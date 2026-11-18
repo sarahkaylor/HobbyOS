@@ -33,6 +33,11 @@
 #       ("socks=" in the [NFSNET] rows the bench requests around the storm):
 #       a socket per RPC pins one host ephemeral port in QEMU's slirp for
 #       240 s, and four guests exhausted the host's range (2026-11-16)
+#   G11 (H2-early) 6 concurrent listers of two different directories
+#       (40 and 50 files) each get exactly their own directory's names in
+#       all 40 listings ("[NB] dirs6" rows): the one-directory NFS listing
+#       cache was shared with no lock and handed a lister the other
+#       directory's names (the game's early exit, docs/cp-early.md)
 #   G5  over all READ RPCs (the last "[NFSRTT] periodic" set): bytes / RPCs
 #       >= 16384.  1344-byte READs give ~1344; 32 KiB READs give ~32768.
 #
@@ -97,6 +102,17 @@ else
   if [ "$nc" -ne 6 ] || [ "$nbad" -ne 0 ]; then bad "G7 multi-file readers: $nc/6 reported, $nbad FAIL rows: $(grep ' FAIL$' <<<"$MR" | head -2 | tr '\n' ' ')"
   elif [ "${amp:-99999}" -gt 200 ]; then bad "G7 readahead amplification: $MA (want amp_pct <= 200)"
   else note "G7 6/6 readers of 6 files, every page correct; ${MA#\[NB\] multi6.ra }"; fi
+fi
+
+# G11 (H2-early): concurrent listings of two different directories each get
+# their own names (the shared one-directory listing cache gave the game
+# Wine's fonts directory for engine/config/base; docs/cp-early.md)
+DR="$(tr -d '\r' < "$C" | grep -aoE '\[NB\] dirs6(\.child k=[0-9]+ dir=d[AB] listings=[0-9]+ wrong=[0-9]+.*| a=[0-9]+ pages=[0-9]+ bad=[0-9]+ first_bad=[-0-9]+) (ok|FAIL)$')"
+if [ -z "$DR" ]; then bad "G11 no [NB] dirs6 rows (the concurrent-listing phase did not run)"
+else
+  nc=$(grep -c '^\[NB\] dirs6\.child ' <<<"$DR"); nbad=$(grep -c ' FAIL$' <<<"$DR")
+  if [ "$nc" -ne 6 ] || [ "$nbad" -ne 0 ]; then bad "G11 concurrent listings: $nc/6 reported, $nbad FAIL rows: $(grep ' FAIL$' <<<"$DR" | head -3 | tr '\n' ' ')"
+  else note "G11 6/6 listers x 40 listings of dA/dB, every listing its own directory's names"; fi
 fi
 
 # G8 (cp/nfs2): large reads, stat times, symlinked directories

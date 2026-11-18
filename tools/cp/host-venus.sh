@@ -104,18 +104,22 @@ argv() {
     local gpuopt=
     [ "${VENUS_IOEVENTFD:-1}" = 1 ] && gpuopt=,ioeventfd=on
     [ -f "$fw" ] || cp "$OVMF" "$fw"
+    # HV_DRIVE_CACHE (cp-hunt H1-03, lane H2-early): a QEMU cache= mode for
+    # the pflash and disk drives, e.g. "unsafe" for per-run throwaway copies
+    # (no host fsync per guest flush).  Unset: QEMU's default, as before.
+    local dc=${HV_DRIVE_CACHE:+,cache=$HV_DRIVE_CACHE}
     local a=(
         "$QEMU" -name hobbyos-venus,debug-threads=on
         -machine q35,accel=kvm,memory-backend=mem0
         -cpu "$CPU" -smp "$SMP" -m "${mib}M"
         -object "memory-backend-memfd,id=mem0,size=${mib}M,share=on"
-        -drive "if=pflash,format=raw,file=$fw"
+        -drive "if=pflash,format=raw,file=$fw$dc"
         -device "virtio-gpu-gl-pci,blob=true,hostmem=$HOSTMEM,venus=true$gpuopt${VENUS_GPU_OPTS:+,$VENUS_GPU_OPTS}"
         -vga none
         -display "egl-headless,rendernode=$RENDER"
         -serial "file:$work/serial.log"
         -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1
-        -drive "file=$disk,format=raw,id=disk0,if=none"
+        -drive "file=$disk,format=raw,id=disk0,if=none$dc"
         -device nvme,drive=disk0,serial=1234,bus=pcie.1
         -device edu -netdev user,id=net0
         -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56

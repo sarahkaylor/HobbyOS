@@ -412,8 +412,12 @@ static int rpc_call_hard(const struct nfs_mount *m, uint32_t proc,
                          const uint8_t *args, int args_len, uint8_t *body_buf,
                          int body_cap, const uint8_t **body, int *body_len);
 
+static ylock_t dcache_lock;
+
 void nfs_init(void) {
   for (int i = 0; i < NFS_MAX_MOUNTS; i++) mounts[i].in_use = 0;
+  ylock_init(&dcache_lock);
+  lock_register(&dcache_lock, "nfs_dir_lock", LOCK_RANK_FILE, LOCK_CLASS_PROCESS);
 }
 
 const struct nfs_mount *nfs_mount_at(int idx) {
@@ -2278,9 +2282,27 @@ struct dir_cache {
 };
 
 static struct dir_cache dcache;
+/* H2-early: dcache is one directory shared by every lister on every CPU.
+ * Without this lock two listers of different directories interleaved: one
+ * checked "fresh" while the other refilled (or both filled at once, appending
+ * into the same names[]), so a getdents of /GAME/engine/config/base returned
+ * the 56 names of /CP/WINE/share/wine/fonts that conhost was listing, the
+ * game found none of its config files and exited 0 about 2.6 s in.  Held
+ * across the fill's READDIRPLUS RPCs, so a ylock (process context only). */
+/* dcache_lock: declared above nfs_init(), which names it */
+
+void nfs_dir_lock(void) {
+  ylock_acquire(&dcache_lock);
+}
+
+void nfs_dir_unlock(void) {
+  ylock_release(&dcache_lock);
+}
 
 static void dir_cache_invalidate_all(void) {
+  nfs_dir_lock();
   dcache.valid = 0;
+  nfs_dir_unlock();
 }
 
 static int dir_entry_is_dot(const char *name) {
@@ -2439,6 +2461,14 @@ static int dir_cache_fill(const struct nfs_mount *m, int midx, const char *rel) 
  * nfs_list_dir() uses -1 for BOTH "past the end" and "RPC failed"; without
  * this count a .NET FileSystemEnumerator sees EIO on its last read. */
 int nfs_dir_entries(const struct nfs_mount *m, const char *rel) {
+  nfs_dir_lock();
+  int r = nfs_dir_entries_locked(m, rel);
+  nfs_dir_unlock();
+  return r;
+}
+
+/* the caller holds nfs_dir_lock() */
+int nfs_dir_entries_locked(const struct nfs_mount *m, const char *rel) {
   if (!m || !m->in_use || !rel) return -1;
   int midx = -1;
   for (int i = 0; i < NFS_MAX_MOUNTS; i++) {
@@ -2458,6 +2488,15 @@ int nfs_dir_entries(const struct nfs_mount *m, const char *rel) {
 
 int nfs_list_dir(const struct nfs_mount *m, const char *rel, int index,
                  char *name, int name_cap, uint8_t *attr_out, uint32_t *size_out) {
+  nfs_dir_lock();
+  int r = nfs_list_dir_locked(m, rel, index, name, name_cap, attr_out, size_out);
+  nfs_dir_unlock();
+  return r;
+}
+
+/* the caller holds nfs_dir_lock() */
+int nfs_list_dir_locked(const struct nfs_mount *m, const char *rel, int index,
+                        char *name, int name_cap, uint8_t *attr_out, uint32_t *size_out) {
   if (!m || !m->in_use || !rel || index < 0) return -1;
 
   int midx = -1;

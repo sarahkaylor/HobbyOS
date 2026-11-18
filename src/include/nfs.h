@@ -314,10 +314,23 @@ int  nfs_ra_shrink(int n);
  * need this directly. */
 int  nfs_readlink(const struct nfs_mount *m, const struct nfs_fh *fh,
                   char *out, int cap);
+/* The directory-listing cache is ONE directory shared by every lister.  The
+ * two calls below take nfs_dir_lock themselves, so each answer comes from one
+ * consistent fill of `rel` (H2-early: unlocked, a getdents of the game's
+ * engine/config/base returned Wine's fonts directory while conhost listed it,
+ * and the game quit; docs/cp-early.md).  A caller that needs the count and
+ * the entries from the SAME fill (getdents64) holds nfs_dir_lock() across
+ * the _locked variants instead.  Process context only (it is a ylock held
+ * across READDIRPLUS RPCs); never take it with a spinlock held. */
 int  nfs_list_dir(const struct nfs_mount *m, const char *rel, int index,
                   char *name, int name_cap, uint8_t *attr_out, uint32_t *size_out);
 /* L54: entry count for a cached directory listing (fills the cache). */
 int  nfs_dir_entries(const struct nfs_mount *m, const char *rel);
+void nfs_dir_lock(void);
+void nfs_dir_unlock(void);
+int  nfs_list_dir_locked(const struct nfs_mount *m, const char *rel, int index,
+                         char *name, int name_cap, uint8_t *attr_out, uint32_t *size_out);
+int  nfs_dir_entries_locked(const struct nfs_mount *m, const char *rel);
 int  nfs_statfs(const struct nfs_mount *m, const char *rel,
                 uint64_t *total, uint64_t *avail);
 int  nfs_is_dir(const struct nfs_mount *m, const char *rel);

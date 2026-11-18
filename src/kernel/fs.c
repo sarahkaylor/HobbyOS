@@ -2690,10 +2690,14 @@ int file_getdents64(struct process *p, int fd, void *ubuf, int bufsize) {
     if (!m) return -EIO;
     /* End of directory must be 0, not -EIO: nfs_list_dir() uses -1 for both
        "past the end" and "RPC error", and .NET's FileSystemEnumerator reads
-       once more after the last entry.  Ask for the count explicitly. */
-    int total = nfs_dir_entries(m, rel);
-    if (total < 0) return -EIO;
-    if ((long)f->nfs.cursor >= total) return 0;
+       once more after the last entry.  Ask for the count explicitly.
+       H2-early: the count and every entry below come from ONE fill of the
+       shared listing cache: nfs_dir_lock is held to the end of this branch
+       (another lister of another directory used to refill it in between). */
+    nfs_dir_lock();
+    int total = nfs_dir_entries_locked(m, rel);
+    if (total < 0) { nfs_dir_unlock(); return -EIO; }
+    if ((long)f->nfs.cursor >= total) { nfs_dir_unlock(); return 0; }
     int used = 0;
     uint32_t idx = f->nfs.cursor;
     uint32_t start_idx = idx;
@@ -2727,7 +2731,7 @@ int file_getdents64(struct process *p, int fd, void *ubuf, int bufsize) {
       char nm[NFS_NAME_MAX];
       uint8_t attr = 0;
       uint32_t sz = 0;
-      int grc = nfs_list_dir(m, rel, (int)idx, nm, sizeof nm, &attr, &sz);
+      int grc = nfs_list_dir_locked(m, rel, (int)idx, nm, sizeof nm, &attr, &sz);
       if (idx == start_idx) first_rc = grc;
       if (grc != 0)
         break;
@@ -2776,6 +2780,7 @@ int file_getdents64(struct process *p, int fd, void *ubuf, int bufsize) {
       used += reclen;
       idx++;
     }
+    nfs_dir_unlock();
     f->nfs.cursor = idx;
     l76_dir_note(rel, start_idx, idx, total, dup_hits);
     {

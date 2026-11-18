@@ -25,6 +25,9 @@
 #   P9_XSCREEN  XHOBBY's startup screen (default 1280x720: the user's 1280x720
 #               borderless window then covers the screen and C6-p7's zero-copy
 #               scanout presents it; "" = the 1920x1080 framebuffer size)
+#   P9_GAME_RES the game's own Resolution setting (default 1280x720; 1920x1080
+#               with P9_XSCREEN=1920x1080: boot_p9 scales its shots to the
+#               1280x720 menu tables, cp-hunt H1-08)
 #   P9_SCANOUT  1 (default) or 0: HB_SCANOUT=0 in the game's environment
 #               (put_image only, the A/B)
 #   VENUS_BUILD the guest Venus Mesa (default ~/cp/lanes/play-venus: this
@@ -68,6 +71,9 @@ if [ -n "${P9_RUN:-}" ]; then RUN="$P9_RUN"; else n=1; while [ -e "$B9/run$n" ];
 MEM="${P9_MEM:-32768}"
 XSCREEN="${P9_XSCREEN-1280x720}"
 BARGS="--script $ROOT/$SCRIPT --play-shot-every ${P9_SHOT_S:-30} --xscreen ${XSCREEN:-1920x1080}"
+# cp-hunt H1-08: the game's own Resolution (prep-settings.sh Resolution=...);
+# boot_p9 scales a 1920x1080 game's shots to the 1280x720 row tables
+BARGS="$BARGS --game-res ${P9_GAME_RES:-1280x720}"
 P8CF="${P8_CFLAGS:-}"
 if [ "${P9_SCANOUT:-1}" = 0 ]; then P8CF="$P8CF -DP8_EXTRA_ENV=\"HB_SCANOUT=0\""; fi
 export VENUS_BUILD="${VENUS_BUILD:-$HOME/cp/lanes/play-venus}"

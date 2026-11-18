@@ -1,0 +1,49 @@
+H2-early post-fix P8 boots (lane commit 4f0da178), strix, second lane tree ~/cp/lanes/early-b (same source), production stage ~/cp/wine-cp, default WINEDEBUG, -smp 8 -m 12288M, one launch per boot (the integ recipe)
+GDT = the kernel [GDT] rows (whole boot, the kernel caps them at 400) for the config/fonts directories: <count> <path>=<entries>; the pre-fix e1 boot has the same 70/1/6 counts
+
+f1 gpu=lavapipe == verdict: main-menu  GDT: 70 /CP/WINE/share/wine/fonts=56; 1 /GAME/engine/config/base=7; 6 /GAME/r6/config=6;
+f2 gpu=lavapipe == verdict: main-menu  GDT: 70 /CP/WINE/share/wine/fonts=56; 1 /GAME/engine/config/base=7; 6 /GAME/r6/config=6;
+f3 gpu=venus == verdict: main-menu  GDT: 70 /CP/WINE/share/wine/fonts=56; 1 /GAME/engine/config/base=7; 6 /GAME/r6/config=6;
+f4 gpu=lavapipe == verdict: main-menu  GDT: 70 /CP/WINE/share/wine/fonts=56; 1 /GAME/engine/config/base=7; 6 /GAME/r6/config=6;
+f5 gpu=lavapipe == verdict: main-menu  GDT: 70 /CP/WINE/share/wine/fonts=56; 1 /GAME/engine/config/base=7; 6 /GAME/r6/config=6;
+f6 gpu=venus == verdict: main-menu  GDT: 70 /CP/WINE/share/wine/fonts=56; 1 /GAME/engine/config/base=7; 6 /GAME/r6/config=6;
+
+early-exit 0/6 (lavapipe 0/4, Venus 0/2); every listing of engine/config/base=7, r6/config=6, fonts=56.
+
+== f1 timeline
+== timeline:
+   +     0.0 s  03:56:50  slot 2 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 2
+   +   162.3 s  03:59:32  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
+   +   177.7 s  03:59:48  warm-up result: [P8] warm-up: display driver loaded
+   +   180.7 s  03:59:51  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+   +   180.8 s  03:59:51  baseline screendump 1920x1080 (desktop before the game's window)
+   +   199.2 s  04:00:09  first screen change after launch (45.5% of the screen differs from the baseline): s002-t000019
+   +   385.6 s  04:03:16  title prompt 'PRESS ... TO CONTINUE' at s012-t000205: sent one Space (#1)
+   +   416.7 s  04:03:47  title prompt 'PRESS ... TO CONTINUE' at s014-t000236: sent one Space (#2)
+   +   431.9 s  04:04:02  main menu OCR at s015-t000251: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+   +   439.4 s  04:04:09  main menu OCR at s016-t000258: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+   +   447.6 s  04:04:18  main menu OCR at s017-t000266: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+   +   450.2 s  04:04:20  verdict: main-menu; QEMU stopped, slot released; guests on the host now: 1
+== f3 timeline
+== timeline:
+   +     0.0 s  04:16:34  slot 3 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 1
+   +   115.4 s  04:18:30  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
+   +   131.4 s  04:18:46  warm-up result: [P8] warm-up: display driver loaded
+   +   134.4 s  04:18:49  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+   +   134.5 s  04:18:49  dri nodes at game launch: qemu-system-x86/605930: /dev/dri/renderD129
+   +   134.5 s  04:18:49  dri nodes at game launch: virgl_render_se/606048: -
+   +   134.5 s  04:18:49  dri nodes at game launch: virgl-3-gpu_ren/617378: /dev/dri/renderD129
+   +   134.5 s  04:18:49  baseline screendump 1920x1080 (desktop before the game's window)
+   +   151.4 s  04:19:06  first screen change after launch (45.8% of the screen differs from the baseline): s002-t000017
+   +   198.5 s  04:19:53  title prompt 'PRESS ... TO CONTINUE' at s005-t000064: sent one Space (#1)
+   +   229.9 s  04:20:24  title prompt 'PRESS ... TO CONTINUE' at s007-t000095: sent one Space (#2)
+   +   244.7 s  04:20:39  main menu OCR at s008-t000110: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+   +   251.8 s  04:20:46  main menu OCR at s009-t000117: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+   +   257.5 s  04:20:52  main menu OCR at s010-t000122: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+   +   257.6 s  04:20:52  dri nodes at the menu: qemu-system-x86/605930: /dev/dri/renderD129
+   +   257.6 s  04:20:52  dri nodes at the menu: virgl_render_se/606048: -
+   +   257.6 s  04:20:52  dri nodes at the menu: virgl-3-gpu_ren/617378: /dev/dri/renderD129
+   +   257.6 s  04:20:52  dri nodes at the menu: virgl-9-gpu_ren/619314: /dev/dri/renderD129
+   +   257.6 s  04:20:52  dri nodes at the menu: virgl-10-gpu_re/619350: /dev/dri/renderD129
+   +   257.6 s  04:20:52  dri nodes at the menu: virgl-12-gpu_re/619419: /dev/dri/renderD129
+   +   261.2 s  04:20:56  verdict: main-menu; QEMU stopped, slot released; guests on the host now: 1

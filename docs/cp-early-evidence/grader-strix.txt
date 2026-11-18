@@ -1,0 +1,65 @@
+H2-early grader fix (tools/cp/p8/p8grade.py; boot_p8.py, boot_p9.py, run-p8.sh) -- host strix (Zen 5), 2026-11-18
+
+1. The unit test seen failing on the pre-H2 rule, then passing.
+   Pre-H2 rule (boot_p8.py's loop): '"[P8] done" in ser or "System halt" in ser -> verdict = "launcher-done"', rc 0,
+   for every phase.  Replayed by a scratch copy of p8grade.py whose launcher_end_verdict() returns "launcher-done"
+   for every phase (python3 -I test_p8grade.py, Mac host):
+   test_early_exit_after_reporter_is_a_fail ... FAIL
+   test_early_exit_without_reporter ... FAIL
+   test_game_timeout ... FAIL
+   test_late_exit_with_steam_still_before_menu ... FAIL
+   test_mount_failure_is_not_launcher_done ... FAIL
+   test_pfx_phase_launcher_done_passes ... ok
+   test_replay ... FAIL
+   test_running_game_has_no_verdict_yet ... ok
+   Ran 8 tests in 0.001s
+   FAILED (failures=6)
+   With the fix (python3 -I tools/cp/p8/test_p8grade.py, 9 tests incl. the later repro-row test):
+   test_early_exit_after_reporter_is_a_fail ... ok
+   test_early_exit_without_reporter ... ok
+   test_game_timeout ... ok
+   test_late_exit_with_steam_still_before_menu ... ok
+   test_mount_failure_is_not_launcher_done ... ok
+   test_pfx_phase_launcher_done_passes ... ok
+   test_replay ... ok
+   test_repro_loop ... ok
+   test_running_game_has_no_verdict_yet ... ok
+   Ran 9 tests in 0.000s
+   OK
+
+2. Saved boots replayed through the grader on strix (~/cp is the integrator's read-only evidence):
+   $ python3 tools/cp/p8/p8grade.py ~/cp/integ15/p8-lvp.2.serial
+   verdict: early-exit
+   detail: the game process ended before the main menu: game status=0 after 2886 ms; REDEngineErrorReporter ran: yes
+   rc=3
+   $ python3 tools/cp/p8/p8grade.py ~/cp/integ13/p8-lvp.1.serial
+   verdict: early-exit
+   detail: the game process ended before the main menu: game status=0 after 2579 ms; REDEngineErrorReporter ran: yes
+   rc=3
+   $ python3 tools/cp/p8/p8grade.py ~/cp/integ/obj/cp-p8/integ10-venus/serial.txt
+   verdict: early-exit
+   detail: the game process ended before the main menu: game status=0 after 20049 ms; REDEngineErrorReporter ran: yes
+   rc=3
+   $ python3 tools/cp/p8/p8grade.py ~/cp/integ15/p8-lvp.1.serial --timeline /home/sarah/cp/integ/obj/cp-p8/integ15-lvp1/timeline.txt
+   verdict: main-menu
+   detail: the timeline has main-menu OCR rows
+   rc=0
+   $ python3 tools/cp/p8/p8grade.py ~/cp/integ/obj/cp-p8/pfx/serial.txt --phase pfx
+   verdict: launcher-done
+   detail: the launcher finished
+   rc=0
+   (integ15 lvp2 = integ12 batch's p8-lvp.2, the brief's occurrence; integ13 lvp1 another 2.6 s exit; integ10-venus
+   the 20 s variant: reporter started late, game ended right after it, no steam_api64 load.  All three were rc=0
+   "launcher-done" before.)
+
+3. A live P8 lavapipe boot on the lane tree with the new grader (normal boot):
+   run e1-lvp, strix slot 4, -smp 8 -m 12288M, wine-cp stage:
+   [P8W] +   232.8 s  02:29:44  main menu OCR at s012-t000202: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+   [P8W] +   240.2 s  02:29:52  main menu OCR at s013-t000209: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+   [P8W] +   249.7 s  02:30:01  main menu OCR at s014-t000219: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+   [P8W] +   252.9 s  02:30:04  verdict: main-menu; QEMU stopped, slot released; guests on the host now: 2
+   == verdict: main-menu
+   rc=0 (~/cp/lanes/early-ev/runs.txt: e1-lvp gpu=lavapipe rc=0 == verdict: main-menu  02:30:06)
+
+Verdicts now: game phase never grades "launcher-done"; early-exit (rc 3) / game-timeout / launcher-ended-before-game
+are FAILs.  P9: "game-exited-before-menu" is now "early-exit" (rc 3) with the same detail.

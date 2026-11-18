@@ -11,7 +11,13 @@ stages the disks, then calls this, which takes ONE QEMU slot
               --shot-every seconds; every shot that differs from the previous
               one is kept (PNG) and OCR'd (tesseract, if present).  Stops on:
                 - "[P8] done" (the game exited / timed out and the launcher
-                  cleaned up);
+                  cleaned up).  In the game phase that is never a PASS:
+                  a game that ended before the menu is verdict early-exit
+                  (rc 3), the launcher's P8_GAME_S deadline game-timeout, a
+                  launcher that never started the game
+                  launcher-ended-before-game (tools/cp/p8/p8grade.py,
+                  docs/cp-early.md).  The watcher stops 180 s after the
+                  game's "[P8] end game" row at the latest;
                 - the main menu (OCR: two of NEW GAME / LOAD GAME / CONTINUE /
                   SETTINGS / CREDITS / QUIT GAME), after two more shots;
                 - a first-run screen (OCR: the CDPR user agreement, the CDPR
@@ -41,6 +47,7 @@ from run_icewm_test import Qmp  # noqa: E402
 sys.path.insert(0, os.path.join(REPO, "tools", "cp"))
 from console_rows import resync  # noqa: E402
 from p5lib import acquire_slot, guests_running, ppm, read, release_slot  # noqa: E402
+import p8grade  # noqa: E402  (tools/cp/p8: the game-phase verdicts, H2-early)
 
 MENU_WORDS = ["NEW GAME", "LOAD GAME", "CONTINUE", "SETTINGS", "CREDITS", "QUIT GAME", "ADDITIONAL CONTENT"]
 FIRST_RUN = [
@@ -58,6 +65,17 @@ def log(msg):
     print(f"[P8W] {msg}", flush=True)
 
 
+def drive_cache():
+    """cp-hunt H1-03: P8_DRIVE_CACHE=<QEMU cache mode> (e.g. "unsafe") for the
+    per-run pflash, disk and data-disk COPIES: with the default writeback mode
+    every guest flush (OVMF variable writes, NVMe flushes) is a host fsync()
+    that waits behind every lane's dirty data (pressure/io full 50 %, 64-142 s
+    QEMU start -> launcher).  run-p8.sh copies all three per run; never set it
+    for an image that is not a throwaway copy.  Unset: QEMU's default."""
+    c = os.environ.get("P8_DRIVE_CACHE", "")
+    return f",cache={c}" if c else ""
+
+
 def qemu_cmd(out, disk, cpdata, args):
     qmp = os.path.join(out, "qmp-sock")
     serial = os.path.join(out, "serial.log")
@@ -66,13 +84,14 @@ def qemu_cmd(out, disk, cpdata, args):
         shutil.copy(os.path.expanduser("~/.local/share/OVMF/OVMF_CODE_4M.fd"), fw)
     # p5lib.qemu_cmd's device set + the ext2 data disk as NVMe namespace 2
     # (the Makefile's CPDATA line).
+    dc = drive_cache()
     cmd = ["qemu-system-x86_64", "-M", "q35", "-smp", str(args.smp), "-m", f"{args.mem}M",
-           "-drive", f"if=pflash,format=raw,file={fw}",
+           "-drive", f"if=pflash,format=raw,file={fw}{dc}",
            "-display", "none", "-serial", f"file:{serial}",
            "-device", "pcie-root-port,id=pcie.1,bus=pcie.0,slot=1",
-           "-drive", f"file={disk},format=raw,id=disk0,if=none",
+           "-drive", f"file={disk},format=raw,id=disk0,if=none{dc}",
            "-device", "nvme,drive=disk0,serial=1234,bus=pcie.1",
-           "-drive", f"file={cpdata},format=raw,id=cpdata,if=none",
+           "-drive", f"file={cpdata},format=raw,id=cpdata,if=none{dc}",
            "-device", "nvme-ns,drive=cpdata,nsid=2",
            "-device", "edu", "-netdev", "user,id=net0",
            "-device", "virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56",
@@ -108,7 +127,10 @@ def venus_qemu_cmd(out, disk, cpdata, args):
     namespace 2 appended to its QEMU argv."""
     hv = os.path.join(REPO, "tools", "cp", "host-venus.sh")
     env = dict(os.environ, MEM=f"{args.mem}M", SMP=str(args.smp), CPU=args.cpu)
-    extra = ["-drive", f"file={cpdata},format=raw,id=cpdata,if=none", "-device", "nvme-ns,drive=cpdata,nsid=2"] + diag_args()
+    dc = drive_cache()
+    if dc:
+        env["HV_DRIVE_CACHE"] = dc[len(",cache="):]
+    extra = ["-drive", f"file={cpdata},format=raw,id=cpdata,if=none{dc}", "-device", "nvme-ns,drive=cpdata,nsid=2"] + diag_args()
     argv = [ln for ln in subprocess.run(["bash", hv, "argv", disk, out] + extra, capture_output=True, text=True,
                                         check=True, env=env).stdout.splitlines() if ln]
     envv = [ln for ln in subprocess.run(["bash", hv, "env"], capture_output=True, text=True, check=True,
@@ -249,7 +271,9 @@ def main():
     proc = subprocess.Popen(cmd, cwd=REPO, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
     log(f"qemu pid {proc.pid}")
     verdict = "timeout"
+    why = ""
     seen = set()
+    ended_at = None     # host time of the game's "[P8] end game" row (game phase)
     try:
         qmp = Qmp(qmp_path, deadline_s=40)
         last_size, last_change = 0, time.time()
@@ -285,9 +309,21 @@ def main():
                             for r in dri_nodes(proc.pid):
                                 mark(f"dri nodes at game launch: {r}")
             if "[P8] done" in ser or "System halt" in ser:
-                verdict = "launcher-done"
+                verdict, why = p8grade.launcher_end_verdict(ser, args.phase)
                 time.sleep(3)
                 break
+            if args.phase == "game" and ended_at is None:
+                r = p8grade.before_menu_exit(ser)
+                if r:
+                    ended_at = time.time()
+                    verdict, why = r
+                    mark(f"{verdict.upper()}: {why}")
+            if ended_at is not None:
+                if time.time() - ended_at > 180:
+                    mark("no [P8] done 180 s after the game ended: stopping")
+                    break
+                time.sleep(1)
+                continue
             if args.phase == "game" and game_t and time.time() >= next_shot:
                 next_shot = time.time() + args.shot_every
                 path = os.path.join(shots_dir, "cur.ppm")
@@ -371,9 +407,11 @@ def main():
                 proc.kill()
         release_slot(lockf)
         mark(f"verdict: {verdict}; QEMU stopped, slot released; guests on the host now: {guests_running()}")
+        if why:
+            mark(f"verdict detail: {why}")
         tl.close()
-    open(os.path.join(args.out, "verdict.txt"), "w").write(verdict + "\n")
-    return 0 if verdict in ("launcher-done", "main-menu") else 1
+    open(os.path.join(args.out, "verdict.txt"), "w").write(verdict + "\n" + (why + "\n" if why else ""))
+    return p8grade.rc_of(verdict)
 
 
 if __name__ == "__main__":

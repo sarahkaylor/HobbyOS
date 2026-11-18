@@ -90,6 +90,10 @@ if [ -n "$BIG" ]; then sudo -n mv "$BIG" "$EXPORT/" || die "big5g into the expor
 sudo -n mkdir "$EXPORT/sub" && sudo -n cp "$OUT/m1.bin" "$EXPORT/sub/data.bin" &&
   sudo -n ln -s sub "$EXPORT/dlink" && sudo -n ln -s dlink "$EXPORT/d2" &&
   sudo -n ln -s .. "$EXPORT/sub/up" || die "symlinks"
+# H2-early: two directories for the concurrent-listing phase (dirs6)
+sudo -n mkdir "$EXPORT/dA" "$EXPORT/dB" &&
+  for i in $(seq -w 0 39); do sudo -n touch "$EXPORT/dA/a$i"; done &&
+  for i in $(seq -w 0 49); do sudo -n touch "$EXPORT/dB/b$i"; done || die "dirs6 dirs"
 sudo -n chmod -R a+rX "$EXPORT" || die "chmod"
 # cp/nfs2: a file with known times for fstat/stat (the guest never reads it)
 sudo -n cp "$OUT/m2.bin" "$EXPORT/stat.bin" && sudo -n chmod a+r "$EXPORT/stat.bin" &&

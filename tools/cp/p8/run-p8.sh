@@ -40,6 +40,8 @@
 #      P8_SMP (default 8), P8_MEM (MiB, default 12288, never more),
 #      P8_VKD3D_FL (VKD3D_FEATURE_LEVEL; default 12_0 on lavapipe, unset on Venus),
 #      P8_XSCREEN (WxH: XHOBBY's startup screen size; default the framebuffer's),
+#      P8_DRIVE_CACHE (QEMU cache= for the per-run drives; game phase default
+#      unsafe, "" = QEMU's default; cp-hunt H1-03),
 #      P8_GPU (lavapipe | venus), VENUS_BUILD (~/cp/venus-build), HOSTMEM (Venus
 #      BAR window, host-venus.sh default 8G: a host mapping, not guest RAM).
 # P9 hooks (lane C9-play, docs/cp-p9.md; tools/cp/p9/run-p9.sh sets them):
@@ -298,8 +300,28 @@ else
   SRC_IMG="${P8_CPDATA_FROM:-$SEEDED}"
   cp --sparse=always "$SRC_IMG" "$CPD"
   echo "== data disk: a copy of $SRC_IMG"
+  # cp-hunt H1-04: the seeded prefix must have been made by THIS Wine stage,
+  # or every game boot re-runs wineboot's prefix update (~10 s, writes the
+  # prefix, opens H1-05's find_gpu race).  Wine compares the prefix's
+  # .update-timestamp with wine.inf's mtime (rsync -a keeps it in the export).
+  PSTAMP="$(debugfs -R 'cat /pfx/.update-timestamp' "$CPD" 2>/dev/null | head -1 | cut -d' ' -f1)"
+  WSTAMP="$(stat -c %Y "$WINE/share/wine/wine.inf" 2>/dev/null)"
+  if [ -n "$WSTAMP" ] && [ "$PSTAMP" != "$WSTAMP" ]; then
+    echo "== WARNING: prefix stamp ${PSTAMP:-none} != $WINE/share/wine/wine.inf mtime $WSTAMP:" \
+         "the seeded prefix was made by another Wine stage; every boot re-runs wineboot's update (re-run P8_PHASE=pfx with this stage)"
+  else
+    echo "== prefix stamp $PSTAMP matches this Wine stage"
+  fi
 fi
 
+# cp-hunt H1-03 / H2-early A/B (docs/cp-early.md §9): a game boot's pflash, disk
+# and data disk are all per-run copies, so QEMU need not fsync them for every
+# guest flush (cache=unsafe; QEMU still writes everything back when it exits).
+# Busy strix: QEMU start -> launcher NFS mount 35-49 s (default) vs 3-9 s.
+# P8_DRIVE_CACHE= (empty) keeps QEMU's default; the pfx/probe phases keep it
+# unless P8_DRIVE_CACHE is set (the pfx image becomes the seeded original).
+if [ "$PHASE" = game ]; then export P8_DRIVE_CACHE="${P8_DRIVE_CACHE-unsafe}"; fi
+echo "== drive cache: ${P8_DRIVE_CACHE:-QEMU default}"
 echo "== boot (deadline ${TIMEOUT_S}s; one QEMU slot for the boot only)"
 BPH="$PHASE"; [ "$PHASE" = probe ] && BPH=pfx   # the same "wait for [P8] done" boot
 BA=(--out "$OUT" --disk "$D" --cpdata "$CPD" --phase "$BPH" --timeout "$TIMEOUT_S" --gpu "$GPU"
@@ -332,7 +354,8 @@ elif [ "$PHASE" = game ]; then
   for d in /pfx/drive_c/vc /mc; do
     debugfs -R "ls -l $d" "$CPD" 2>/dev/null | awk -v d="$d" 'NF>=8 && $NF!="." && $NF!=".." {n++; b+=$6} END {printf "   %-28s %d entries, %d bytes\n", d, n, b}'
   done
-  echo "== verdict: $(cat "$OUT/verdict.txt" 2>/dev/null)"
+  echo "== verdict: $(head -1 "$OUT/verdict.txt" 2>/dev/null)"
+  [ -n "$(sed -n 2p "$OUT/verdict.txt" 2>/dev/null)" ] && echo "== verdict detail: $(sed -n 2p "$OUT/verdict.txt")"
   echo "== timeline:"; sed 's/^/   /' "$OUT/timeline.txt"
 fi
 echo "raw serial: $OUT/serial.txt"

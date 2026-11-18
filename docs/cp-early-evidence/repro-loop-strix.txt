@@ -1,0 +1,22 @@
+== r1-lvp-fresh12 (strix, lavapipe, -smp 8 -m 12288M, wine-cp stage)
+== verdict: repro
+== verdict detail: early=0 n=12; 1:survived+rep+steam 2:survived+rep+steam 3:survived+rep+steam 4:survived+rep+steam 5:survived+rep+steam 6:survived+rep+steam 7:survived+rep+steam 8:survived+rep+steam 9:survived+rep+steam 10:survived+rep+steam 11:survived+rep+steam 12:survived+rep+steam
+   reporter seen at (ms after launch): 5454 5022 1156 6788 3747 2559 1605 2031 1070 3820 2309 1260 
+== r2-lvp-keep40-relay (strix, lavapipe, -smp 8 -m 12288M, wine-cp stage)
+== verdict: repro
+== verdict detail: early=0 n=40; 1:survived+rep+steam 2:survived+rep+steam 3:survived+rep+steam 4:survived+rep+steam 5:survived+rep+steam 6:survived+rep+steam 7:survived+rep+steam 8:survived+rep+steam 9:survived+rep+steam 10:survived+rep+steam 11:survived+rep+steam 12:survived+rep+steam 13:survived+rep+steam 14:survived+rep+steam 15:survived+rep+steam 16:survived+rep+steam 17:survived+rep+steam 18
+   reporter seen at (ms after launch): 1848 2946 1720 1970 2865 3126 2699 1352 1268 1315 1707 1584 1008 1258 1512 1753 1335 1265 1789 1357 1407 1107 1258 1158 1156 1729 1280 1512 1190 1125 1512 1218 1452 1415 1307 1209 1207 1059 1206 1306 
+
+== wineserver -k between the fresh-session launches of r1 (session leak, finding H2-F2)
+kill  1: wineserver -k ms=   181  Process 19: wineserver exited | Process 184: /CP/WINE/bin/wineserver exited  left: 0 blocked(s5) 1 exited(s4)
+kill  2: wineserver -k ms=   189  Process 188: wineserver exited | Process 372: /CP/WINE/bin/wineserver exited  left: 0 blocked(s5) 2 exited(s4)
+kill  3: wineserver -k ms=   191  Process 376: wineserver exited | Process 63: /CP/WINE/bin/wineserver exited  left: 0 blocked(s5) 3 exited(s4)
+kill  4: wineserver -k ms=   551  Process 67: wineserver exited | Process 198: /CP/WINE/bin/wineserver exited  left: 0 blocked(s5) 4 exited(s4)
+kill  5: wineserver -k ms= 10541  Process 202: wineserver exited (signal 9). | Process 394: /CP/WINE/bin/wineserver exited  left: 8 blocked(s5) 4 exited(s4)
+kill  6: wineserver -k ms= 10521  Process 398: wineserver exited (signal 9). | Process 87: /CP/WINE/bin/wineserver exited  left: 16 blocked(s5) 4 exited(s4)
+kill  7: wineserver -k ms= 10534  Process 91: wineserver exited (signal 9). | Process 324: /CP/WINE/bin/wineserver exited  left: 24 blocked(s5) 4 exited(s4)
+kill  8: wineserver -k ms=   418  Process 328: wineserver exited | Process 42: /CP/WINE/bin/wineserver exited  left: 24 blocked(s5) 5 exited(s4)
+kill  9: wineserver -k ms= 10528  Process 46: wineserver exited (signal 9). | Process 323: /CP/WINE/bin/wineserver exited  left: 32 blocked(s5) 5 exited(s4)
+kill 10: wineserver -k ms=   179  Process 328: wineserver exited | Process 43: /CP/WINE/bin/wineserver exited  left: 32 blocked(s5) 6 exited(s4)
+kill 11: wineserver -k ms= 10534  Process 48: wineserver exited (signal 9). | Process 355: /CP/WINE/bin/wineserver exited  left: 40 blocked(s5) 6 exited(s4)
+kill 12: wineserver -k ms= 10526  Process 359: wineserver exited (signal 9). | Process 244: /CP/WINE/bin/wineserver exited  left: 48 blocked(s5) 6 exited(s4)
