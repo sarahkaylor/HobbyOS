@@ -896,9 +896,11 @@ log, `check-no-game-files` output.
   25.5–27.6; 1080p 34.5; the 28-minute soak median 37.6 with no leak. The target is met at the median, not with margin.)*
 - [ ] Native context lane if P0 or P9 numbers call for it (§1.4).
 - [x] virtio-sound + ALSA (AD-9). *(opt-in `CP_AUDIO_WAV`; C4-audio, H5-audio2)*
-  - [ ] audio without dropouts: the kernel xrun cascades are fixed (H1-01 part A). The remaining 5–6 zero runs per
-    fp720 boot are winealsa lead-ins (H5-04, Wine) and the game's padding during loading (H5-05). Measure them with
-    the `[SND] zeros` rows and `tools/cp/audio2/gamecheck.sh`.
+  - [ ] audio without dropouts: the kernel xrun cascades are fixed (H1-01 part A). The remaining 3–6 zero runs per
+    fp720 boot happen while the game's audio thread is absent for 31–293 ms (H5-05). The `[AWAY]` kernel rows show
+    it busy in the game's own code, or its peers parked on one game lock; NFS is not involved. No Wine-side gate
+    helps (H5-04). This is game-side, not ours. Measure with `[SND] zeros up_ms=`, the `[AWAY-Z]` rows and
+    `tools/cp/audio2/gamecheck.sh`.
 
 **Gate P9:** recorded session (screendump sequence + fps rows), no crash, the
 save reloads. Target: ≥30 fps at 1280×720 Low, or within 70 % of the
@@ -1351,7 +1353,7 @@ integ19 adds only harness files and docs on top of integ18.
     and after a host stall it drains at up to 2× real time. The underrun rule now uses a real-time play clock. Kernel
     xruns per game boot: 534 → 2.
   - Open: the 5–6 audible exact-zero runs per fp720 boot. They are winealsa's silence lead-in when the game's padding
-    falls under one period (H5-04 Wine, H5-05 game or event timing).
+    falls under one period (H5-04 Wine, H5-05 game or event timing). Round 2 traced them to the game (below).
 - **Harness.**
   - Game boots use `cache=unsafe` on their throwaway per-run drives: QEMU start → launcher median 61 s → 5.3 s.
   - `ext2w_gate`'s crash-run clock starts at the first console byte, so a slot wait no longer fails it.
@@ -1375,6 +1377,48 @@ integ19 adds only harness files and docs on top of integ18.
   - Wine's TEB leak after ~20 000 TerminateThread (W3);
   - errno and socket items K8–K11 and the ext2 flusher nap K12 (`docs/cp-kglitch.md`);
   - the menu focus after a sub-menu (H1-12, worked around in the harness).
+
+#### Wave 8 round 2 (integ21)
+
+integ20 = integ19 + cp-audio2 round 2 (tools and docs only); integ21 = + cp-kglitch2. Batch
+`strix:~/cp/integ-gates21.txt`, all green:
+- all 69 probes, `sigmask-gate` 8/8, ext2_gate, exec_gate, ext2w_gate, reg_gate, pfx, rsize_guard and rsize_scan;
+- unit 463/0, host 40/42 (the known pair), castscan, ARM, `exitgroup` ×3;
+- P2 (G3 `-k` clean), P4, P5 ×3, P6 Venus, P7, thrstorm, k5probes;
+- P8 lavapipe ×2 and Venus at the menu (221 s, 206 s and 114 s).
+
+- **`wineserver -k` ignored for 10.5 s (H2-F2): fixed.**
+  - Cause: the compat signal mask, sigaltstack and SA_* flags live in per-pid-slot arrays, and only fork and clone set
+    them. A process the kernel creates from scratch (spawn_ex, the wave and XSTART loaders) inherited the slot's last
+    occupant. Wine clients block SIGINT in `server_block_set`, so from about the 4th launch p8launch's `wine` landed on
+    a dirty slot. It forked the wineserver with SIGINT blocked.
+  - Fix: process.c's fresh-PCB init calls `linux_compat_sig_slot_reset()`. In H2's relaunch loop, with both trees booted
+    together: 9/12 slow `-k` on integ19, 0/12 on the lane. `tools/cp/kglitch/sigmask-gate.sh` fails 8/8 before the fix.
+- **K10:** a blocking TCP connect now blocks instead of returning EINPROGRESS. Only AF_UNIX takes the non-blocking
+  probe. The blocking path is `net_socket_connect`'s in-kernel `safe_wfi` wait, which holds its CPU for up to 10 s
+  against a silent peer. Wine's winsock connects are non-blocking, so the game does not take it.
+- **K11:** a blocking loopback accept parks (BLOCKED, 10 ms bound) and the connector wakes it: 341 ms → 0.4 ms of CPU
+  per 500 ms wait.
+- **K8/K9:** fs.c's generic −1 is EBADF on a closed fd (readv, writev, pread64, pwrite64 said EPERM) and EPERM for a
+  sealed memfd/tmpfs write (write said EBADF).
+- **H5-05: the audio dropouts are game-side.** The new `[AWAY]` rows (`linux_compat_away.c`) report what a periodic
+  ntsync waiter does while away from its clock; `[AWAY-Z]` replays them at each `[SND] zeros` row. In 12 fp720 audio
+  boots:
+  - the audio clock's waiters (the game's main thread and one other game thread) were away 30–293 ms at every
+    dropout, 66–70 % in user code and 16–25 % in fault handling;
+  - the other periodic waiters were parked on one game lock (97–99 % of their absences), woken by a game thread that
+    held it;
+  - NFS was not involved: there were 0–1 `[NFSPIPE] stall` rows per boot against 4–5 dropouts each, and no sample was
+    an NFS, blk_token or ylock wait.
+
+  Demand-fault cost while the game streams is the only kernel share, and a possible future lever.
+- **Still open:**
+  - W2 (`grab_object(NULL)` after EMFILE, no repro);
+  - W3 (TEB leak after ~20 000 TerminateThread);
+  - K12 (the ext2 flusher nap);
+  - H1-12 (menu focus, worked around in the harness);
+  - H1-13 (NFS resend pauses of 150–260 ms, 14/18 boots; they cause no audio dropout);
+  - fault-handling cost during streaming.
 
 ### 7.3 Frozen interfaces (binding)
 
