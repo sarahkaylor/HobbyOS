@@ -23,3 +23,4 @@
 # console output (fps / [HBV] rows) in the 1-8 lines before; old boots: 101/128 game boots carry the row, 56 of the first 62
 # sampled rows right after [NFSIO].
 # the uptime of the p8v4 pair: [NFSIO] ms=0x7530 (30000) and 0xea60 (60000) -- the first two 30 s [NFSIO] ticks of the boot.
+# host-side check (run-hunt.sampler records serial.log's size each second from h-p8v4 on): longest stretch with no serial growth after the firmware preamble -- h-p8v4 3 s, h-fp3 14 s, h-fq2 7 s -- while the guest watchdog printed 'silent for more than 20s' 2, 2 and 4 times in those boots. The console was never silent for 20 s.
