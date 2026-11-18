@@ -22,7 +22,7 @@
  *   4. An absence of >= AWAY_MIN_MS prints one row (budget AWAY_ROWS):
  *        [AWAY] tid= tgid= ms= at= clock=0x.. n= U= R= T= F=(0x..) K=nr:n,..
  *               B=nr:n,.. pc=0x..,0x..
- *      `at` is the uptime (ms) the absence began, to line it up with
+ *      `clock` is the clock's slot (#n) in the table; `at` is the uptime (ms) the absence began, to line it up with
  *      [NFSPIPE] / [SND] zeros / [WALSA] rows; pc values are kernel PCs
  *      (symbolise with nm hobbyos.elf).
  *
@@ -253,8 +253,11 @@ static void away_fmt(struct kline *kl, const char *tag, const struct process *t,
   kl_i(kl, (long)(now - a->ret_ms));
   kl_s(kl, " at=");
   kl_i(kl, (long)a->ret_ms);
-  kl_s(kl, " clock=0x");
-  kl_hex(kl, (unsigned long)(uintptr_t)clock);
+  int ci = -1; /* the clock's slot in away_clk: an id, without a pointer cast */
+  for (int i = 0; i < AWAY_CLOCKS; i++)
+    if (away_clk[i].obj == clock) ci = i;
+  kl_s(kl, " clock=#");
+  kl_i(kl, ci);
   kl_s(kl, " n=");
   kl_i(kl, a->ns);
   kl_s(kl, " U=");
