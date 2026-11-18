@@ -43,6 +43,9 @@ for j in runs:
             v = [float(x["approx_fps"]) for x in rows if x["phase"] == ph]
             if v:
                 row[ph] = (round(statistics.median(v), 1), round(q10(v), 1), len(v))
+        fg = (r.get("fps_gaps") or {})
+        row["hitch"] = sum(v.get("hitches", 0) for k, v in fg.items() if k == "world" or k.startswith("soak"))
+        row["wmin"] = min((v["min"] for k, v in fg.items() if k == "world" or k.startswith("soak")), default="-")
         mem = r.get("mem", {}).get("Cyberpunk2077.e")
         row["mem"] = f"{mem['res_first']}→{mem['res_max']}" if mem else "-"
         p9.append(row)
@@ -53,12 +56,12 @@ print("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
 for r in p8:
     print(f"| {r['run']} | {r['kind']} | {r['verdict']} | {r['launch']} | {r['l2m']} | {r['kf']} | {r['ks']} | {r['exitpc']} | {r['newerr']} | {r['newdx']} | {r['red']} | {r['gpu']} | {r['guests']} |")
 print()
-print("| boot | kind | verdict | world median | world p10 | rows | menu median | 9070 XT busy (world) med/p90 | game res MiB first→max | kernel stalls | other guests | script |")
-print("|---|---|---|---|---|---|---|---|---|---|---|---|")
+print("| boot | kind | verdict | world median | world p10 | world min row | rows | hitches (>1 s frame) | menu median | 9070 XT busy (world) med/p90 | game res MiB first→max | kernel stalls | other guests | script |")
+print("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
 for r in p9:
     w = r.get("world") or (None, None, 0)
     m = r.get("menu") or (None, None, 0)
-    print(f"| {r['run']} | {r['kind']} | {r['verdict']} | {w[0]} | {w[1]} | {w[2]} | {m[0]} | {r['gpuw']} | {r['mem']} | {r['ks']} | {r['guests']} | {r['fail'][:60]} |")
+    print(f"| {r['run']} | {r['kind']} | {r['verdict']} | {w[0]} | {w[1]} | {r.get('wmin', '-')} | {w[2]} | {r.get('hitch', '-')} | {m[0]} | {r['gpuw']} | {r['mem']} | {r['ks']} | {r['guests']} | {r['fail'][:60]} |")
 
 # the soak: per phase fps (decay) and the game's memory (growth), from
 # RUN.fps.csv / RUN.thrs.csv of every boot that has soak phases

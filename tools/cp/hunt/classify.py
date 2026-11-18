@@ -177,6 +177,7 @@ def classify_serial(text):
     pidname = {}
     nfps = 0
     fps_vals = []
+    fps_ts = []                         # guest time of each fps row (WINEDEBUG +timestamp)
     thrs = {}
 
     def add(c, sig, ln, ex):
@@ -241,6 +242,8 @@ def classify_serial(text):
         if m:
             nfps += 1
             fps_vals.append(float(m.group(1)))
+            mt = re.match(r"\[X\]\s+(\d+\.\d+):", line)
+            fps_ts.append(float(mt.group(1)) if mt else None)
             continue
         m = VKD3D_RX.match(x)
         if m and m.group(1) in ("err", "warn"):
@@ -259,7 +262,7 @@ def classify_serial(text):
         if m:
             add("dxvk", f"{m.group(1)}: {norm(m.group(2))}", ln, line)
             continue
-    return cls, {"fps_rows": nfps, "fps": fps_vals, "thrs": thrs}
+    return cls, {"fps_rows": nfps, "fps": fps_vals, "fps_ts": fps_ts, "thrs": thrs}
 
 
 # --- run log / host sampler ------------------------------------------------------------
@@ -342,8 +345,12 @@ def q10(v):
     return v[lo] + (v[hi] - v[lo]) * (k - lo)
 
 
-def fps_gaps(serial_path):
-    """Largest gap (game s) between fps rows in each world phase, from fps.csv."""
+def fps_gaps(serial_path, fps_ts=None, fps_vals=None):
+    """Per phase of fps.csv: rows, median, p10 and -- from the guest timestamps
+    of the same rows in the serial log (winevulkan prints one every ~1.5 s of
+    guest time) -- the longest interval between rows and how many exceed 2.5 s
+    (a frame that took >= 1 s: a hitch).  fps.csv's own game_s is the host's
+    read time, which follows boot_p9's screendump cadence, not the game."""
     if serial_path.endswith(".serial.txt"):            # run-hunt.sh's copy: RUN.serial.txt + RUN.fps.csv
         p = serial_path[:-len(".serial.txt")] + ".fps.csv"
     else:
@@ -351,15 +358,26 @@ def fps_gaps(serial_path):
     if not os.path.exists(p):
         return None
     rows = list(csv.DictReader(open(p)))
+    ts = None
+    if fps_ts and fps_vals and len(fps_vals) >= len(rows):
+        # boot_p9 may miss a row at either end: align on the fps values
+        for k in range(0, len(fps_vals) - len(rows) + 1):
+            if all(abs(float(rows[i]["approx_fps"]) - fps_vals[i + k]) < 0.06 for i in range(len(rows))):
+                ts = fps_ts[k:k + len(rows)]
+                break
     out = {}
     for ph in dict.fromkeys(r["phase"] for r in rows):
-        t = [float(r["game_s"]) for r in rows if r["phase"] == ph]
-        v = [float(r["approx_fps"]) for r in rows if r["phase"] == ph]
-        if len(t) < 2:
+        idx = [i for i, r in enumerate(rows) if r["phase"] == ph]
+        v = [float(rows[i]["approx_fps"]) for i in idx]
+        if len(idx) < 2:
             continue
-        gaps = [b - a for a, b in zip(t, t[1:])]
-        out[ph] = {"rows": len(t), "max_gap_s": round(max(gaps), 1), "median": round(statistics.median(v), 1),
-                   "p10": round(q10(v), 1)}
+        e = {"rows": len(idx), "median": round(statistics.median(v), 1), "p10": round(q10(v), 1), "min": min(v)}
+        if ts and all(ts[i] is not None for i in idx):
+            g = [ts[b] - ts[a] for a, b in zip(idx, idx[1:]) if b == a + 1]
+            if g:
+                e["max_gap_s"] = round(max(g), 2)
+                e["hitches"] = sum(1 for x in g if x > 2.5)
+        out[ph] = e
     return out
 
 
@@ -381,7 +399,7 @@ def report(args):
     cls, ex = classify_serial(raw)
     rl = parse_runlog(args.log)
     host = parse_host(args.host, rl.get("phases"))
-    gaps = fps_gaps(args.serial)
+    gaps = fps_gaps(args.serial, ex.get("fps_ts"), ex.get("fps"))
     mem = mem_growth(ex["thrs"])
     rid = args.run or os.path.basename(os.path.dirname(os.path.abspath(args.serial)))
     res = {"run": rid, "serial": args.serial, "serial_lines": raw.count("\n"),
@@ -413,9 +431,10 @@ def report(args):
             tag = f"  [{v[3]}]" if len(v) > 3 else ""
             print(f"   {v[0]:5d}  L{v[1]:<7d} {sig}{tag}")
     if gaps:
-        print("-- fps rows per phase (fps.csv): rows, max gap s, median, p10")
+        print("-- fps rows per phase (fps.csv): rows, median, p10, min, longest guest-time gap s, gaps > 2.5 s")
         for ph, g in gaps.items():
-            print(f"   {ph:<16} {g['rows']:5d} {g['max_gap_s']:7.1f} {g['median']:7.1f} {g['p10']:7.1f}")
+            print(f"   {ph:<16} {g['rows']:5d} {g['median']:7.1f} {g['p10']:7.1f} {g['min']:7.1f}"
+                  f" {g.get('max_gap_s', '-'):>7} {g.get('hitches', '-'):>4}")
     if mem:
         print("-- [THRS] per process: rows, anon MiB first/max/last, res MiB first/max/last, max threads")
         for n, m in sorted(mem.items(), key=lambda kv: -kv[1]["max"]):
