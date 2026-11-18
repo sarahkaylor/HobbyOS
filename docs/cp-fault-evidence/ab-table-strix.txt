@@ -48,3 +48,11 @@ ab-lane-fp2 samples=777 T=158 (20.3%)
 ab-fin-fp1 samples=1689 T=410 (24.3%)
 ab-fin-fp2 samples=1143 T=254 (22.2%)
 ab-fin-fp3 samples=1335 T=255 (19.1%)
+
+# soaks (tools/cp/fault/fp.sh soak; tools/cp/hunt/soak.p9, no audio)
+| ab-base-soak1 | 36.6 | 33.7 | - | - | - | - | 2782497 | 30839.3 | 10.6 | 2294.7 | 26538.4 | 19105.8 | 7086.1 | 32 | 1 | - | 1 |
+| ab-fin-soak1 | 31.8 | 29.2 | - | - | - | - | 3393463 | 18401.0 | 5.1 | 438.6 | 1250.0 | 6511.7 | 10438.1 | 6 | 0 | 0 | 0 |
+ab-base-soak1: soak1 30.3/23.9  soak2 34.4/30.4  soak3 37.2/31.6  soak4 38.1/36.5  soak5 36.6/34.9  soak6 36.0/33.7  
+[NFSRS] off=773750784 want=32768 age_ms=151 inflight=1 sys_kib=32 resend_ms=1 late_ms=-1 iters=2398200 gap_max_us=17 pend=0 rxpk=1 frags+=23 ipr_to+=0 stale=0 stalls=1 at=269341
+ab-fin-soak1: soak1 31.8/29.2  soak2 30.5/28.8  soak3 28.9/26.1  soak4 31.8/26.2  soak5 34.6/33.0  soak6 33.1/30.1  
+txq_wait=0 txq_drop=0 txq_wmax_us=0 rxq_reuse=1

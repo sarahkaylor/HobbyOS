@@ -150,7 +150,9 @@ Checks:
   at 32–64 ms, none later. A 150 ms first wait is 2.3× the slowest reply ever
   seen.
 - **Rate:**
-  - 2 stalls in 6 chain-1 boots (k = 2/6), one of each shape;
+  - base: 5 stalls in 4 of 6 boots (5 fp720 + 1 soak): 4 lost, 1 delayed;
+  - final lane: 2 stalls in 1 of 4 boots (3 fp720 + 1 soak), one of each
+    shape;
   - 0–2 per boot in H4's kg2 boots (6/11);
   - H1's 14/18 were boots on integ15/17, with more lanes booting at once.
 - **Where the lost reply goes.**
@@ -338,7 +340,27 @@ which change no behaviour), base boots 4–5 alternated with it. Totals over cha
 | `[AWAY]` T share over the audio-clock threads' absences (`audio=1` rows) | 29.7–36.6 % (mean 33.2) | 19.1–24.3 % (mean 21.9; chain-1 lane 20.3–24.4) |
 | host stall per boot (`stolen_ms`) | 1.6–5.2 s | 1.5–2.1 s |
 
-The soaks: SOAK
+The soaks (`soak.p9`, ~28 min in the world, no audio, n=1 each). H6's guest
+shared the host and the GPU through both: load 10.5–10.9, 9070 XT 83–85 % busy.
+
+| soak | base (ab-base-soak1) | lane (ab-fin-soak1) |
+|---|---|---|
+| soak phases median of medians / p10 | 36.6 / 33.7 | 31.8 / 29.2 |
+| hitches (classify.py, fps rows > 2.5 s apart) | 1 | 0 |
+| faults / fault time / anon avg | 2.78 M / 30.8 s / 10.6 µs | 3.39 M / 18.4 s / 5.1 µs |
+| `vm_lock` wait (every site) / hold in faults | 19.1 s / 26.5 s | 6.5 s / 1.25 s |
+| faults that waited ≥ 1 ms for the lock | 32 | 6 |
+| TLB shootdown time | 7.1 s | 10.4 s |
+| NFS stalls | 1 (lost, 151 + 1 ms) | 0 |
+| host stall (`stolen_ms`) | 2.2 s | 1.9 s |
+
+- The lane soak's lower fps comes with 22 % more faults and 47 % more
+  shootdown time in the same script. That is a different run of the game
+  world, and probably a different GPU share with H6's guest.
+- One soak each cannot separate those causes. The fp720 pairs (n=5/3), with
+  equal shootdown time, are the A/B.
+- `rxq_reuse=1` in the lane soak: the RX re-queue window (H7-05 suspect 2)
+  opened once in 30 minutes, with no stall then.
 
 - The fault path's cost to the game halved, and the lock serialization is gone:
   the wait at every `vm_lock` site fell 6×. The vm_lock hold inside faults fell
@@ -356,16 +378,40 @@ The soaks: SOAK
 | H7-02 | the frame allocator first-touches never-backed guest RAM for memory the guest has just freed (forward-walking hint); the P9 guest's host footprint grows toward its `-m` | 6/6 fp720 | `fault-mix-fp720-strix.txt` (world: 940 MiB zero-filled, pool −100 MiB) | `[PFL] … zero=241k/1.8s … fresh=471` with `[P8MEM]` flat | kernel (frame.c) | perf | fixed in 2963d3da |
 | H7-03 | `vm_arch_reload_cr3` switched CR3 to the faulting AS instead of flushing; the unit tier then ran on a freed PML4 | 1/1 unit runs with F1 (hidden before by the allocator) | `unit-cr3-strix.txt` | `[KERNEL] FATAL kernel-mode fault … rip=…nvme_ready_now cr2=0xFFFF808000000014` | kernel (x64 mmu.c; test-only path) | crash (unit tier) | fixed in 4112438a |
 | H7-04 | console rows (`[PUBS]` every 4096 publishes) printed while holding `vm_lock`: 4–15 ms holds | 2/2 lane F1+F2 boots, 21–27 lock waits ≥ 1 ms per boot | `fault-ab-rows-strix.txt` | `[PFX] F tid=149 … kind=anon … lh=15235 zero=7` | kernel (vm.c instrument) | perf | fixed in d419ec9d |
-| H7-05 | a pipelined NFS READ stalls for its full 150 ms first wait (H1-13): either one IP fragment of the reply never reaches reassembly (lost), or a host stall holds every reply back (delayed) | 2/6 chain-1 boots (ab-base-fp2 lost, ab-base-fp3 delayed); lane: 1/3 boots (ab-fin-fp2, one of each); 6/11 kg2 | `nfs-stalls-strix.txt` | `[NFSRS] … age_ms=151 … resend_ms=8 late_ms=-1 … gap_max_us=43 pend=0 rxpk=1`; lane `… ipr=2/31424/52 … txdrop+=0` | kernel NFS client (the wait); the lost fragment: guest RX re-queue race (suspect, df28d9ca counts it) or QEMU/slirp | perf (150–480 ms pause) | pause cut by 1164f98f (lost: 53 ms; delayed: 71 ms, late original used); loss cause open |
-| H7-06 | `virtio_net_send` drops a frame silently after ~2 ms with all 16 TX slots in flight (`net_socket_send` ignores the return) | 0 waits, 0 drops in 2 lane boots with the counter (fin-fp2, fin-fp3) | code review; `nfs-stalls-strix.txt` | `txq_wait=0 txq_drop=0` | kernel (virtio_net.c, net.c) | latent (would lose an RPC) | not the H7-05 cause; the silent drop is left as is (counted) |
+| H7-05 | a pipelined NFS READ stalls for its full 150 ms first wait (H1-13): either one IP fragment of the reply never reaches reassembly (lost), or a host stall holds every reply back (delayed) | base: 4/6 boots (ab-base-fp2, -fp3, -fp5, -soak1; 4 lost + 1 delayed); final lane: 1/4 (ab-fin-fp2, one of each); fa-fp1 and the F1+F2 lane 0/3; 6/11 kg2 | `nfs-stalls-strix.txt` | `[NFSRS] … age_ms=151 … resend_ms=8 late_ms=-1 … gap_max_us=43 pend=0 rxpk=1`; lane `… ipr=2/31424/52 … txdrop+=0` | kernel NFS client (the wait); the lost fragment: guest RX re-queue race (suspect, df28d9ca counts it) or QEMU/slirp | perf (150–480 ms pause) | pause cut by 1164f98f (lost: 53 ms; delayed: 71 ms, late original used); loss cause open |
+| H7-06 | `virtio_net_send` drops a frame silently after ~2 ms with all 16 TX slots in flight (`net_socket_send` ignores the return) | 0 waits, 0 drops in the 3 lane boots with the counter (ab-fin-fp2, -fp3, -soak1) | code review; `nfs-stalls-strix.txt` | `txq_wait=0 txq_drop=0` | kernel (virtio_net.c, net.c) | latent (would lose an RPC) | not the H7-05 cause; the silent drop is left as is (counted) |
 | H7-07 | TLB shootdowns cost 4.9–5.2 s per fp720 boot, up to 740 ms each (synchronous IPIs to vCPUs the host has not scheduled) | 6/6 fp720 | `fault-mix-fp720-strix.txt` | `[PFX] F … kind=cow … shoot=279674`; `[PFL] … shoot=790/2488113/739666` | kernel (x64 mmu.c) + host scheduling | perf | open |
 | H7-08 | timer interrupts that land on user threads cost 14 µs each (~500 Hz per CPU); about half of `[AWAY]`'s T samples | 6/6 fp720 | `fault-mix-fp720-strix.txt` | `[PFI] … tmr=416731/6028782us/max3251` (world) | kernel (trap.c 0x84 path, scheduler) | perf | open (not this lane's files) |
 | H7-10 | after F1–F3 the longest `vm_lock` holds are `vm_mprotect`, `vm_mmap` and the JIT unmap over large spans (3–5.5 ms), and `vm_touch` waits for them | 1/1 final-lane boot checked (ab-fin-fp1) | `fault-ab-rows-strix.txt` | `[PFL] … vml=…/h=225075/4732@5573` (vm_mprotect), `…/3107@5174` (vm_mmap) | kernel (vm.c) | perf (ms holds, 7–10 faults per boot wait ≥ 1 ms) | open |
-| H7-09 | `virtio_net_rx_backlog_max` was referenced by nfs.c on ARM with no definition there (would not link) | 1/1 ARM build of e5dd95d7's tree | `gates-strix.txt` | `undefined … virtio_net_rx_backlog_max` (caught before the gate) | kernel (this lane) | build | fixed in 1dc4aa02 |
+| H7-09 | this lane's `[NFSRTH]` row (fab2e460) referenced `virtio_net_rx_backlog_max`, which only the x86_64 virtio-net driver defined; found by review before an ARM gate ran | 1/1 (review) | `src/kernel/virtio_net.c` | the counter defined inside `#ifdef __x86_64__` only | kernel (this lane) | build (ARM) | fixed in 1dc4aa02 (counters defined for both arches; ARM build passes) |
 
 ## 7. Gates
 
-GATES
+`~/cp/lanes/fault-gates/gates.sh` is a copy of `~/cp/integ-gates21.sh` pointed at
+`~/cp/lanes/fault-dev` (the lane at 1164f98f, plus f258ad62's probe check; the
+counter commits 1dc4aa02 and df28d9ca were staged into it during the probe
+phase). `tip-rerun.sh` reran on the tip (df28d9ca) in `~/cp/lanes/fault-chk` every
+gate those two commits could touch. Raw rows: `gates-strix.txt`.
+
+| gate | lane | integ21 reference |
+|---|---|---|
+| build (intel test) | PASS | PASS |
+| unit | 464/0 (tip: 464/0); +1 `test_frame_warm_lifo` | 463/0 |
+| probes | 71/71 (the 69 of integ21 + `pfstat`, `pfpar`, both with their console checks); tip rerun: pfstat, pfpar, console, exitgroup, hello, netlink, loaccept, tcpconn all PASS | 69/69 |
+| sigmask-gate | 8/8 | 8/8 |
+| ext2_gate / exec_gate | PASS / PASS | PASS / PASS |
+| rsize_guard | PASS (gate batch and tip) | PASS |
+| rsize_scan | PASS (gate batch and tip) | PASS |
+| nfs_proto_test_host | PASS | PASS |
+| host_tests | 40/42 (the known gaming.md pair; tip 40/42) | 40/42 |
+| castscan | 0 new sites (373 outside kmem.h, all allow-listed) | PASS |
+| ARM build | PASS (gate batch and tip) | PASS |
+| panic-sink allowlist | PASS | PASS |
+| pfx_gate | PASS | PASS |
+| ext2w_gate | PASS | PASS |
+| Gate P2 ×2 | G1/G2/G3 PASS ×2 | PASS |
+| Gate P5 | vkcube, d3d11, d3d12, fullscr PASS (boot 275 s) | PASS ×3 |
+| Gate P8 Venus | main menu at s008-t000109 (109 s game time, +134 s host), verdict main-menu | main menu at s009-t000114 (+138 s) |
 
 ## 8. Commands (strix)
 
