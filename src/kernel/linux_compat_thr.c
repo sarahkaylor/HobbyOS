@@ -4044,10 +4044,20 @@ int linux_compat_sigreturn(struct process *p, struct trap_frame *tf) {
       kl_emit(&kl);
     }
   }
-  if (!l_user_ok(p, rip, 1, 0) || !l_user_ok(p, rsp, 8, 1)) {
-    /* A corrupt frame must not resume the kernel: force SIGSEGV. */
-    uart_puts("[LCOMPAT] rt_sigreturn: bad rip/rsp -> SIGSEGV\n");
+  /* H4-kglitch: Linux does not check the restored RIP/RSP: a handler may
+     return into an address that is not mapped (Wine does), and the thread
+     then takes an ordinary fault there, with its own trap number.  Refusing
+     it here raised SIGSEGV from this syscall's frame, whose vector (0x80)
+     Wine read as REG_TRAPNO: "Got unexpected trap 128", then "nested
+     exception on signal stack" (linux_probe_sigret S2).  Only what iretq
+     itself cannot take is refused: a non-canonical or kernel-half RIP/RSP
+     would #GP inside the kernel.  That SIGSEGV carries Linux's trap number
+     for it (13). */
+  if (rip >= 0x0000800000000000ULL || rsp >= 0x0000800000000000ULL) {
+    uart_puts("[LCOMPAT] rt_sigreturn: non-canonical rip/rsp -> SIGSEGV\n");
     cur->sig_in_handler = 0;
+    tf->vector = 13;
+    tf->error_code = 0;
     process_fault_exit(tf, HO_SIGSEGV);
     return 1;
   }
