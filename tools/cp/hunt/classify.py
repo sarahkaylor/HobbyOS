@@ -314,7 +314,7 @@ def hms(s):
 def parse_host(path, phases=None):
     if not path or not os.path.exists(path):
         return {}
-    busy, world, guests = [], [], set()
+    busy, world, guests, ser = [], [], set(), []
     spans = []
     if phases:
         for i, (_, t, name) in enumerate(phases):
@@ -323,6 +323,8 @@ def parse_host(path, phases=None):
                 spans.append((hms(t), hms(end) if end else 10 ** 9))
     for ln in open(path, errors="replace"):
         p = ln.split()
+        if p[:1] == ["S"] and len(p) >= 5 and p[4].isdigit():
+            ser.append((hms(p[1]), int(p[4])))
         if p[:1] == ["S"] and len(p) >= 3 and p[2].isdigit():
             b = int(p[2])
             busy.append(b)
@@ -336,7 +338,17 @@ def parse_host(path, phases=None):
             return None
         v = sorted(v)
         return {"median": v[len(v) // 2], "p90": v[min(len(v) - 1, int(len(v) * 0.9))], "n": len(v)}
-    return {"gpu_busy_all": mq(busy), "gpu_busy_world": mq(world), "guests": sorted(guests)}
+    # the longest stretch with no serial output once the guest has printed
+    silent, cur, last = 0, 0, None
+    for t, n in ser:
+        if last is not None and n == last[1] and n > 0:
+            cur = t - last[0] + cur if cur else t - last[0]
+        else:
+            cur = 0
+        silent = max(silent, cur)
+        last = (t, n)
+    return {"gpu_busy_all": mq(busy), "gpu_busy_world": mq(world), "guests": sorted(guests),
+            "serial_silent_max_s": silent if ser else None}
 
 
 def q10(v):
@@ -446,6 +458,8 @@ def report(args):
     if host:
         print(f"-- host: 9070 XT busy % whole boot {host.get('gpu_busy_all')}, world {host.get('gpu_busy_world')}")
         print(f"   other guests seen: {len(host.get('guests', []))} {' '.join(host.get('guests', []))[:300]}")
+        if host.get("serial_silent_max_s") is not None:
+            print(f"   longest silent serial stretch: {host['serial_silent_max_s']} s")
     return 0
 
 

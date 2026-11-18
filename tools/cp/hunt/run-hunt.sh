@@ -45,7 +45,7 @@ if [ "${HUNT_AUDIO:-0}" = 1 ]; then
 fi
 
 sampler() {
-  echo "# run-hunt host sampler: HH:MM:SS gpu_busy_percent(renderD129) loadavg1; G lines = other QEMU guests"
+  echo "# run-hunt host sampler: S HH:MM:SS gpu_busy_percent(renderD129) loadavg1 serial_bytes dirty_kB writeback_kB; G lines = other QEMU guests"
   local i=0
   while kill -0 "$1" 2>/dev/null; do
     if [ $((i % 60)) = 0 ]; then
@@ -53,7 +53,11 @@ sampler() {
         echo "G $(date +%T) $p $(readlink /proc/$p/cwd) $(tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null | grep -o -- '-m [0-9]*M\|virtio-gpu[a-z-]*\|virtio-sound[a-z-]*' | tr '\n' ' ')"
       done
     fi
-    echo "S $(date +%T) $(cat /sys/class/drm/renderD129/device/gpu_busy_percent 2>/dev/null) $(cut -d' ' -f1 /proc/loadavg)"
+    # + the boot's serial.log size (a silent console = a stalled guest or a
+    # stalled QEMU main loop) and the host's Dirty/Writeback kB (a QEMU
+    # write() to serial.log throttled by dirty-page writeback stalls the guest)
+    echo "S $(date +%T) $(cat /sys/class/drm/renderD129/device/gpu_busy_percent 2>/dev/null) $(cut -d' ' -f1 /proc/loadavg)" \
+      "$(stat -c %s "$2/serial.log" 2>/dev/null || echo -)" "$(awk '/^(Dirty|Writeback):/ {printf "%s ", $2}' /proc/meminfo)"
     i=$((i + 1)); sleep 1
   done
 }
@@ -95,16 +99,16 @@ case "$KIND" in
   *) echo "run-hunt: unknown kind $KIND" >&2; exit 2 ;;
 esac
 
+if [ "$P9" = 1 ]; then OUT="$ROOT/obj/cp-p9/$RUN"; else OUT="$ROOT/obj/cp-p8/$RUN"; fi
 echo "== run-hunt kind=$KIND run=$RUN audio=${WAV:-off} venus=$VENUS_BUILD wine=$CP_WINE_STAGE start=$(date -Is)" > "$L"
 "$@" >> "$L" 2>&1 &
 BP=$!
-sampler "$BP" > "$H" 2>&1 &
+sampler "$BP" "$OUT" > "$H" 2>&1 &
 SP=$!
 wait "$BP"; rc=$?
 kill "$SP" 2>/dev/null; wait "$SP" 2>/dev/null
 echo "rc=$rc $(date +%T)" >> "$L"
 
-if [ "$P9" = 1 ]; then OUT="$ROOT/obj/cp-p9/$RUN"; else OUT="$ROOT/obj/cp-p8/$RUN"; fi
 SER="$OUT/serial.txt"; [ -f "$SER" ] || SER="$OUT/serial.log"
 python3 -I tools/cp/hunt/classify.py --run "$RUN" --log "$L" --host "$H" --json "$LOGS/$RUN.class.json" "$SER" > "$LOGS/$RUN.class.txt" 2>&1
 if [ -n "$WAV" ]; then
