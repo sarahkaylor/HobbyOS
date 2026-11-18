@@ -75,6 +75,29 @@ static uint64_t frame_bits[FRAME_WORDS_MAX];
 static uint64_t frame_watch_phys;
 static int frame_watch_hits;
 static uint32_t frame_hint; /* rotating alloc hint: word index */
+/* H7-fault (docs/cp-fault.md §4): RECENTLY FREED FRAMES ARE HANDED OUT FIRST.
+ *
+ * The rotating hint walks the pool forwards and revisits a freed frame only
+ * after it has wrapped, so a guest that allocates and frees (a game
+ * streaming its world) keeps first-touching guest RAM the host has never
+ * backed, until it has touched all of it.  On strix every fresh 2 MiB of
+ * guest RAM is a host page fault (a THP allocation, compaction when memory is
+ * fragmented): measured 2-38 ms for one 4 KiB zero with the desktop and
+ * another 32 GiB guest running, and the guest's host footprint grows to its
+ * whole -m.  frame_free() pushes the frame on a bounded LIFO (the oldest
+ * entry is overwritten when it is full); frame_alloc() pops it before it
+ * scans, so freed memory is reused while it is warm in the host and in the
+ * caches.  A popped entry whose bit is set again (the scan, a reservation or
+ * a test's pretend-full handed it out meanwhile) is skipped: the bitmap stays
+ * the only owner record. */
+#ifdef __x86_64__
+#define FRAME_WARM_N 65536 /* 256 MiB of frames, 256 KiB of .bss */
+#else
+#define FRAME_WARM_N 4096
+#endif
+static uint32_t frame_warm[FRAME_WARM_N]; /* frame index + 1 */
+static uint32_t frame_warm_top, frame_warm_n;
+static uint32_t frame_warm_hits, frame_warm_stale;
 static int frame_dfree_n;   /* C1-k6: frees of an already-free frame */
 static int frame_used;      /* count of set bits */
 static int frame_high;      /* high-water mark of frame_used */
@@ -346,6 +369,28 @@ uint64_t frame_alloc(void) {
     uint64_t res = 0;
     uint32_t hint = frame_hint;
 
+    /* H7-fault: the most recently freed frame that is still free */
+    while (frame_warm_n && !res) {
+      frame_warm_top = (frame_warm_top + FRAME_WARM_N - 1) % FRAME_WARM_N;
+      frame_warm_n--;
+      uint32_t wi = frame_warm[frame_warm_top];
+      if (!wi--)
+        continue;
+      uint32_t ww = wi / 64, wb = wi % 64;
+      if (ww >= (uint32_t)FRAME_WORDS || (frame_bits[ww] & (1ULL << wb))) {
+        frame_warm_stale++;
+        continue;
+      }
+      frame_bits[ww] |= 1ULL << wb;
+      frame_used++;
+      if (frame_used > frame_high)
+        frame_high = frame_used;
+      res = frame_phys_of((int)wi);
+      frame_warm_hits++;
+      if (res >= 0x200000000ULL)
+        frame_hi_allocs_n++;
+    }
+
     /* Find-first-zero-word scan from the rotating hint, wrapping once.
        Sequential allocation (faults, loader, spawns) advances the hint
        word by word, so the scan is amortized O(1) per frame; a nearly
@@ -431,6 +476,10 @@ void frame_free(uint64_t phys) {
   if (frame_bits[w] & (1ULL << bit)) {
     frame_bits[w] &= ~(1ULL << bit);
     frame_used--;
+    frame_warm[frame_warm_top] = (uint32_t)idx + 1; /* H7-fault: reuse first */
+    frame_warm_top = (frame_warm_top + 1) % FRAME_WARM_N;
+    if (frame_warm_n < FRAME_WARM_N)
+      frame_warm_n++;
   } else {
     dfree = ++frame_dfree_n;
   }
@@ -453,6 +502,11 @@ void frame_free(uint64_t phys) {
     }
   }
 }
+
+/* H7-fault: allocations served by the recently-freed LIFO, and entries it
+   skipped because the frame had been handed out again. */
+uint32_t frame_warm_hit_count(void) { return frame_warm_hits; }
+uint32_t frame_warm_stale_count(void) { return frame_warm_stale; }
 
 /* C1-k6: how many already-free frames frame_free() has been handed. */
 int frame_dfree_count(void) { return frame_dfree_n; }

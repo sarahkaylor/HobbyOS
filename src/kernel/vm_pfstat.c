@@ -17,7 +17,7 @@
  *   [PFH] t= all=<17 buckets> file=<17 buckets>
  *        latency histogram, buckets < 1, 2, 4, ... 32768 us, then the rest.
  *   [PFL] t= lw=sum/max lh=sum/max vml=n/w=sum/max@line/h=sum/max@line
- *        zero=n/us/max fresh=n/us shoot=n/us/max/cpus=
+ *        zero=n/us/max fresh=n/us shoot=n/us/max/cpus= warm=n
  *        vm_lock wait (lw) and hold (lh) inside faults; vml every vm_lock
  *        pair in vm.c with the source line of the longest wait and hold;
  *        frame zeroing (fresh: the first frame handed out from a 2 MiB guest
@@ -480,6 +480,15 @@ static void pf_emit(uint64_t now_ms) {
   kl_us(&kl, sh_mx);
   kl_s(&kl, "/cpus=");
   kl_u(&kl, D(sh_tg));
+  {
+    /* frame.c's recently-freed LIFO (H7-fault): allocations it served */
+    extern uint32_t frame_warm_hit_count(void);
+    static uint32_t warm_prev;
+    uint32_t wh = frame_warm_hit_count();
+    kl_s(&kl, " warm=");
+    kl_u(&kl, wh - warm_prev);
+    warm_prev = wh;
+  }
   kl_c(&kl, '\n');
   kl_emit(&kl);
 
