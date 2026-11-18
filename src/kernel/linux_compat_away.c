@@ -230,6 +230,58 @@ static void kl_kv(struct kline *kl, const char *tag, const struct away_kv *kv) {
   }
 }
 
+/* One absence as a row (tag "[AWAY] " or "[AWAY-Z] "; the newline fits). */
+static void away_fmt(struct kline *kl, const char *tag, const struct process *t,
+                     const struct away_thr *a, const void *clock, uint64_t now) {
+  kl_init(kl);
+  kl_s(kl, tag);
+  kl_s(kl, "tid=");
+  kl_i(kl, t->pid);
+  kl_s(kl, " tgid=");
+  kl_i(kl, t->tgid);
+  kl_s(kl, " ms=");
+  kl_i(kl, (long)(now - a->ret_ms));
+  kl_s(kl, " at=");
+  kl_i(kl, (long)a->ret_ms);
+  kl_s(kl, " clock=0x");
+  kl_hex(kl, (unsigned long)(uintptr_t)clock);
+  kl_s(kl, " n=");
+  kl_i(kl, a->ns);
+  kl_s(kl, " U=");
+  kl_i(kl, a->u);
+  kl_s(kl, " R=");
+  kl_i(kl, a->r);
+  kl_s(kl, " T=");
+  kl_i(kl, a->t);
+  kl_s(kl, " F=");
+  kl_i(kl, a->f);
+  if (a->fword) {
+    kl_s(kl, "(0x");
+    kl_hex(kl, (unsigned long)a->fword);
+    kl_c(kl, ')');
+  }
+  kl_s(kl, " O=");
+  kl_i(kl, a->o);
+  kl_kv(kl, " K=", a->k);
+  kl_kv(kl, " B=", a->b);
+  for (int i = 0; i < AWAY_NPC; i++) {
+    if (!a->pc[i])
+      continue;
+    kl_s(kl, i ? "," : " pc=0x");
+    if (i) kl_s(kl, "0x");
+    kl_hex(kl, (unsigned long)a->pc[i]);
+  }
+  if (a->waker) {
+    kl_s(kl, " waker=");
+    kl_i(kl, a->waker - 1);
+    kl_waker(kl, a->waker - 1, (int)((now - a->ret_ms) / 10));
+  }
+  kl_c(kl, ' ');
+  kl_s(kl, t->name);
+  if (kl->n > (int)sizeof kl->b - 2) kl->n = (int)sizeof kl->b - 2; /* the newline always fits */
+  kl_c(kl, '\n');
+}
+
 /* Thread `t` starts an ntsync wait on objs[0..n): if one is a clock, it is a
    periodic waiter, and the time since its last clock wait returned is an
    absence worth a row when it is long. */
@@ -248,52 +300,7 @@ void away_wait_begin(struct process *t, void *const *objs, int n) {
   uint64_t now = timer_get_ms();
   if (a->flagged && a->away && a->gen == process_slot_seq(t->pid) && now - a->ret_ms >= AWAY_MIN_MS) {
     struct kline kl;
-    kl_init(&kl);
-    kl_s(&kl, "[AWAY] tid=");
-    kl_i(&kl, t->pid);
-    kl_s(&kl, " tgid=");
-    kl_i(&kl, t->tgid);
-    kl_s(&kl, " ms=");
-    kl_i(&kl, (long)(now - a->ret_ms));
-    kl_s(&kl, " at=");
-    kl_i(&kl, (long)a->ret_ms);
-    kl_s(&kl, " clock=0x");
-    kl_hex(&kl, (unsigned long)(uintptr_t)clock);
-    kl_s(&kl, " n=");
-    kl_i(&kl, a->ns);
-    kl_s(&kl, " U=");
-    kl_i(&kl, a->u);
-    kl_s(&kl, " R=");
-    kl_i(&kl, a->r);
-    kl_s(&kl, " T=");
-    kl_i(&kl, a->t);
-    kl_s(&kl, " F=");
-    kl_i(&kl, a->f);
-    if (a->fword) {
-      kl_s(&kl, "(0x");
-      kl_hex(&kl, (unsigned long)a->fword);
-      kl_c(&kl, ')');
-    }
-    kl_s(&kl, " O=");
-    kl_i(&kl, a->o);
-    kl_kv(&kl, " K=", a->k);
-    kl_kv(&kl, " B=", a->b);
-    for (int i = 0; i < AWAY_NPC; i++) {
-      if (!a->pc[i])
-        continue;
-      kl_s(&kl, i ? "," : " pc=0x");
-      if (i) kl_s(&kl, "0x");
-      kl_hex(&kl, (unsigned long)a->pc[i]);
-    }
-    if (a->waker) {
-      kl_s(&kl, " waker=");
-      kl_i(&kl, a->waker - 1);
-      kl_waker(&kl, a->waker - 1, (int)((now - a->ret_ms) / 10));
-    }
-    kl_c(&kl, ' ');
-    kl_s(&kl, t->name);
-    if (kl.n > (int)sizeof kl.b - 2) kl.n = (int)sizeof kl.b - 2; /* the newline always fits */
-    kl_c(&kl, '\n');
+    away_fmt(&kl, "[AWAY] ", t, a, clock, now);
     struct away_fr *fr = &away_fr[away_fr_n++ % AWAY_FR];
     fr->at = a->ret_ms;
     fr->end = now;
@@ -322,6 +329,20 @@ void away_dump_since(uint64_t from_ms) {
     kl_s(&z, "[AWAY-Z] ");
     for (int j = 7; j < fr->kl.n && z.n < (int)sizeof z.b - 2; j++) z.b[z.n++] = fr->kl.b[j];
     if (z.n && z.b[z.n - 1] != '\n') kl_c(&z, '\n');
+    kl_emit(&z);
+  }
+  /* and the absences still open: the client has come back (it is writing
+     again, which ends the zero run) but has not reached its next clock
+     wait, where its row would be made */
+  uint64_t now = timer_get_ms();
+  for (int slot = 1; slot < MAX_PROCESSES; slot++) {
+    struct away_thr *a = &away_t[slot];
+    if (!a->flagged || !a->away || now - a->ret_ms < AWAY_MIN_MS) continue;
+    if (a->gen != process_slot_seq(slot)) continue;
+    struct process *t = process_get_pcb(slot);
+    if (!t) continue;
+    struct kline z;
+    away_fmt(&z, "[AWAY-Z] ", t, a, a->clock, now);
     kl_emit(&z);
   }
 }
