@@ -279,6 +279,9 @@ uint64_t timer_get_ms(void) {
  * Same TSC as timer_get_ms(), so it advances with interrupts disabled and
  * has sub-millisecond resolution.  Not for scheduling decisions: a caller
  * that must not spin should use timer_get_ms(). */
+/* C1-k7: the TSC rate, for the trap profile (trapprof.c). */
+uint64_t timer_tsc_per_ms(void) { return tsc_per_ms; }
+
 uint64_t timer_get_us(void) {
   if (tsc_per_ms == 0) {
     return timer_ticks * 10000;
