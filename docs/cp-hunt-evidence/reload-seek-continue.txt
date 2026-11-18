@@ -1,0 +1,14 @@
+# H1-hunt: reload.p9's 'seek menu-continue main up 6 CONTINUE' loses the focus after the second Up (strix, h-rl1 on h-play1's data disk)
+[P9W] focus s018-t000145-menu-continue0: rows 526..561 centre 544 -> LOAD GAME
+[P9W] focus s019-t000148-menu-continue1: rows 489..524 centre 506 -> NEW GAME
+[P9W] focus s021-t000152-menu-continue2: no highlighted row
+[P9W] focus s022-t000154-menu-continue3: no highlighted row
+[P9W] focus s023-t000156-menu-continue4: no highlighted row
+[P9W] focus s024-t000158-menu-continue5: no highlighted row
+[P9W] focus s025-t000160-menu-continue6: no highlighted row
+[P9W] +   204.9 s  04:08:41  SEEK FAILED menu-continue: main menu row 'CONTINUE' not focused after 6 x up
+   +   204.9 s  04:08:41  SEEK FAILED menu-continue: main menu row 'CONTINUE' not focused after 6 x up
+# the same seek in earlier reload boots (lanes/play gateB5, gateB6, r2-reload-scan1): focus y 544 -> 507 -> 470 (LOAD GAME -> NEW GAME -> CONTINUE), 'after 2 taps'
+# h-rl1 shots s021..s025 (numbers only, tools/cp/hunt checks on strix): the NEW GAME frame (rows 309-344 of the 1280x720 glass) is gone and no yellow frame appears anywhere on the screen; OCR still reads the full main menu (CONTINUE, LOAD GAME, SETTINGS, MODS, CREDITS, QUIT GAME). Four more Ups change nothing.
+# reading: the second Up moved two rows, past CONTINUE onto the frameless patch-notes button above it (docs/cp-p9.md gateA1 saw the same landing with an extra Up); i.e. one key event delivered twice, or a late key-up turned into an autorepeat.
+# all P9 run logs on strix (88, tools/cp/hunt/inputcheck.py): 274 one-row moves, 0 dropped, 3 two-row moves (2 in the pause menu, whose rows are not evenly spaced), plus this one: CONTINUE seeks 3 of 4 fine.

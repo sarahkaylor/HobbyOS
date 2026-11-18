@@ -26,7 +26,13 @@ lane's boots" are the `h-*` boots below (integ15 code); "old boots" are the
 census of 128 earlier game boots (§ Old logs), quoted only to show whether
 something recurs.
 
-<!-- CATALOG -->
+| ID | symptom | rate | first-seen evidence | signature | layer | severity | status |
+|---|---|---|---|---|---|---|---|
+<!-- ROWS -->
+
+### Notes on the rows
+
+<!-- NOTES -->
 
 <!-- FPS -->
 

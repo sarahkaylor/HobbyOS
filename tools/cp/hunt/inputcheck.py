@@ -48,7 +48,7 @@ def check(path):
     order = []
     for ln in open(path, errors="replace"):
         m = FOCUS_RX.search(ln)
-        kind = "main"
+        kind = "menu"
         if not m:
             m = LIST_RX.search(ln)
             kind = "list"
