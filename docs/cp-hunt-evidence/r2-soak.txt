@@ -1,0 +1,30 @@
+# H1-hunt round 2: 28-minute soak on integ17 (strix, h2-soak1, P9 32 GiB Venus, CP_AUDIO_WAV; WAV measured then deleted)
+Soak h2-soak1: per phase
+| phase | game s | fps rows | median | p10 | min | longest fps-row gap s (host read time) | game res MiB (last) | anon MiB (last) | threads (last) |
+|---|---|---|---|---|---|---|---|---|---|
+| soak1 | 228-494 | 177 | 38.0 | 32.4 | 23.5 | 2.3 | 4396 | 141080 | 48 |
+| soak2 | 496-761 | 176 | 33.6 | 23.0 | 21.0 | 2.1 | 4433 | 141081 | 48 |
+| soak3 | 764-1029 | 177 | 37.9 | 34.0 | 25.8 | 2.1 | 4449 | 141097 | 48 |
+| soak4 | 1031-1296 | 176 | 35.6 | 30.4 | 23.9 | 2.2 | 4477 | 141113 | 48 |
+| soak5 | 1298-1564 | 177 | 38.6 | 28.1 | 20.4 | 2.4 | 4486 | 141113 | 48 |
+| soak6 | 1566-1831 | 176 | 42.8 | 38.2 | 31.6 | 2.3 | 4482 | 141113 | 48 |
+resident growth over the soak phases: 4314 -> 4482 MiB in 26.7 min = 6.3 MiB/min
+-- fps rows per phase (fps.csv): rows, median, p10, min, longest guest-time gap s, gaps > 2.5 s
+   soak1              177    38.0    32.4    23.5    1.54    0
+   soak2              176    33.6    23.0    21.0    1.55    0
+   soak3              177    37.9    34.0    25.8    1.53    0
+   soak4              176    35.6    30.4    23.9    1.54    0
+   soak5              177    38.6    28.1    20.4    1.54    0
+   soak6              176    42.8    38.2    31.6    1.55    0
+-- kernel faults: 0 rows, 0 signatures
+      37  L3082    kernel [SND] xrun row
+       3  L17378   alsa-lib snd_pcm_recover: underrun occurred
+-- host: 9070 XT busy % whole boot {'median': 38, 'p90': 82, 'n': 1858}, world {'median': 37, 'p90': 47, 'n': 1587}
+wavgaps: duration_s=1844.21
+wavgaps: dropouts=8
+wavgaps: dropout_ms_total=720.0
+wavgaps: wall_s=1855.2
+wavgaps: wav_over_wall=0.9941
+wavcheck: file=/home/sarah/cp/lanes/hunt-wav/h2-soak1.wav rate=48000 channels=2 duration_s=1844.205 rms_dbfs=-24.3 active_rms_dbfs=-24.3 active_s=1826.5 first_active_s=17.3 peak_hz_median=70.0 tone_hz=None tone_s=None active_peak_dbfs=-4.4 verdict=PASS
+# integ15 h-soak1 for comparison: median 35.9 (p10 23.9), 12 guest-time hitches > 2.5 s incl. one ~8 s freeze (H1-15), +5.9 MiB/min resident; audio 22 dropouts / 49 alsa-lib underrun rows; kernel xrun rows did not exist yet.
+# integ17: median 37.6 (p10 29.7, 1059 rows), 0 hitches, no [VENUS] stall row, resident +6.3 MiB/min (flat over the last three phases), 8 WAV dropouts, 3 alsa-lib underrun rows, 37 [SND] xrun rows (the integ17 kernel, before cp-audio2's fix in integ18).

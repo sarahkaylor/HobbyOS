@@ -127,6 +127,8 @@ KDIAG = [
     # trap.c's stall watchdog: "console silent for more than 20s" -- in the
     # game boots it fires ~1 s after console output (cp-hunt H1-14)
     ("watchdog", re.compile(r"\[WATCHDOG\] console silent.*")),
+    # integ17 (cp-kglitch): the stall-proof console's takeover row
+    ("cons-takeover", re.compile(r"\[CONS\] takeover.*")),
 ]
 PROC_RX = re.compile(r"\[KERNEL\] Process (\d+): (.*?) exited unexpectedly or gracefully")
 EXITPC_RX = re.compile(r"\[EXITPC\] pid=(\d+) last_user_pc=(\S+) code=(0x[0-9A-Fa-f]+)")
@@ -254,6 +256,9 @@ def classify_serial(text):
         m = VKD3D_RX.match(x)
         if m and m.group(1) in ("err", "warn"):
             add("dxvk", f"{m.group(1)}:{m.group(2)}:{m.group(3)} {norm(m.group(4))}", ln, line)
+            continue
+        if line.startswith("[SND] xrun"):              # integ17 (cp-kglitch H1-11): the kernel's own row
+            add("audio", "kernel [SND] xrun row", ln, line)
             continue
         if "snd_pcm_recover) underrun" in x:          # alsa-lib in the game process
             add("audio", "alsa-lib snd_pcm_recover: underrun occurred", ln, line)

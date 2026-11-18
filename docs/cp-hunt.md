@@ -14,7 +14,184 @@ seeded prefix a copy of integ's `obj/cp-p8/pfx-seeded.img` (sha256
 `/tmp/cp-bigguest.lock`.  Other lanes' guests ran beside every boot (H2-early,
 H3-winefix, H4-kglitch, the integ16 gate batch); the host sampler lists them.
 
-## Result
+## Round 2 (integ17 = bdf39e33)
+
+Branch `cp-hunt2`; strix tree `~/cp/lanes/hunt2`, logs `~/cp/lanes/hunt2-logs`.
+Wine `~/cp/wine-cp2` (the patched stage).  The seeded prefix was rebuilt by
+this lane with that stage (`P8_PHASE=pfx`, 07:55; stamp 1794996799 = wine-cp2's
+wine.inf, so no per-boot wineboot update).  The Venus ICD is unchanged
+(`tools/mesa/venus` has no diff integ15 → integ17).  At most one boot of
+this lane ran at a time, so it used one slot at a time; P9 boots ran under
+the big-guest lock.
+
+**Boots:** 18 game boots on integ17 (6 P8 to the menu: Venus 4, lavapipe 2; 12 P9: 2 play, 3 reloads, 3 fpsprobe 720p, 2 fpsprobe 1080p, 1 soak with audio, 1 hand-driven Settings boot), 07:55–11:25, plus one fpsprobe 720p audio boot (h2i18-a1, after merging integ18 = 0a985aa2: world 40.3, p10 27.0; 7 WAV dropouts, 0 alsa-lib underruns, 0 kernel xruns, 8 `[SND] zeros` rows; `r2-integ18-audio.txt`) on integ18.
+
+* **The fixes hold.**
+  - Early exits 0 of 18 launches.
+  - 0 kernel-fault rows.
+  - QEMU start → launcher: median **5.3 s** (integ15: 61.1 s; 11/22 boots over 60 s → 0/18), H2's `cache=unsafe`.
+  - `[BADELR]` and `[VENUS] fence_wait2 timeout` rows: 0 (integ15: 22/22 and 18/18 boots).
+  - The `[WATCHDOG]` row is down to 2 of 18 boots. Each one now comes with a ≥ 19 s silence that the host saw too (the boot's end).
+  - The H1-04 wineboot reinstall is gone: 0 `InstallHinfSection` rows. However, H2's new warning about it fires falsely on every boot (H1-16).
+* **H1-12 (the reload) is solved by the harness:**
+  - play → save → reload → world passed 2/2: h2-play1 → h2-rl1, h2-play2 → h2-rl2b.
+  - In both, the F5 right after loading wrote the same `playerPosition` as the play boot's quick save.
+  - The root cause is a 104 px tall CONTINUE highlight. boot_p9's seek mislabels it and overshoots. There is a one-line `focus_in` diff for H2.
+  - The "no focus after Settings" variant is cured by a mouse wiggle (1/1).
+* **H1-08 on a real boot:** at 1920×1080, `--game-res` fixes the main menu; the UI does scale 1.5×. The save list then fails (H1-17, bicubic blur of a 1–2 px frame). With NEAREST scaling, the whole stock fpsprobe passed (h2-fq2nn, world 34.5).
+* **fps (fpsprobe 720p Low):** world medians 33.7, 28.1, 30.3. The median of medians is 30.3 (integ15: 30.0). p10 is 25.5–27.6 (integ15: 20.6–26.4); the low tail is up.
+* **Graphics preset:** the change now takes. Enter on Quick Preset, not Right, moved it from Custom to "Ray Tracing Overdrive". The save played on it at 15.5–18.8 fps with no device loss.
+* **Soak:** 28 minutes, world median 37.6 (p10 29.7; integ15 35.9 / 23.9), **0 hitches** (integ15: 12, including the 8 s H1-15 freeze), no `[VENUS] stall` row, resident +6.3 MiB/min and flat over the last three phases (no leak), 0 flagged shots (108). Audio on the integ17 kernel: 8 WAV dropouts (integ15 22), 3 alsa-lib underrun rows (49), 37 `[SND] xrun` rows.
+* **New:** H1-16 (a false prefix-stamp warning), H1-17 (the 1080p list seek), H1-18 (this lane's own lock collision, fixed).
+
+### integ15 vs integ17 (this lane's boots)
+
+| | integ15 | integ17 |
+|---|---|---|
+| game boots | 22 | 18 |
+| verdicts | main-menu=11, script-done=1, script-stop=6, seek-failed:menu-continue=2, seek-failed:menu-load=2 | listseek-failed:loadlist-focus=1, main-menu=6, script-done=5, script-stop=5, seek-failed:menu-continue=1 |
+| early exits | 0/22 | 0/18 |
+| kernel fault rows | 0 | 0 |
+| QEMU start → launcher (NFS mount) s, median | 61.1 (n=22, 6.4–142.2) | 5.3 (n=18, 2.3–6.3) |
+| boots with that > 60 s | 11/22 | 0/18 |
+| P8 Venus launch → menu s | 140.6 (n=7, 109.9–170.0) | 132.9 (n=4, 93.2–140.6) |
+| P8 lavapipe launch → menu s | 242.9 (n=4, 202.4–278.5) | 255.2 (n=2, 232.7–277.6) |
+| fpsprobe 720p world medians | 29.0, 33.4, 30.0 | 33.7, 28.1, 30.3 |
+| fpsprobe 720p p10 | 24.7, 20.6, 26.4 | 25.9, 25.5, 27.6 |
+| fpsprobe 1080p world medians | 29.8, 33.0 | 34.5 |
+| soak world median (p10) | 35.9 (23.9) | 37.6 (29.7) |
+
+| class | signature | integ15 boots (rows) | integ17 boots (rows) |
+|---|---|---|---|
+| audio | `alsa-lib snd_pcm_recover: underrun occurred` | 2/22 (56) | 1/18 (3) |
+| audio | `kernel [SND] xrun row` | 0/22 (0) | 1/18 (37) |
+| exitpc | `wine code=0xC0000135 DLL_NOT_FOUND` | 22/22 (42) | 18/18 (18) |
+| kdiag | `badelr` | 22/22 (439) | 0/18 (0) |
+| kdiag | `watchdog` | 15/22 (43) | 2/18 (2) |
+| kstall | `nfspipe` | 21/22 (70) | 14/18 (33) |
+| kstall | `venus` | 18/22 (294) | 0/18 (0) |
+| wine_err | `system:find_gpu_from_path Failed to find gpu with path "PCI\\VEN_1002&DEV_7550&SUBSYS_0000` | 2/22 (8) | 0/18 (0) |
+| wine_err | `system:lock_display_devices Failed to read display config.` | 2/22 (4) | 0/18 (0) |
+
+The 18 integ17 boots include the two harness failures (h2-fq1, h2-rl2) and
+the hand-driven h2-ctl1.  "watchdog" in integ17: both rows came with a ≥ 19 s
+silence that the host saw as well (h2-play1 and h2-rl1, each at the game's
+exit), i.e. true rows, not the false ones H1-14 was about.
+
+#### Round 2 P8 boots
+
+| boot | kind | verdict | launch s | launch→menu s | kernel faults | kernel stalls (rows) | EXITPC≠0 | new Wine err sigs | new DXVK/vkd3d sigs | REDEngineErrorReporter | 9070 XT busy med/p90 | other guests seen |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| h2-p8l1 | p8l | main-menu | 21.3 | 277.6 | 0 | 0 | 1 | 0 | 0 | yes | 87/97 | 2 |
+| h2-p8l2 | p8l | main-menu | 21.3 | 232.7 | 0 | nfspipe×1 | 1 | 0 | 0 | yes | 28/70 | 2 |
+| h2-p8v1 | p8v | main-menu | 24.3 | 140.6 | 0 | 0 | 1 | 0 | 0 | yes | 69/76 | 2 |
+| h2-p8v2 | p8v | main-menu | 24.3 | 93.2 | 0 | nfspipe×2 | 1 | 0 | 0 | yes | 66/74 | 2 |
+| h2-p8v3 | p8v | main-menu | 24.3 | 125.2 | 0 | 0 | 1 | 0 | 0 | yes | 94/98 | 1 |
+| h2-p8v4 | p8v | main-menu | 24.3 | 140.6 | 0 | nfspipe×1 | 1 | 0 | 0 | yes | 88/98 | 1 |
+
+#### Round 2 P9 boots (world = `world` rows; for the soak, all `soakN` rows)
+
+| boot | kind | verdict | world median | world p10 | world min row | rows | hitches (>1 s frame) | menu median | 9070 XT busy (world) med/p90 | game res MiB first→max | kernel stalls | other guests seen | script |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| h2-ctl1 | settings | script-done | 15.5 | 13.8 | 12.57 | 16 | 0 | 219.7 | 48/54 | 549→4540 | nfspipe×1 | 3 |  |
+| h2-fp1 | fp720 | script-stop | 33.7 | 25.9 | 17.25 | 62 | 0 | 216.7 | 34/39 | 553→4614 | nfspipe×3 | 3 |  |
+| h2-fp2 | fp720 | script-stop | 28.1 | 25.5 | 15.84 | 60 | 0 | 216.2 | 35/45 | 579→4591 | nfspipe×2 | 3 |  |
+| h2-fp3 | fp720 | script-stop | 30.3 | 27.6 | 21.91 | 60 | 0 | 84.9 | 45/98 | 488→4496 | 0 | 2 |  |
+| h2-fq1 | fp1080 | listseek-failed:loadlist-focus | None | None | - | 0 | 0 | 109.3 | -/- | 444→2751 | nfspipe×1 | 1 | FAILED loadlist-focus: no entry focused at y=509.0 after 8 t |
+| h2-fq2nn | fp1080 | script-stop | 34.5 | 25.3 | 10.51 | 64 | 0 | 111.6 | 54/61 | 510→4413 | nfspipe×4 | 3 |  |
+| h2-play1 | play | script-done | 32.6 | 20.8 | 11.12 | 376 | 0 | 214.9 | 35/40 | 528→4654 | nfspipe×6 | 3 |  |
+| h2-play2 | play | script-done | 31.5 | 23.5 | 0.6 | 379 | 0 | 215.8 | 36/43 | 484→4515 | nfspipe×5 | 3 |  |
+| h2-rl1 | reload2 | script-done | 28.8 | 24.9 | 13.14 | 58 | 0 | 197.6 | 35/41 | 379→4133 | nfspipe×2 | 2 |  |
+| h2-rl2 | reload2 | seek-failed:menu-continue | None | None | - | 0 | 0 | 207.6 | -/- | 569→2668 | nfspipe×2 | 2 | FAILED menu-continue: main menu row 'CONTINUE' not focused a |
+| h2-rl2b | reload2 | script-done | 29.8 | 27.4 | 25.07 | 48 | 0 | 122.5 | 36/86 | 503→4133 | nfspipe×2 | 3 |  |
+| h2-soak1 | soak | script-stop | 37.6 | 29.7 | 20.37 | 1059 | 0 | 213.6 | 37/47 | 552→4513 | nfspipe×1 | 2 |  |
+
+h2-ctl1's world is the Ray Tracing Overdrive preset (above).  Soak per phase:
+`cp-hunt-evidence/r2-soak.txt`.
+
+### Round 2 findings and status changes
+
+| ID | symptom | rate | first-seen evidence | signature | layer | severity | status |
+|---|---|---|---|---|---|---|---|
+| **H1-17** | at a 1920×1080 game resolution with H2's `--game-res`, the main-menu seek works (the menu does scale 1.5×), but the save-list seek fails: `game_view()` scales with PIL's default bicubic, which blends the 1–2 px cyan focus frame below `list_focus()`'s colour test (the target entry reads as a 1-row sliver) | 1/1 stock boot (h2-fq1); 0/1 with NEAREST (h2-fq2nn passes the whole fpsprobe, world 34.5) | `cp-hunt-evidence/r2-1080p-listseek.txt` | `LISTSEEK FAILED loadlist-focus: no entry focused at y=509.0 after 8 taps` | harness (`boot_p9.game_view`) | harness | open: one-word diff below (H2-early) |
+| **H1-16** | `run-p8.sh`'s new prefix-stamp warning (209a5ce4) fires when the stamp matches: `.update-timestamp` ends in CR LF, so `"$PSTAMP" != "$WSTAMP"` though both print the same number | 18/18 boots (every integ17 game boot) | `cp-hunt-evidence/r2-prefix-stamp-cr.txt` | `== WARNING: prefix stamp 1794996799 != …/wine.inf mtime 1794996799` | harness (`tools/cp/p8/run-p8.sh`) | cosmetic (a false alarm on every boot) | open: diff below (H2-early) |
+| **H1-18** | `run-hunt.sh`'s one-boot lock was `/tmp/cp-hunt-lane.lock` for every tree; another lane's copy (audio2-base) held it, and this lane's boot waited ~10 min behind theirs | 1 wait (h2-rl1) | `h2-rl1` start 08:17 → its log starts 08:27 | `fuser /tmp/cp-hunt-lane.lock` → audio2-base's run-hunt | this lane's harness | harness | **fixed in e11b0700** (lock per tree) |
+
+**Console host stalls (observation, H1-03's class).**  The stall-proof
+console (cp-kglitch) counts the time the guest's console waited on the host:
+`[CONS] … stalls=57 stolen_ms=8401` in the 5-minute h2i18-a1 boot and
+`stalls=35 stolen_ms=3299` in the 28-minute h2-soak1 (gamecheck.sh's last
+column).  No boot stalled before the launcher any more (QEMU start →
+launcher ≤ 6.3 s in 18/18), so this is no longer a visible hang, but the
+host still steals seconds per boot.
+
+**H1-12, the two ways around it.**
+* `tools/cp/hunt/reload2.p9`: the reload takes CONTINUE from the **fresh**
+  main menu, where the focus always behaves, and skips reload.p9's detour
+  through the save list (the evidence that the save is boot A's is the
+  position: an immediate F5 after loading writes a quick save whose
+  `playerPosition` equals boot A's).  Result: play → save → reload → world **2/2** (h2-play1 → h2-rl1; h2-play2 → h2-rl2b after h2-rl2 failed on the seek), the F5 after loading at the same `playerPosition` as the play boot's quick save both times (`r2-reload.txt`).
+* Why the reload's seek fails (h2-rl2, and round 1's h-rl1b): with some
+  save sets the focused CONTINUE row is drawn **104 px tall** (rows
+  451..555, its save line under it; still there 1.6 s later), and
+  `focus_in()` labels a frame by its centre (503 → NEW GAME).  `seek` then
+  taps Up once more and overshoots onto the frameless button above.
+  `reload2.p9` now takes CONTINUE with two settled Ups (every fresh menu
+  answered Up → NEW GAME, Up → CONTINUE) and lets the loading screen's
+  `expect` check it.  Proposed for `focus_in()` (H2-early; checked offline on
+  the h2-rl1 / h2-rl2 / h2-rl2b shots: only the tall frame's label changes,
+  to CONTINUE):
+
+  ```diff
+       y0, y1 = max(cl, key=lambda c: c[1] - c[0])
+       yc = (y0 + y1) / 2
+  +    if y1 - y0 > 50:
+  +        # cp-hunt H1-12: a focused row can be drawn taller (CONTINUE with its save
+  +        # line under it, rows 451..555): its frame starts at the row, so label by the top
+  +        yc = y0 + 18
+  ```
+* By hand in h2-ctl1: after Esc from Settings the menu showed no focus for
+  two Up taps; a relative mouse move of +60 then −60 (QMP `rel` events) and
+  the next Up gave NEW GAME, Down gave LOAD GAME (`r2-ctl-preset-focus.txt`).
+  In the same boot the save list → Esc left the focus visible, so H1-12 is
+  intermittent, not 3/3.  Proposed for `boot_p9.seek()` (H2-early, untested
+  in an unattended boot):
+
+  ```diff
+                       d = direction if label is None else ("down" if want > names.index(label) else "up")
+  +                    if label is None and i >= 1:
+  +                        # cp-hunt H1-12: back from a sub-menu the main menu can show no
+  +                        # keyboard focus until the pointer moves; a net-zero wiggle brings it back
+  +                        send([{"type": "rel", "data": {"axis": "x", "value": 60}}]); tick(0.1)
+  +                        send([{"type": "rel", "data": {"axis": "x", "value": -60}}]); tick(0.5)
+  ```
+
+**H1-17 diff** (`tools/cp/p9/boot_p9.py` `game_view`, H2-early), verified by
+h2-fq2nn through `tools/cp/hunt/boot_p9_nn.py`, which is boot_p9 with only
+this replaced:
+
+```diff
+-        return g.resize((1280, 720))
++        return g.resize((1280, 720), Image.NEAREST)   # keep the 1-2 px focus frames (cp-hunt H1-17)
+```
+
+**H1-16 diff** (`tools/cp/p8/run-p8.sh` ~307, H2-early):
+
+```diff
+-  PSTAMP="$(debugfs -R 'cat /pfx/.update-timestamp' "$CPD" 2>/dev/null | head -1 | cut -d' ' -f1)"
++  PSTAMP="$(debugfs -R 'cat /pfx/.update-timestamp' "$CPD" 2>/dev/null | head -1 | tr -d '\r' | cut -d' ' -f1)"
+```
+
+**The graphics preset (round 1's open item).**  On the GRAPHICS tab Right on
+Quick Preset moves the focus to RUN BENCHMARK instead of changing it; **Enter
+changes it**.  One Enter took "Custom" to "Ray Tracing Overdrive" (path
+tracing; vkd3d-proton reports DXR 1.1 on the 9070 XT through Venus), saved by
+the game on leaving Settings (Texture High, Crowd High, FSR2).  The save then
+loaded and played on it at 15.5–18.8 fps world median with no `[VENUS]`
+stall, fence or submit error and no device-lost row (1/1, h2-ctl1).
+
+
+## Round 1 result (integ15)
 
 **22 game boots** on strix, 2026-11-18 02:21–06:42, integ15 code: 11 P8 to the main menu (6 Venus, 4 lavapipe, 1 Windowed under IceWM; 11/11 reached it) and 11 P9 on Venus (3 fpsprobe at 1280×720 Low, 3 at 1920×1080 Low of which one hit a harness gap, 1 ten-minute play + save, 2 reloads, 1 28-minute soak, 1 hand-driven Settings boot), plus a census of 128 older game boots.  Headline:
 
@@ -72,21 +249,21 @@ something recurs.
 
 | ID | symptom | rate | first-seen evidence | signature | layer | severity | status |
 |---|---|---|---|---|---|---|---|
-| **H1-01** | audio dropouts: exact-zero runs of 10–290 ms (whole 10 ms periods) inside loud audio; in h-fp2 all in or near the save's loading, in the soak 7 during loading and 15 over 28 minutes in the world (~1 per 2 min); alsa-lib in the guest reports the underruns | 2/2 audio boots (h-fp2, h-soak1) | `cp-hunt-evidence/audio-dropouts-fp2.txt` | `ALSA lib …/pcm.c:8772:(snd_pcm_recover) underrun occurred` (h-fp2 7 rows / 10 dropouts; h-soak1 49 / 22) | game audio thread starved under guest load + winealsa's 40 ms buffer (Wine / kernel scheduling) | wrong output (audible glitch) | open |
-| **H1-15** | ~8 s freeze in the world: Venus ring-1 fences unretired for 7.7 s, fps rows of 1.7 and 4.3, audio dropouts; the host's own 1 Hz sampler stalled 8 s twice at the same moment | 1 in 28 min of soak (h-soak1); none in the other P9 world phases (≤ 1 hitch each) | `cp-hunt-evidence/soak-venus-freeze.txt` | `[VENUS] stall pid=110 tid=185 waits_ms=7754 ctx=12 ring=1` | host (amdgpu / virglrenderer under host load), not the guest | hang (recovers) | open (not ours, most likely) |
-| **H1-02** | the game exits 2–3 s (or ~20 s) after launch, right after REDEngineErrorReporter starts; graded rc=0 "launcher-done" | 0/22 here; old run logs: 6 (integ10-venus, k6-venus, console-lvp1, integ13-lvp1, k7l-1, integ15-lvp2) | `cp-hunt-evidence/mine-census.txt` (run-log section) | `[P8] end game status=0 ms=2886` + REDEngineErrorR exits twice + services.exe/explorer.exe `code=0x1` | H2-early's (Wine session teardown) | crash | open (H2-early); grader diff below |
-| **H1-03** | 1–2.5 minute stall before the launcher starts: twice in the firmware stage (serial stuck at the firmware's 113 bytes for 78 / 85 s), once after the X session (console bytes not reaching the host for ~145 s, vCPUs waiting in the UART TX path) | 11/22: QEMU start → launcher NFS mount 64–142 s (fast boots 6–58 s); stage identified in h-soak1 (console), h-p8v5 and h-p8v6 (firmware, host I/O) | `cp-hunt-evidence/pregame-console-stall.txt` | `no launcher/Wine row for 120 s before the game: sampling the vCPUs (prof-prestall)`; host `/proc/pressure/io` full avg10 50–55 % during the stall | host I/O pressure (QEMU's flushes / file writes wait behind other lanes' dirty data) | hang (recovers) | open: QEMU `cache=unsafe` A/B proposed below |
-| **H1-12** | after Esc back to the main menu from a sub-menu (the save list, Settings), Up/Down no longer show a focus frame: LOAD GAME → NEW GAME then nothing (h-rl1), a taller frame back at LOAD GAME then nothing (h-rl1b), nothing at all after Settings (h-set1) | 3/3 boots that returned from a sub-menu (h-rl1, h-rl1b, h-set1); lanes/play's reload boots (wave 6, wine-build-x) 3/3 fine | `cp-hunt-evidence/reload-seek-continue.txt`, `settings-menu.txt` | `SEEK FAILED menu-continue: main menu row 'CONTINUE' not focused after 6 x up` | game UI × input (where the keyboard focus goes after the sub-menu closes); harness can't follow it | harness (blocks the reload check) | open |
-| **H1-08** | P9 `seek` never finds the main-menu focus at a 1920×1080 game resolution | 1/1 seek-based 1080p boot (h-fq1); 0/2 with `fpsprobe-blind.p9` (h-fq1b, h-fq2) | `cp-hunt-evidence/p9-seek-1080.txt` | `SEEK FAILED menu-load: main menu row 'LOAD GAME' not focused after 6 x down` | harness (`boot_p9.canon`) | harness | worked around (`fpsprobe-blind.p9`); diff below (H2-early) |
-| **H1-09** | the ≥ 30 fps world target is met only at the median: fpsprobe 720p medians 29.0 / 33.4 / 30.0, 1080p 29.8 / 33.0; p10 17–26; single ~1.5 s rows down to 6–13 fps | 2/5 fpsprobe boots below 30 (h-fp1, h-fq1b) | P9 table below | `world median 29.0 (p10 24.7)` (h-fp1) | game user code + Venus fence/present path (cp-k7 §6); 1080p ≈ 720p, so not GPU fill | perf | open |
-| **H1-04** | every game boot re-runs wineboot's prefix update (~9.5 s, writes the prefix) | 22/22 | `cp-hunt-evidence/prefix-stale-stamp.txt` | `wine: failed to start L"C:\\windows\\syswow64\\rundll32.exe": c0000135` (its last step) | harness (seeded prefix from another Wine stage) | perf | open (integ16's p8_pfx rebuilds it; check diff below for H2-early) |
-| **H1-10** | ~1.5 s freeze on the first frame after closing the map | 1 of 2 map closes (h-play1) | h-play1 `fps.csv` (game s 752.9) | one `approx 0.61fps` row after `unwind map-close2` | game / Venus (first frame of a scene) | perf | open |
-| **H1-13** | 150–260 ms NFS reply loss + resend pauses on the game copy | 21/22 boots, 70 rows (1–8 per boot) | `classify.py` kstall `nfspipe` | `[NFSPIPE] stall inflight=1 issued=518 replies=517 … us=258904` | kernel NFS / slirp | perf | open (known class, recovers) |
-| **H1-05** | win32u cannot find the GPU while the per-boot prefix update rebuilds devices | 2/22 (h-fq1b, h-fq2) | `cp-hunt-evidence/win32u-find-gpu-race.txt` | `err:system:find_gpu_from_path Failed to find gpu with path "PCI\\VEN_1002&DEV_7550…"` | Wine (race inside H1-04's update) | cosmetic | open (goes away with H1-04) |
-| **H1-06** | `[BADELR]` reports the game's own healthy resumes; the 20-row cap is spent at once | 22/22 (439 rows, capped at 20 per boot); old boots 127/128 | `cp-hunt-evidence/badelr-pe-image.txt` | `[BADELR] picking a user slot with an implausible frame.elr=0x00000001406A5043 … Cyberpunk2077.e` | kernel instrument (`process.c`) | cosmetic (blinds a hang detector) | open; diff below (H4-kglitch) |
-| **H1-07** | `[VENUS] fence_wait2 timeout` rows: 16 short-timeout polls in the game's first ~6 s exhaust the lifetime cap | 18/18 Venus boots reach the cap | `cp-hunt-evidence/venus-fence-timeout-cap.txt` | `[VENUS] fence_wait2 timeout pid=109 ctx=12 ring=1 seqno=0x0000000100000011 … done=0x0000000000000000` | kernel instrument (`gpu_abi.c`) | cosmetic (blinds a hang detector) | open; diff below |
-| **H1-14** | trap.c's stall watchdog prints `console silent for more than 20s` (+ a CPU dump) about 1 s after the console printed | 15/22 boots (43 rows); old boots 101/128 | `cp-hunt-evidence/watchdog-false-silence.txt` | `[WATCHDOG] console silent for more than 20s` right after an `[X] 1240.402:…trace:fps` row | kernel instrument (`trap.c` watchdog / `uart_last_activity_ms`) | cosmetic (false hang alarms) | open (H4-kglitch: console) |
-| **H1-11** | the kernel's xrun count is printed only at PCM close, which a game boot never reaches (alsa-lib's own row confirms H1-01 instead) | 2/2 audio boots | `cp-hunt-evidence/audio-dropouts-fp2.txt` | `[SND] pcm closed: chunks=… xruns=…` absent for the game's stream | kernel instrument (`linux_snd.c`) | cosmetic | open |
+| **H1-01** | audio dropouts: exact-zero runs of 10–290 ms (whole 10 ms periods) inside loud audio; in h-fp2 all in or near the save's loading, in the soak 7 during loading and 15 over 28 minutes in the world (~1 per 2 min); alsa-lib in the guest reports the underruns | 2/2 audio boots (h-fp2, h-soak1) | `cp-hunt-evidence/audio-dropouts-fp2.txt` | `ALSA lib …/pcm.c:8772:(snd_pcm_recover) underrun occurred` (h-fp2 7 rows / 10 dropouts; h-soak1 49 / 22) | game audio thread starved under guest load + winealsa's 40 ms buffer (Wine / kernel scheduling) | wrong output (audible glitch) | open — H5-audio2 owns it (round 2: h2-soak1 8 dropouts / 3 alsa-lib underruns / 37 kernel xrun rows on integ17; h2i18-a1 on integ18 7 dropouts / 0 / 0, 8 `[SND] zeros`) |
+| **H1-15** | ~8 s freeze in the world: Venus ring-1 fences unretired for 7.7 s, fps rows of 1.7 and 4.3, audio dropouts; the host's own 1 Hz sampler stalled 8 s twice at the same moment | 1 in 28 min of soak (h-soak1); none in the other P9 world phases (≤ 1 hitch each) | `cp-hunt-evidence/soak-venus-freeze.txt` | `[VENUS] stall pid=110 tid=185 waits_ms=7754 ctx=12 ring=1` | host (amdgpu / virglrenderer under host load), not the guest | hang (recovers) | open (host side); round 2: 0 freezes in the 28-minute soak and 0 hitches in every world phase |
+| **H1-02** | the game exits 2–3 s (or ~20 s) after launch, right after REDEngineErrorReporter starts; graded rc=0 "launcher-done" | 0/22 here; old run logs: 6 (integ10-venus, k6-venus, console-lvp1, integ13-lvp1, k7l-1, integ15-lvp2) | `cp-hunt-evidence/mine-census.txt` (run-log section) | `[P8] end game status=0 ms=2886` + REDEngineErrorR exits twice + services.exe/explorer.exe `code=0x1` | H2-early's (Wine session teardown) | crash | **fixed in 4f0da178** (NFS directory-listing cache lock, H2-early) + grader 351b0d49 (`early-exit`, rc 3); round 2: 0/18 |
+| **H1-03** | 1–2.5 minute stall before the launcher starts: twice in the firmware stage (serial stuck at the firmware's 113 bytes for 78 / 85 s), once after the X session (console bytes not reaching the host for ~145 s, vCPUs waiting in the UART TX path) | 11/22: QEMU start → launcher NFS mount 64–142 s (fast boots 6–58 s); stage identified in h-soak1 (console), h-p8v5 and h-p8v6 (firmware, host I/O) | `cp-hunt-evidence/pregame-console-stall.txt` | `no launcher/Wine row for 120 s before the game: sampling the vCPUs (prof-prestall)`; host `/proc/pressure/io` full avg10 50–55 % during the stall | host I/O pressure (QEMU's flushes / file writes wait behind other lanes' dirty data) | hang (recovers) | **mitigated in 5784e671** (`P8_DRIVE_CACHE=unsafe` default for game boots); round 2: QEMU start → launcher median 5.3 s, 0/18 over 60 s (integ15: 61.1 s, 11/22) |
+| **H1-12** | after Esc back to the main menu from a sub-menu (the save list, Settings), Up/Down no longer show a focus frame: LOAD GAME → NEW GAME then nothing (h-rl1), a taller frame back at LOAD GAME then nothing (h-rl1b), nothing at all after Settings (h-set1) | 3/3 boots that returned from a sub-menu (h-rl1, h-rl1b, h-set1); lanes/play's reload boots (wave 6, wine-build-x) 3/3 fine | `cp-hunt-evidence/reload-seek-continue.txt`, `settings-menu.txt` | `SEEK FAILED menu-continue: main menu row 'CONTINUE' not focused after 6 x up` | game UI × input (where the keyboard focus goes after the sub-menu closes); harness can't follow it | harness (blocks the reload check) | **worked around** (round 2): `reload2.p9` takes CONTINUE from the fresh menu (2/2 reloads, one after a retry: h2-rl1, h2-rl2b; h2-rl2 failed on the seek, which led to the fix); a relative-mouse wiggle restores the focus after a sub-menu (1/1) |
+| **H1-08** | P9 `seek` never finds the main-menu focus at a 1920×1080 game resolution | 1/1 seek-based 1080p boot (h-fq1); 0/2 with `fpsprobe-blind.p9` (h-fq1b, h-fq2) | `cp-hunt-evidence/p9-seek-1080.txt` | `SEEK FAILED menu-load: main menu row 'LOAD GAME' not focused after 6 x down` | harness (`boot_p9.canon`) | harness | **main menu fixed in 209a5ce4** (`--game-res`); the save list still fails at 1080p (H1-17) |
+| **H1-09** | the ≥ 30 fps world target is met only at the median: fpsprobe 720p medians 29.0 / 33.4 / 30.0, 1080p 29.8 / 33.0; p10 17–26; single ~1.5 s rows down to 6–13 fps | 2/5 fpsprobe boots below 30 (h-fp1, h-fq1b) | P9 table below | `world median 29.0 (p10 24.7)` (h-fp1) | game user code + Venus fence/present path (cp-k7 §6); 1080p ≈ 720p, so not GPU fill | perf | open; round 2: fpsprobe 720p 33.7 / 28.1 / 30.3 (p10 25.5–27.6), 1080p 34.5, soak 37.6 |
+| **H1-04** | every game boot re-runs wineboot's prefix update (~9.5 s, writes the prefix) | 22/22 | `cp-hunt-evidence/prefix-stale-stamp.txt` | `wine: failed to start L"C:\\windows\\syswow64\\rundll32.exe": c0000135` (its last step) | harness (seeded prefix from another Wine stage) | perf | **fixed for this lane** (prefix rebuilt with wine-cp2); 209a5ce4 adds the warning, which fires falsely (H1-16) |
+| **H1-10** | ~1.5 s freeze (one `approx 0.6fps` row) at the same point of play.p9's second walking loop, game s 753–759; **not** the map close: round 1 compared host seconds with game seconds — the second map close is ~110 s earlier | 2/3 play boots (h-play1 game s 752.9, h2-play2 758.7; not h2-play1) | h-play1 / h2-play2 `fps.csv` | one `approx 0.61fps` / `0.60fps` world row | game (a streaming or scripted point on that walk) / Venus | perf | open; round 2: h2-play2 again at game s 758.7 (h2-play1 not) |
+| **H1-13** | 150–260 ms NFS reply loss + resend pauses on the game copy | 21/22 boots, 70 rows (1–8 per boot) | `classify.py` kstall `nfspipe` | `[NFSPIPE] stall inflight=1 issued=518 replies=517 … us=258904` | kernel NFS / slirp | perf | open; round 2: 14/18 boots, 33 rows (integ15 21/22, 70) |
+| **H1-05** | win32u cannot find the GPU while the per-boot prefix update rebuilds devices | 2/22 (h-fq1b, h-fq2) | `cp-hunt-evidence/win32u-find-gpu-race.txt` | `err:system:find_gpu_from_path Failed to find gpu with path "PCI\\VEN_1002&DEV_7550…"` | Wine (race inside H1-04's update) | cosmetic | not seen in round 2 (no prefix update): 0/18 |
+| **H1-06** | `[BADELR]` reports the game's own healthy resumes; the 20-row cap is spent at once | 22/22 (439 rows, capped at 20 per boot); old boots 127/128 | `cp-hunt-evidence/badelr-pe-image.txt` | `[BADELR] picking a user slot with an implausible frame.elr=0x00000001406A5043 … Cyberpunk2077.e` | kernel instrument (`process.c`) | cosmetic (blinds a hang detector) | **fixed in 991491d1** (H4); round 2: 0 rows in 18 boots |
+| **H1-07** | `[VENUS] fence_wait2 timeout` rows: 16 short-timeout polls in the game's first ~6 s exhaust the lifetime cap | 18/18 Venus boots reach the cap | `cp-hunt-evidence/venus-fence-timeout-cap.txt` | `[VENUS] fence_wait2 timeout pid=109 ctx=12 ring=1 seqno=0x0000000100000011 … done=0x0000000000000000` | kernel instrument (`gpu_abi.c`) | cosmetic (blinds a hang detector) | **fixed in af295366** (H4); round 2: 0 rows in 18 boots |
+| **H1-14** | trap.c's stall watchdog prints `console silent for more than 20s` (+ a CPU dump) about 1 s after the console printed | 15/22 boots (43 rows); old boots 101/128 | `cp-hunt-evidence/watchdog-false-silence.txt` | `[WATCHDOG] console silent for more than 20s` right after an `[X] 1240.402:…trace:fps` row | kernel instrument (`trap.c` watchdog / `uart_last_activity_ms`) | cosmetic (false hang alarms) | **fixed in d7060448** (H4, `wd_console_silent()`); round 2: 2/18 boots, both true silences of ≥ 19 s at the game exit |
+| **H1-11** | the kernel's xrun count is printed only at PCM close, which a game boot never reaches (alsa-lib's own row confirms H1-01 instead) | 2/2 audio boots | `cp-hunt-evidence/audio-dropouts-fp2.txt` | `[SND] pcm closed: chunks=… xruns=…` absent for the game's stream | kernel instrument (`linux_snd.c`) | cosmetic | **fixed in cf7a0865** (`[SND] xrun` rows); round 2: 37 `[SND] xrun` rows in h2-soak1 |
 | — | benign, every boot (tagged by `classify.py`): `winediag:getaddrinfo`, winemenubuilder 126, `winebth`, `wineusb.inf` copy error, no schannel / Kerberos, `mfc140u.dll` for the Razer Chroma plugin, DXVK EDID / HDR metadata / unknown adapter interface / ignored flags, `wine code=0xC0000135` (winemenubuilder; + syswow64 rundll32 under H1-04) | 22/22 | `*.class.txt` | — | Wine / DXVK | none | not ours |
 
 ### Notes on the rows
@@ -442,4 +619,9 @@ crash classes above are all wave 5 / early wave 6 and gone on today's code.
 | `fpsprobe-blind.p9` | fpsprobe.p9 with the two menu seeks replaced by fixed tap counts, for game resolutions whose layout boot_p9's row tables do not know (H1-08) |
 | `settings.p9` | main menu, then interactive (`ctl`): the hand-driven Settings / reload boot |
 | `tables.py` | the P8 / P9 tables below from the per-boot files |
+| `reload2.p9` (round 2) | the P9 reload without the H1-12 traps: CONTINUE from the fresh main menu with two settled Ups, F5 without moving, 2 minutes in the world, QUIT GAME |
+| `focusprobe.py` (round 2) | boot_p9's own `focus_in()` on a shot without a tap (a failing `seek` ends the boot); `--list` the save-list frame with a choice of 1080p scaling; `--diff` where two shots differ |
+| `ctl.sh` (round 2) | drive an interactive P9 boot (`ctl`) from ssh: append boot_p9 lines, wait for the shot, print its OCR and focus readings |
+| `boot_p9_nn.py` (round 2) | boot_p9.py with only `game_view()` swapped for NEAREST scaling (the H1-17 experiment); `run-hunt.sh HUNT_BOOT=` runs a P9 boot with it |
+| `compare.py` (round 2) | two log directories side by side (the integ15 vs integ17 table) |
 | `test_hunt.py` + `golden/` | golden tests: classifier output, early-exit flag, aggregation, wavgaps on a synthetic WAV with a planted 20 ms dropout and 1 s gap |

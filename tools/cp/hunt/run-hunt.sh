@@ -15,18 +15,22 @@
 #   p8l       P8 to the main menu, lavapipe (12 GiB)
 #   win       P8 Venus on a data image with WindowMode=Windowed (prep-windowed.sh)
 #   fp720     P9 fpsprobe.p9, 1280x720 Low (32 GiB, big-guest lock)
-#   fp1080    P9 fpsprobe.p9 at 1920x1080 Low (data image from prep-res.sh, X screen 1920x1080)
+#   fp1080    P9 fpsprobe.p9 at 1920x1080 Low (data image from prep-settings.sh,
+#             X screen 1920x1080, P9_GAME_RES=1920x1080)
 #   play      P9 play.p9 (load, ~11 min of play, quick save, quit)
 #   reload    P9 reload.p9 on HUNT_FROM=<play run>'s data disk
+#   reload2   P9 tools/cp/hunt/reload2.p9 on HUNT_FROM=<play run>'s data disk
+#             (CONTINUE from the fresh main menu: no sub-menu first, cp-hunt H1-12)
 #   soak      P9 tools/cp/hunt/soak.p9 (~28 min in the world)
 #   settings  P9 tools/cp/hunt/settings.p9 (Settings menu: change + apply a graphics option)
 #   script    P9 with HUNT_SCRIPT=<path>
 #
 # Env: HUNT_AUDIO=1, HUNT_FROM (P9 run under obj/cp-p9 to start from),
+#      HUNT_BOOT (P9: another boot script in place of tools/cp/p9/boot_p9.py),
 #      HUNT_LOGS (default ~/cp/lanes/hunt-logs), HUNT_EXPORT (export name
 #      prefix, default /srv/nfs/cp-hunt: -p8 / -p9 are appended; another
 #      lane's own name, H5-audio2), anything run-p8/run-p9 take.
-# One boot of this lane at a time (flock /tmp/cp-hunt-lane.lock); the QEMU
+# One boot of this tree at a time (flock /tmp/cp-hunt-lane.<tree>.lock); the QEMU
 # slot and the big-guest lock are taken inside the harnesses, for the boot only.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -35,10 +39,15 @@ KIND="${1:?kind}"; RUN="${2:?run name}"
 LOGS="${HUNT_LOGS:-$HOME/cp/lanes/hunt-logs}"; mkdir -p "$LOGS"
 L="$LOGS/$RUN.log"; H="$LOGS/$RUN.host.txt"
 export PATH="$HOME/.local/bin:$PATH" MAKEFLAGS=-j16 TOOLS_SKIP=1
-export CP_WINE_STAGE="${CP_WINE_STAGE:-$HOME/cp/wine-cp/stage/CP/WINE}" WINE_BUILD="${WINE_BUILD:-$HOME/cp/wine-cp}"
+# wave 8b: the patched Wine stage (cp-winefix) is the default
+export CP_WINE_STAGE="${CP_WINE_STAGE:-$HOME/cp/wine-cp2/stage/CP/WINE}" WINE_BUILD="${WINE_BUILD:-$HOME/cp/wine-cp2}"
 export VENUS_BUILD="${VENUS_BUILD:-$HOME/cp/lanes/hunt-venus}" VENUS_VNC=1
 EXP="${HUNT_EXPORT:-/srv/nfs/cp-hunt}"
-exec 196>>/tmp/cp-hunt-lane.lock
+# one boot per TREE (a lane), not per host: other lanes copy this script into
+# their trees, and a shared /tmp/cp-hunt-lane.lock made their boots and this
+# lane's wait for each other (round 2, 2026-11-18).  HUNT_LOCK overrides.
+LOCK="${HUNT_LOCK:-/tmp/cp-hunt-lane.$(basename "$ROOT").lock}"
+exec 196>>"$LOCK"
 flock 196
 
 WAV=""
@@ -76,11 +85,14 @@ case "$KIND" in
         [ -f "$IMG" ] || bash tools/cp/hunt/prep-settings.sh "$ROOT/obj/cp-p8/pfx-seeded.img" "$IMG" WindowMode=Windowed:0 >&2 || exit 2
         set -- env P8_GPU=venus P8_RUN="$RUN" P8_EXPORT="$EXP-p8" P8_CPDATA_FROM="$IMG" TIMEOUT_S="${TIMEOUT_S:-3600}" \
           P8_STALL_S="${P8_STALL_S:-600}" P8_GAME_S="${P8_GAME_S:-3000}" bash tools/cp/p8/run-p8.sh ;;
-  fp720|fp1080|play|reload|soak|settings|script)
+  fp720|fp1080|play|reload|reload2|soak|settings|script)
         P9=1
         case "$KIND" in
           fp720) S=tools/cp/p9/fpsprobe.p9 ;;
-          fp1080) S="${HUNT_SCRIPT:-tools/cp/hunt/fpsprobe-blind.p9}" ;;
+          # integ17: boot_p9 --game-res (P9_GAME_RES) maps 1080p shots, so the
+          # stock fpsprobe.p9; HUNT_SCRIPT=tools/cp/hunt/fpsprobe-blind.p9 is the old workaround
+          fp1080) S="${HUNT_SCRIPT:-tools/cp/p9/fpsprobe.p9}" ;;
+          reload2) S=tools/cp/hunt/reload2.p9 ;;
           play) S=tools/cp/p9/play.p9 ;;
           reload) S=tools/cp/p9/reload.p9 ;;
           soak) S=tools/cp/hunt/soak.p9 ;;
@@ -96,10 +108,20 @@ case "$KIND" in
             mkdir -p "$SRC"
             bash tools/cp/hunt/prep-settings.sh "$ROOT/obj/cp-p9/pfx-saves.img" "$SRC/cpdata.img" Resolution=1920x1080 >&2 || exit 2
           fi
-          X+=(P9_FROM=hunt-src1080 P9_XSCREEN=1920x1080)
+          X+=(P9_FROM=hunt-src1080 P9_XSCREEN=1920x1080 P9_GAME_RES=1920x1080)
         fi
         [ -n "${HUNT_FROM:-}" ] && X+=(P9_FROM="$HUNT_FROM")
-        set -- env "${X[@]}" bash tools/cp/p9/run-p9.sh ;;
+        if [ -n "${HUNT_BOOT:-}" ]; then
+          # a P9 boot with another boot script (e.g. tools/cp/hunt/boot_p9_nn.py):
+          # run-p9.sh hard-codes P8_BOOT, so a generated copy beside this script
+          # (same ROOT) swaps it; removed after the boot
+          GEN="$ROOT/tools/cp/hunt/.run-p9-$RUN.sh"
+          sed "s#P8_BOOT=tools/cp/p9/boot_p9.py#P8_BOOT=$HUNT_BOOT#" tools/cp/p9/run-p9.sh > "$GEN"
+          grep -q "P8_BOOT=$HUNT_BOOT" "$GEN" || { echo "run-hunt: could not swap P8_BOOT" >&2; exit 2; }
+          set -- env "${X[@]}" bash "$GEN"
+        else
+          set -- env "${X[@]}" bash tools/cp/p9/run-p9.sh
+        fi ;;
   *) echo "run-hunt: unknown kind $KIND" >&2; exit 2 ;;
 esac
 
@@ -112,6 +134,7 @@ SP=$!
 wait "$BP"; rc=$?
 kill "$SP" 2>/dev/null; wait "$SP" 2>/dev/null
 echo "rc=$rc $(date +%T)" >> "$L"
+[ -n "${GEN:-}" ] && rm -f "$GEN"
 
 SER="$OUT/serial.txt"; [ -f "$SER" ] || SER="$OUT/serial.log"
 python3 -I tools/cp/hunt/classify.py --run "$RUN" --log "$L" --host "$H" --json "$LOGS/$RUN.class.json" "$SER" > "$LOGS/$RUN.class.txt" 2>&1
