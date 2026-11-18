@@ -263,17 +263,27 @@ boot's extra minute is after the first Space (the intro sequence with sound
 plays out at its real length; without an endpoint it is skipped faster —
 plausible, not proven with n = 1).
 
-**P9 fpsprobe A/B (audio on/off): not run.**  `tools/cp/audio/run-fps-ab.sh`
-(3 boots per arm, alternating, 32 GiB under `/tmp/cp-bigguest.lock`) was
-started once and stopped by this lane while its first boot still waited for
-a QEMU slot (all four busy with five lanes' batches); it needs an idle strix.
-What is known about the audio thread's cost: winealsa writes one 480-frame
-period per 10 ms (≈100 WRITEI/SYNC_PTR pairs per second, see the WASAPI row
-in §6), the kernel submits ≈100 chunks/s and takes ≈100 TX interrupts/s.
+**P9 fpsprobe A/B (audio on/off), n = 1 per arm** (`tools/cp/audio/run-fps-ab.sh 1`;
+32 GiB, Venus, the winealsa Wine stage in both arms, the device only in the
+ON arm; `docs/cp-audio-evidence/fps-ab.txt`):
+
+| arm | world median | world p10 | prof-fp-world median | menu median |
+|---|---|---|---|---|
+| audio ON  | **31.2** | 18.5 | 36.5 | 183.6 |
+| audio OFF | **21.8** | 17.8 | 27.2 | 198.4 |
+
+No measurable cost at n = 1: the ON boot was the faster one, and the
+difference (9 fps) is inside the boot-to-boot spread C9-play measured
+(±5 and more under load).  The ON arm's WAV: 389 s, 366 s active, RMS
+−23.8 dBFS, peak −4.2 dBFS (game content: measured, deleted).  The audio
+path's own load is ≈100 WRITEI + ≈100 SYNC_PTR ioctls, ≈100 TX chunks and
+≈100 TX interrupts per second (winealsa's 10 ms period).  Three boots per
+arm were planned; strix had five lanes' batches queued for the four slots,
+so only one pair ran.
 
 ## 9. Open items
 
-- P9 fps A/B with audio on/off (§7).
+- P9 fps A/B with audio on/off: n = 1 per arm only (§7); 3 per arm on an idle strix.
 - No data mmap (MMAP access): it would let alsa-lib drop `mmap_emul` and save
   a copy; it needs the PCM ring mapped into user space (vm.c / the compat
   mmap path, not this lane's files).  Status/control mmap stays refused
@@ -285,7 +295,34 @@ in §6), the kernel submits ≈100 chunks/s and takes ≈100 TX interrupts/s.
 - `/dev/dsp` stays the GB-029 ENODEV stub (`src/kernel/audio_stub.c`
   unchanged).
 
-## 10. Commands
+## 10. Gates (device OFF; `docs/cp-audio-evidence/gates.txt`)
+
+strix, tree `~/cp/lanes/audio-g` (cp-audio 48ba44de):
+
+| gate | integ11 (integ14 batch) | cp-audio |
+|---|---|---|
+| 1 build | ok | ok |
+| 2 probes (58, incl. new `snd`) | all green | 57 green; `console` red: 1 torn / 4 missing rows — integ11 itself is red now under the same load (A/B below) |
+| 3 ext2_gate | PASS | PASS (`GLIBC_SYSROOT` = the repaired copy) |
+| 4 unit | 463 run, 2 failed (virtio_gpu_test.c:214/:244) | the same |
+| 5 host_tests | 38/40 | 38/40; `linux_snd_params_test` 24/24 run by name |
+| 6 castscan | 371 sites, 0 new | 371, 0 new |
+| 7 ARM build | ok | ok |
+| 8 exec_gate | PASS | batch row FAIL at STAGE (the shared sysroot's dangling ld.so link), rerun with the repaired sysroot: PASS |
+| 8 rsize_guard / nfs_rsize_scan | PASS / PASS | PASS / PASS |
+| 9 pfx_gate | PASS | PASS |
+| P2 | G1 G2 G3 PASS | G1 G2 G3 PASS |
+| P5 (vkcube d3d11 d3d12 fullscr) | PASS (#2: services.exe fault, known) | PASS |
+| P8 lavapipe | menu (255 s, 276 s) | menu (401.5 s; boot→NFS mount 87 s under load) |
+| P8 Venus, device ON | — | menu (352.7 s) + 216.8 s of game audio |
+
+Console A/B, alternating on the same host load: integ11 base 8 torn / 73
+missing and 6 / 56; cp-audio 13 / 141 and 8 / 80; earlier lane reruns 7 / 61
+and 8 / 57.  Both trees fail the same way; the console probe is load
+sensitive (four slots busy), not changed by this lane (no sound device,
+no [SND] row in those boots).
+
+## 11. Commands
 
 ```
 # probe, device ON (strix, one slot):
@@ -322,5 +359,12 @@ bash tools/cp/audio/run-game-audio.sh audio-venus-on
   branch; it also serves a GPU/net device that shares the line.  C1-k7 owns
   trap.c: the hunk is 14 lines in `general_interrupt_inner`'s else-if chain,
   nowhere near the syscall entry/exit.
+- `make -k host_tests` never reaches its last ~30 test binaries: the
+  recipe runs `python3 tools/t5/run_t5_tests.py` (the known 38/40 with the
+  two `gaming.md` reds) and make stops the recipe there, so NES_TEST,
+  GUI_TEST, …, AUDIO_STUB_TEST and this lane's LINUX_SND_PARAMS_TEST are
+  built but not run by the gate.  Run them by name
+  (`make linux_snd_params_test_host && ./linux_snd_params_test_host`: 24
+  checks, 0 failed).
 - `FILE_TYPE_DEVSND` is appended at the end of `file_type_t`; C2-ntsync's
   node type will land next to it (a trivial merge).

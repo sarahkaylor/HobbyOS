@@ -1,0 +1,18 @@
+# audio-fps-on1 (tools/cp/audio/run-fps-ab.sh 1; fpsprobe.p9, 32 GiB, Venus; winealsa Wine stage both arms; CP_AUDIO_WAV only on the on arm)
+phase           rows          game s   median     p10     min     max    mean
+launch            83          19-142     95.0    76.0     0.0   234.9   123.7
+menu              14         146-164    183.6   146.7   131.8   214.8   179.7
+loading           76         165-278    191.7    27.0    15.4   232.9   156.2
+world             65         283-378     31.2    18.5     8.0    40.1    29.5
+prof-fp-world     14         380-399     36.5    29.4    23.9    39.9    35.1
+== frame pool free MiB ([P8MEM]) by phase: first / min / last
+# audio-fps-off1 (tools/cp/audio/run-fps-ab.sh 1; fpsprobe.p9, 32 GiB, Venus; winealsa Wine stage both arms; CP_AUDIO_WAV only on the on arm)
+phase           rows          game s   median     p10     min     max    mean
+launch            83          19-143     99.9    83.1     0.0   235.5   131.6
+menu              16         148-167    198.4   175.2   160.6   228.4   196.5
+loading           66         168-267    197.1    30.6    13.6   242.8   161.5
+world             62         271-361     21.8    17.8    15.3    28.6    22.4
+prof-fp-world     13         363-381     27.2    26.5    26.0    28.6    27.2
+== frame pool free MiB ([P8MEM]) by phase: first / min / last
+# on-arm WAV (deleted after measuring):
+  wavcheck: file=/home/sarah/cp/lanes/audio/obj/cp-audio/fps/audio-fps-on1.wav rate=48000 channels=2 duration_s=389.05 rms_dbfs=-24.0 active_rms_dbfs=-23.8 active_s=366.0 first_active_s=19.400000000000002 peak_hz_median=80.0 tone_hz=None tone_s=None active_peak_dbfs=-4.2 verdict=PASS
