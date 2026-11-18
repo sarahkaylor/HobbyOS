@@ -734,7 +734,10 @@ static int proc_reap_parked_locked(void) {
       q->exit_status = 0;
       n++;
     } else if (q->state == PROC_STATE_THREAD_DONE) {
-      if (!q->is_thread && q->live_threads != 0)
+      /* H4-kglitch: a leader-exited anchor whose group is mid-exit
+         (exit_owner set) is not a tombstone yet: it becomes EXITED when
+         the teardown ends, and freeing it here lost the child to waitpid. */
+      if (!q->is_thread && (q->live_threads != 0 || q->exit_owner))
         continue;
       if (!q->is_thread && (q->phys_block_idx >= 0 || q->as))
         proc_release_mem_locked(q);
@@ -1251,7 +1254,7 @@ static int thread_alloc_slot_locked(void) {
     struct process *q = &proc_table[i];
     if (q->state != PROC_STATE_THREAD_DONE || process_still_running(i))
       continue;
-    if (!q->is_thread && q->live_threads != 0)
+    if (!q->is_thread && (q->live_threads != 0 || q->exit_owner)) /* H4-kglitch */
       continue;
     if (!q->is_thread && (q->phys_block_idx >= 0 || q->as)) {
       /* Defensive: a leader tombstone must not leak its block/AS. */
@@ -1459,7 +1462,7 @@ static int process_create_internal_ver(int ver) {
       struct process *q = &proc_table[i];
       if (q->state != PROC_STATE_THREAD_DONE || process_still_running(i))
         continue;
-      if (!q->is_thread && q->live_threads != 0)
+      if (!q->is_thread && (q->live_threads != 0 || q->exit_owner)) /* H4-kglitch */
         continue;
       if (!q->is_thread && (q->phys_block_idx >= 0 || q->as))
         proc_release_mem_locked(q);
@@ -8446,6 +8449,13 @@ void process_thread_exit(struct trap_frame *tf, uint64_t retval) {
   if (grp->live_threads > 0)
     grp->live_threads--;
   int last = (grp->live_threads == 0);
+  /* H4-kglitch: the last thread owns the group's exit from here to the
+     teardown's EXITED, like exit_group's owner (C1-k4).  With the leader
+     gone the anchor is THREAD_DONE, and live_threads == 0 alone made every
+     slot reclaimer free it in that window: waitpid answered ECHILD
+     (linux_probe_exitrace X2; killgrp K6 for the exit_group path). */
+  if (last && !grp->exit_owner)
+    grp->exit_owner = cur->pid;
   /* Keep the caller schedulable until the teardown (if any) is done: a
      timer tick preempting this path must be able to save and later resume
      it (a THREAD_DONE state would abandon the exit path mid-teardown). */
