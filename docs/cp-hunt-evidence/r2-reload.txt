@@ -1,0 +1,15 @@
+# H1-hunt round 2: play -> save -> reload -> world, with the H1-12 workaround (strix, integ17 bdf39e33, wine-cp2; tools/cp/hunt/reload2.p9 = CONTINUE from the fresh main menu)
+## h2-play1 (play.p9): saves on its data disk afterwards (tools/cp/p9/saves.sh)
+QuickSave-0      name=QuickSave-0 time=14:15:52, 18.11.2026 playTime=4703.3 pos=(-1451.42, 1214.90, 23.06)
+## h2-rl1 (reload2.p9 on h2-play1's disk)
+[P9W] focus s014-t000152-menu-continue0: no highlighted row
+[P9W] focus s015-t000154-menu-continue1: rows 489..524 centre 506 -> NEW GAME
+[P9W] focus s016-t000156-menu-continue2: rows 451..488 centre 470 -> CONTINUE
+[P9W] +   180.9 s  08:31:52  seek menu-continue: main menu focus on CONTINUE after 2 taps
+[P9W] +   257.9 s  08:33:09  expect loaded: matched /PRESS\b.{0,24}\bTO\s+CONTINUE/ at s032-t000232-loaded
+[P9W] +   273.3 s  08:33:24  expect inworld: matched /RIPPERDOC|Jackie/ at s035-t000247-inworld
+[P9W] +   417.9 s  08:35:49  verdict: script-done; QEMU stopped, slot released; guests on the host now: 0
+== verdict: script-done
+QuickSave-0      name=QuickSave-0 time=14:15:52, 18.11.2026 playTime=4703.3 pos=(-1451.42, 1214.90, 23.06)
+QuickSave-1      name=QuickSave-1 time=14:33:37, 18.11.2026 playTime=4731.1 pos=(-1451.42, 1214.90, 23.06)
+# QuickSave-1 was written by F5 right after the reload, without moving: same playerPosition as h2-play1's QuickSave-0 -> the reload put the player where boot A saved.
