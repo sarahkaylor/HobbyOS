@@ -51,6 +51,7 @@
  */
 #include <stdint.h>
 
+#include "arch/cpu.h"
 #include "arch/trap.h"
 #include "errno.h"
 #include "fs.h"
@@ -135,6 +136,8 @@ static uint32_t ns_pages, ns_live, ns_live_max;
 
 /* counters (racy increments are fine: diagnostics) */
 static struct {
+  uint64_t calls, call_us; /* ioctl executions that returned (not parks)
+                              and their summed time in the kernel */
   uint64_t opens, creates[5], waits_any, waits_all, immediate, parks,
       restarts, timeouts, eintr, ownerdead, alerts, wakes, dead_skips,
       stale_q, sets, releases, unlocks, kills, last_row_ms;
@@ -381,6 +384,10 @@ static void ns_row_stats(const char *why) {
   kl_init(&kl);
   kl_s(&kl, "[NTSYNC] ");
   kl_s(&kl, why);
+  kl_s(&kl, " calls=");
+  kl_i(&kl, (long)ns_st.calls);
+  kl_s(&kl, " ns/call=");
+  kl_i(&kl, ns_st.calls ? (long)(ns_st.call_us * 1000 / ns_st.calls) : 0);
   kl_s(&kl, " opens=");
   kl_i(&kl, (long)ns_st.opens);
   kl_s(&kl, " sem/mutex/event=");
@@ -603,6 +610,9 @@ static int ns_create(struct process *p, struct trap_frame *tf,
 /* Park the thread, the l_park way (linux_compat_fd.c): the caller committed
    BLOCKED under proc_lock; a signal that became deliverable since then undoes
    it.  Returns 1 if parked (scheduled away), 0 to look again. */
+/* set by ns_park on this CPU so ntsync_ioctl's accounting skips a park
+   (whose "return" is the next thread's) */
+static uint64_t ns_parked_mask;
 static int ns_park(struct process *p, struct trap_frame *tf) {
   if (linux_compat_sig_deliverable(p)) {
     uint64_t pf = spinlock_acquire_irqsave(&proc_lock);
@@ -617,6 +627,10 @@ static int ns_park(struct process *p, struct trap_frame *tf) {
 #endif
   p->sig_park_kind = 2; /* rewound: the signal path re-executes the ioctl */
   p->sig_park_nr = 0;
+  {
+    uint32_t c = get_cpuid();
+    if (c < 64) __atomic_or_fetch(&ns_parked_mask, 1ull << c, __ATOMIC_RELAXED);
+  }
   save_context(p, tf);
   schedule(tf, 0);
   return 1;
@@ -937,8 +951,25 @@ static int ns_obj_ioctl(struct process *p, struct trap_frame *tf, struct ns_obj 
   }
 }
 
+static int ns_ioctl(struct process *p, struct trap_frame *tf, int fd, uint32_t req,
+                    uint64_t arg);
 int ntsync_ioctl(struct process *p, struct trap_frame *tf, int fd, uint32_t req,
                  uint64_t arg) {
+  uint64_t t0 = timer_get_us();
+  int r = ns_ioctl(p, tf, fd, req, arg);
+  uint32_t c = get_cpuid();
+  uint64_t bit = c < 64 ? 1ull << c : 0;
+  if (bit && (__atomic_load_n(&ns_parked_mask, __ATOMIC_RELAXED) & bit)) {
+    __atomic_and_fetch(&ns_parked_mask, ~bit, __ATOMIC_RELAXED);
+  } else {
+    __atomic_add_fetch(&ns_st.calls, 1, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&ns_st.call_us, timer_get_us() - t0, __ATOMIC_RELAXED);
+  }
+  return r;
+}
+
+static int ns_ioctl(struct process *p, struct trap_frame *tf, int fd, uint32_t req,
+                    uint64_t arg) {
   /* a parked wait re-executing: its queued entries pin everything it needs,
      even if the device fd was closed meanwhile (Linux holds the file) */
   if ((req == NTSYNC_IOC_WAIT_ANY_K || req == NTSYNC_IOC_WAIT_ALL_K) &&
