@@ -28,7 +28,8 @@ something recurs.
 
 | ID | symptom | rate | first-seen evidence | signature | layer | severity | status |
 |---|---|---|---|---|---|---|---|
-| **H1-01** | audio dropouts: exact-zero runs of 10–200 ms (whole 10 ms periods) inside loud audio, mostly while the save loads | {R01} | `cp-hunt-evidence/audio-dropouts-fp2.txt` | `wavgaps: dropouts=10 dropout_ms_total=750.0` (h-fp2) | Wine winealsa 40 ms buffer + guest scheduling under load (kernel); not confirmed in-guest (H1-11) | wrong output (audible glitch) | open |
+| **H1-01** | audio dropouts: exact-zero runs of 10–290 ms (whole 10 ms periods) inside loud audio, most while the save loads, some in the world; alsa-lib in the guest reports each underrun | {R01} | `cp-hunt-evidence/audio-dropouts-fp2.txt` | `ALSA lib …/pcm.c:8772:(snd_pcm_recover) underrun occurred` (h-fp2 7 rows / 10 dropouts; h-soak1 49 / 22) | game audio thread starved under guest load + winealsa's 40 ms buffer (Wine / kernel scheduling) | wrong output (audible glitch) | open |
+| **H1-15** | ~8 s freeze in the world: Venus ring-1 fences unretired for 7.7 s, fps rows of 1.7 and 4.3, audio dropouts; the host's own 1 Hz sampler stalled 8 s twice at the same moment | {R15} | `cp-hunt-evidence/soak-venus-freeze.txt` | `[VENUS] stall pid=110 tid=185 waits_ms=7754 ctx=12 ring=1` | host (amdgpu / virglrenderer under host load), not the guest | hang (recovers) | open (not ours, most likely) |
 | **H1-02** | the game exits 2–3 s (or ~20 s) after launch, right after REDEngineErrorReporter starts; graded rc=0 "launcher-done" | {R02} | `cp-hunt-evidence/mine-census.txt` (run-log section) | `[P8] end game status=0 ms=2886` + REDEngineErrorR exits twice + services.exe/explorer.exe `code=0x1` | H2-early's (Wine session teardown) | crash | open (H2-early); grader diff below |
 | **H1-03** | ~2-minute silent stall between the X session and the launcher: the console stops reaching the host, the guest waits in the UART TX path | {R03} | `cp-hunt-evidence/pregame-console-stall.txt` | `no launcher/Wine row for 120 s before the game: sampling the vCPUs (prof-prestall)`; prof: `cons_hw_tx`, `uart_puts` | kernel console TX / QEMU serial chardev on a loaded host | hang (recovers) | open (H4-kglitch: console) |
 | **H1-12** | reload.p9's CONTINUE seek loses the focus after the second Up (focus not visible anywhere; consistent with a doubled Up onto the patch-notes button) | {R12} | `cp-hunt-evidence/reload-seek-continue.txt` | `SEEK FAILED menu-continue: main menu row 'CONTINUE' not focused after 6 x up` | input (QMP → X → Wine) or harness | wrong output (input) | open |
@@ -40,7 +41,8 @@ something recurs.
 | **H1-05** | win32u cannot find the GPU while the per-boot prefix update rebuilds devices | {R05} | `cp-hunt-evidence/win32u-find-gpu-race.txt` | `err:system:find_gpu_from_path Failed to find gpu with path "PCI\\VEN_1002&DEV_7550…"` | Wine (race inside H1-04's update) | cosmetic | open (goes away with H1-04) |
 | **H1-06** | `[BADELR]` reports the game's own healthy resumes; the 20-row cap is spent at once | {R06} | `cp-hunt-evidence/badelr-pe-image.txt` | `[BADELR] picking a user slot with an implausible frame.elr=0x00000001406A5043 … Cyberpunk2077.e` | kernel instrument (`process.c`) | cosmetic (blinds a hang detector) | open; diff below (H4-kglitch) |
 | **H1-07** | `[VENUS] fence_wait2 timeout` rows: 16 short-timeout polls in the game's first ~6 s exhaust the lifetime cap | {R07} | `cp-hunt-evidence/venus-fence-timeout-cap.txt` | `[VENUS] fence_wait2 timeout pid=109 ctx=12 ring=1 seqno=0x0000000100000011 … done=0x0000000000000000` | kernel instrument (`gpu_abi.c`) | cosmetic (blinds a hang detector) | open; diff below |
-| **H1-11** | the kernel's xrun count is printed only at PCM close, which a game boot never reaches | {R11} | `cp-hunt-evidence/audio-dropouts-fp2.txt` | `[SND] pcm closed: chunks=… xruns=…` absent for the game's stream | kernel instrument (`linux_snd.c`) | cosmetic (blinds H1-01) | open |
+| **H1-14** | trap.c's stall watchdog prints `console silent for more than 20s` (+ a CPU dump) about 1 s after the console printed | {R14} | `cp-hunt-evidence/watchdog-false-silence.txt` | `[WATCHDOG] console silent for more than 20s` right after an `[X] 1240.402:…trace:fps` row | kernel instrument (`trap.c` watchdog / `uart_last_activity_ms`) | cosmetic (false hang alarms) | open (H4-kglitch: console) |
+| **H1-11** | the kernel's xrun count is printed only at PCM close, which a game boot never reaches (alsa-lib's own row confirms H1-01 instead) | {R11} | `cp-hunt-evidence/audio-dropouts-fp2.txt` | `[SND] pcm closed: chunks=… xruns=…` absent for the game's stream | kernel instrument (`linux_snd.c`) | cosmetic | open |
 | — | benign, every boot (tagged by `classify.py`): `winediag:getaddrinfo`, winemenubuilder 126, `winebth`, `wineusb.inf` copy error, no schannel / Kerberos, `mfc140u.dll` for the Razer Chroma plugin, DXVK EDID / HDR metadata / unknown adapter interface / ignored flags, `wine code=0xC0000135` (winemenubuilder; + syswow64 rundll32 under H1-04) | {RB} | `*.class.txt` | — | Wine / DXVK | none | not ours |
 
 ### Notes on the rows
@@ -53,10 +55,12 @@ the save's loading (game s 147–158 in h-fp2: the phase where the 8 vCPUs are
 busiest) and are rare in the world.  The ALSA buffer winealsa asks for is 4 ×
 10 ms = 40 ms (`[SND] hw_params … period=480 periods=4`, docs/cp-audio.md
 §7), so any 40 ms stall of the game's audio thread (or of the compat
-`WRITEI` path behind it) is audible.  The kernel counts xruns but prints
-them only at PCM close (H1-11), which never happens before QEMU stops, so the
-guest side cannot confirm it yet.  Next steps (not done here): print the
-xrun count periodically (H1-11), then decide between a longer device buffer
+`WRITEI` path behind it) is audible.  The guest confirms it: alsa-lib, in
+the game process, prints `snd_pcm_recover) underrun occurred` (7 rows in
+h-fp2, 49 in the 28-minute soak; wavgaps counts only the zero runs ≥ 5 ms
+between loud audio, 10 and 22).  The kernel's own xrun counter is printed
+only at PCM close (H1-11).  Next steps (not done here): correlate the
+underrun rows with the guest's CPU load (THRW), then decide between a longer device buffer
 on the winealsa side (H3-winefix: the 40 ms comes from the WASAPI period the
 game asks for, mapped by winealsa) and the scheduling of the game's audio
 thread under load (H4-kglitch).
