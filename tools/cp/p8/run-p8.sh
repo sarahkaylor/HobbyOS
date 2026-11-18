@@ -332,7 +332,8 @@ elif [ "$PHASE" = game ]; then
   for d in /pfx/drive_c/vc /mc; do
     debugfs -R "ls -l $d" "$CPD" 2>/dev/null | awk -v d="$d" 'NF>=8 && $NF!="." && $NF!=".." {n++; b+=$6} END {printf "   %-28s %d entries, %d bytes\n", d, n, b}'
   done
-  echo "== verdict: $(cat "$OUT/verdict.txt" 2>/dev/null)"
+  echo "== verdict: $(head -1 "$OUT/verdict.txt" 2>/dev/null)"
+  [ -n "$(sed -n 2p "$OUT/verdict.txt" 2>/dev/null)" ] && echo "== verdict detail: $(sed -n 2p "$OUT/verdict.txt")"
   echo "== timeline:"; sed 's/^/   /' "$OUT/timeline.txt"
 fi
 echo "raw serial: $OUT/serial.txt"

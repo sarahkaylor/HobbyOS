@@ -11,7 +11,13 @@ stages the disks, then calls this, which takes ONE QEMU slot
               --shot-every seconds; every shot that differs from the previous
               one is kept (PNG) and OCR'd (tesseract, if present).  Stops on:
                 - "[P8] done" (the game exited / timed out and the launcher
-                  cleaned up);
+                  cleaned up).  In the game phase that is never a PASS:
+                  a game that ended before the menu is verdict early-exit
+                  (rc 3), the launcher's P8_GAME_S deadline game-timeout, a
+                  launcher that never started the game
+                  launcher-ended-before-game (tools/cp/p8/p8grade.py,
+                  docs/cp-early.md).  The watcher stops 180 s after the
+                  game's "[P8] end game" row at the latest;
                 - the main menu (OCR: two of NEW GAME / LOAD GAME / CONTINUE /
                   SETTINGS / CREDITS / QUIT GAME), after two more shots;
                 - a first-run screen (OCR: the CDPR user agreement, the CDPR
@@ -41,6 +47,7 @@ from run_icewm_test import Qmp  # noqa: E402
 sys.path.insert(0, os.path.join(REPO, "tools", "cp"))
 from console_rows import resync  # noqa: E402
 from p5lib import acquire_slot, guests_running, ppm, read, release_slot  # noqa: E402
+import p8grade  # noqa: E402  (tools/cp/p8: the game-phase verdicts, H2-early)
 
 MENU_WORDS = ["NEW GAME", "LOAD GAME", "CONTINUE", "SETTINGS", "CREDITS", "QUIT GAME", "ADDITIONAL CONTENT"]
 FIRST_RUN = [
@@ -249,7 +256,9 @@ def main():
     proc = subprocess.Popen(cmd, cwd=REPO, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
     log(f"qemu pid {proc.pid}")
     verdict = "timeout"
+    why = ""
     seen = set()
+    ended_at = None     # host time of the game's "[P8] end game" row (game phase)
     try:
         qmp = Qmp(qmp_path, deadline_s=40)
         last_size, last_change = 0, time.time()
@@ -285,9 +294,21 @@ def main():
                             for r in dri_nodes(proc.pid):
                                 mark(f"dri nodes at game launch: {r}")
             if "[P8] done" in ser or "System halt" in ser:
-                verdict = "launcher-done"
+                verdict, why = p8grade.launcher_end_verdict(ser, args.phase)
                 time.sleep(3)
                 break
+            if args.phase == "game" and ended_at is None:
+                r = p8grade.before_menu_exit(ser)
+                if r:
+                    ended_at = time.time()
+                    verdict, why = r
+                    mark(f"{verdict.upper()}: {why}")
+            if ended_at is not None:
+                if time.time() - ended_at > 180:
+                    mark("no [P8] done 180 s after the game ended: stopping")
+                    break
+                time.sleep(1)
+                continue
             if args.phase == "game" and game_t and time.time() >= next_shot:
                 next_shot = time.time() + args.shot_every
                 path = os.path.join(shots_dir, "cur.ppm")
@@ -371,9 +392,11 @@ def main():
                 proc.kill()
         release_slot(lockf)
         mark(f"verdict: {verdict}; QEMU stopped, slot released; guests on the host now: {guests_running()}")
+        if why:
+            mark(f"verdict detail: {why}")
         tl.close()
-    open(os.path.join(args.out, "verdict.txt"), "w").write(verdict + "\n")
-    return 0 if verdict in ("launcher-done", "main-menu") else 1
+    open(os.path.join(args.out, "verdict.txt"), "w").write(verdict + "\n" + (why + "\n" if why else ""))
+    return p8grade.rc_of(verdict)
 
 
 if __name__ == "__main__":

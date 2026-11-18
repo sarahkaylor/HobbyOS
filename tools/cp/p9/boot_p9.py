@@ -65,6 +65,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
 sys.path.insert(0, os.path.join(REPO, "tools", "cp", "p8"))
 import boot_p8 as P8  # noqa: E402
+import p8grade  # noqa: E402  (the shared game-phase verdicts, H2-early)
 
 BIG_LOCK = "/tmp/cp-bigguest.lock"
 FPS_RX = re.compile(r"trace:fps:\S+ \S+ @ approx ([0-9.]+)fps, total ([0-9.]+)fps")
@@ -205,8 +206,12 @@ def main():
     proc = subprocess.Popen(cmd, cwd=REPO, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
     log(f"qemu pid {proc.pid}")
     verdict = "timeout"
+    why = ""
     seen = set()
     ser = Serial(serial)
+    # the rows p8grade needs, from "[P8] begin game" on (kept small: P9 logs grow to GBs)
+    grade_rx = re.compile(r"\[P8\] (?:begin|end) game|REDEngineErrorR|steam_api64\.dll\" at")
+    glines = []
     kept = {"n": 0}
     try:
         qmp = P8.Qmp(qmp_path, deadline_s=40)
@@ -270,6 +275,8 @@ def main():
         def pump():
             """the per-tick duties: serial rows with wall times, milestone marks."""
             for ln in ser.lines():
+                if grade_rx.search(ln) and ("[P8] begin game " in seen or "[P8] begin game " in ln):
+                    glines.append(ln)
                 m = FPS_RX.search(ln)
                 if m:
                     fps_f.write(f"{time.time() - t0:.1f},{gtime():.1f},{st['phase']},{m.group(1)},{m.group(2)}\n")
@@ -435,7 +442,10 @@ def main():
                     mark("no launcher/Wine row for 120 s before the game: sampling the vCPUs (prof-prestall)")
                     sample_regs("prestall", 20, 4, True, time.sleep)
             if "[P8] end game " in seen:
-                verdict = "game-exited-before-menu"
+                # H2-early: was "game-exited-before-menu"; now the P8 verdict
+                verdict, why = p8grade.before_menu_exit("\n".join(glines)) or (
+                    "early-exit", "the game process ended before the main menu")
+                mark(f"{verdict.upper()}: {why}")
                 break
             gt = st["game_t"]
             if gt and time.time() >= next_shot:
@@ -825,6 +835,10 @@ def main():
             if verdict in ("game-exited", "launcher-done") and st.get("exit_ok"):
                 verdict = "script-done"
             mark(f"play script ended: {verdict}")
+            if verdict == "game-exited":
+                e = p8grade.game_end("\n".join(glines))
+                why = "the game ended during the play script (after the menu)" + (": " + p8grade.describe(e) if e else "")
+                mark(f"verdict detail: {why}")
             # let the launcher finish (wineserver -k, sync) if the game has quit
             if "[P8] end game " in seen:
                 end = time.time() + 180
@@ -832,6 +846,9 @@ def main():
                     pump()
                     time.sleep(1)
                 pump()
+        if verdict == "timeout" and "[P8] done" in seen:
+            verdict, why = p8grade.launcher_end_verdict("\n".join(glines), "game")
+            mark(f"{verdict.upper()}: {why}")
         if proc.poll() is not None and verdict == "timeout":
             verdict = f"qemu-exited rc={proc.returncode}"
         if proc.poll() is None:
@@ -852,8 +869,10 @@ def main():
         mark(f"verdict: {verdict}; QEMU stopped, slot released; guests on the host now: {P8.guests_running()}")
         for f in (tl, fps_f, mem_f, thr_f, ph_f, hbp_f):
             f.close()
-    open(os.path.join(args.out, "verdict.txt"), "w").write(verdict + "\n")
-    return 0 if verdict in ("script-done", "script-stop", "launcher-done") else 1
+    open(os.path.join(args.out, "verdict.txt"), "w").write(verdict + "\n" + (why + "\n" if why else ""))
+    if verdict in ("script-done", "script-stop", "launcher-done"):
+        return 0
+    return 3 if verdict == "early-exit" else 1
 
 
 if __name__ == "__main__":
