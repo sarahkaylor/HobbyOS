@@ -1,0 +1,19 @@
+# H1-hunt: ~2-minute silent stall between the X session start and the P8 launcher (strix, h-soak1, P9 32 GiB Venus + audio)
+# boot_p9: no serial row for 120 s -> vCPU sampler (prof-prestall); serial.log stayed at 13863 bytes (last row after ICEWMBG exit) from ~+5 s to ~+150 s, then ~350 KB arrived at once
+[P9W] +     0.0 s  04:12:57  slot 2 acquired + big-guest lock; boot -smp 8 -m 32768M -cpu host (KVM, venus); QEMU guests on the host before ours: 2
+[P9W] +   120.6 s  04:14:57  no launcher/Wine row for 120 s before the game: sampling the vCPUs (prof-prestall)
+[P9W] +   149.7 s  04:15:26  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P9W] +   154.1 s  04:15:31  serial row: [X] 152.107:0188:trace:process:CreateProcessInternalW app L"Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe" cmdline L"REDEngineEr
+   idle (HLT)      333   71.8 %
+   kernel          131   28.2 %
+== per vCPU (idle / kernel / user %)
+     9.1 %  arch_wfe
+     3.0 %  timer_get_ms
+     1.9 %  cons_hw_tx
+     1.5 %  net_socket_recv_timeout
+     1.5 %  arch_memory_barrier
+     1.3 %  uart_puts
+     1.1 %  virtio_gpu_x64_transact_ex
+# the vCPUs were 72 % idle and, in the kernel, in the console TX path (cons_hw_tx, uart_puts) - i.e. the guest was printing but the bytes did not reach the host file; the loader's own clocks for the images in that window are normal (ICEWM.BIN elap=496 ms).
+# host at that time (run-hunt sampler): loadavg 36 -> 17 (other lanes' builds/batches); 93 GB RAM, ~79 GB page cache.
+# same shape in 2 earlier boots on strix: lanes/kglitch-s2 kg-stack1 (today 03:14, 'no launcher/Wine row' at +120.4 s, game launched +150.1 s) and lanes/play r2-fps-scan5 (wave 6, then verdict timeout).
