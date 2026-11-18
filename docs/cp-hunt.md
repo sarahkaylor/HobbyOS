@@ -28,7 +28,20 @@ something recurs.
 
 | ID | symptom | rate | first-seen evidence | signature | layer | severity | status |
 |---|---|---|---|---|---|---|---|
-<!-- ROWS -->
+| **H1-01** | audio dropouts: exact-zero runs of 10–200 ms (whole 10 ms periods) inside loud audio, mostly while the save loads | {R01} | `cp-hunt-evidence/audio-dropouts-fp2.txt` | `wavgaps: dropouts=10 dropout_ms_total=750.0` (h-fp2) | Wine winealsa 40 ms buffer + guest scheduling under load (kernel); not confirmed in-guest (H1-11) | wrong output (audible glitch) | open |
+| **H1-02** | the game exits 2–3 s (or ~20 s) after launch, right after REDEngineErrorReporter starts; graded rc=0 "launcher-done" | {R02} | `cp-hunt-evidence/mine-census.txt` (run-log section) | `[P8] end game status=0 ms=2886` + REDEngineErrorR exits twice + services.exe/explorer.exe `code=0x1` | H2-early's (Wine session teardown) | crash | open (H2-early); grader diff below |
+| **H1-03** | ~2-minute silent stall between the X session and the launcher: the console stops reaching the host, the guest waits in the UART TX path | {R03} | `cp-hunt-evidence/pregame-console-stall.txt` | `no launcher/Wine row for 120 s before the game: sampling the vCPUs (prof-prestall)`; prof: `cons_hw_tx`, `uart_puts` | kernel console TX / QEMU serial chardev on a loaded host | hang (recovers) | open (H4-kglitch: console) |
+| **H1-12** | reload.p9's CONTINUE seek loses the focus after the second Up (focus not visible anywhere; consistent with a doubled Up onto the patch-notes button) | {R12} | `cp-hunt-evidence/reload-seek-continue.txt` | `SEEK FAILED menu-continue: main menu row 'CONTINUE' not focused after 6 x up` | input (QMP → X → Wine) or harness | wrong output (input) | open |
+| **H1-08** | P9 `seek` never finds the main-menu focus at a 1920×1080 game resolution | {R08} | `cp-hunt-evidence/p9-seek-1080.txt` | `SEEK FAILED menu-load: main menu row 'LOAD GAME' not focused after 6 x down` | harness (`boot_p9.canon`) | harness | worked around (`fpsprobe-blind.p9`); diff below (H2-early) |
+| **H1-09** | P9 world median below the 30 fps target in most boots; p10 17–25 | {R09} | P9 table below | `world median 29.0 (p10 24.7)` (h-fp1) | user code + Venus fence/present path (cp-k7 §6) | perf | open |
+| **H1-04** | every game boot re-runs wineboot's prefix update (~9.5 s, writes the prefix) | {R04} | `cp-hunt-evidence/prefix-stale-stamp.txt` | `wine: failed to start L"C:\\windows\\syswow64\\rundll32.exe": c0000135` (its last step) | harness (seeded prefix from another Wine stage) | perf | open (integ16's p8_pfx rebuilds it; check diff below for H2-early) |
+| **H1-10** | ~1.5 s freeze on the first frame after closing the map | {R10} | h-play1 `fps.csv` (game s 752.9) | one `approx 0.61fps` row after `unwind map-close2` | game / Venus (first frame of a scene) | perf | open |
+| **H1-13** | 150–260 ms NFS reply loss + resend pauses on the game copy | {R13} | `classify.py` kstall `nfspipe` | `[NFSPIPE] stall inflight=1 issued=518 replies=517 … us=258904` | kernel NFS / slirp | perf | open (known class, recovers) |
+| **H1-05** | win32u cannot find the GPU while the per-boot prefix update rebuilds devices | {R05} | `cp-hunt-evidence/win32u-find-gpu-race.txt` | `err:system:find_gpu_from_path Failed to find gpu with path "PCI\\VEN_1002&DEV_7550…"` | Wine (race inside H1-04's update) | cosmetic | open (goes away with H1-04) |
+| **H1-06** | `[BADELR]` reports the game's own healthy resumes; the 20-row cap is spent at once | {R06} | `cp-hunt-evidence/badelr-pe-image.txt` | `[BADELR] picking a user slot with an implausible frame.elr=0x00000001406A5043 … Cyberpunk2077.e` | kernel instrument (`process.c`) | cosmetic (blinds a hang detector) | open; diff below (H4-kglitch) |
+| **H1-07** | `[VENUS] fence_wait2 timeout` rows: 16 short-timeout polls in the game's first ~6 s exhaust the lifetime cap | {R07} | `cp-hunt-evidence/venus-fence-timeout-cap.txt` | `[VENUS] fence_wait2 timeout pid=109 ctx=12 ring=1 seqno=0x0000000100000011 … done=0x0000000000000000` | kernel instrument (`gpu_abi.c`) | cosmetic (blinds a hang detector) | open; diff below |
+| **H1-11** | the kernel's xrun count is printed only at PCM close, which a game boot never reaches | {R11} | `cp-hunt-evidence/audio-dropouts-fp2.txt` | `[SND] pcm closed: chunks=… xruns=…` absent for the game's stream | kernel instrument (`linux_snd.c`) | cosmetic (blinds H1-01) | open |
+| — | benign, every boot (tagged by `classify.py`): `winediag:getaddrinfo`, winemenubuilder 126, `winebth`, `wineusb.inf` copy error, no schannel / Kerberos, `mfc140u.dll` for the Razer Chroma plugin, DXVK EDID / HDR metadata / unknown adapter interface / ignored flags, `wine code=0xC0000135` (winemenubuilder; + syswow64 rundll32 under H1-04) | {RB} | `*.class.txt` | — | Wine / DXVK | none | not ours |
 
 ### Notes on the rows
 
@@ -47,6 +60,49 @@ xrun count periodically (H1-11), then decide between a longer device buffer
 on the winealsa side (H3-winefix: the 40 ms comes from the WASAPI period the
 game asks for, mapped by winealsa) and the scheduling of the game's audio
 thread under load (H4-kglitch).
+
+**H1-11 (xrun count).**  Proposed (`src/kernel/linux_snd.c`, the audio
+driver's owner), so H1-01 can be confirmed or ruled out in the guest:
+
+```diff
+ static void check_xrun_locked(void) {
+   if (S.state == ST_RUNNING && S.stop_thr < S.boundary && avail_locked() >= S.stop_thr) {
+     S.state = ST_XRUN;
+     S.xruns++;
+     S.trigger_us = timer_get_us();
++    /* cp-hunt H1-11: a game never closes its PCM before the boot ends, so
++       the close row never shows them: one row per xrun (first 32, then every 64th) */
++    if (S.xruns <= 32 || (S.xruns & 63) == 0) {
++      struct kline kl;
++      kl_init(&kl);
++      kl_s(&kl, "[SND] xrun n=");
++      kl_i(&kl, (long)S.xruns);
++      kl_s(&kl, " frames_done=");
++      kl_i(&kl, (long)S.frames_done);
++      kl_s(&kl, " chunks=");
++      kl_i(&kl, (long)S.chunks);
++      kl_c(&kl, '\n');
++      kl_emit(&kl);
++    }
+   }
+ }
+```
+
+**H1-03 (pre-game stall).**  In h-soak1 the serial file stopped growing for
+~145 s right after IceWM started and the launcher's first row came only at
++150 s (a normal P9 boot launches the game at +25…90 s).  The 20 s vCPU
+sample boot_p9 took in the middle shows the guest mostly idle and, in the
+kernel, in `cons_hw_tx` / `uart_puts`: it was printing, and the bytes were
+not reaching `serial.log`.  The image loader's own timings in that window are
+normal, and the Wine `+timestamp` clock agrees with the host clock after the
+stall, so the guest itself lost the time waiting on its console.  Two other
+boots on strix show the same 120 s trigger and a +150 s launch
+(lanes/kglitch-s2 kg-stack1, lanes/play r2-fps-scan5).  Candidates: the
+UART TX path waiting on a 16550 that QEMU's main loop is not draining (its
+`-serial file:` write blocked; the host was at loadavg 36 with ~79 GB page
+cache), or a console lock held across the wait.  `run-hunt.sh`'s sampler now
+records the serial file size and the host's Dirty/Writeback each second, so
+the next occurrence shows which (boots from h-p8v4 on).
 
 **H1-04 (stale prefix stamp).**  Not a game bug: every game boot of this
 lane ran a ~9.5 s `wineboot` prefix update (PreInstall, DefaultInstall,
