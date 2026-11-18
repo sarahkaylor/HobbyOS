@@ -11,3 +11,26 @@ test_1080p_game_without_game_res_misses is the pre-H1-08 rule on a 1.5x frame (i
 
 cp-hunt H1-04: run-p8.sh prefix-stamp check, strix run ab-A1 (seeded image from integ15's wine-ntsync pfx, stage wine-cp):
 == WARNING: prefix stamp 1794844150 != /home/sarah/cp/wine-cp/stage/CP/WINE/share/wine/wine.inf mtime 1794987459: the seeded prefix was made by another Wine stage; every boot re-runs wineboot's update (re-run P8_PHASE=pfx with this stage)
+
+cp-hunt H1-03: QEMU drive cache A/B, strix (busy: other lanes' boots, /proc/pressure/io full avg10 25-80 % sampled after each boot), lane tree ~/cp/lanes/early-b, lavapipe, P8_CFLAGS=-DP8_CAPS_ONLY (boot, NFS mount, warm-up, d3d12caps; no game), -smp 8 -m 12288M, interleaved A/B; t=0 is the slot acquired / QEMU start
+A = QEMU default cache (writeback), B = P8_DRIVE_CACHE=unsafe on the per-run ovmf.fd, disk.img and cpdata.img copies
+ab-A1 mode=A cache=default qemu->mount_s=36.4 qemu->warmup_s=51.6 guests_before= 1 io_full_now=avg10=58.12
+ab-B1 mode=B cache=unsafe qemu->mount_s=6.3 qemu->warmup_s=21.4 guests_before= 2 io_full_now=avg10=34.72
+ab-A2 mode=A cache=default qemu->mount_s=35.3 qemu->warmup_s=50.8 guests_before= 0 io_full_now=avg10=72.39
+ab-B2 mode=B cache=unsafe qemu->mount_s=9.3 qemu->warmup_s=28.4 guests_before= 0 io_full_now=avg10=74.53
+ab-A3 mode=A cache=default qemu->mount_s=42.6 qemu->warmup_s=63.0 guests_before= 2 io_full_now=avg10=29.08
+ab-B3 mode=B cache=unsafe qemu->mount_s=3.3 qemu->warmup_s=18.3 guests_before= 1 io_full_now=avg10=32.09
+ab-A4 mode=A cache=default qemu->mount_s=49.3 qemu->warmup_s=64.9 guests_before= 1 io_full_now=avg10=79.49
+ab-B4 mode=B cache=unsafe qemu->mount_s=5.3 qemu->warmup_s=21.3 guests_before= 2 io_full_now=avg10=25.55
+QEMU start -> launcher NFS mount: A 36.4 35.3 42.6 49.3 s (median 39.5), B 6.3 9.3 3.3 5.3 s (median 5.8); -> warm-up done: A 51-65 s, B 18-28 s.
+e2fsck -fn of the data disk after every A and B boot: rc=0 (QEMU writes the cache back at exit).
+
+Venus path (host-venus.sh HV_DRIVE_CACHE from boot_p8), run vcache-1, game-phase default now unsafe:
+== drive cache: unsafe
+[P8W] +     5.3 s  07:23:09  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
+[P8W] +    21.3 s  07:23:25  warm-up result: [P8] warm-up: display driver loaded
+== e2fsck -fn after the boot: rc=0 (cpdata: 1035/1048576 files (0.6% non-contiguous), 135261/4194304 blocks)
+   +     5.3 s  07:23:09  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
+   +    21.3 s  07:23:25  warm-up result: [P8] warm-up: display driver loaded
+QEMU argv (paths shortened): if=pflash,format=raw,file=.../ovmf.fd,cache=unsafe | file=.../disk.img,format=raw,id=disk0,if=none,cache=unsafe | file=.../cpdata.img,format=raw,id=cpdata,if=none,cache=unsafe
+(a caps-only boot grades launcher-ended-before-game by design: no game was started)

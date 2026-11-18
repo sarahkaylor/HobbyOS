@@ -65,6 +65,17 @@ def log(msg):
     print(f"[P8W] {msg}", flush=True)
 
 
+def drive_cache():
+    """cp-hunt H1-03: P8_DRIVE_CACHE=<QEMU cache mode> (e.g. "unsafe") for the
+    per-run pflash, disk and data-disk COPIES: with the default writeback mode
+    every guest flush (OVMF variable writes, NVMe flushes) is a host fsync()
+    that waits behind every lane's dirty data (pressure/io full 50 %, 64-142 s
+    QEMU start -> launcher).  run-p8.sh copies all three per run; never set it
+    for an image that is not a throwaway copy.  Unset: QEMU's default."""
+    c = os.environ.get("P8_DRIVE_CACHE", "")
+    return f",cache={c}" if c else ""
+
+
 def qemu_cmd(out, disk, cpdata, args):
     qmp = os.path.join(out, "qmp-sock")
     serial = os.path.join(out, "serial.log")
@@ -73,13 +84,14 @@ def qemu_cmd(out, disk, cpdata, args):
         shutil.copy(os.path.expanduser("~/.local/share/OVMF/OVMF_CODE_4M.fd"), fw)
     # p5lib.qemu_cmd's device set + the ext2 data disk as NVMe namespace 2
     # (the Makefile's CPDATA line).
+    dc = drive_cache()
     cmd = ["qemu-system-x86_64", "-M", "q35", "-smp", str(args.smp), "-m", f"{args.mem}M",
-           "-drive", f"if=pflash,format=raw,file={fw}",
+           "-drive", f"if=pflash,format=raw,file={fw}{dc}",
            "-display", "none", "-serial", f"file:{serial}",
            "-device", "pcie-root-port,id=pcie.1,bus=pcie.0,slot=1",
-           "-drive", f"file={disk},format=raw,id=disk0,if=none",
+           "-drive", f"file={disk},format=raw,id=disk0,if=none{dc}",
            "-device", "nvme,drive=disk0,serial=1234,bus=pcie.1",
-           "-drive", f"file={cpdata},format=raw,id=cpdata,if=none",
+           "-drive", f"file={cpdata},format=raw,id=cpdata,if=none{dc}",
            "-device", "nvme-ns,drive=cpdata,nsid=2",
            "-device", "edu", "-netdev", "user,id=net0",
            "-device", "virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56",
@@ -115,7 +127,10 @@ def venus_qemu_cmd(out, disk, cpdata, args):
     namespace 2 appended to its QEMU argv."""
     hv = os.path.join(REPO, "tools", "cp", "host-venus.sh")
     env = dict(os.environ, MEM=f"{args.mem}M", SMP=str(args.smp), CPU=args.cpu)
-    extra = ["-drive", f"file={cpdata},format=raw,id=cpdata,if=none", "-device", "nvme-ns,drive=cpdata,nsid=2"] + diag_args()
+    dc = drive_cache()
+    if dc:
+        env["HV_DRIVE_CACHE"] = dc[len(",cache="):]
+    extra = ["-drive", f"file={cpdata},format=raw,id=cpdata,if=none{dc}", "-device", "nvme-ns,drive=cpdata,nsid=2"] + diag_args()
     argv = [ln for ln in subprocess.run(["bash", hv, "argv", disk, out] + extra, capture_output=True, text=True,
                                         check=True, env=env).stdout.splitlines() if ln]
     envv = [ln for ln in subprocess.run(["bash", hv, "env"], capture_output=True, text=True, check=True,

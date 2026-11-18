@@ -176,3 +176,32 @@ SIGKILLed, and left its 8 clients (services, winedevice x2, plugplay, svchost,
 explorer, rpcss, vkcube) blocked.  The other 5 calls took 0.2-0.6 s.
 `docs/cp-early-evidence/repro-loop-strix.txt`.  The repro loop now sweeps these
 leftovers.
+
+## 9. cp-hunt items in H2's files
+
+1. **"Game ended early" graded rc 0** (`boot_p8.py` ~287).  351b0d49 already
+   covers this: the game phase never grades `launcher-done`, and an early exit is
+   `early-exit`, rc 3.  H1's `game-exited-early` diff is not needed.
+2. **H1-08, P9 menus at a 1920x1080 game resolution.**
+   - `boot_p9.py --game-res` (`P9_GAME_RES` in run-p9.sh).
+   - `game_view()` scales a 1920x1080 game's shot to the 1280x720 layout that
+     `MENUS`, the save-list search and the prompt/menu OCR crops were measured
+     on.  `canon_image()` and `focus_in()` are module-level and covered by
+     `tools/cp/p9/test_p9canon.py`, which uses synthetic frames.
+   - Not yet checked on a real 1080p boot: the 1.5x UI scale is an assumption.
+3. **H1-04, stale prefix stamp.**  run-p8.sh compares `/pfx/.update-timestamp`
+   with the stage's `wine.inf` mtime and prints `== WARNING: prefix stamp ...`.
+   The integ15 seeded image (wine-ntsync, 1794844150) does not match wine-cp
+   (1794987459).
+4. **H1-03, the pre-launch stall.**
+   - `P8_DRIVE_CACHE` sets a QEMU `cache=` mode on the per-run `ovmf.fd`,
+     `disk.img` and `cpdata.img` copies.  boot_p8 sets it on the lavapipe
+     drives and passes it to `host-venus.sh` as `HV_DRIVE_CACHE`.
+   - The game phase now defaults to `unsafe`; `P8_DRIVE_CACHE=` (empty) gives
+     QEMU's default.  The pfx and probe phases keep QEMU's default, because the
+     pfx image becomes the seeded original.
+   - A/B on a busy strix, 4+4 interleaved caps-only boots, QEMU start to the
+     launcher's NFS mount: default 35-49 s (median 39.5), unsafe 3-9 s
+     (median 5.8).
+   - e2fsck of the data disk after each of the 8 boots: rc 0.
+   - Evidence: `docs/cp-early-evidence/hunt-items-strix.txt`.
