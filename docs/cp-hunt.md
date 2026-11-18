@@ -92,6 +92,31 @@ driver's owner), so H1-01 can be confirmed or ruled out in the guest:
  }
 ```
 
+**H1-14 (watchdog false silence): root cause.**  `watchdog_tick()` reads
+`now` at the top, then prints the 30-second `[NFSIO]` row through the normal
+console (`wd_puts` → `uart_putc_dbg` → `cons_kputc` → `cons_hw_tx`), and
+`cons_hw_tx` stamps `uart_last_activity_ms = timer_get_ms()` — a later
+millisecond than `now` once that print (or any other CPU's) crosses one.  The
+silence test is unsigned, `now - uart_last_activity_ms < WATCHDOG_SILENCE_MS`,
+so `now < last` wraps to ~2⁶⁴ and the watchdog declares 20 s of silence and
+dumps the CPUs.  24 of this lane's first 32 rows follow the tick's own
+`[NFSIO]` row, the rest follow other console output within 1–8 lines; 101 of
+the 128 old game boots carry it.  Proposed (owner of `src/kernel/arch/x64/trap.c`'s
+watchdog; H4-kglitch for the console side), with a host-test or probe row
+that sets `uart_last_activity_ms = now + 1` and expects no report:
+
+```diff
+-  if (now - uart_last_activity_ms < WATCHDOG_SILENCE_MS) {
++  /* cp-hunt H1-14: the [NFSIO] print above (or another CPU) can stamp the
++     console a millisecond AFTER `now`; unsigned now - last then wraps */
++  uint64_t last = uart_last_activity_ms;
++  if (last >= now || now - last < WATCHDOG_SILENCE_MS) {
+     return;
+   }
+```
+(The same test is in `src/kernel/arch/arm/trap.c`'s watchdog if it reads the
+clock before printing.)
+
 **H1-03 (pre-game stall).**  In h-soak1 the serial file stopped growing for
 ~145 s right after IceWM started and the launcher's first row came only at
 +150 s (a normal P9 boot launches the game at +25…90 s).  The 20 s vCPU
