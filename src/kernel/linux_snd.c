@@ -149,6 +149,16 @@ static struct {
   /* stats */
   uint64_t xruns, chunks, frames_done;
   uint64_t n_sync_ptr, n_writei, n_status, n_refine, n_parks;
+  /* H5-audio2 timing instrument (docs/cp-audio2.md §3): rate-limited rows
+     only, a [SND] stat row every 10 s while running and the xrun row's
+     context.  *_us are timer_get_us() stamps. */
+  uint64_t slot_post_us[SLOTS];
+  uint64_t last_done_us, last_writei_us, last_ioctl_us, run_start_us;
+  uint32_t dring_us_lo[32]; /* completion ring: low 32 bits of the stamp */
+  uint32_t dring_fr[32];
+  uint32_t dring_n;
+  uint64_t st_t0_us, st_frames0, st_xruns0, st_dry0, dry;
+  uint64_t st_maxgap_us, st_maxlat_us, st_maxwr_us, st_max100, st_minq;
 } S;
 
 static spinlock_t lsnd_lock;
@@ -327,10 +337,70 @@ static void submit_locked(void) {
     if (slot < 0 || slot >= SLOTS) break;
     S.slot_epoch[slot] = S.epoch;
     S.slot_frames[slot] = (uint32_t)n;
+    S.slot_post_us[slot] = timer_get_us();
     S.submit += n;
     S.inflight++;
     S.chunks++;
   }
+}
+
+/* frames the device completed in the last `win_us` (the completion ring) */
+static uint64_t done_within_locked(uint64_t now, uint64_t win_us) {
+  uint64_t f = 0;
+  uint32_t n = S.dring_n < 32 ? S.dring_n : 32;
+  for (uint32_t i = 0; i < n; i++) {
+    uint32_t k = (S.dring_n - 1 - i) & 31;
+    uint32_t age = (uint32_t)now - S.dring_us_lo[k];
+    if (age > win_us) break;
+    f += S.dring_fr[k];
+  }
+  return f;
+}
+
+static void stat_reset_locked(uint64_t now) {
+  S.st_t0_us = now;
+  S.st_frames0 = S.frames_done;
+  S.st_xruns0 = S.xruns;
+  S.st_dry0 = S.dry;
+  S.st_maxgap_us = S.st_maxlat_us = S.st_maxwr_us = S.st_max100 = 0;
+  S.st_minq = ~0ull;
+}
+
+/* one row per 10 s of a running stream: what the device and the writer did */
+static void stat_row_locked(uint64_t now) {
+  if (!S.st_t0_us) {
+    stat_reset_locked(now);
+    return;
+  }
+  uint64_t el = now - S.st_t0_us;
+  if (el < 10000000u) return;
+  uint64_t fr = S.frames_done - S.st_frames0;
+  uint64_t exp = el * (S.rate ? S.rate : 48000) / 1000000u;
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[SND] stat t_ms=");
+  kl_i(&kl, (long)((now - S.run_start_us) / 1000));
+  kl_s(&kl, " frames=");
+  kl_i(&kl, (long)fr);
+  kl_s(&kl, " wall_frames=");
+  kl_i(&kl, (long)exp);
+  kl_s(&kl, " max100ms=");
+  kl_i(&kl, (long)S.st_max100);
+  kl_s(&kl, " maxgap_us=");
+  kl_i(&kl, (long)S.st_maxgap_us);
+  kl_s(&kl, " maxlat_us=");
+  kl_i(&kl, (long)S.st_maxlat_us);
+  kl_s(&kl, " maxwr_us=");
+  kl_i(&kl, (long)S.st_maxwr_us);
+  kl_s(&kl, " minq=");
+  kl_i(&kl, S.st_minq == ~0ull ? -1 : (long)S.st_minq);
+  kl_s(&kl, " dry=+");
+  kl_i(&kl, (long)(S.dry - S.st_dry0));
+  kl_s(&kl, " xruns=+");
+  kl_i(&kl, (long)(S.xruns - S.st_xruns0));
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+  stat_reset_locked(now);
 }
 
 static void check_xrun_locked(void) {
@@ -350,6 +420,20 @@ static void check_xrun_locked(void) {
       kl_i(&kl, (long)S.frames_done);
       kl_s(&kl, " chunks=");
       kl_i(&kl, (long)S.chunks);
+      /* H5-audio2: who missed the deadline -- the writer (wr_ago: time since
+         the last WRITEI that moved appl) or the device (done100ms: frames it
+         completed in the last 100 ms; 4800 is real time at 48 kHz) */
+      uint64_t now = S.trigger_us;
+      kl_s(&kl, " t_ms=");
+      kl_i(&kl, (long)((now - S.run_start_us) / 1000));
+      kl_s(&kl, " wr_ago_us=");
+      kl_i(&kl, S.last_writei_us ? (long)(now - S.last_writei_us) : -1);
+      kl_s(&kl, " io_ago_us=");
+      kl_i(&kl, S.last_ioctl_us ? (long)(now - S.last_ioctl_us) : -1);
+      kl_s(&kl, " done100ms=");
+      kl_i(&kl, (long)done_within_locked(now, 100000));
+      kl_s(&kl, " done40ms=");
+      kl_i(&kl, (long)done_within_locked(now, 40000));
       kl_c(&kl, '\n');
       kl_emit(&kl);
     }
@@ -364,6 +448,14 @@ static void reap_cb(int slot, uint32_t status, void *ctx) {
   S.hw += S.slot_frames[slot];
   S.frames_done += S.slot_frames[slot];
   if (S.inflight > 0) S.inflight--;
+  uint64_t now = timer_get_us();
+  if (S.slot_post_us[slot] && now - S.slot_post_us[slot] > S.st_maxlat_us)
+    S.st_maxlat_us = now - S.slot_post_us[slot];
+  if (S.last_done_us && now - S.last_done_us > S.st_maxgap_us) S.st_maxgap_us = now - S.last_done_us;
+  S.last_done_us = now;
+  uint32_t k = S.dring_n++ & 31;
+  S.dring_us_lo[k] = (uint32_t)now;
+  S.dring_fr[k] = S.slot_frames[slot];
 }
 
 /* Reap completions and keep the device fed.  Returns 1 when anything moved. */
@@ -373,6 +465,15 @@ static int service_locked(void) {
     if (S.hw > S.appl) S.hw = S.appl; /* never: the device returns what we gave it */
     uint64_t av = avail_locked();
     if (av > S.avail_max) S.avail_max = av;
+    if (S.state == ST_RUNNING) {
+      uint64_t now = S.last_done_us;
+      uint64_t q = S.appl - S.hw;
+      if (q < S.st_minq) S.st_minq = q;
+      if (S.inflight == 0) S.dry++;
+      uint64_t d100 = done_within_locked(now, 100000);
+      if (d100 > S.st_max100) S.st_max100 = d100;
+      stat_row_locked(now);
+    }
     check_xrun_locked();
     if (S.state == ST_DRAINING && S.hw >= S.appl) S.state = ST_SETUP;
   }
@@ -423,6 +524,10 @@ int linux_snd_open(int minor, uint32_t flags) {
     S.tstamp_mode = S.tstamp_type = 0;
     S.xruns = S.chunks = S.frames_done = 0;
     S.n_sync_ptr = S.n_writei = S.n_status = S.n_refine = S.n_parks = 0;
+    S.last_done_us = S.last_writei_us = S.last_ioctl_us = S.run_start_us = 0;
+    S.dring_n = 0;
+    S.dry = 0;
+    S.st_t0_us = 0;
     spinlock_release_irqrestore(&lsnd_lock, fl);
   }
   ylock_release(&lsnd_op);
@@ -731,6 +836,7 @@ static int do_start(void) {
   fl = spinlock_acquire_irqsave(&lsnd_lock);
   S.state = ST_RUNNING;
   S.trigger_us = timer_get_us();
+  if (!S.run_start_us) S.run_start_us = S.trigger_us;
   submit_locked();
   spinlock_release_irqrestore(&lsnd_lock, fl);
   return 0;
@@ -932,6 +1038,12 @@ static int do_writei(struct process *p, uint64_t arg, int nonblock) {
   int need_start = 0;
   fl = spinlock_acquire_irqsave(&lsnd_lock);
   S.appl += done;
+  {
+    uint64_t now = timer_get_us();
+    if (S.state == ST_RUNNING && S.last_writei_us && now - S.last_writei_us > S.st_maxwr_us)
+      S.st_maxwr_us = now - S.last_writei_us;
+    S.last_writei_us = now;
+  }
   if (S.state == ST_PREPARED && S.appl - S.hw >= S.start_thr) need_start = 1;
   submit_locked();
   spinlock_release_irqrestore(&lsnd_lock, fl);
@@ -1177,8 +1289,10 @@ int linux_snd_ioctl(struct process *p, int minor, uint32_t open_flags, uint32_t 
   int r;
   if (minor == LSND_MINOR_CONTROL)
     r = ctl_ioctl(p, req, arg);
-  else
+  else {
+    S.last_ioctl_us = timer_get_us();
     r = pcm_ioctl(p, req, arg, (open_flags & 0x800u) != 0 /* O_NONBLOCK */);
+  }
   ylock_release(&lsnd_op);
   return r;
 }
