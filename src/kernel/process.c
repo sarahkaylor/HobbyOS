@@ -5233,6 +5233,42 @@ void cp_wait_sample(int emit) {
         st == PROC_STATE_ALLOCATED)
       continue;
     if (!(q->abi_flags & PROC_FLAG_LINUX_ABI)) continue;
+    {
+      /* H4-kglitch (H5-05): a periodic waiter away from its clock
+         (linux_compat_away.c): what is it doing this tick? */
+      extern int away_flagged(int slot);
+      extern void away_sample(int slot, int kind, int nr, uint64_t word, uint64_t pc);
+      if (away_flagged(i)) {
+        int kind = 'O';
+        uint64_t pc = 0;
+        if (st == PROC_STATE_RUNNING) {
+          int oncpu = -1;
+          for (uint32_t c = 0; c < MAX_CPUS; c++)
+            if (current_pid_of_cpu(c) == i) {
+              oncpu = (int)c;
+              break;
+            }
+          int kin = q->ru_kin_us != 0;
+          if (kin && oncpu >= 0 && (uint32_t)oncpu == get_cpuid() && cpw_tick_user) kin = 0;
+          if (!kin) {
+            kind = 'U';
+          } else if (!q->in_sys) {
+            kind = 'T';
+          } else {
+            extern uint64_t watchdog_cpu_rip(uint32_t cpu);
+            kind = 'K';
+            if (oncpu >= 0) pc = watchdog_cpu_rip((uint32_t)oncpu);
+          }
+        } else if (st == PROC_STATE_READY) {
+          kind = 'R';
+        } else if (st == PROC_STATE_FUTEX) {
+          kind = 'F';
+        } else if (st == PROC_STATE_BLOCKED) {
+          kind = 'B';
+        }
+        away_sample(i, kind, (int)q->last_syscall, q->futex_uaddr, pc);
+      }
+    }
     struct cpw_group *g = cpw_find(q->tgid);
     if (!g) continue;
     if (st == PROC_STATE_RUNNING) {
