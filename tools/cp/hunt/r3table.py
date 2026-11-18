@@ -84,6 +84,10 @@ def row(logs, run):
         for r in s.get("flagged", []):
             if r["tag"] == "final":       # the desktop after the game quit: not a game frame
                 continue
+            if (r.get("w"), r.get("h")) == (1920, 1080) and r["flags"] == ["partial-black"] \
+                    and abs(r["band_bottom"] - 0.333) < 0.01 and abs(r["band_right"] - 0.333) < 0.01:
+                continue                  # the 1280x720 X screen in a 1920x1080 framebuffer: the desktop, no game window
+
             for f in r["flags"]:
                 f = f.split("@")[0]
                 fl[f] = fl.get(f, 0) + 1

@@ -1,0 +1,16 @@
+# cp-hunt H6-03: p8launch never reaps its keepalive; every game boot's quiesce lists it and waits the full 30 s
+# strix, integ21, boot h3-c01 (P9 12 GiB Venus, cold-m86-pq.p9), serial.txt lines 317, 9283..9410 + the boot_p9 timeline
+[P8] keepalive pid=17
+[P8] end game status=0 ms=331378
+[P8] begin kill : wineserver -k
+[P8] end kill status=0 ms=238
+[P8] quiesce after kill: extra=1 left: vkcube.exe/17:s4
+[P8] sync done
+[P8] done
+[P9W] +   356.1 s  15:44:45  game process ended: [P8] end game status=0 ms=331378
+[P9W] +   386.9 s  15:45:15  sync done: [P8] sync done
+[P9W] +   386.9 s  15:45:15  launcher done: [P8] done
+# state 4 = PROC_STATE_EXITED (src/include/process.h): the keepalive (wine vkcube.exe --idle, session_up()) has exited
+# and waits for its parent p8launch's waitpid(), which only sweep() (the P8_LAUNCHES>1 repro loop) does.
+# The quiesce loop polls for extra == 0, so the single-launch path waits its whole 30 s bound:
+# game end 356.1 s -> sync done 386.9 s.  The same row in H1's round-2 serials (hunt2-logs): 4/4 with a serial copy.

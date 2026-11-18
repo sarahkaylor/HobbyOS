@@ -244,16 +244,40 @@ def list_focus(path):
                  if px[x, y][0] < 120 and px[x, y][1] > 170 and px[x, y][2] > 170) > W // 32]
     if not ys or ys[-1] - ys[0] > H // 5:
         return None
+    if ys[-1] - ys[0] < H // 24:
+        # one 1-3 px cyan line: the list has scrolled and the focused entry's
+        # frame is clipped by the list's viewport, only its top border (low on
+        # the screen) or its bottom border (high) shows (h3-churn2: y 520..522
+        # while the OCR'd names stepped QuickSave-3, -2, -1 ...); an entry is
+        # ~70 px tall at 720p
+        e = int(H * 0.097)
+        return (ys[0], min(H - 1, ys[0] + e)) if ys[0] > H // 2 else (max(0, ys[-1] - e), ys[-1])
     return ys[0], ys[-1]
 
 
 def list_name(path, fr):
-    """the save name inside the focused frame (or None for a group header)"""
-    im = Image.open(path)
+    """the save name inside the focused frame (or None for a group header):
+    plain OCR, then the green channel contrast-stretched (h3-churn1: it read
+    "ManualSave-86" where the plain pass did not)"""
+    from PIL import ImageOps
+    im = Image.open(path).convert("RGB")
     W, H = im.size
     y0, y1 = fr
-    t = ocr(path, box=(int(W * 0.15), max(0, y0 - 6), int(W * 0.85), min(H, y1 + 6)), scale=3, psm=6)
+    box = (int(W * 0.15), max(0, y0 - 6), int(W * 0.85), min(H, y1 + 6))
+    t = ocr(path, box=box, scale=3, psm=6)
     m = SAVE_RX.search(t)
+    if not m:
+        g = ImageOps.autocontrast(im.crop(box).getchannel("G"))
+        g = g.resize((g.size[0] * 3, g.size[1] * 3))
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
+            g.save(tf.name)
+        try:
+            t2 = " ".join(subprocess.run(["tesseract", tf.name, "-", "--psm", "6"], capture_output=True,
+                                         text=True, timeout=60).stdout.split())
+        finally:
+            os.unlink(tf.name)
+        t += " | " + t2
+        m = SAVE_RX.search(t2)
     return (re.sub(r"\s+", "", m.group(1)).replace("Sove", "Save") if m else None), t
 
 
@@ -446,6 +470,34 @@ def make_saves(b, n):
         log(f"quick save {i + 1}/{n}: OCR {boot_ocr(p)[:60]!r}")
 
 
+def manual_save(b, k):
+    """pause -> SAVE GAME -> the list's NEW SAVE entry -> Enter (docs/cp-p9.md:
+    SAVE GAME -> NEW SAVE wrote ManualSave-87 in ctl1; Return on an existing
+    entry would ask to overwrite it, so the focused frame must read NEW SAVE)"""
+    if not pause_open(b) or not seek(b, PAUSE, "SAVE GAME", name=f"sg{k}_"):
+        b.shot("bk", "key esc", "wait 3")
+        return False
+    b.shot(f"sgr{k}", "key ret", "wait 3")
+    for i in range(6):
+        p = b.shot(f"sgl{k}_{i}", "key down", "wait 1.2")
+        fr = list_focus(p)
+        if not fr:
+            continue
+        _, t = list_name(p, fr)
+        if re.search(r"NEW\s*SAVE", t, re.I):
+            p, t = b.until(f"sgw{k}", r"overwrite|sure", 4, "key ret", "wait 3")
+            if p:
+                log(f"manual save {k}: a dialog ({t[:60]!r}): cancelled")
+                b.shot("bk", "key esc", "wait 2")
+            else:
+                log(f"manual save {k}: NEW SAVE taken after {i + 1} taps")
+            b.shot(f"sgx{k}", "wait 3", "key esc", "wait 3", "key esc", "wait 3")
+            return not p
+    log(f"manual save {k}: no NEW SAVE entry focused")
+    b.shot("bk", "key esc", "wait 3", "key esc", "wait 3")
+    return False
+
+
 def load_in_world(b, avoid, k):
     if not pause_open(b):
         log(f"load {k}: the pause menu did not open")
@@ -531,6 +583,9 @@ def churn(b, a):
             if not load_from_main(b, 0, "ManualSave-86"):
                 raise Ended("no world at the start")
     make_saves(b, a.saves)
+    ms = sum(1 for k in range(1, a.manual_saves + 1) if manual_save(b, k))
+    if a.manual_saves:
+        log(f"manual saves: {ms}/{a.manual_saves}")
     loaded, ok = list(a.avoid or []), 0
     for k in range(1, a.loads + 1):
         nm = load_in_world(b, set(loaded), k)
@@ -715,6 +770,7 @@ def main():
     ap.add_argument("--loads", type=int, default=10)
     ap.add_argument("--menu-loads", type=int, default=5)
     ap.add_argument("--saves", type=int, default=10)
+    ap.add_argument("--manual-saves", type=int, default=0)
     ap.add_argument("--cycles", type=int, default=2)
     ap.add_argument("--from", dest="frm", default="pause", choices=["pause", "main"])
     ap.add_argument("--in-world", action="store_true", help="the boot is in the world already (a restarted driver)")
