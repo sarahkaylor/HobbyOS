@@ -1,0 +1,84 @@
+C6-p7c: integ11 (13dc693b) Gate P5 #2 fault line -- services.exe pid 95, VA 0x3A8, PC 0x1080293940
+Source: strix:~/cp/integ14/p5.2.serial (integrator's integ11 batch; copied, not edited).  strix KVM, -smp 8 -m 12G.
+
+1. The PC is Wine's ntdll.so (unix side), quit_handler+0x40 -- the SIGQUIT handler.
+   ntdll.so = strix:~/cp/wine-build-x/stage/CP/WINE/lib/wine/x86_64-unix/ntdll.so (the P5 stage).
+   nm: 3f120 t segv_handler, 3e900 t quit_handler, 581d0 t abort_thread, 576e0 NtCurrentTeb.
+   [SIGX] for the fault names the SIGSEGV handler h=0x1080294120 = segv_handler
+     => ntdll.so base = 0x1080294120 - 0x3f120 = 0x1080255000
+     => PC 0x1080293940 - base = 0x3e940 = quit_handler+0x40:
+          3e934: mov    0xa0(%rbx),%rbx          ; ucontext RSP
+          3e93b: call   576e0 <NtCurrentTeb>
+          3e940: cmp    %rbx,0x3a8(%rax)         ; <-- rax = NtCurrentTeb() = NULL, reads 0x3A8
+   NtCurrentTeb in this build is   mov teb_key,%edi; jmp pthread_getspecific@plt
+   (not a %gs read), so the TEB came back NULL because this thread's pthread TSD slot is NULL.
+
+2. Where the thread was: glibc's thread-exit path, after its TSD was destroyed.
+   libc-2.31.so (strix:~/cp/vk2-build/sysroot-glibc231): _exit = 0xe3110, madvise = 0x118c90.
+   Every process's [EXITPC] last_user_pc = 0x1080143146 = _exit+0x36 (exit_group)  => libc base 0x1080060000.
+   The SIGQUIT row:  [SIGR] pid=95 sig=3 ipc=0x1080178C9B  => libc+0x118c9b = madvise+0xb (just past `syscall`);
+   the fault row says sys=28 (= madvise).  glibc 2.31 start_thread, after the thread function / pthread_exit
+   unwinds: __nptl_deallocate_tsd() (every pthread_setspecific slot -> NULL), then advise_stack_range()
+   -> madvise(MADV_DONTNEED) on the dead stack, then the exit syscall.  So pid 95 was a thread on its way out,
+   TEB key already cleared, when SIGQUIT arrived.
+   The thread's mask, [SIG] blocked pid=95 sig=10 ... mask=0x10012A03 = {HUP, INT, USR1, USR2, ALRM, CHLD, IO}
+   = Wine's server_block_set exactly: Wine's exit_thread/abort_thread block that set before
+   pthread_exit -- and it does NOT contain SIGQUIT.
+
+3. Who sent it: wineserver, ending the process.  The surrounding rows are the post-wineboot teardown:
+   SIGQUIT ([SIGR] ... sig=3) to every remaining Wine thread of services/winedevice/plugplay/svchost, the groups
+   exiting, then "[KERNEL] Process 94: services.exe exited" (pid 95's group anchor) next to the fault.
+   Wine 11.0 source (strix:~/cp/wine-build-x/src/wine-11.0, read for this note):
+     server/thread.c kill_thread():  a thread in a server wait gets a wakeup ("if it is waiting on the
+       socket, we don't need to send a SIGQUIT"); any other listed thread: `if (violent_death)
+       send_thread_signal( thread, SIGQUIT );`  (terminate_process kills the other threads violently).
+     dlls/ntdll/unix/thread.c: abort_thread()/exit_thread() do pthread_sigmask(SIG_BLOCK, &server_block_set)
+       then pthread_exit_wrapper(): close alert/wait/reply/request fds, pthread_exit().
+     dlls/ntdll/unix/server.c:1627-1633  server_block_set = ALRM IO INT HUP USR1 USR2 CHLD (no SIGQUIT).
+   The server drops a thread from its list when it processes the request-fd closure.  A thread
+   that has already closed its request fd (pthread_exit_wrapper) but whose closure the server has not processed
+   yet is still listed, so it is signalled inside its own exit: quit_handler -> NtCurrentTeb()==NULL -> SIGSEGV.
+   The kernel delivered a SIGQUIT that user space sent to that tid; nothing here is a lost wakeup, an early wait
+   return or a reply-fd/ioctl result.  The fault is in a process that is being terminated anyway (the probes
+   all passed); only the P5 grader's fault-line check turns it red.
+
+4. It is not new in integ11.  Identical signature (same PC, VA, ipc, rsp) on trees without any integ11 code:
+   scan: every *.serial / serial*.log on strix newer than 2026-11-16 that mentions services.exe:
+        441 files (copies included), hits (memory fault VA=0x3A8 / SIGQUIT-in-madvise rows):
+     1 1 ./integ14/p5.2.serial
+     1 1 ./integ/obj/cp-p5/wine/serial.log
+     1 1 ./lanes/k6-gl4/p4.1.serial
+     1 1 ./lanes/ext2w3b/obj/regloop-d-5/serial-b1.log
+     1 1 ./lanes/k6/obj/p4/integ12-1/serial.log
+     - lanes/ext2w3b/obj/regloop-d-5 : cp-ext2w3 edb0f175 (c0dbe5a2-based: no P7, no k6, no fork, no fat, no present),
+       reg_gate loop d run 5, 14:11 -- reg_gate does not grade this line, so it went unnoticed;
+     - lanes/k6/obj/p4/integ12-1 (+ its copy lanes/k6-gl4/p4.1.serial) : cp-k6 9d47b051, Gate P4, 17:28 --
+       P4 does not grade it either;
+     - integ14/p5.2 (+ its working copy integ/obj/cp-p5/wine/serial.log) : integ11, the red under study.
+   => 3 distinct occurrences in ~440 Wine boots (~0.7 %/boot); the precondition row
+      (SIGQUIT delivered with ipc = madvise+0xb) appears ONLY in those 3 boots, always followed by the fault.
+   P5 is the only gate whose grader fails on any "memory fault" line, which is why it first showed as a red there.
+
+5. Reproduction on integ11 13dc693b (this lane: strix:~/cp/lanes/p7c, synced + find src -exec touch {} +):
+   command: ~/cp/p7c/run-p5.sh i11-N = the integrator line (P5_PROBES="vkcube d3d11 d3d12 fullscr", P5_XSESSION_ENV=HB_SECOND_SCREEN=0,
+   wine-build-x / vk2-build / x11-build-x2 / vk2-pe, P5_EXPORT=/srv/nfs/cp-p7c-p5, MAKEFLAGS=-j16 TOOLS_SKIP=1), qemu-slot.sh, -m 12G.
+   p5 i11-1 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS  [P5W] boot finished after 304 s; lock released faults=0 21:05:15
+   p5 i11-2 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS  [P5W] boot finished after 298 s; lock released faults=0 21:11:07
+   p5 i11-3 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS  [P5W] boot finished after 295 s; lock released faults=0 21:17:52
+   p5 i11-4 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS  [P5W] boot finished after 304 s; lock released faults=0 21:24:09
+   i11-1: SIGQUIT-in-madvise rows=0  SIGQUIT deliveries ([SIGR] sig=3)=24  memory-fault rows=0
+   i11-2: SIGQUIT-in-madvise rows=0  SIGQUIT deliveries ([SIGR] sig=3)=24  memory-fault rows=0
+   i11-3: SIGQUIT-in-madvise rows=0  SIGQUIT deliveries ([SIGR] sig=3)=23  memory-fault rows=0
+   i11-4: SIGQUIT-in-madvise rows=0  SIGQUIT deliveries ([SIGR] sig=3)=21  memory-fault rows=0
+   integ11 total: integrator 1 FAIL / 2 (integ14 p5.1 pass, p5.2 this fault) + this lane 0 / 4  =>  1 / 6 boots.
+   integ10 (integ13): 0 / 3.  Both are consistent with the ~0.7 %/boot (3 in ~440) rate across trees: the
+   difference between 0/3 and 1/6 is not significant, and the same fault exists on edb0f175 (pre-integ8 code).
+
+6. Not done here (none of it is this lane's file), proposed:
+   - Wine (whoever owns ~/cp/wine-build-x): either let quit_handler return when NtCurrentTeb() is NULL
+     (the thread is already inside pthread_exit), or block SIGQUIT too in abort_thread()/exit_thread() before
+     pthread_exit_wrapper().  Both only change a thread that is already exiting.
+   - P5 grader (tools/cp/p5, C5-vk2's): until then, grade this exact signature as INFO, not as a fault:
+     a services/winedevice "memory fault VA=0x3A8 PC=<ntdll.so quit_handler+0x40>" right after
+     "[SIGR] pid=<same> sig=3 ipc=<libc madvise+0xb>" in a group that is exiting.
+   - No kernel change: the kernel delivered a signal that user space sent to a live tid, as Linux would.
