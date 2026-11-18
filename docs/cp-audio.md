@@ -281,6 +281,35 @@ path's own load is ≈100 WRITEI + ≈100 SYNC_PTR ioctls, ≈100 TX chunks and
 arm were planned; strix had five lanes' batches queued for the four slots,
 so only one pair ran.
 
+## 8. Facts for other lanes
+
+- `~/cp/sysroot-glibc231` is broken for linking: 17 dev symlinks
+  (libpthread.so, libdl.so, librt.so, libutil.so, libresolv.so, libnss_*.so,
+  lib64/ld-linux-x86-64.so.2 …) dangle into the deleted
+  `~/cp/lanes/ext2b/obj/sysroot-glibc231`.  ld then links static archives
+  into shared objects without a word (and configure scripts' pthread checks
+  fail).  Fix (integrator, it is shared): re-point each link at the same
+  sysroot's `lib/x86_64-linux-gnu/<target>`; `~/cp/lanes/audio-sysroot` is
+  such a copy.  Builds made before the deletion (wine-build-x) are fine.
+- A compat ioctl route that parks must not use -2 as its "parked" code:
+  -ENOENT is -2 (§3).  `GPU_ABI_PARKED` is -2 too; gpu_abi.c never returns
+  -ENOENT today, but it is the same trap.
+- alsa-lib on a RW-only hw device needs mmap_emul under plug (§5); any lane
+  that adds its own ALSA config must keep that.
+- The x64 IRQ dispatch (trap.c) now has a virtio-sound branch before the GPU
+  branch; it also serves a GPU/net device that shares the line.  C1-k7 owns
+  trap.c: the hunk is 14 lines in `general_interrupt_inner`'s else-if chain,
+  nowhere near the syscall entry/exit.
+- `make -k host_tests` never reaches its last ~30 test binaries: the
+  recipe runs `python3 tools/t5/run_t5_tests.py` (the known 38/40 with the
+  two `gaming.md` reds) and make stops the recipe there, so NES_TEST,
+  GUI_TEST, …, AUDIO_STUB_TEST and this lane's LINUX_SND_PARAMS_TEST are
+  built but not run by the gate.  Run them by name
+  (`make linux_snd_params_test_host && ./linux_snd_params_test_host`: 24
+  checks, 0 failed).
+- `FILE_TYPE_DEVSND` is appended at the end of `file_type_t`; C2-ntsync's
+  node type will land next to it (a trivial merge).
+
 ## 9. Open items
 
 - P9 fps A/B with audio on/off: n = 1 per arm only (§7); 3 per arm on an idle strix.
@@ -339,32 +368,3 @@ bash tools/cp/audio/run-game-audio.sh audio-venus-on
 # any harness: CP_AUDIO_WAV=/abs/out.wav (Makefile run, host-venus.sh,
 # p5lib.qemu_cmd, boot_p8.qemu_cmd); grade with tools/cp/audio/wavcheck.py
 ```
-
-## 8. Facts for other lanes
-
-- `~/cp/sysroot-glibc231` is broken for linking: 17 dev symlinks
-  (libpthread.so, libdl.so, librt.so, libutil.so, libresolv.so, libnss_*.so,
-  lib64/ld-linux-x86-64.so.2 …) dangle into the deleted
-  `~/cp/lanes/ext2b/obj/sysroot-glibc231`.  ld then links static archives
-  into shared objects without a word (and configure scripts' pthread checks
-  fail).  Fix (integrator, it is shared): re-point each link at the same
-  sysroot's `lib/x86_64-linux-gnu/<target>`; `~/cp/lanes/audio-sysroot` is
-  such a copy.  Builds made before the deletion (wine-build-x) are fine.
-- A compat ioctl route that parks must not use -2 as its "parked" code:
-  -ENOENT is -2 (§3).  `GPU_ABI_PARKED` is -2 too; gpu_abi.c never returns
-  -ENOENT today, but it is the same trap.
-- alsa-lib on a RW-only hw device needs mmap_emul under plug (§5); any lane
-  that adds its own ALSA config must keep that.
-- The x64 IRQ dispatch (trap.c) now has a virtio-sound branch before the GPU
-  branch; it also serves a GPU/net device that shares the line.  C1-k7 owns
-  trap.c: the hunk is 14 lines in `general_interrupt_inner`'s else-if chain,
-  nowhere near the syscall entry/exit.
-- `make -k host_tests` never reaches its last ~30 test binaries: the
-  recipe runs `python3 tools/t5/run_t5_tests.py` (the known 38/40 with the
-  two `gaming.md` reds) and make stops the recipe there, so NES_TEST,
-  GUI_TEST, …, AUDIO_STUB_TEST and this lane's LINUX_SND_PARAMS_TEST are
-  built but not run by the gate.  Run them by name
-  (`make linux_snd_params_test_host && ./linux_snd_params_test_host`: 24
-  checks, 0 failed).
-- `FILE_TYPE_DEVSND` is appended at the end of `file_type_t`; C2-ntsync's
-  node type will land next to it (a trivial merge).
