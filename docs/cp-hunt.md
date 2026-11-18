@@ -122,7 +122,7 @@ h2-ctl1's world is the Ray Tracing Overdrive preset (above).  Soak per phase:
   main menu, where the focus always behaves, and skips reload.p9's detour
   through the save list (the evidence that the save is boot A's is the
   position: an immediate F5 after loading writes a quick save whose
-  `playerPosition` equals boot A's).  {R12RATE}
+  `playerPosition` equals boot A's).  Result: play → save → reload → world **2/2** (h2-play1 → h2-rl1; h2-play2 → h2-rl2b after h2-rl2 failed on the seek), the F5 after loading at the same `playerPosition` as the play boot's quick save both times (`r2-reload.txt`).
 * Why the reload's seek fails (h2-rl2, and round 1's h-rl1b): with some
   save sets the focused CONTINUE row is drawn **104 px tall** (rows
   451..555, its save line under it; still there 1.6 s later), and
