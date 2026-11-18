@@ -23,6 +23,15 @@ for l in open(os.path.join(run, "serial.log"), errors="replace"):
     if "[THRW]" in l:
         thrw.append((phases[nhbp - 1] if 0 < nhbp <= len(phases) else "pre", l.strip()))
         continue
+    if ("[THRWK]" in l or "[THRWT]" in l) and thrw:
+        # rows 2 and 3 of the same group (kernel: [THRW] is split to fit a
+        # 256-byte kline): fold them into row 1, keeping its name last
+        m = re.search(r"pid=(\d+) (.*)", l.strip())
+        ph, r1 = thrw[-1]
+        if m and (" pid=%s " % m.group(1)) in r1:
+            head, name = r1.rsplit(" ", 1)
+            thrw[-1] = (ph, "%s %s %s" % (head, m.group(2), name))
+        continue
     if "[HBP]" in l:
         nhbp += 1
         last = l

@@ -4995,6 +4995,8 @@ void rw_thr_sample(void) {
 }
 
 /* ---- C6-present (docs/cp-present.md): what the threads are waiting in ----
+ * Three rows per group, each under the 256-byte kline: [THRW] states,
+ * [THRWK] ksys, [THRWT] top threads.
  * Row: run/ready/futex = average threads in that state; blk NR:avg = threads
  * blocked, by the syscall they are in; kern = running threads that were in
  * the kernel at the tick (trap = of those, not in a syscall: faults and
@@ -5035,6 +5037,15 @@ static struct cpw_group *cpw_find(int tgid) {
       return &cpw_g[i];
     }
   return 0;
+}
+
+/* End a row: the newline always fits (a kline is 256 bytes; a row that
+ * lost its newline would fuse with the next writer's, which the console
+ * probe grades as torn). */
+static void cpw_end(struct kline *kl) {
+  if (kl->n > (int)sizeof kl->b - 2) kl->n = (int)sizeof kl->b - 2;
+  kl_c(kl, '\n');
+  kl_emit(kl);
 }
 
 static void cpw_pct(struct kline *kl, uint32_t n, uint32_t ticks) {
@@ -5148,6 +5159,13 @@ void cp_wait_sample(int emit) {
       cpw_pct(&kl, g->kern, cpw_ticks);
       kl_s(&kl, " trap=");
       cpw_pct(&kl, g->ktrap, cpw_ticks);
+      kl_c(&kl, ' ');
+      if (lead) kl_s(&kl, lead->name);
+      cpw_end(&kl);
+      /* row 2: running-in-a-syscall threads by syscall */
+      kl_init(&kl);
+      kl_s(&kl, "[THRWK] pid=");
+      kl_i(&kl, g->tgid);
       kl_s(&kl, " ksys");
       for (int k = 0; k < CPW_NR; k++) {
         if (!g->ks[k].n) continue;
@@ -5156,8 +5174,12 @@ void cp_wait_sample(int emit) {
         kl_c(&kl, ':');
         cpw_pct(&kl, g->ks[k].n, cpw_ticks);
       }
+      cpw_end(&kl);
+      /* row 3: the group's three threads that ran most this window */
+      kl_init(&kl);
+      kl_s(&kl, "[THRWT] pid=");
+      kl_i(&kl, g->tgid);
       kl_s(&kl, " top");
-      /* the group's three threads that ran most this window */
       int used[3] = { 0, 0, 0 };
       for (int t = 0; t < 3; t++) {
         int best = 0;
@@ -5177,20 +5199,17 @@ void cp_wait_sample(int emit) {
         kl_i(&kl, (long)((uint32_t)cpw_kern[best] * 100u / cpw_ticks));
         kl_c(&kl, '/');
         kl_i(&kl, (long)((uint32_t)cpw_ktrap[best] * 100u / cpw_ticks));
-        /* its syscall ticks by syscall, in % of the window */
-        for (int k = 0; k < CPW_TKS; k++) {
+        /* its syscall ticks by syscall (first four seen), in % of the window */
+        for (int k = 0; k < CPW_TKS && k < 4; k++) {
           if (!cpw_tks[best][k].n) continue;
           kl_c(&kl, k ? ',' : '(');
           kl_i(&kl, cpw_tks[best][k].nr);
           kl_c(&kl, '=');
           kl_i(&kl, (long)((uint32_t)cpw_tks[best][k].n * 100u / cpw_ticks));
-          if (k == CPW_TKS - 1 || !cpw_tks[best][k + 1].n) kl_c(&kl, ')');
+          if (k == 3 || k == CPW_TKS - 1 || !cpw_tks[best][k + 1].n) kl_c(&kl, ')');
         }
       }
-      kl_c(&kl, ' ');
-      if (lead) kl_s(&kl, lead->name);
-      kl_c(&kl, '\n');
-      kl_emit(&kl);
+      cpw_end(&kl);
     }
   }
   for (int gi = 0; gi < CPW_GROUPS; gi++) {
