@@ -5399,8 +5399,16 @@ static void vtb_finish_site(struct vm_tlb_batch *b, struct addr_space *as, int s
 }
 
 /* vm_zap_range with the releases parked in `b`.  Caller holds vm_lock. */
+#if defined(__x86_64__)
+static void vtb_rel_cb(void *ctx, uint64_t fr) { vtb_add((struct vm_tlb_batch *)ctx, fr); }
+#endif
 static void vm_zap_range_defer(struct addr_space *as, uint64_t base,
                                uint64_t len, struct vm_tlb_batch *b) {
+#if defined(__x86_64__)
+  /* H7-fault round 2 (H7-10): one table walk per 2 MiB (mmu.c) */
+  as->resident_frames -= vm_arch_zap_range(as, base, base + len, vtb_rel_cb, b);
+  return;
+#endif
   for (uint64_t a = base; a < base + len; a += FRAME_SIZE) {
     uint64_t nx = vm_arch_skip_absent(as, a); /* P1: skip absent tables */
     if (nx != a) {
@@ -5565,6 +5573,7 @@ static int vm_prot_set_span(struct addr_space *as, uint64_t addr, uint64_t len,
 }
 
 static int mpr_diag_rows;
+#define VM_MPROT_CHUNK 512 /* resident pages per vm_lock hold (H7-10) */
 
 int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot) {
   if (!grp || !grp->as)
@@ -5607,7 +5616,18 @@ int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot)
   }
   /* Resident pages: re-encode in place, or ZAP for PROT_NONE (design
      section 4.4: documented divergence from Linux).  P1: absent tables are
-     skipped whole. */
+     skipped whole.
+     H7-fault round 2 (H7-10): the walk drops vm_lock every
+     VM_MPROT_CHUNK resident pages.  An mprotect of 256 MiB resident held the
+     lock 3-4.5 ms in one stretch and a concurrent fault waited up to 5.3 ms
+     (linux_probe_vmhold).  Safe because the region records are already
+     final (vm_prot_set_span above): a fault in the gap maps a new page with
+     the new protection, an old leaf keeps its old rights only until this
+     loop or the shootdown at the end reaches it (Linux: until its flush),
+     and a page whose region changed under us in the gap (another thread's
+     mprotect / mmap / munmap) is left to that call. */
+  int mprot_n = 0, mr_ok = 0;
+  uint64_t mr_lo = 0, mr_hi = 0; /* the region last looked up, while held */
   for (uint64_t a = addr; a < addr + len; a += FRAME_SIZE) {
     uint64_t nx = vm_arch_skip_absent(as, a);
     if (nx != a) {
@@ -5616,6 +5636,23 @@ int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot)
     }
     if (vm_arch_walk(as, a, 0) != 0)
       continue;
+    if (++mprot_n % VM_MPROT_CHUNK == 0) {
+      vm_lock_rel(fl);
+      fl = vm_lock_acq(__LINE__);
+      mr_lo = mr_hi = 0; /* the region list may have changed in the gap */
+      if (as->ver != AS_V2)
+        break;
+      if (vm_arch_walk(as, a, 0) != 0)
+        continue;
+    }
+    if (a < mr_lo || a >= mr_hi) {
+      struct vm_region *cr = vm_region_find(as, a);
+      mr_ok = cr && cr->prot == p;
+      mr_lo = cr ? cr->base : a;
+      mr_hi = cr ? cr->base + cr->len : a + FRAME_SIZE;
+    }
+    if (!mr_ok)
+      continue; /* changed in a gap: another call's page now */
     if (p == 0) {
       vtb_add(&tb, vm_arch_unmap_keep(as, a));
       as->resident_frames--;
@@ -5641,22 +5678,26 @@ int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot)
   if (mpr_diag_rows < 40) {
     struct vm_region *dr = vm_region_find(as, addr);
     if (dr && dr->obj && (dr->flags & VM_MAP_PRIVATE)) {
+      /* H7-fault: one kline, printed after the release (vm_row) */
       mpr_diag_rows++;
-      uart_puts("[MPROT] a=");
-      uart_print_hex(addr);
-      uart_puts(" len=");
-      uart_print_hex(len);
-      uart_puts(" prot=");
-      print_int((int)p);
-      uart_puts(" rc=");
-      print_int(rc);
-      uart_puts(" r=");
-      uart_print_hex(dr->base);
-      uart_puts("+");
-      uart_print_hex(dr->len);
-      uart_puts(" rprot=");
-      print_int((int)dr->prot);
-      uart_puts("\n");
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[MPROT] a=");
+      kl_hex(&kl, (unsigned long)addr);
+      kl_s(&kl, " len=");
+      kl_hex(&kl, (unsigned long)len);
+      kl_s(&kl, " prot=");
+      kl_i(&kl, (int)p);
+      kl_s(&kl, " rc=");
+      kl_i(&kl, rc);
+      kl_s(&kl, " r=");
+      kl_hex(&kl, (unsigned long)dr->base);
+      kl_c(&kl, '+');
+      kl_hex(&kl, (unsigned long)dr->len);
+      kl_s(&kl, " rprot=");
+      kl_i(&kl, (int)dr->prot);
+      kl_c(&kl, '\n');
+      vm_row(&kl);
     }
   }
   vm_lock_rel(fl);

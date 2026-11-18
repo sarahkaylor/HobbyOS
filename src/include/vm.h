@@ -716,6 +716,13 @@ void vm_arch_unmap(struct addr_space *as, uint64_t va);
  * back (0 for an absent or SHARED-marked leaf) instead of freeing it: the
  * caller frees it after vm_arch_shootdown(). */
 uint64_t vm_arch_unmap_keep(struct addr_space *as, uint64_t va);
+/* H7-fault round 2 (x86_64): vm_arch_unmap_keep over [va, end), one table at a
+   time: each present leaf is cleared and rel(ctx, frame-or-0) called (0 for a
+   shared or still-COW-shared frame, as unmap_keep returns).  This CPU's TLB is
+   flushed (invlpg, or one CR3 reload past 32 leaves); other CPUs are the
+   caller's (shootdown).  Returns the leaves cleared. */
+int vm_arch_zap_range(struct addr_space *as, uint64_t va, uint64_t end,
+                      void (*rel)(void *ctx, uint64_t fr), void *ctx);
 /* C1-k4: munmap/mremap cores with the cross-CPU flush (vm.c). */
 void vm_zap_span(struct addr_space *as, uint64_t base, uint64_t len);
 int vm_unmap_span(struct addr_space *as, uint64_t base, uint64_t len);

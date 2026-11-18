@@ -928,6 +928,49 @@ uint64_t vm_arch_unmap_keep(struct addr_space *as, uint64_t va) {
   return leaf & X64_OA_MASK;
 }
 
+/* H7-fault round 2 (H7-10): see vm.h.  munmap / MAP_FIXED / madvise of a big
+   resident span walked all four levels for every page twice (vm_arch_walk,
+   then vm_arch_unmap_keep) and invlpg'd each one, under vm_lock: 6-9 ms for
+   256 MiB (linux_probe_vmhold).  Here the page table is walked once per
+   2 MiB and its entries are read in a row. */
+int vm_arch_zap_range(struct addr_space *as, uint64_t va, uint64_t end,
+                      void (*rel)(void *ctx, uint64_t fr), void *ctx) {
+  int n = 0;
+  while (va < end) {
+    uint64_t nx = vm_arch_skip_absent(as, va);
+    if (nx != va) {
+      va = nx;
+      continue;
+    }
+    uint64_t tend = (va | 0x1FFFFFULL) + 1;
+    if (tend > end)
+      tend = end;
+    uint64_t *pte = x64_v2_walk_alloc(as, va, 0);
+    if (!pte) {
+      va = tend;
+      continue;
+    }
+    for (uint64_t a = va; a < tend; a += FRAME_SIZE, pte++) {
+      uint64_t leaf = *pte;
+      if (!(leaf & X64_PTE_P))
+        continue;
+      *pte = 0;
+      if (n < 32)
+        x64_invlpg(a);
+      n++;
+      uint64_t fr = 0;
+      if (!(leaf & X64_PTE_SHARED) &&
+          (!(leaf & X64_PTE_COW) || vm_cow_frame_put(leaf & X64_OA_MASK)))
+        fr = leaf & X64_OA_MASK;
+      rel(ctx, fr);
+    }
+    va = tend;
+  }
+  if (n >= 32)
+    vm_arch_reload_cr3(as); /* this CPU, if it runs the AS (a flush) */
+  return n;
+}
+
 /* C1-fork: make a present private leaf a copy-on-write share (read-only,
    COW bit).  Local invlpg only: the caller shoots the other CPUs down once
    for the whole fork.  0, or -1 when no private leaf is present. */
