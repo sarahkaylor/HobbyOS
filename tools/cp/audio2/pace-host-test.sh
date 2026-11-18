@@ -16,8 +16,8 @@
 #           own player process: the host-stall shape of cp-hunt H1-15 and the
 #           [CONS] stalls= rows; QEMU's timer thread freezes with it) PASS: <= 2
 #   lowpad  no stall, the game renders one period per event (fill=1) PASS: <= 10
-# Measured on strix (base = integ16 + the timing rows): calm 1, stall 12,
-# lowpad 1795; with the fix 0, 1, 3.
+# Measured on strix (base = integ16 + the timing rows, two runs): calm 0-1,
+# stall 12-31, lowpad 1795-1837; with the fix 0, 0-1, 1-3.
 # Before the play-clock fix (docs/cp-audio2.md §4) a stall cost an xrun or a
 # cascade of them (QEMU pays the stalled time back at up to 2x real time) and
 # lowpad underran on most writer ticks (QEMU's mixing buffer takes a whole

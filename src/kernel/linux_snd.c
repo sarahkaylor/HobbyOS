@@ -161,7 +161,7 @@ static struct {
   uint64_t st_maxgap_us, st_maxlat_us, st_maxwr_us, st_max100, st_minq;
   /* H5-audio2 play clock (vis_update_locked): `vis` is hw limited to the
      guest's real time -- how far the stream can really have played */
-  uint64_t vis, vis_us, vis_rem;
+  uint64_t vis, clk, vis_us, vis_rem;
   uint64_t held, st_held0, st_maxahead; /* xruns the play clock held back */
   int in_hold;
 } S;
@@ -344,16 +344,27 @@ static uint64_t avail_locked(void) {
  * with no stall at all.  Each winealsa recovery puts a period of silence in
  * front of the music (cp-hunt H1-01).
  *
- * So the xrun rule uses `vis`: hw, but never more than real time ahead of
- * where it was -- vis = min(hw, vis + elapsed x rate), and never more than a
- * buffer behind hw.  A device that plays
+ * So the xrun rule uses `vis` = min(hw, clk), where clk advances at real
+ * time and is kept within [hw - buffer, hw + period] (vis_update_locked).
+ * A device that plays
  * at real time or slower is unchanged (vis == hw, so a writer that really is
  * late still underruns); a device that runs ahead of the clock cannot drain
- * the writer's buffer faster than the music plays.  Everything else (avail,
- * hw_ptr, poll, drain) still uses hw, so no waiter depends on the clock and
- * nothing needs a timer. */
+ * the writer's buffer faster than the music plays.
+ *
+ * The position user space sees (SYNC_PTR/STATUS hw_ptr, avail, DELAY, the
+ * WRITEI room) is vis too: winealsa counts what avail says was played and
+ * puts a period of silence in front of the music whenever that is all of it
+ * (alsa_write_data's lead-in), so a hw-based avail made the same zeros
+ * without any xrun (game boot a2-lane-fp1 with only the xrun rule: 534 -> 8
+ * kernel xruns, 5 -> 6 WAV dropouts).  The ring is safe either way (the
+ * device has consumed everything below hw >= vis).  Drain still ends on hw.
+ * Liveness: vis moves with time, not with interrupts, so SYNC_PTR always
+ * services the stream, a parked WRITEI has its deadline, and poll also says
+ * POLLOUT when the device is dry (no completion interrupt will come) and hw
+ * has room -- the caller re-polls until the clock catches up, at most one
+ * buffer time. */
 static void vis_start_locked(void) {
-  S.vis = S.hw;
+  S.vis = S.clk = S.hw;
   S.vis_us = timer_get_us();
   S.vis_rem = 0;
   S.in_hold = 0;
@@ -367,12 +378,19 @@ static void vis_update_locked(uint64_t now) {
   if (dt > 10000000u) dt = 10000000u; /* no overflow; 10 s is "everything" */
   uint64_t x = dt * r + S.vis_rem;
   S.vis_rem = x % 1000000u;
-  uint64_t v = S.vis + x / 1000000u;
-  S.vis = v < S.hw ? v : S.hw;
-  /* never more than one buffer behind the device: a writer that stops after
-     a long catch-up still underruns within one buffer time (the bound can
-     never cause an xrun itself: appl >= hw > hw - buffer) */
-  if (S.hw > S.buffer && S.vis < S.hw - S.buffer) S.vis = S.hw - S.buffer;
+  /* clk runs at real time.  It may lead hw by at most one period (hw moves
+     in whole TX messages, so a device on time is up to a message "behind"
+     between completions; more than that, the device really is late and the
+     lead is not saved up -- after a host stall the guest's clock jumped but
+     the device's has not), and it never trails hw by more than a buffer: a
+     writer that stops after a long catch-up still underruns within one
+     buffer time (that bound can never cause an xrun itself: appl >= hw >
+     hw - buffer). */
+  uint64_t c = S.clk + x / 1000000u;
+  if (c > S.hw + S.period) c = S.hw + S.period;
+  if (S.hw > S.buffer && c < S.hw - S.buffer) c = S.hw - S.buffer;
+  S.clk = c;
+  S.vis = c < S.hw ? c : S.hw;
   if (S.hw - S.vis > S.st_maxahead) S.st_maxahead = S.hw - S.vis;
 }
 
@@ -536,10 +554,12 @@ static int service_locked(void) {
   uint64_t now = timer_get_us();
   if (n > 0) {
     if (S.hw > S.appl) S.hw = S.appl; /* never: the device returns what we gave it */
-    uint64_t av = avail_locked();
-    if (av > S.avail_max) S.avail_max = av;
   }
   vis_update_locked(now);
+  if (n > 0) {
+    uint64_t av = avail_vis_locked();
+    if (av > S.avail_max) S.avail_max = av;
+  }
   if (n > 0) {
     if (S.state == ST_RUNNING) {
       uint64_t q = S.appl - S.hw;
@@ -549,7 +569,10 @@ static int service_locked(void) {
       if (d100 > S.st_max100) S.st_max100 = d100;
       stat_row_locked(now);
     }
-    if (S.state == ST_DRAINING && S.hw >= S.appl) S.state = ST_SETUP;
+    if (S.state == ST_DRAINING && S.hw >= S.appl) {
+      S.state = ST_SETUP;
+      S.vis = S.clk = S.hw;
+    }
   }
   int was = S.state;
   check_xrun_locked(); /* also between completions: the play clock moves on */
@@ -593,7 +616,7 @@ int linux_snd_open(int minor, uint32_t flags) {
     uint64_t fl = spinlock_acquire_irqsave(&lsnd_lock);
     S.open = 1;
     S.state = ST_OPEN;
-    S.hw = S.appl = S.submit = S.vis = 0;
+    S.hw = S.appl = S.submit = S.vis = S.clk = 0;
     S.epoch++;
     S.inflight = 0;
     S.user_pversion = 0;
@@ -682,7 +705,7 @@ void linux_snd_poll_probe(int minor, int *r, int *w, int *e) {
   case ST_PREPARED:
   case ST_RUNNING:
   case ST_PAUSED:
-    if (avail_locked() >= S.avail_min) *w = 1;
+    if (avail_vis_locked() >= S.avail_min || (S.inflight == 0 && avail_locked() >= S.avail_min)) *w = 1;
     break;
   case ST_DRAINING:
     break;
@@ -867,9 +890,9 @@ static void fill_status(uint8_t *b) { /* 152 bytes, lsnd_lock held */
   put_ts(b + 8, S.trigger_us);
   put_ts(b + 24, timer_get_us());
   uint64_t bd = S.boundary ? S.boundary : ~0ull;
-  uint64_t appl = S.appl % bd, hw = S.hw % bd, av = avail_locked();
+  uint64_t appl = S.appl % bd, hw = S.vis % bd, av = avail_vis_locked();
   int64_t delay = (S.state == ST_RUNNING || S.state == ST_DRAINING || S.state == ST_PAUSED)
-                      ? (int64_t)(S.appl - S.hw) : 0;
+                      ? (int64_t)(S.appl - S.vis) : 0;
   cpy(b + 40, &appl, 8);
   cpy(b + 48, &hw, 8);
   cpy(b + 56, &delay, 8);
@@ -1009,7 +1032,7 @@ static int do_hw_params(struct process *p, uint64_t arg, int refine_only) {
   S.avail_min = period;
   S.start_thr = 1;
   S.stop_thr = buffer;
-  S.hw = S.appl = S.submit = S.vis = 0;
+  S.hw = S.appl = S.submit = S.vis = S.clk = 0;
   S.epoch++;
   S.inflight = 0;
   S.state = ST_SETUP;
@@ -1078,7 +1101,7 @@ static int do_writei(struct process *p, uint64_t arg, int nonblock) {
     spinlock_release_irqrestore(&lsnd_lock, fl);
     return -EBADFD;
   }
-  uint64_t av = avail_locked();
+  uint64_t av = avail_vis_locked();
   uint32_t seen = __atomic_load_n(&lsnd_seq, __ATOMIC_SEQ_CST);
   uint64_t appl = S.appl;
   uint64_t fb = S.frame_bytes, bufsz = S.buffer;
@@ -1214,7 +1237,7 @@ static int pcm_ioctl(struct process *p, uint32_t req, uint64_t arg, int nonblock
     service();
     fl = spinlock_acquire_irqsave(&lsnd_lock);
     int e = hwsync_state_err();
-    int64_t d = (int64_t)(S.appl - S.hw);
+    int64_t d = (int64_t)(S.appl - S.vis);
     spinlock_release_irqrestore(&lsnd_lock, fl);
     if (e) return e;
     return req == PCM_DELAY ? cout(p, arg, &d, 8) : 0;
@@ -1226,7 +1249,9 @@ static int pcm_ioctl(struct process *p, uint32_t req, uint64_t arg, int nonblock
     if (r) return r;
     uint32_t flags;
     cpy(&flags, b, 4);
-    if (flags & 1u) service(); /* SNDRV_PCM_SYNC_PTR_HWSYNC */
+    (void)(flags & 1u); /* SNDRV_PCM_SYNC_PTR_HWSYNC or not: the play clock moves
+                           with time, so every SYNC_PTR services the stream */
+    service();
     fl = spinlock_acquire_irqsave(&lsnd_lock);
     uint64_t bd = S.boundary ? S.boundary : ~0ull;
     if (!(flags & 2u) && S.state != ST_OPEN) { /* !SYNC_PTR_APPL: apply the user's appl_ptr */
@@ -1245,7 +1270,7 @@ static int pcm_ioctl(struct process *p, uint32_t req, uint64_t arg, int nonblock
     z(b + 8, 64);
     int32_t st = S.state;
     cpy(b + 8, &st, 4);
-    uint64_t hw = S.hw % bd, appl = S.appl % bd;
+    uint64_t hw = S.vis % bd, appl = S.appl % bd;
     cpy(b + 16, &hw, 8);
     put_ts(b + 24, timer_get_us());
     cpy(b + 72, &appl, 8);
@@ -1267,7 +1292,7 @@ static int pcm_ioctl(struct process *p, uint32_t req, uint64_t arg, int nonblock
       return -EBUSY;
     }
     S.hw = S.appl = S.submit = 0;
-    S.vis = 0;
+    S.vis = S.clk = 0;
     S.epoch++;
     S.inflight = 0;
     S.avail_max = 0;
@@ -1285,6 +1310,7 @@ static int pcm_ioctl(struct process *p, uint32_t req, uint64_t arg, int nonblock
     S.inflight = 0;
     S.appl = S.submit = S.hw;
     if (S.vis > S.hw) S.vis = S.hw;
+    if (S.clk > S.hw) S.clk = S.hw;
     spinlock_release_irqrestore(&lsnd_lock, fl);
     return 0;
   case PCM_START: return do_start();
@@ -1341,7 +1367,7 @@ static int pcm_ioctl(struct process *p, uint32_t req, uint64_t arg, int nonblock
         moved = fr < can ? fr : can;
         S.appl -= moved;
       } else {
-        uint64_t can = avail_locked();
+        uint64_t can = avail_vis_locked();
         moved = fr < can ? fr : can;
         S.appl += moved; /* forwarded frames play whatever the ring held */
         submit_locked();
