@@ -1,0 +1,11 @@
+# H4-kglitch round 2: tools/cp/kglitch/sigmask-gate.sh, integ19 (kglitch) and lane (kglitch-s1)
+== base
+2073:[LP] M1 a spawned process starts with an empty mask  pid=97 mask=0x10002 sigint_blocked=1 -> FAIL
+2082:[LP] M1 a spawned process starts with an empty mask  pid=99 mask=0x10002 sigint_blocked=1 -> FAIL
+2091:[LP] M1 a spawned process starts with an empty mask  pid=101 mask=0x10002 sigint_blocked=1 -> FAIL
+2099:[LP] M1 a spawned process starts with an empty mask  pid=103 mask=0x10002 sigint_blocked=1 -> FAIL
+2107:[LP] M1 a spawned process starts with an empty mask  pid=105 mask=0x10002 sigint_blocked=1 -> FAIL
+2115:[LP] M1 a spawned process starts with an empty mask  pid=107 mask=0x10002 sigint_blocked=1 -> FAIL
+2123:[LP] M1 a spawned process starts with an empty mask  pid=109 mask=0x10002 sigint_blocked=1 -> FAIL
+2131:[LP] M1 a spawned process starts with an empty mask  pid=111 mask=0x10002 sigint_blocked=1 -> FAIL
+== lane

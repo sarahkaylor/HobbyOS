@@ -430,3 +430,151 @@ P9_SCRIPT=tools/cp/kglitch/fpsprobe-stack.p9 P9_RUN=kg-stack1 VENUS_BUILD=$HOME/
   any boot here.
 - **Soak depth.** The concurrency probes reached 2–5 boots each, not 10, because of slot
   contention. thrstorm was not run.
+
+# Round 2 (base integ19 = 787c6bbe, branch cp-kglitch2)
+
+## 9. H2-F2: `wineserver -k` ignored for 10.5 s — a recycled pid slot's signal mask
+
+**The trace.** H2's r1 loop (`-DP8_LAUNCHES=12`, a fresh session per launch, lavapipe,
+wine-cp2) ran on integ19 with round 1's `[SIGINT-S]`/`[SIGINT-D]` rows.
+- On every slow `-k` the SIGINT was queued to the session's wineserver with SIGINT in
+  its mask. Examples: `[SIGINT-S] from=260 to=69 tgid=69 st=2 mask=0x10012A07`, then
+  `mask=0x10012A03`, then `mask=0xFFFFFFFE3FFBFAFF`.
+- No `[SIGINT-D]` row followed, `wineserver -k` polled for 10.5 s, and then it
+  SIGKILLed the server.
+- On every fast `-k` the mask was 0 and `[SIGINT-D] pid=… ip=…epoll_wait` came
+  within the same millisecond.
+
+So the signal was queued and never delivered, because the server ran with SIGINT
+blocked. epoll_wait was not at fault.
+
+**Why the server's mask held SIGINT.**
+- The compat signal mask, sigaltstack and SA_* flag words are arrays indexed by pid
+  slot (`linux_compat_proc.c`). Only fork and clone set them, copying the parent's.
+- A process the kernel creates from scratch kept the slot's last occupant's values.
+  That covers `spawn_ex`, used by p8launch to start `wine`, and the wave and XSTART
+  loaders.
+- Every Wine client blocks ntdll's `server_block_set` (SIGINT included) for good, at
+  `server_init_process`. Once a session's clients have used the pid slots, p8launch's
+  `spawn_ex("wine")` lands on such a slot.
+- `wine` then forks the session's wineserver, fork copies the stale mask, and execve
+  keeps it. That is why the failures start from the 4th launch on.
+
+**Fix (f5ba109f).** process.c's fresh-PCB init calls `linux_compat_sig_slot_reset()`:
+mask 0, no altstack, no SA_* flags. fork and clone still copy the parent's state
+afterwards.
+
+**Test that fails first.** `linux_probe_sigmask` with the native driver
+`tools/cp/kglitch/kgmask.c`, run by `tools/cp/kglitch/sigmask-gate.sh`.
+- 600 forks die with SIGINT blocked, then 8 `spawn_ex`'d checks land on recycled slots.
+- integ19: 8/8 start with `mask=0x10002` (SIGINT|SIGCHLD): FAIL.
+- Lane: 8/8 start with mask 0: PASS.
+
+| H2's r1 loop, 12 fresh-session launches, strix, booted together | slow `-k` (10.5 s, SIGKILL) |
+|---|---|
+| integ19 (`kg-r1-base`) | **9/12** (launches 4 and 6–12) |
+| lane, f5ba109f (`kg-r1-lane`) | **0/12** (166–190 ms each) |
+
+Round 1's `sigint` probe passed on integ19 because it forks its child. Only a
+from-scratch process inherits a stale slot.
+
+**The related winprobe W6 note (GetTickCount64 lagging Sleep(200)).** The trace has no
+late epoll_wait timeout. Every `[SIGINT-D]` landed in the same millisecond as its send,
+and no other epoll rows were collected. Nothing here points at the kernel, which fits
+a host stall.
+
+## 10. K10: a blocking TCP connect returned EINPROGRESS (012c748c)
+
+- **Cause.** `l_connect` forced O_NONBLOCK for every family to disambiguate unix's -2.
+- **Fix.** Only AF_UNIX takes that probe now; AF_INET connect is synchronous.
+- **Probe** `linux_probe_tcpconn`: C1 is a blocking connect to the host's NFS port,
+  10.0.2.2:2049. integ19 gets `rc=-1 errno=115` (FAIL); the lane gets `rc=0` (PASS). C2
+  (O_NONBLOCK, completes with SO_ERROR 0) and C3 (blocking loopback) pass on both.
+
+## 11. K11: a blocking loopback accept busy-yielded (fe068ce9)
+
+- **Cause.** `net_socket_accept_lo` returned the park `-2` without marking the caller
+  BLOCKED.
+- **Fix.** It now parks with a 10 ms bound and publishes `lo_waiter`.
+  `net_socket_connect_lo` wakes that waiter, and any pollers, after queueing.
+- **Probe** `linux_probe_loaccept`: A1 waits 500 ms in `accept` for a connector thread.
+  integ19 burns `cpu_us=341216` (FAIL); the lane uses `cpu_us=443` (PASS).
+
+## 12. K8/K9: errno of the generic -1 (4c286150)
+
+- **The helper.** `file_fail_errno(p, fd)` returns EPERM for a memfd or tmpfs write,
+  whose only -1 is a seal refusal, and EBADF otherwise.
+- **Where it is applied:**
+  - write and pwrite64 use it;
+  - read, readv, writev and pread64 map -1 to EBADF.
+
+  These are the x64 native read/write/readv/writev routes and the compat
+  readv/pread64/pwrite64 routes.
+- **Probe** `linux_probe_errnomap`. On integ19 three rows FAIL:
+  - R3 (readv on a closed fd) returns EPERM;
+  - R4 (writev on a closed fd) returns EPERM;
+  - S1 (write to an F_SEAL_WRITE memfd) returns EBADF.
+
+  On the lane all 8 rows pass.
+
+## 13. H5-05: what the game's audio thread blocks on
+
+**Instrument (`src/kernel/linux_compat_away.c`).**
+1. An ntsync event that is SET 50–200 times a second is treated as a clock (winealsa's
+   period event).
+2. A thread that waits on a clock is a periodic waiter (the WASAPI client).
+3. CPU 0's 100 Hz sampler records what that thread does between a clock wait's return
+   and its next clock wait. The kinds are U, R, T, F (futex word), K (in syscall nr,
+   with the CPU's PC) and B (parked in syscall nr).
+4. Every absence of 30 ms or more prints `[AWAY] tid ms at= clock …`, with a budget of
+   400 rows.
+5. The row also names the thread whose FUTEX_WAKE ended a park (`waker=`), with that
+   waker's own samples over the absence (`wk=`).
+6. A 48-entry flight recorder replays the absences behind each `[SND] zeros` row as
+   `[AWAY-Z]`, including any absence still open. The zeros row now carries `up_ms=`.
+7. Clocks set by the `/dev/snd` WRITEI caller are tagged `audio=1`, and a clock is
+   named by its slot (`clock=#n`).
+
+The probe `linux_probe_away`, checked by `tools/gate/lp_check_away.py`, fails on
+integ19 (no row) and passes on the lane (12 rows: 6 sleep absences, 4 busy ones).
+
+**Result: 11 fp720 audio boots** (strix, Venus, wine-cp2, `run-hunt.sh fp720
+HUNT_AUDIO=1`). The instrument was built up over these boots:
+- fp1–2: the base rows;
+- fp3–4: the waker added;
+- fp5–8: the recorder; detection was still broken in fp5 and fp7;
+- fp9–10: robust clock detection;
+- fp11–12: the PCM-writer `audio=1` tag.
+
+Each boot had 4–5 WAV dropouts (gamecheck), and every one has `[AWAY-Z]` rows from
+fp9 on. Evidence: `h505-away-strix.txt`.
+
+1. **Who waits on the audio clock.** The ntsync event set by the PCM writer (winealsa's
+   timer thread) is waited on by tids 92 and 96. Those are the game's main thread and
+   one other game thread (fp11).
+   - At every dropout of fp11 and fp12 they had been away for 30–293 ms.
+   - Their samples over those absences:
+     - fp11 (15 `audio=1` `[AWAY-Z]` rows): **user code 70 %**, faults/interrupts in
+       the kernel (T) 16 %, runnable 3 %, clock_nanosleep 3 %, under 2 % anything else;
+     - fp12 (11 rows): user 66 %, T 25 %, runnable 1 %.
+   - Over all their absences: user 38 %, faults 31 %, mmap/munmap 15 %.
+   - So the waiter is busy running its own game code. It is not blocked.
+2. **The other periodic waiters near the dropouts.** Tids 162/163/168/169, on the game's
+   other clock events, are parked in FUTEX_WAIT on one lock object for 97–99 % of their
+   absences. The words are 0x14F342024C–0x14F342025C, the same in every boot (0x14F37B…
+   in fp11).
+   - They are released by a game thread, tid 96 or 97, in 286–303 of about 300 rows per
+   boot. While holding the lock, that thread runs user code, ntsync waits and sleeps.
+   - This is user-space lock contention inside the game.
+3. **No kernel wait.** No sample of the audio clock's waiters is an NFS read, a
+   blk_token or a ylock wait.
+   - `[NFSPIPE] stall` rows: 0, 1, 1 and 0 in fp1–4, against 4 dropouts each.
+   - **The H1-13 hypothesis (NFS resend pauses) is rejected**, and the NFS resend path is
+     unchanged.
+   - The one kernel share is fault handling (T, 16–25 % at the dropouts): demand
+     paging while the game streams. That is a possible later lever, not a glitch.
+
+So the 31–260 ms absences H5 saw are the game's own threads being busy or contending
+for the game's own lock. The kernel has nothing to fix there. The instrument stays: it
+costs one sample per flagged thread per tick, plus a row only when a periodic waiter
+is away for 30 ms or more.

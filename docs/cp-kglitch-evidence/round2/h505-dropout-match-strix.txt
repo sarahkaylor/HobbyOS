@@ -1,0 +1,137 @@
+== kg2-fp9
+== /home/sarah/cp/lanes/kglitch-work/kg2-fp9.away
+ zeros n=2 up_ms=140598 frames=3360 (70 ms)
+   tid=92 away=113ms since=140549 F=0 U=11 waker=- wk=-
+   tid=96 away=114ms since=140548 F=0 U=3 waker=- wk=-
+   tid=162 away=16366ms since=124309 F=1616(0x0x14F342024C) U=19 waker=96 wk=U:15,B16:4,K202:1,T:10,B230:2
+   tid=168 away=15030ms since=125645 F=1502(0x0x14F3420258) U=0 waker=96 wk=U:15,B16:4,K202:1,T:10,B230:2
+ zeros n=3 up_ms=142398 frames=6240 (130 ms)
+   tid=92 away=161ms since=142362 F=0 U=16 waker=- wk=-
+   tid=162 away=18223ms since=124309 F=1803(0x0x14F342024C) U=19 waker=96 wk=U:11,B230:4,R:1,B16:1,T:15
+   tid=168 away=16887ms since=125645 F=1689(0x0x14F3420258) U=0 waker=96 wk=U:11,B230:4,R:1,B16:1,T:15
+ zeros n=4 up_ms=150288 frames=10080 (210 ms)
+   tid=96 away=59ms since=149761 F=0 U=5 waker=- wk=-
+   tid=95 away=72ms since=149795 F=0 U=1 waker=148 wk=B16:6,R:1
+   tid=95 away=67ms since=150036 F=0 U=0 waker=- wk=-
+   tid=92 away=259ms since=150233 F=0 U=23 waker=151 wk=B16:25
+   tid=96 away=271ms since=150232 F=0 U=9 waker=- wk=-
+   tid=162 away=26194ms since=124309 F=2586(0x0x14F342024C) U=30 waker=92 wk=B7:4,U:25,T:2,K98:1
+   tid=168 away=24858ms since=125645 F=2481(0x0x14F3420258) U=1 waker=92 wk=B7:4,U:25,T:2,K98:1
+ zeros n=5 up_ms=220958 frames=960 (20 ms)
+   tid=92 away=30ms since=220458 F=0 U=3 waker=96 wk=U:3
+   tid=92 away=30ms since=220718 F=0 U=2 waker=- wk=-
+   tid=92 away=121ms since=220748 F=0 U=7 waker=- wk=-
+   tid=96 away=57ms since=220910 F=0 U=1 waker=148 wk=B16:5
+   tid=92 away=32ms since=220943 F=0 U=4 waker=- wk=-
+   tid=95 away=70ms since=220917 F=1(0x0x10802EE550) U=0 waker=148 wk=R:1,B16:5,K202:1
+   tid=96 away=-1ms since=220988 F=0 U=0 waker=- wk=-
+   tid=162 away=96678ms since=124309 F=9593(0x0x14F342024C) U=70 waker=96 wk=U:25,T:6,R:1
+   tid=168 away=95342ms since=125645 F=9513(0x0x14F3420258) U=6 waker=96 wk=U:25,T:6,R:1
+0 audio-clock AWAY-Z rows, 0 samples: 
+== kg2-fp10
+== /home/sarah/cp/lanes/kglitch-work/kg2-fp10.away
+ zeros n=2 up_ms=140551 frames=3360 (70 ms)
+   tid=93 away=113ms since=140503 F=0 U=10 waker=123 wk=F:11
+   tid=163 away=16469ms since=124160 F=1624(0x0x14F3420250) U=22 waker=97 wk=B16:3,B230:7,U:11,K230:1,T:9,R:1
+   tid=169 away=14902ms since=125727 F=1490(0x0x14F342025C) U=0 waker=97 wk=B16:3,B230:7,U:11,K230:1,T:9,R:1
+ zeros n=3 up_ms=142381 frames=5760 (120 ms)
+   tid=96 away=67ms since=141866 F=0 U=0 waker=- wk=-
+   tid=93 away=163ms since=142331 F=0 U=16 waker=- wk=-
+   tid=163 away=18353ms since=124160 F=1812(0x0x14F3420250) U=22 waker=97 wk=U:18,B0:1,B16:1,T:11,B230:1
+   tid=169 away=16786ms since=125727 F=1678(0x0x14F342025C) U=0 waker=97 wk=U:18,B0:1,B16:1,T:11,B230:1
+ zeros n=4 up_ms=150381 frames=10560 (220 ms)
+   tid=97 away=103ms since=150008 F=0 U=0 waker=- wk=-
+   tid=96 away=83ms since=150070 F=0 U=0 waker=152 wk=B16:6,B0:1,R:1
+   tid=97 away=64ms since=150118 F=0 U=3 waker=- wk=-
+   tid=96 away=69ms since=150182 F=0 U=0 waker=- wk=-
+   tid=93 away=260ms since=150334 F=0 U=10 waker=- wk=-
+   tid=163 away=26452ms since=124160 F=2618(0x0x14F3420250) U=25 waker=97 wk=U:29,B230:1,T:2
+   tid=169 away=24885ms since=125727 F=2486(0x0x14F342025C) U=0 waker=97 wk=U:29,B230:1,T:2
+ zeros n=5 up_ms=221031 frames=960 (20 ms)
+   tid=93 away=39ms since=220520 F=0 U=4 waker=- wk=-
+   tid=97 away=33ms since=220552 F=0 U=3 waker=93 wk=U:3
+   tid=97 away=42ms since=220641 F=0 U=2 waker=93 wk=U:3,K202:1
+   tid=93 away=146ms since=220795 F=0 U=9 waker=- wk=-
+   tid=97 away=47ms since=220990 F=0 U=0 waker=149 wk=R:1,B16:3
+   tid=96 away=66ms since=220996 F=0 U=0 waker=149 wk=R:2,B16:4
+   tid=163 away=96902ms since=124160 F=9646(0x0x14F3420250) U=43 waker=97 wk=U:23,K10:1,T:8
+   tid=169 away=95335ms since=125727 F=9523(0x0x14F342025C) U=0 waker=97 wk=U:23,K10:1,T:8
+0 audio-clock AWAY-Z rows, 0 samples: 
+== kg2-fp11
+== /home/sarah/cp/lanes/kglitch-work/kg2-fp11.away
+ zeros n=2 up_ms=57304 frames=480 (10 ms)
+   tid=96 away=60ms since=57254 F=0 U=2 waker=92 wk=U:2,F:4
+   tid=168 away=724ms since=56590 F=72(0x0x14F37B0258) U=0 waker=96 wk=T:1,K202:4,U:21,K228:1,K16:1,B230:4
+ zeros n=3 up_ms=130884 frames=61744 (1286 ms)
+   tid=95 away=43ms since=130511 F=0 U=0 waker=- wk=-
+   tid=96 away=50ms since=130794 F=0 U=4 waker=92 wk=U:3,B230:2
+   tid=96 away=43ms since=130891 F=0 U=3 waker=123 wk=F:4
+   tid=168 away=3101ms since=129014 F=310(0x0x14F37B0258) U=0 waker=95 wk=B16:31,K0:1
+   tid=95 away=43ms since=132104 F=0 U=0 waker=168 wk=B16:4
+   tid=95 away=35ms since=132148 F=0 U=0 waker=168 wk=B16:3
+ zeros n=4 up_ms=185734 frames=2880 (60 ms)
+   tid=92 away=111ms since=185682 F=0 U=10 waker=- wk=-
+   tid=96 away=113ms since=185681 F=0 U=2 waker=- wk=-
+   tid=162 away=16258ms since=169538 F=1611(0x0x14F37B024C) U=13 waker=96 wk=B16:9,B0:1,U:10,B230:1,T:11
+   tid=168 away=14925ms since=170871 F=1492(0x0x14F37B0258) U=0 waker=96 wk=B16:9,B0:1,U:10,B230:1,T:11
+ zeros n=5 up_ms=187684 frames=5760 (120 ms)
+   tid=92 away=177ms since=187624 F=0 U=16 waker=- wk=-
+   tid=162 away=18270ms since=169538 F=1812(0x0x14F37B024C) U=13 waker=96 wk=U:7,B16:7,B230:4,T:14
+   tid=168 away=16937ms since=170871 F=1693(0x0x14F37B0258) U=0 waker=96 wk=U:7,B16:7,B230:4,T:14
+ zeros n=6 up_ms=195254 frames=11520 (240 ms)
+   tid=96 away=30ms since=194885 F=0 U=1 waker=- wk=-
+   tid=95 away=30ms since=194912 F=0 U=0 waker=151 wk=B16:2,B0:1
+   tid=92 away=33ms since=194920 F=0 U=1 waker=- wk=-
+   tid=95 away=33ms since=194976 F=0 U=0 waker=151 wk=B16:3
+   tid=95 away=30ms since=195083 F=0 U=0 waker=151 wk=B16:2,R:1
+   tid=96 away=37ms since=195100 F=0 U=3 waker=- wk=-
+   tid=95 away=54ms since=195133 F=0 U=1 waker=151 wk=B16:4,T:1
+   tid=92 away=293ms since=195197 F=0 U=25 waker=- wk=-
+   tid=162 away=25974ms since=169538 F=2564(0x0x14F37B024C) U=31 waker=96 wk=U:14,T:18
+   tid=168 away=24641ms since=170871 F=2452(0x0x14F37B0258) U=0 waker=96 wk=U:14,T:18
+ zeros n=7 up_ms=256434 frames=1440 (30 ms)
+   tid=96 away=42ms since=256005 F=0 U=2 waker=122 wk=F:4
+   tid=96 away=65ms since=256084 F=0 U=2 waker=92 wk=U:5,R:1
+   tid=92 away=31ms since=256134 F=0 U=1 waker=96 wk=K202:1,U:2
+   tid=96 away=44ms since=256194 F=0 U=4 waker=- wk=-
+   tid=95 away=49ms since=256219 F=0 U=0 waker=151 wk=B16:4
+   tid=92 away=126ms since=256227 F=1(0x0x1080317328) U=9 waker=96 wk=U:11,K9:1
+   tid=92 away=65ms since=256390 F=0 U=2 waker=148 wk=B16:6
+   tid=92 away=31ms since=255924 F=0 U=3 waker=96 wk=U:2,R:1
+   tid=95 away=84ms since=256397 F=0 U=0 waker=148 wk=K16:1,B16:7
+   tid=162 away=86943ms since=169538 F=8641(0x0x14F37B024C) U=48 waker=96 wk=U:29,K9:1,T:2
+   tid=168 away=85610ms since=170871 F=8538(0x0x14F37B0258) U=2 waker=96 wk=U:29,K9:1,T:2
+15 audio-clock AWAY-Z rows, 124 samples: U=87 (70%), T=21 (16%), R=4 (3%), B230=4 (3%), B7=2 (1%), K228=2 (1%), K202=2 (1%), F=1 (0%), K24=1 (0%), O=0 (0%)
+== kg2-fp12
+== /home/sarah/cp/lanes/kglitch-work/kg2-fp12.away
+ zeros n=2 up_ms=170211 frames=3360 (70 ms)
+   tid=93 away=70ms since=169961 F=0 U=2 waker=- wk=-
+   tid=96 away=74ms since=169973 F=0 U=0 waker=- wk=-
+   tid=93 away=111ms since=170160 F=0 U=10 waker=- wk=-
+   tid=163 away=15895ms since=154405 F=1574(0x0x14F3420250) U=14 waker=97 wk=T:8,U:14,B16:4,K202:1,B230:3,K16:1
+   tid=169 away=14394ms since=155906 F=1438(0x0x14F342025C) U=0 waker=97 wk=T:8,U:14,B16:4,K202:1,B230:3,K16:1
+ zeros n=3 up_ms=171831 frames=6240 (130 ms)
+   tid=93 away=158ms since=171799 F=0 U=15 waker=- wk=-
+   tid=163 away=17560ms since=154405 F=1742(0x0x14F3420250) U=14 waker=97 wk=B16:4,U:9,B230:2,T:15,K230:1,K1:1
+   tid=169 away=16059ms since=155906 F=1606(0x0x14F342025C) U=0 waker=97 wk=B16:4,U:9,B230:2,T:15,K230:1,K1:1
+ zeros n=4 up_ms=178911 frames=10080 (210 ms)
+   tid=96 away=324ms since=178104 F=0 U=2 waker=97 wk=T:14,U:16,B230:1,R:1
+   tid=96 away=32ms since=178486 F=0 U=0 waker=- wk=-
+   tid=97 away=33ms since=178488 F=0 U=2 waker=123 wk=F:3
+   tid=97 away=36ms since=178625 F=0 U=2 waker=93 wk=T:1,U:1,K20:1
+   tid=96 away=81ms since=178642 F=0 U=0 waker=93 wk=U:5,K20:1,B7:1,T:1
+   tid=96 away=31ms since=178869 F=0 U=0 waker=- wk=-
+   tid=93 away=244ms since=178871 F=0 U=23 waker=- wk=-
+   tid=97 away=321ms since=178812 F=0 U=12 waker=- wk=-
+   tid=163 away=24728ms since=154405 F=2450(0x0x14F3420250) U=22 waker=97 wk=U:13,T:19
+   tid=169 away=23227ms since=155906 F=2314(0x0x14F342025C) U=0 waker=97 wk=U:13,T:19
+ zeros n=5 up_ms=240331 frames=1440 (30 ms)
+   tid=97 away=30ms since=239821 F=0 U=3 waker=123 wk=F:3
+   tid=93 away=30ms since=240141 F=0 U=3 waker=97 wk=U:2,T:1
+   tid=96 away=54ms since=240137 F=0 U=0 waker=- wk=-
+   tid=97 away=101ms since=240152 F=0 U=8 waker=- wk=-
+   tid=97 away=62ms since=240289 F=0 U=0 waker=149 wk=B16:6
+   tid=96 away=66ms since=240304 F=0 U=0 waker=- wk=-
+   tid=163 away=85971ms since=154405 F=8558(0x0x14F3420250) U=38 waker=97 wk=U:22,B230:1,T:9
+   tid=169 away=84470ms since=155906 F=8426(0x0x14F342025C) U=1 waker=97 wk=U:22,B230:1,T:9
+11 audio-clock AWAY-Z rows, 120 samples: U=80 (66%), T=31 (25%), R=2 (1%), B7=2 (1%), K98=2 (1%), K228=1 (0%), K7=1 (0%), B230=1 (0%), F=0 (0%), O=0 (0%)

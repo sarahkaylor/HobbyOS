@@ -1,0 +1,373 @@
+# H4-kglitch round 2 (H5-05): fp720 audio boots (P9 fpsprobe 1280x720, Venus, wine-cp2, run-hunt.sh fp720 HUNT_AUDIO=1), lane kglitch-s1
+# per boot: gamecheck line, [AWAY] summary per (tid, clock) (/tmp/awaysum.py), waker counts for the audio client, the [SND] zeros / [AWAY-Z] / [NFSPIPE] stall rows
+
+#### kg2-fp1
+kg2-fp1 dropouts=4 dropout_ms=370.0 wav_s=327.02 alsa_underrun_rows=0 kernel_xruns=1 held=12 max100ms=6240 xrun_rows[wok/drt:1 ] stalls=19 stolen_ms=1648
+ tid=95 clock=0x0xFFFF800216916708 rows=183 ms: min=30 med=62 max=3964 sum=30988
+   samples: K0=85%, B0=5%, U=2%, T=1%, R=1%, K47=1% futex words: {'0x0x10802EE550': 6}
+ tid=168 clock=0x0xFFFF8002854E01F8 rows=64 ms: min=30 med=98 max=3107 sum=9605
+   samples: F=98%, R=0%, B0=0%, T=0%, K16=0%, U=0% futex words: {'0x0x14F3420258': 64}
+-- wakers of the audio client's futex parks:
+-- zeros / AWAY-Z / NFSPIPE stall rows:
+[SND] zeros n=1 t_ms=0 frames=739296 q_vis=0 q_hw=0 call_frames=1920 call_all_zero=1 calls=1739 gap_ms=0 since_gap_ms=-1 since_prepare_ms=-2451
+[SND] zeros n=2 t_ms=93830 frames=61744 q_vis=1566 q_hw=976 call_frames=192 call_all_zero=0 calls=148 gap_ms=0 since_gap_ms=-1 since_prepare_ms=91379
+[SND] zeros n=3 t_ms=138761 frames=2400 q_vis=598 q_hw=32 call_frames=480 call_all_zero=1 calls=7 gap_ms=0 since_gap_ms=-1 since_prepare_ms=136310
+[SND] zeros n=4 t_ms=140730 frames=4800 q_vis=623 q_hw=0 call_frames=480 call_all_zero=1 calls=13 gap_ms=0 since_gap_ms=-1 since_prepare_ms=138279
+[SND] zeros n=5 t_ms=148350 frames=9120 q_vis=1203 q_hw=64 call_frames=480 call_all_zero=1 calls=24 gap_ms=0 since_gap_ms=-1 since_prepare_ms=145899
+[SND] zeros n=6 t_ms=208380 frames=1440 q_vis=1192 q_hw=64 call_frames=416 call_all_zero=1 calls=5 gap_ms=0 since_gap_ms=-1 since_prepare_ms=205929
+
+#### kg2-fp2
+kg2-fp2 dropouts=4 dropout_ms=400.0 wav_s=286.49 alsa_underrun_rows=0 kernel_xruns=3 held=18 max100ms=5760 xrun_rows[wok/drt:3 ] stalls=20 stolen_ms=1960
+ tid=169 clock=0x0xFFFF8002853DA510 rows=195 ms: min=30 med=153 max=1084 sum=25480
+   samples: F=98%, R=0%, B0=0%, U=0%, K16=0%, T=0% futex words: {'0x0x14F342025C': 195}
+ tid=96 clock=0x0xFFFF8002168FB678 rows=144 ms: min=30 med=78 max=2199 sum=21172
+   samples: K0=81%, B0=6%, U=2%, T=2%, R=2%, K47=1% futex words: {'0x0x10802EE550': 2}
+ tid=169 clock=0x0xFFFF8002853DA630 rows=59 ms: min=30 med=84 max=747 sum=6256
+   samples: F=99%, R=0%, B0=0%, U=0%, T=0%, O=0% futex words: {'0x0x14F342025C': 59}
+ tid=163 clock=0x0xFFFF8002853DA630 rows=1 ms: min=4726 med=4726 max=4726 sum=4726
+   samples: F=86%, U=12%, R=0%, K202=0%, T=0%, O=0% futex words: {'0x0x14F3420250': 1}
+ tid=163 clock=0x0xFFFF8002853DA510 rows=1 ms: min=11272 med=11272 max=11272 sum=11272
+   samples: F=91%, U=7%, R=0%, T=0%, K202=0%, K228=0% futex words: {'0x0x14F3420250': 1}
+-- wakers of the audio client's futex parks:
+-- zeros / AWAY-Z / NFSPIPE stall rows:
+[SND] zeros n=1 t_ms=0 frames=677312 q_vis=0 q_hw=0 call_frames=1920 call_all_zero=1 calls=1577 gap_ms=0 since_gap_ms=-1 since_prepare_ms=-2334
+[SND] zeros n=2 t_ms=92541 frames=3360 q_vis=688 q_hw=32 call_frames=480 call_all_zero=1 calls=10 gap_ms=0 since_gap_ms=-1 since_prepare_ms=90206
+[SND] zeros n=3 t_ms=94381 frames=4800 q_vis=719 q_hw=64 call_frames=480 call_all_zero=1 calls=14 gap_ms=0 since_gap_ms=-1 since_prepare_ms=92046
+[SND] zeros n=4 t_ms=101410 frames=8640 q_vis=895 q_hw=224 call_frames=480 call_all_zero=1 calls=23 gap_ms=0 since_gap_ms=-1 since_prepare_ms=99076
+[SND] zeros n=5 t_ms=167650 frames=2400 q_vis=1344 q_hw=192 call_frames=480 call_all_zero=1 calls=7 gap_ms=0 since_gap_ms=-1 since_prepare_ms=165316
+[NFSPIPE] stall inflight=1 issued=8 replies=7 contig=2405695488 end=2405957632 us=151568 budget=32768 xids=1213292917/2405695488 
+
+#### kg2-fp3
+kg2-fp3 dropouts=4 dropout_ms=330.0 wav_s=281.22 alsa_underrun_rows=0 kernel_xruns=2 held=26 max100ms=6176 xrun_rows[wok/drt:2 ] stalls=24 stolen_ms=1923
+ tid=168 clock=0x0xFFFF800285759798 rows=141 ms: min=30 med=97 max=1340 sum=15838
+   samples: F=97%, R=1%, B0=0%, U=0%, T=0%, K3=0% futex words: {'0x0x14F3420258': 140, '0x0x10802EE550': 1}
+ tid=168 clock=0x0xFFFF800285759990 rows=91 ms: min=32 med=155 max=667 sum=12852
+   samples: F=98%, R=0%, B0=0%, U=0%, K16=0%, K0=0% futex words: {'0x0x14F3420258': 91}
+ tid=168 clock=0x0xFFFF800285759288 rows=64 ms: min=30 med=82 max=732 sum=6566
+   samples: F=98%, R=0%, U=0%, T=0%, B0=0%, K47=0% futex words: {'0x0x14F3420258': 64}
+ tid=168 clock=0x0xFFFF800276B44048 rows=60 ms: min=31 med=119 max=164 sum=6816
+   samples: F=98%, R=0%, B0=0%, T=0%, K0=0%, K14=0% futex words: {'0x0x14F3420258': 60}
+ tid=92 clock=0x0xFFFF800286ABA5E8 rows=26 ms: min=30 med=36 max=91 sum=983
+   samples: U=47%, B7=27%, R=7%, T=4%, B0=3%, K7=2% futex words: {'0x0x104006AB80': 1}
+ tid=96 clock=0x0xFFFF800286ABA5E8 rows=11 ms: min=30 med=36 max=67 sum=415
+   samples: U=65%, T=20%, K202=7%, R=5%, K9=2%, F=0% futex words: {}
+ tid=95 clock=0x0xFFFF80021685D708 rows=6 ms: min=41 med=64 max=75 sum=369
+   samples: K0=75%, T=18%, U=2%, K14=2%, R=0%, F=0% futex words: {}
+ tid=162 clock=0x0xFFFF800276B44048 rows=1 ms: min=6294 med=6294 max=6294 sum=6294
+   samples: F=91%, U=8%, R=0%, T=0%, O=0% futex words: {'0x0x14F342024C': 1}
+-- wakers of the audio client's futex parks:
+    304 waker=96
+     30 waker=92
+     17 waker=151
+      3 waker=95
+-- zeros / AWAY-Z / NFSPIPE stall rows:
+[SND] zeros n=1 t_ms=0 up_ms=31856 frames=700928 q_vis=0 q_hw=0 call_frames=1920 call_all_zero=1 calls=1628 gap_ms=0 since_gap_ms=-1 since_prepare_ms=-2263
+[SND] zeros n=2 t_ms=92440 up_ms=124297 frames=1440 q_vis=515 q_hw=0 call_frames=480 call_all_zero=1 calls=5 gap_ms=0 since_gap_ms=-1 since_prepare_ms=90177
+[SND] zeros n=3 t_ms=93960 up_ms=125817 frames=4800 q_vis=675 q_hw=64 call_frames=416 call_all_zero=1 calls=14 gap_ms=0 since_gap_ms=-1 since_prepare_ms=91697
+[NFSPIPE] stall inflight=1 issued=23 replies=22 contig=3453386752 end=3454205952 us=154782 budget=32768 xids=1213246894/3453386752 
+[SND] zeros n=4 t_ms=101630 up_ms=133487 frames=8640 q_vis=834 q_hw=224 call_frames=480 call_all_zero=1 calls=24 gap_ms=0 since_gap_ms=-1 since_prepare_ms=99367
+[SND] zeros n=5 t_ms=162710 up_ms=194567 frames=960 q_vis=1154 q_hw=64 call_frames=416 call_all_zero=1 calls=4 gap_ms=0 since_gap_ms=-1 since_prepare_ms=160447
+
+#### kg2-fp4
+kg2-fp4 dropouts=4 dropout_ms=430.0 wav_s=337.2 alsa_underrun_rows=0 kernel_xruns=5 held=29 max100ms=7200 xrun_rows[wok/drt:5 ] stalls=24 stolen_ms=2397
+ tid=168 clock=0x0xFFFF8002856A4870 rows=258 ms: min=30 med=90 max=1353 sum=24710
+   samples: F=98%, R=0%, B0=0%, U=0%, K0=0%, K202=0% futex words: {'0x0x14F3420258': 258}
+ tid=92 clock=0x0xFFFF8002873795E8 rows=87 ms: min=30 med=33 max=66 sum=3068
+   samples: U=50%, B7=20%, R=7%, T=4%, B0=4%, K202=2% futex words: {'0x0x104006AB60': 4}
+ tid=168 clock=0x0xFFFF8002856A48B8 rows=34 ms: min=30 med=61 max=158 sum=2264
+   samples: F=97%, R=0%, U=0%, B0=0%, K1=0%, T=0% futex words: {'0x0x14F3420258': 34}
+ tid=96 clock=0x0xFFFF8002873795E8 rows=13 ms: min=30 med=33 max=44 sum=447
+   samples: U=75%, K9=6%, F=4%, B230=4%, T=2%, K228=2% futex words: {'0x0x104006AB60': 2}
+ tid=95 clock=0x0xFFFF80020DD8FEE8 rows=8 ms: min=30 med=35 max=40 sum=270
+   samples: K0=100%, U=0%, R=0%, T=0%, F=0%, O=0% futex words: {}
+-- wakers of the audio client's futex parks:
+    286 waker=96
+      2 waker=92
+      2 waker=151
+      1 waker=95
+-- zeros / AWAY-Z / NFSPIPE stall rows:
+[SND] zeros n=1 t_ms=0 up_ms=31774 frames=747552 q_vis=0 q_hw=0 call_frames=1920 call_all_zero=1 calls=1739 gap_ms=0 since_gap_ms=-1 since_prepare_ms=-2569
+[SND] zeros n=2 t_ms=138480 up_ms=170254 frames=2880 q_vis=1271 q_hw=0 call_frames=480 call_all_zero=1 calls=8 gap_ms=0 since_gap_ms=-1 since_prepare_ms=135911
+[SND] zeros n=3 t_ms=140310 up_ms=172084 frames=5760 q_vis=1300 q_hw=0 call_frames=224 call_all_zero=1 calls=16 gap_ms=0 since_gap_ms=-1 since_prepare_ms=137741
+[SND] zeros n=4 t_ms=147510 up_ms=179284 frames=9120 q_vis=1382 q_hw=0 call_frames=96 call_all_zero=1 calls=25 gap_ms=0 since_gap_ms=-1 since_prepare_ms=144941
+[SND] zeros n=5 t_ms=219131 up_ms=250905 frames=2880 q_vis=1667 q_hw=160 call_frames=320 call_all_zero=1 calls=9 gap_ms=0 since_gap_ms=-1 since_prepare_ms=216562
+
+#### kg2-fp5
+kg2-fp5 dropouts=5 dropout_ms=460.0 wav_s=291.86 alsa_underrun_rows=0 kernel_xruns=1 held=21 max100ms=5920 xrun_rows[wok/drt:1 ] stalls=24 stolen_ms=2243
+ tid=169 clock=0x0xFFFF800287280EA0 rows=231 ms: min=30 med=123 max=1352 sum=29114
+   samples: F=98%, R=0%, B0=0%, U=0%, T=0%, K47=0% futex words: {'0x0x14F342025C': 230, '0x0x10802EE550': 1}
+ tid=96 clock=0x0xFFFF800208606120 rows=161 ms: min=30 med=71 max=2108 sum=18483
+   samples: K0=80%, B0=7%, U=2%, R=2%, T=2%, K47=1% futex words: {'0x0x10802EE550': 7}
+ tid=163 clock=0x0xFFFF800287280EA0 rows=1 ms: min=9993 med=9993 max=9993 sum=9993
+   samples: F=89%, U=9%, T=0%, R=0%, O=0% futex words: {'0x0x14F3420250': 1}
+-- wakers of the audio client's futex parks:
+    188 waker=97
+     28 waker=93
+     10 waker=152
+      2 waker=96
+-- zeros / AWAY-Z / NFSPIPE stall rows:
+[NFSPIPE] stall inflight=1 issued=1052 replies=1051 contig=37394944 end=77426688 us=196317 budget=32768 xids=1213188297/37394944 
+[SND] zeros n=1 t_ms=0 up_ms=31896 frames=764544 q_vis=0 q_hw=0 call_frames=1920 call_all_zero=1 calls=1762 gap_ms=0 since_gap_ms=-1 since_prepare_ms=-2591
+[SND] zeros n=2 t_ms=92841 up_ms=124737 frames=2880 q_vis=846 q_hw=0 call_frames=480 call_all_zero=1 calls=9 gap_ms=0 since_gap_ms=-1 since_prepare_ms=90250
+[SND] zeros n=3 t_ms=94611 up_ms=126507 frames=4800 q_vis=688 q_hw=192 call_frames=288 call_all_zero=1 calls=14 gap_ms=0 since_gap_ms=-1 since_prepare_ms=92019
+[SND] zeros n=4 t_ms=101941 up_ms=133838 frames=9120 q_vis=760 q_hw=0 call_frames=480 call_all_zero=1 calls=24 gap_ms=0 since_gap_ms=-1 since_prepare_ms=99350
+[SND] zeros n=5 t_ms=173063 up_ms=204960 frames=960 q_vis=818 q_hw=0 call_frames=480 call_all_zero=1 calls=3 gap_ms=0 since_gap_ms=-1 since_prepare_ms=170472
+[SND] zeros n=6 t_ms=258481 up_ms=290377 frames=4320 q_vis=1633 q_hw=0 call_frames=480 call_all_zero=1 calls=12 gap_ms=0 since_gap_ms=-1 since_prepare_ms=255890
+
+#### kg2-fp6
+kg2-fp6 dropouts=4 dropout_ms=400.0 wav_s=297.25 alsa_underrun_rows=0 kernel_xruns=2 held=50 max100ms=8160 xrun_rows[wok/drt:2 ] stalls=25 stolen_ms=2207
+ tid=168 clock=0x0xFFFF8002853A9558 rows=187 ms: min=30 med=97 max=1085 sum=22869
+   samples: F=98%, R=0%, B0=0%, T=0%, U=0%, K202=0% futex words: {'0x0x14F3420258': 187}
+ tid=168 clock=0x0xFFFF8002853A9678 rows=112 ms: min=31 med=156 max=1358 sum=16547
+   samples: F=98%, R=0%, B0=0%, U=0%, T=0%, K16=0% futex words: {'0x0x14F3420258': 112}
+ tid=95 clock=0x0xFFFF800208546120 rows=46 ms: min=31 med=81 max=2065 sum=8285
+   samples: K0=78%, B0=8%, U=2%, T=2%, K1=2%, K47=1% futex words: {'0x0x10802EE550': 4}
+ tid=96 clock=0x0xFFFF800286F4E5E8 rows=35 ms: min=30 med=44 max=376 sum=2834
+   samples: U=47%, T=38%, K9=10%, B230=2%, F=1%, K16=0% futex words: {'0x0x104006AA20': 2}
+ tid=92 clock=0x0xFFFF800286F4E5E8 rows=19 ms: min=30 med=39 max=223 sum=1160
+   samples: U=58%, B7=20%, R=4%, T=4%, K228=3%, B230=2% futex words: {'0x0x104006AA20': 1}
+ tid=162 clock=0x0xFFFF8002853A9558 rows=1 ms: min=9996 med=9996 max=9996 sum=9996
+   samples: F=91%, U=8%, T=0%, B0=0%, R=0%, O=0% futex words: {'0x0x14F342024C': 1}
+-- wakers of the audio client's futex parks:
+    249 waker=96
+     32 waker=92
+     13 waker=151
+      3 waker=95
+-- zeros / AWAY-Z / NFSPIPE stall rows:
+[SND] zeros n=1 t_ms=0 up_ms=32051 frames=776704 q_vis=0 q_hw=0 call_frames=1920 call_all_zero=1 calls=1813 gap_ms=0 since_gap_ms=-1 since_prepare_ms=-2515
+[SND] zeros n=2 t_ms=92281 up_ms=124332 frames=3360 q_vis=1605 q_hw=0 call_frames=160 call_all_zero=1 calls=10 gap_ms=60 since_gap_ms=47109 since_prepare_ms=89765
+[SND] zeros n=3 t_ms=94161 up_ms=126212 frames=5760 q_vis=1759 q_hw=0 call_frames=480 call_all_zero=1 calls=13 gap_ms=60 since_gap_ms=48989 since_prepare_ms=91645
+[SND] zeros n=4 t_ms=101321 up_ms=133372 frames=8160 q_vis=1717 q_hw=0 call_frames=480 call_all_zero=1 calls=18 gap_ms=60 since_gap_ms=56149 since_prepare_ms=98805
+[AWAY-Z] tid=96 tgid=92 ms=33 at=209710 clock=0x0xFFFF800286F4E5E8 n=3 U=2 R=0 T=1 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=95 tgid=92 ms=39 at=209726 clock=0x0xFFFF800208546120 n=4 U=0 R=0 T=0 F=0 O=0 K=0:4 pc=0x0x10800503CC Cyberpunk2077.e
+[AWAY-Z] tid=92 tgid=92 ms=110 at=209743 clock=0x0xFFFF800286F4E5E8 n=11 U=6 R=0 T=5 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=96 tgid=92 ms=58 at=209890 clock=0x0xFFFF800286F4E5E8 n=5 U=1 R=0 T=4 F=0 O=0 waker=148 wk=K1:1,B16:4 Cyberpunk2077.e
+[SND] zeros n=5 t_ms=177873 up_ms=209925 frames=1920 q_vis=1892 q_hw=224 call_frames=480 call_all_zero=1 calls=6 gap_ms=60 since_gap_ms=132701 since_prepare_ms=175357
+
+#### kg2-fp7
+kg2-fp7 dropouts=4 dropout_ms=410.0 wav_s=306.99 alsa_underrun_rows=0 kernel_xruns=0 held=13 max100ms=6240 xrun_rows[] stalls=20 stolen_ms=1702
+ tid=95 clock=0x0xFFFF80021684B948 rows=149 ms: min=30 med=67 max=4694 sum=25870
+   samples: K0=83%, B0=5%, U=3%, T=2%, R=1%, K47=1% futex words: {'0x0x10802EE550': 8}
+-- wakers of the audio client's futex parks:
+-- zeros / AWAY-Z / NFSPIPE stall rows:
+[SND] zeros n=1 t_ms=0 up_ms=32354 frames=785376 q_vis=0 q_hw=0 call_frames=1920 call_all_zero=1 calls=1834 gap_ms=0 since_gap_ms=-1 since_prepare_ms=0
+[SND] zeros n=2 t_ms=107271 up_ms=139625 frames=2880 q_vis=671 q_hw=0 call_frames=480 call_all_zero=1 calls=8 gap_ms=0 since_gap_ms=-1 since_prepare_ms=107271
+[SND] zeros n=3 t_ms=109010 up_ms=141364 frames=5760 q_vis=966 q_hw=352 call_frames=480 call_all_zero=1 calls=16 gap_ms=0 since_gap_ms=-1 since_prepare_ms=109011
+[SND] zeros n=4 t_ms=117250 up_ms=149604 frames=10080 q_vis=1349 q_hw=256 call_frames=224 call_all_zero=1 calls=28 gap_ms=0 since_gap_ms=-1 since_prepare_ms=117251
+[AWAY-Z] tid=95 tgid=92 ms=71 at=219894 clock=0x0xFFFF80021684B948 n=8 U=0 R=0 T=0 F=0 O=0 K=202:1,0:7 pc=0x0x7011883C,0x0x10800503CC waker=148 wk=B16:7 Cyberpunk2077.e
+[SND] zeros n=5 t_ms=187590 up_ms=219945 frames=960 q_vis=997 q_hw=0 call_frames=480 call_all_zero=1 calls=3 gap_ms=0 since_gap_ms=-1 since_prepare_ms=187591
+
+#### kg2-fp9
+kg2-fp9 dropouts=4 dropout_ms=430.0 wav_s=307.39 alsa_underrun_rows=0 kernel_xruns=2 held=27 max100ms=7200 xrun_rows[wok/drt:2 ] stalls=26 stolen_ms=1934
+ tid=168 clock=0x0xFFFF80028531A630 rows=137 ms: min=30 med=124 max=1331 sum=19388
+   samples: F=99%, R=0%, B0=0%, U=0%, T=0%, O=0% futex words: {'0x0x14F3420258': 136, '0x0x10802EE550': 1}
+ tid=92 clock=0x0xFFFF8002863AC5E8 rows=80 ms: min=30 med=35 max=508 sum=3523
+   samples: U=47%, T=17%, B7=8%, K202=5%, B0=5%, R=4% futex words: {'0x0x104006ABA0': 6, '0x0x14F342013C': 1}
+ tid=96 clock=0x0xFFFF8002863AC5E8 rows=60 ms: min=30 med=46 max=4376 sum=13460
+   samples: U=39%, T=35%, K11=8%, K9=5%, K0=3%, F=2% futex words: {'0x0x104006ABA0': 10, '0x0x1080317328': 1}
+ tid=168 clock=0x0xFFFF80028531A120 rows=53 ms: min=34 med=65 max=167 sum=4102
+   samples: F=98%, R=0%, U=0%, B0=0%, T=0%, O=0% futex words: {'0x0x14F3420258': 53}
+ tid=168 clock=0x0xFFFF80028531A168 rows=46 ms: min=30 med=159 max=667 sum=7521
+   samples: F=98%, R=1%, B0=0%, U=0%, T=0%, K0=0% futex words: {'0x0x14F3420258': 46}
+ tid=95 clock=0x0xFFFF800216809708 rows=22 ms: min=31 med=152 max=4865 sum=8322
+   samples: K0=80%, T=7%, B0=4%, U=2%, K47=1%, R=0% futex words: {'0x0x14F3420148': 1, '0x0x10802EE550': 1}
+ tid=168 clock=0x0xFFFF80028531A288 rows=2 ms: min=294 med=808 max=808 sum=1102
+   samples: F=98%, R=1%, U=0%, T=0%, O=0% futex words: {'0x0x14F3420258': 2}
+-- wakers of the audio client's futex parks:
+    233 waker=96
+      8 waker=92
+      3 waker=151
+      2 waker=95
+-- zeros / AWAY-Z / NFSPIPE stall rows:
+[NFSPIPE] stall inflight=2 issued=694 replies=692 contig=25312768 end=45364224 us=185155 budget=65536 xids=1213185842/25312768 1213185852/25640448 
+[AWAY-Z] tid=168 tgid=92 ms=286 at=49202 clock=0x0xFFFF80028531A288 n=29 U=0 R=2 T=0 F=27(0x0x14F3420258) O=0 waker=96 wk=B230:4,U:16,B16:3,R:1,B0:2,K262:1 Cyberpunk2077.e
+[SND] zeros n=1 t_ms=0 up_ms=32327 frames=825120 q_vis=0 q_hw=0 call_frames=1920 call_all_zero=1 calls=1891 gap_ms=0 since_gap_ms=-1 since_prepare_ms=-2783
+[NFSPIPE] stall inflight=1 issued=8 replies=7 contig=851836928 end=852099072 us=153437 budget=32768 xids=1213238781/851836928 
+[AWAY-Z] tid=92 tgid=92 ms=113 at=140549 clock=0x0xFFFF8002863AC5E8 n=11 U=11 R=0 T=0 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=96 tgid=92 ms=114 at=140548 clock=0x0xFFFF8002863AC5E8 n=11 U=3 R=0 T=8 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=162 tgid=92 ms=16366 at=124309 clock=0x0xFFFF80028531A168 n=1636 U=19 R=0 T=0 F=1616(0x0x14F342024C) O=0 K=202:1 pc=0x0x108017895D waker=96 wk=U:15,B16:4,K202:1,T:10,B230:2 Cyberpunk2077.e
+[AWAY-Z] tid=168 tgid=92 ms=15030 at=125645 clock=0x0xFFFF80028531A120 n=1502 U=0 R=0 T=0 F=1502(0x0x14F3420258) O=0 waker=96 wk=U:15,B16:4,K202:1,T:10,B230:2 Cyberpunk2077.e
+[SND] zeros n=2 t_ms=108270 up_ms=140598 frames=3360 q_vis=1215 q_hw=0 call_frames=480 call_all_zero=1 calls=10 gap_ms=0 since_gap_ms=-1 since_prepare_ms=105487
+[AWAY-Z] tid=92 tgid=92 ms=161 at=142362 clock=0x0xFFFF8002863AC5E8 n=16 U=16 R=0 T=0 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=162 tgid=92 ms=18223 at=124309 clock=0x0xFFFF80028531A168 n=1823 U=19 R=0 T=0 F=1803(0x0x14F342024C) O=0 K=202:1 pc=0x0x108017895D waker=96 wk=U:11,B230:4,R:1,B16:1,T:15 Cyberpunk2077.e
+[AWAY-Z] tid=168 tgid=92 ms=16887 at=125645 clock=0x0xFFFF80028531A120 n=1689 U=0 R=0 T=0 F=1689(0x0x14F3420258) O=0 waker=96 wk=U:11,B230:4,R:1,B16:1,T:15 Cyberpunk2077.e
+[SND] zeros n=3 t_ms=110070 up_ms=142398 frames=6240 q_vis=1240 q_hw=0 call_frames=480 call_all_zero=1 calls=17 gap_ms=0 since_gap_ms=-1 since_prepare_ms=107287
+[AWAY-Z] tid=96 tgid=92 ms=59 at=149761 clock=0x0xFFFF8002863AC5E8 n=6 U=5 R=0 T=1 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=95 tgid=92 ms=72 at=149795 clock=0x0xFFFF800216809708 n=8 U=1 R=0 T=1 F=0 O=0 K=0:4 B=0:2 pc=0x0x10800503CC waker=148 wk=B16:6,R:1 Cyberpunk2077.e
+[AWAY-Z] tid=95 tgid=92 ms=67 at=150036 clock=0x0xFFFF800216809708 n=7 U=0 R=0 T=0 F=0 O=0 K=0:7 pc=0x0x10800503CC Cyberpunk2077.e
+[AWAY-Z] tid=92 tgid=92 ms=259 at=150233 clock=0x0xFFFF8002863AC5E8 n=26 U=23 R=0 T=2 F=0 O=0 K=98:1 pc=0x0x108017400B waker=151 wk=B16:25 Cyberpunk2077.e
+[AWAY-Z] tid=96 tgid=92 ms=271 at=150232 clock=0x0xFFFF8002863AC5E8 n=27 U=9 R=0 T=18 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=162 tgid=92 ms=26194 at=124309 clock=0x0xFFFF80028531A168 n=2620 U=30 R=1 T=1 F=2586(0x0x14F342024C) O=0 K=202:2 pc=0x0x108017895D waker=92 wk=B7:4,U:25,T:2,K98:1 Cyberpunk2077.e
+[AWAY-Z] tid=168 tgid=92 ms=24858 at=125645 clock=0x0xFFFF80028531A120 n=2486 U=1 R=4 T=0 F=2481(0x0x14F3420258) O=0 waker=92 wk=B7:4,U:25,T:2,K98:1 Cyberpunk2077.e
+[SND] zeros n=4 t_ms=117960 up_ms=150288 frames=10080 q_vis=1460 q_hw=0 call_frames=64 call_all_zero=1 calls=28 gap_ms=0 since_gap_ms=-1 since_prepare_ms=115177
+[AWAY-Z] tid=92 tgid=92 ms=30 at=220458 clock=0x0xFFFF8002863AC5E8 n=3 U=3 R=0 T=0 F=0 O=0 waker=96 wk=U:3 Cyberpunk2077.e
+[AWAY-Z] tid=92 tgid=92 ms=30 at=220718 clock=0x0xFFFF8002863AC5E8 n=3 U=2 R=0 T=1 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=92 tgid=92 ms=121 at=220748 clock=0x0xFFFF8002863AC5E8 n=12 U=7 R=0 T=5 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=96 tgid=92 ms=57 at=220910 clock=0x0xFFFF8002863AC5E8 n=6 U=1 R=1 T=4 F=0 O=0 waker=148 wk=B16:5 Cyberpunk2077.e
+[AWAY-Z] tid=92 tgid=92 ms=32 at=220943 clock=0x0xFFFF80028531A288 n=4 U=4 R=0 T=0 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=95 tgid=92 ms=70 at=220917 clock=0x0xFFFF800216809708 n=6 U=0 R=0 T=0 F=1(0x0x10802EE550) O=0 K=0:4,47:1 pc=0x0x10800503CC,0x0x10800510ED waker=148 wk=R:1,B16:5,K202:1 Cyberpunk2077.e
+[AWAY-Z] tid=96 tgid=92 ms=-1 at=220988 clock=0x0xFFFF8002863AC5E8 n=0 U=0 R=0 T=0 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=162 tgid=92 ms=96678 at=124309 clock=0x0xFFFF80028531A168 n=9669 U=70 R=2 T=1 F=9593(0x0x14F342024C) O=0 K=202:3 pc=0x0x108017895D waker=96 wk=U:25,T:6,R:1 Cyberpunk2077.e
+[AWAY-Z] tid=168 tgid=92 ms=95342 at=125645 clock=0x0xFFFF80028531A120 n=9535 U=6 R=13 T=0 F=9513(0x0x14F3420258) O=0 B=0:3 waker=96 wk=U:25,T:6,R:1 Cyberpunk2077.e
+[SND] zeros n=5 t_ms=188631 up_ms=220958 frames=960 q_vis=1309 q_hw=128 call_frames=352 call_all_zero=1 calls=4 gap_ms=0 since_gap_ms=-1 since_prepare_ms=185847
+
+#### kg2-fp10
+kg2-fp10 dropouts=4 dropout_ms=430.0 wav_s=306.64 alsa_underrun_rows=0 kernel_xruns=2 held=27 max100ms=7200 xrun_rows[wok/drt:2 ] stalls=21 stolen_ms=1814
+ tid=169 clock=0x0xFFFF800285683048 rows=127 ms: min=30 med=91 max=1342 sum=13808
+   samples: F=98%, R=0%, B0=0%, U=0%, T=0%, O=0% futex words: {'0x0x14F342025C': 127}
+ tid=169 clock=0x0xFFFF8002861D9F78 rows=111 ms: min=31 med=156 max=1090 sum=15820
+   samples: F=98%, R=1%, T=0%, K1=0%, K0=0%, K202=0% futex words: {'0x0x14F342025C': 111}
+ tid=93 clock=0x0xFFFF8002861D9318 rows=74 ms: min=30 med=35 max=550 sum=3316
+   samples: U=45%, T=20%, B7=10%, R=8%, K202=3%, B0=1% futex words: {'0x0x104006ABE0': 1}
+ tid=97 clock=0x0xFFFF8002861D9318 rows=64 ms: min=30 med=49 max=2404 sum=12801
+   samples: U=39%, T=34%, K11=8%, K9=5%, B230=4%, F=2% futex words: {'0x0x104006ABE0': 11}
+ tid=96 clock=0x0xFFFF800208486120 rows=24 ms: min=30 med=70 max=5045 sum=8472
+   samples: K0=79%, T=8%, U=4%, B0=3%, R=1%, K47=0% futex words: {'0x0x10802EE550': 2}
+-- wakers of the audio client's futex parks:
+    239 waker=97
+      2 waker=96
+      2 waker=93
+      2 waker=152
+-- zeros / AWAY-Z / NFSPIPE stall rows:
+[SND] zeros n=1 t_ms=0 up_ms=32630 frames=829024 q_vis=0 q_hw=0 call_frames=1920 call_all_zero=1 calls=1933 gap_ms=0 since_gap_ms=-1 since_prepare_ms=-3053
+[AWAY-Z] tid=93 tgid=93 ms=113 at=140503 clock=0x0xFFFF8002861D9318 n=11 U=10 R=0 T=0 F=0 O=0 B=7:1 waker=123 wk=F:11 Cyberpunk2077.e
+[AWAY-Z] tid=163 tgid=93 ms=16469 at=124160 clock=0x0xFFFF800285683048 n=1647 U=22 R=1 T=0 F=1624(0x0x14F3420250) O=0 waker=97 wk=B16:3,B230:7,U:11,K230:1,T:9,R:1 Cyberpunk2077.e
+[AWAY-Z] tid=169 tgid=93 ms=14902 at=125727 clock=0x0xFFFF800285683630 n=1491 U=0 R=1 T=0 F=1490(0x0x14F342025C) O=0 waker=97 wk=B16:3,B230:7,U:11,K230:1,T:9,R:1 Cyberpunk2077.e
+[SND] zeros n=2 t_ms=107920 up_ms=140551 frames=3360 q_vis=1169 q_hw=0 call_frames=480 call_all_zero=1 calls=10 gap_ms=0 since_gap_ms=-1 since_prepare_ms=104866
+[AWAY-Z] tid=96 tgid=93 ms=67 at=141866 clock=0x0xFFFF800208486120 n=7 U=0 R=0 T=0 F=0 O=0 K=0:7 pc=0x0x10800503CC Cyberpunk2077.e
+[AWAY-Z] tid=93 tgid=93 ms=163 at=142331 clock=0x0xFFFF8002861D9318 n=17 U=16 R=1 T=0 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=163 tgid=93 ms=18353 at=124160 clock=0x0xFFFF800285683048 n=1835 U=22 R=1 T=0 F=1812(0x0x14F3420250) O=0 waker=97 wk=U:18,B0:1,B16:1,T:11,B230:1 Cyberpunk2077.e
+[AWAY-Z] tid=169 tgid=93 ms=16786 at=125727 clock=0x0xFFFF800285683630 n=1679 U=0 R=1 T=0 F=1678(0x0x14F342025C) O=0 waker=97 wk=U:18,B0:1,B16:1,T:11,B230:1 Cyberpunk2077.e
+[SND] zeros n=3 t_ms=109750 up_ms=142381 frames=5760 q_vis=962 q_hw=0 call_frames=448 call_all_zero=1 calls=16 gap_ms=0 since_gap_ms=-1 since_prepare_ms=106696
+[AWAY-Z] tid=97 tgid=93 ms=103 at=150008 clock=0x0xFFFF8002861D9318 n=11 U=0 R=0 T=11 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=96 tgid=93 ms=83 at=150070 clock=0x0xFFFF800208486120 n=9 U=0 R=0 T=0 F=0 O=0 K=47:2,0:5 B=0:2 pc=0x0x10800510ED,0x0x10800503CC waker=152 wk=B16:6,B0:1,R:1 Cyberpunk2077.e
+[AWAY-Z] tid=97 tgid=93 ms=64 at=150118 clock=0x0xFFFF8002861D9318 n=7 U=3 R=0 T=4 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=96 tgid=93 ms=69 at=150182 clock=0x0xFFFF800208486120 n=7 U=0 R=0 T=0 F=0 O=0 K=0:7 pc=0x0x10800503CC Cyberpunk2077.e
+[AWAY-Z] tid=93 tgid=93 ms=260 at=150334 clock=0x0xFFFF8002861D9318 n=26 U=10 R=0 T=16 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=163 tgid=93 ms=26452 at=124160 clock=0x0xFFFF800285683048 n=2645 U=25 R=1 T=1 F=2618(0x0x14F3420250) O=0 waker=97 wk=U:29,B230:1,T:2 Cyberpunk2077.e
+[AWAY-Z] tid=169 tgid=93 ms=24885 at=125727 clock=0x0xFFFF800285683630 n=2489 U=0 R=1 T=1 F=2486(0x0x14F342025C) O=0 K=1:1 pc=0x0x108005032F waker=97 wk=U:29,B230:1,T:2 Cyberpunk2077.e
+[SND] zeros n=4 t_ms=117750 up_ms=150381 frames=10560 q_vis=1548 q_hw=192 call_frames=480 call_all_zero=1 calls=28 gap_ms=0 since_gap_ms=-1 since_prepare_ms=114696
+[AWAY-Z] tid=93 tgid=93 ms=39 at=220520 clock=0x0xFFFF8002861D9318 n=4 U=4 R=0 T=0 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=97 tgid=93 ms=33 at=220552 clock=0x0xFFFF8002861D9318 n=3 U=3 R=0 T=0 F=0 O=0 waker=93 wk=U:3 Cyberpunk2077.e
+[AWAY-Z] tid=97 tgid=93 ms=42 at=220641 clock=0x0xFFFF8002861D9318 n=4 U=2 R=0 T=0 F=0 O=0 K=202:1 B=230:1 pc=0x0x1080050170 waker=93 wk=U:3,K202:1 Cyberpunk2077.e
+[AWAY-Z] tid=93 tgid=93 ms=146 at=220795 clock=0x0xFFFF8002861D9318 n=15 U=9 R=0 T=6 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=97 tgid=93 ms=47 at=220990 clock=0x0xFFFF8002861D9318 n=4 U=0 R=0 T=4 F=0 O=0 waker=149 wk=R:1,B16:3 Cyberpunk2077.e
+[AWAY-Z] tid=96 tgid=93 ms=66 at=220996 clock=0x0xFFFF800208486120 n=6 U=0 R=0 T=0 F=0 O=0 K=0:5 B=0:1 pc=0x0x10800503CC waker=149 wk=R:2,B16:4 Cyberpunk2077.e
+[AWAY-Z] tid=163 tgid=93 ms=96902 at=124160 clock=0x0xFFFF800285683048 n=9691 U=43 R=1 T=1 F=9646(0x0x14F3420250) O=0 waker=97 wk=U:23,K10:1,T:8 Cyberpunk2077.e
+[AWAY-Z] tid=169 tgid=93 ms=95335 at=125727 clock=0x0xFFFF800285683630 n=9535 U=0 R=6 T=1 F=9523(0x0x14F342025C) O=0 K=1:1,16:1 B=0:3 pc=0x0x108005032F,0x0x10801745CB waker=97 wk=U:23,K10:1,T:8 Cyberpunk2077.e
+[SND] zeros n=5 t_ms=188400 up_ms=221031 frames=960 q_vis=1770 q_hw=320 call_frames=480 call_all_zero=1 calls=4 gap_ms=0 since_gap_ms=-1 since_prepare_ms=185347
+
+#### kg2-fp11
+kg2-fp11 dropouts=5 dropout_ms=460.0 wav_s=343.19 alsa_underrun_rows=0 kernel_xruns=1 held=30 max100ms=6720 xrun_rows[wlate/drt:1 ] stalls=20 stolen_ms=1751
+ tid=168 clock=#13 rows=121 ms: min=30 med=134 max=1338 sum=15608
+   samples: F=98%, R=0%, B0=0%, U=0%, T=0%, O=0% futex words: {'0x0x14F37B0258': 121}
+ tid=168 clock=#9 rows=73 ms: min=30 med=66 max=166 sum=6085
+   samples: F=98%, R=0%, K0=0%, B0=0%, U=0%, T=0% futex words: {'0x0x14F37B0258': 73}
+ tid=92 clock=#20 rows=67 ms: min=30 med=33 max=1810 sum=4766
+   samples: U=52%, T=21%, B7=8%, R=3%, K0=2%, K228=2% futex words: {'0x0x10802EE550': 2, '0x0x104006AD80': 2}
+ tid=96 clock=#20 rows=67 ms: min=30 med=42 max=2373 sum=11944
+   samples: T=35%, U=33%, K11=11%, K9=9%, B230=3%, F=2% futex words: {'0x0x104006AD80': 9, '0x0x14F37B014C': 1, '0x0x1080317328': 1}
+ tid=168 clock=#2 rows=48 ms: min=32 med=161 max=1189 sum=9899
+   samples: F=99%, R=0%, U=0%, B0=0%, T=0%, O=0% futex words: {'0x0x14F37B0258': 48}
+ tid=95 clock=#34 rows=24 ms: min=31 med=138 max=5209 sum=8846
+   samples: K0=83%, T=5%, B0=4%, U=3%, R=1%, F=0% futex words: {'0x0x10802EE550': 2}
+-- wakers of the audio client's futex parks:
+-- zeros / AWAY-Z / NFSPIPE stall rows:
+[SND] zeros n=1 t_ms=0 up_ms=32442 frames=966496 q_vis=0 q_hw=0 call_frames=1920 call_all_zero=1 calls=2253 gap_ms=0 since_gap_ms=-1 since_prepare_ms=-5381
+[AWAY-Z] tid=96 tgid=92 ms=60 at=57254 clock=#20 audio=1 n=6 U=2 R=0 T=0 F=0 O=0 B=230:4 waker=92 wk=U:2,F:4 Cyberpunk2077.e
+[AWAY-Z] tid=168 tgid=92 ms=724 at=56590 clock=#2 n=72 U=0 R=0 T=0 F=72(0x0x14F37B0258) O=0 waker=96 wk=T:1,K202:4,U:21,K228:1,K16:1,B230:4 Cyberpunk2077.e
+[SND] zeros n=2 t_ms=24861 up_ms=57304 frames=480 q_vis=1557 q_hw=96 call_frames=384 call_all_zero=1 calls=3 gap_ms=0 since_gap_ms=-1 since_prepare_ms=19479
+[NFSPIPE] stall inflight=1 issued=10 replies=9 contig=5167677440 end=5167972352 us=151682 budget=32768 xids=1213238002/5167677440 
+[AWAY-Z] tid=95 tgid=92 ms=43 at=130511 clock=#34 n=4 U=0 R=0 T=0 F=0 O=0 K=0:4 pc=0x0x10800503CC Cyberpunk2077.e
+[AWAY-Z] tid=96 tgid=92 ms=50 at=130794 clock=#20 audio=1 n=5 U=4 R=0 T=1 F=0 O=0 waker=92 wk=U:3,B230:2 Cyberpunk2077.e
+[AWAY-Z] tid=96 tgid=92 ms=43 at=130891 clock=#20 audio=1 n=4 U=3 R=0 T=1 F=0 O=0 waker=123 wk=F:4 Cyberpunk2077.e
+[AWAY-Z] tid=168 tgid=92 ms=3101 at=129014 clock=#13 n=310 U=0 R=0 T=0 F=310(0x0x14F37B0258) O=0 waker=95 wk=B16:31,K0:1 Cyberpunk2077.e
+[AWAY-Z] tid=95 tgid=92 ms=43 at=132104 clock=#34 n=5 U=0 R=0 T=2 F=0 O=0 K=0:3 pc=0x0x10800503CC waker=168 wk=B16:4 Cyberpunk2077.e
+[AWAY-Z] tid=95 tgid=92 ms=35 at=132148 clock=#34 n=2 U=0 R=0 T=0 F=0 O=0 K=0:2 pc=0x0x10800503CC waker=168 wk=B16:3 Cyberpunk2077.e
+[SND] zeros n=3 t_ms=98441 up_ms=130884 frames=61744 q_vis=2488 q_hw=1360 call_frames=480 call_all_zero=0 calls=148 gap_ms=0 since_gap_ms=-1 since_prepare_ms=93059
+[AWAY-Z] tid=92 tgid=92 ms=111 at=185682 clock=#20 audio=1 n=11 U=10 R=0 T=1 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=96 tgid=92 ms=113 at=185681 clock=#20 audio=1 n=11 U=2 R=0 T=9 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=162 tgid=92 ms=16258 at=169538 clock=#2 n=1626 U=13 R=0 T=1 F=1611(0x0x14F37B024C) O=0 K=202:1 pc=0x0x108017895D waker=96 wk=B16:9,B0:1,U:10,B230:1,T:11 Cyberpunk2077.e
+[AWAY-Z] tid=168 tgid=92 ms=14925 at=170871 clock=#14 n=1492 U=0 R=0 T=0 F=1492(0x0x14F37B0258) O=0 waker=96 wk=B16:9,B0:1,U:10,B230:1,T:11 Cyberpunk2077.e
+[SND] zeros n=4 t_ms=153291 up_ms=185734 frames=2880 q_vis=1245 q_hw=0 call_frames=480 call_all_zero=1 calls=9 gap_ms=0 since_gap_ms=-1 since_prepare_ms=147909
+[AWAY-Z] tid=92 tgid=92 ms=177 at=187624 clock=#20 audio=1 n=18 U=16 R=0 T=1 F=0 O=0 B=7:1 Cyberpunk2077.e
+[AWAY-Z] tid=162 tgid=92 ms=18270 at=169538 clock=#2 n=1827 U=13 R=0 T=1 F=1812(0x0x14F37B024C) O=0 K=202:1 pc=0x0x108017895D waker=96 wk=U:7,B16:7,B230:4,T:14 Cyberpunk2077.e
+[AWAY-Z] tid=168 tgid=92 ms=16937 at=170871 clock=#14 n=1693 U=0 R=0 T=0 F=1693(0x0x14F37B0258) O=0 waker=96 wk=U:7,B16:7,B230:4,T:14 Cyberpunk2077.e
+[SND] zeros n=5 t_ms=155241 up_ms=187684 frames=5760 q_vis=1652 q_hw=352 call_frames=480 call_all_zero=1 calls=16 gap_ms=0 since_gap_ms=-1 since_prepare_ms=149859
+[AWAY-Z] tid=96 tgid=92 ms=30 at=194885 clock=#20 audio=1 n=3 U=1 R=0 T=2 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=95 tgid=92 ms=30 at=194912 clock=#34 n=3 U=0 R=0 T=0 F=0 O=0 K=0:2,3:1 pc=0x0x10800503CC,0x0x108005045B waker=151 wk=B16:2,B0:1 Cyberpunk2077.e
+[AWAY-Z] tid=92 tgid=92 ms=33 at=194920 clock=#20 audio=1 n=3 U=1 R=0 T=2 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=95 tgid=92 ms=33 at=194976 clock=#34 n=3 U=0 R=0 T=0 F=0 O=0 K=0:2,47:1 pc=0x0x10800503CC,0x0x10800510ED waker=151 wk=B16:3 Cyberpunk2077.e
+[AWAY-Z] tid=95 tgid=92 ms=30 at=195083 clock=#34 n=3 U=0 R=0 T=0 F=0 O=0 K=0:1,202:2 pc=0x0x10800503CC,0x0x1080049839,0x0x7011875C waker=151 wk=B16:2,R:1 Cyberpunk2077.e
+[AWAY-Z] tid=96 tgid=92 ms=37 at=195100 clock=#20 audio=1 n=4 U=3 R=0 T=1 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=95 tgid=92 ms=54 at=195133 clock=#34 n=6 U=1 R=0 T=0 F=0 O=0 K=0:4 B=0:1 pc=0x0x10800503CC waker=151 wk=B16:4,T:1 Cyberpunk2077.e
+[AWAY-Z] tid=92 tgid=92 ms=293 at=195197 clock=#20 audio=1 n=29 U=25 R=1 T=1 F=0 O=0 K=24:1 B=7:1 pc=0x0x108016271B Cyberpunk2077.e
+[AWAY-Z] tid=162 tgid=92 ms=25974 at=169538 clock=#2 n=2597 U=31 R=0 T=1 F=2564(0x0x14F37B024C) O=0 K=202:1 pc=0x0x108017895D waker=96 wk=U:14,T:18 Cyberpunk2077.e
+[AWAY-Z] tid=168 tgid=92 ms=24641 at=170871 clock=#14 n=2463 U=0 R=7 T=0 F=2452(0x0x14F37B0258) O=0 K=202:1,1:1 B=0:2 pc=0x0x10800503CC,0x0x108005032F waker=96 wk=U:14,T:18 Cyberpunk2077.e
+[SND] zeros n=6 t_ms=162811 up_ms=195254 frames=11520 q_vis=1392 q_hw=128 call_frames=352 call_all_zero=1 calls=31 gap_ms=0 since_gap_ms=-1 since_prepare_ms=157429
+[AWAY-Z] tid=96 tgid=92 ms=42 at=256005 clock=#20 audio=1 n=4 U=2 R=0 T=0 F=0 O=0 K=228:2 pc=0x0x108013D0F4 waker=122 wk=F:4 Cyberpunk2077.e
+[AWAY-Z] tid=96 tgid=92 ms=65 at=256084 clock=#20 audio=1 n=6 U=2 R=2 T=0 F=0 O=0 K=202:2 pc=0x0x1080049839 waker=92 wk=U:5,R:1 Cyberpunk2077.e
+[AWAY-Z] tid=92 tgid=92 ms=31 at=256134 clock=#25 n=3 U=1 R=1 T=1 F=0 O=0 waker=96 wk=K202:1,U:2 Cyberpunk2077.e
+[AWAY-Z] tid=96 tgid=92 ms=44 at=256194 clock=#20 audio=1 n=4 U=4 R=0 T=0 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=95 tgid=92 ms=49 at=256219 clock=#34 n=5 U=0 R=0 T=0 F=0 O=0 K=0:3,1:1 B=0:1 pc=0x0x10800503CC,0x0x108005032F waker=151 wk=B16:4 Cyberpunk2077.e
+[AWAY-Z] tid=92 tgid=92 ms=126 at=256227 clock=#20 audio=1 n=12 U=9 R=0 T=2 F=1(0x0x1080317328) O=0 waker=96 wk=U:11,K9:1 Cyberpunk2077.e
+[AWAY-Z] tid=92 tgid=92 ms=65 at=256390 clock=#25 n=7 U=2 R=0 T=5 F=0 O=0 waker=148 wk=B16:6 Cyberpunk2077.e
+[AWAY-Z] tid=92 tgid=92 ms=31 at=255924 clock=#20 audio=1 n=4 U=3 R=1 T=0 F=0 O=0 waker=96 wk=U:2,R:1 Cyberpunk2077.e
+[AWAY-Z] tid=95 tgid=92 ms=84 at=256397 clock=#34 n=7 U=0 R=0 T=0 F=0 O=0 K=0:7 pc=0x0x10800503CC waker=148 wk=K16:1,B16:7 Cyberpunk2077.e
+[AWAY-Z] tid=162 tgid=92 ms=86943 at=169538 clock=#2 n=8695 U=48 R=1 T=1 F=8641(0x0x14F37B024C) O=0 K=202:4 pc=0x0x108017895D waker=96 wk=U:29,K9:1,T:2 Cyberpunk2077.e
+[AWAY-Z] tid=168 tgid=92 ms=85610 at=170871 clock=#14 n=8561 U=2 R=13 T=0 F=8538(0x0x14F37B0258) O=0 K=202:3,1:1,0:2 B=0:2 pc=0x0x10800503CC,0x0x108005032F,0x0x108012764A waker=96 wk=U:29,K9:1,T:2 Cyberpunk2077.e
+[SND] zeros n=7 t_ms=223991 up_ms=256434 frames=1440 q_vis=1498 q_hw=96 call_frames=480 call_all_zero=1 calls=5 gap_ms=0 since_gap_ms=-1 since_prepare_ms=218609
+
+#### kg2-fp12
+kg2-fp12 dropouts=4 dropout_ms=440.0 wav_s=327.76 alsa_underrun_rows=0 kernel_xruns=1 held=51 max100ms=7776 xrun_rows[wok/drt:1 ] stalls=20 stolen_ms=1546
+ tid=169 clock=#14 rows=129 ms: min=30 med=103 max=1345 sum=16780
+   samples: F=98%, R=0%, B0=0%, U=0%, K16=0%, T=0% futex words: {'0x0x14F342025C': 129}
+ tid=169 clock=#9 rows=73 ms: min=30 med=68 max=166 sum=6080
+   samples: F=98%, R=0%, U=0%, B0=0%, K202=0%, K16=0% futex words: {'0x0x14F342025C': 73}
+ tid=97 clock=#17 rows=59 ms: min=30 med=53 max=2373 sum=10724
+   samples: T=39%, U=34%, K11=9%, K9=7%, B230=4%, F=2% futex words: {'0x0x104006AB40': 9, '0x0x1080317328': 2, '0x0x14F3420150': 1}
+ tid=93 clock=#17 rows=57 ms: min=30 med=37 max=1427 sum=4132
+   samples: U=53%, T=22%, B7=10%, R=4%, K0=2%, B0=1% futex words: {'0x0x14F3420140': 1}
+ tid=169 clock=#0 rows=56 ms: min=30 med=162 max=1130 sum=11321
+   samples: F=98%, R=0%, B0=0%, U=0%, K202=0%, K16=0% futex words: {'0x0x14F342025C': 56}
+ tid=96 clock=#35 rows=26 ms: min=30 med=60 max=4512 sum=7915
+   samples: K0=81%, B0=5%, T=5%, U=3%, R=1%, K47=0% futex words: {'0x0x10802EE550': 2, '0x0x104006AB40': 1}
+-- wakers of the audio client's futex parks:
+    249 waker=97
+     13 waker=93
+      5 waker=152
+      1 waker=96
+-- zeros / AWAY-Z / NFSPIPE stall rows:
+[AWAY-Z] tid=96 tgid=93 ms=31 at=47330 clock=#35 n=3 U=0 R=0 T=0 F=0 O=0 K=47:1,0:2 pc=0x0x10800510ED,0x0x10800503CC waker=152 wk=B16:3 Cyberpunk2077.e
+[AWAY-Z] tid=169 tgid=93 ms=239 at=47122 clock=#0 n=24 U=0 R=0 T=0 F=24(0x0x14F342025C) O=0 waker=97 wk=U:10,K9:6,K16:1,B230:4,B0:2 Cyberpunk2077.e
+[SND] zeros n=1 t_ms=0 up_ms=31490 frames=762912 q_vis=0 q_hw=0 call_frames=1920 call_all_zero=1 calls=1781 gap_ms=0 since_gap_ms=-1 since_prepare_ms=-2469
+[AWAY-Z] tid=93 tgid=93 ms=70 at=169961 clock=#17 audio=1 n=7 U=2 R=1 T=1 F=0 O=0 K=228:1 B=7:2 pc=0x0x108013D0F4 Cyberpunk2077.e
+[AWAY-Z] tid=96 tgid=93 ms=74 at=169973 clock=#35 n=7 U=0 R=0 T=0 F=0 O=0 K=0:7 pc=0x0x10800503CC Cyberpunk2077.e
+[AWAY-Z] tid=93 tgid=93 ms=111 at=170160 clock=#17 audio=1 n=12 U=10 R=0 T=0 F=0 O=0 K=7:1,98:1 pc=0x0x108012764A,0x0x108017400B Cyberpunk2077.e
+[AWAY-Z] tid=163 tgid=93 ms=15895 at=154405 clock=#5 n=1588 U=14 R=0 T=0 F=1574(0x0x14F3420250) O=0 waker=97 wk=T:8,U:14,B16:4,K202:1,B230:3,K16:1 Cyberpunk2077.e
+[AWAY-Z] tid=169 tgid=93 ms=14394 at=155906 clock=#14 n=1438 U=0 R=0 T=0 F=1438(0x0x14F342025C) O=0 waker=97 wk=T:8,U:14,B16:4,K202:1,B230:3,K16:1 Cyberpunk2077.e
+[SND] zeros n=2 t_ms=138720 up_ms=170211 frames=3360 q_vis=984 q_hw=0 call_frames=480 call_all_zero=1 calls=10 gap_ms=0 since_gap_ms=-1 since_prepare_ms=136251
+[AWAY-Z] tid=93 tgid=93 ms=158 at=171799 clock=#17 audio=1 n=16 U=15 R=1 T=0 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=163 tgid=93 ms=17560 at=154405 clock=#5 n=1756 U=14 R=0 T=0 F=1742(0x0x14F3420250) O=0 waker=97 wk=B16:4,U:9,B230:2,T:15,K230:1,K1:1 Cyberpunk2077.e
+[AWAY-Z] tid=169 tgid=93 ms=16059 at=155906 clock=#14 n=1606 U=0 R=0 T=0 F=1606(0x0x14F342025C) O=0 waker=97 wk=B16:4,U:9,B230:2,T:15,K230:1,K1:1 Cyberpunk2077.e
+[SND] zeros n=3 t_ms=140340 up_ms=171831 frames=6240 q_vis=1379 q_hw=0 call_frames=480 call_all_zero=1 calls=17 gap_ms=0 since_gap_ms=-1 since_prepare_ms=137871
+[AWAY-Z] tid=96 tgid=93 ms=324 at=178104 clock=#35 n=32 U=2 R=0 T=1 F=0 O=0 K=0:23,3:1,47:2 B=0:3 pc=0x0x10800503CC,0x0x108005045B,0x0x10800510ED waker=97 wk=T:14,U:16,B230:1,R:1 Cyberpunk2077.e
+[AWAY-Z] tid=96 tgid=93 ms=32 at=178486 clock=#35 n=3 U=0 R=0 T=0 F=0 O=0 K=0:2 B=0:1 pc=0x0x10800503CC Cyberpunk2077.e
+[AWAY-Z] tid=97 tgid=93 ms=33 at=178488 clock=#17 audio=1 n=4 U=2 R=0 T=1 F=0 O=0 B=230:1 waker=123 wk=F:3 Cyberpunk2077.e
+[AWAY-Z] tid=97 tgid=93 ms=36 at=178625 clock=#17 audio=1 n=4 U=2 R=0 T=2 F=0 O=0 waker=93 wk=T:1,U:1,K20:1 Cyberpunk2077.e
+[AWAY-Z] tid=96 tgid=93 ms=81 at=178642 clock=#35 n=8 U=0 R=0 T=0 F=0 O=0 K=0:8 pc=0x0x10800503CC waker=93 wk=U:5,K20:1,B7:1,T:1 Cyberpunk2077.e
+[AWAY-Z] tid=96 tgid=93 ms=31 at=178869 clock=#35 n=4 U=0 R=0 T=0 F=0 O=0 K=0:4 pc=0x0x10800503CC,0x0x108012764A Cyberpunk2077.e
+[AWAY-Z] tid=93 tgid=93 ms=244 at=178871 clock=#17 audio=1 n=24 U=23 R=0 T=0 F=0 O=0 K=98:1 pc=0x0x108017400B Cyberpunk2077.e
+[AWAY-Z] tid=97 tgid=93 ms=321 at=178812 clock=#17 audio=1 n=31 U=12 R=0 T=19 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=163 tgid=93 ms=24728 at=154405 clock=#5 n=2472 U=22 R=0 T=0 F=2450(0x0x14F3420250) O=0 waker=97 wk=U:13,T:19 Cyberpunk2077.e
+[AWAY-Z] tid=169 tgid=93 ms=23227 at=155906 clock=#14 n=2322 U=0 R=6 T=0 F=2314(0x0x14F342025C) O=0 B=0:2 waker=97 wk=U:13,T:19 Cyberpunk2077.e
+[SND] zeros n=4 t_ms=147420 up_ms=178911 frames=10080 q_vis=1501 q_hw=0 call_frames=480 call_all_zero=1 calls=22 gap_ms=0 since_gap_ms=-1 since_prepare_ms=144951
+[AWAY-Z] tid=97 tgid=93 ms=30 at=239821 clock=#17 audio=1 n=3 U=3 R=0 T=0 F=0 O=0 waker=123 wk=F:3 Cyberpunk2077.e
+[AWAY-Z] tid=93 tgid=93 ms=30 at=240141 clock=#17 audio=1 n=3 U=3 R=0 T=0 F=0 O=0 waker=97 wk=U:2,T:1 Cyberpunk2077.e
+[AWAY-Z] tid=96 tgid=93 ms=54 at=240137 clock=#35 n=6 U=0 R=0 T=1 F=0 O=0 K=0:4 B=0:1 pc=0x0x10800503CC Cyberpunk2077.e
+[AWAY-Z] tid=97 tgid=93 ms=101 at=240152 clock=#17 audio=1 n=10 U=8 R=0 T=2 F=0 O=0 Cyberpunk2077.e
+[AWAY-Z] tid=97 tgid=93 ms=62 at=240289 clock=#17 audio=1 n=6 U=0 R=0 T=6 F=0 O=0 waker=149 wk=B16:6 Cyberpunk2077.e
+[AWAY-Z] tid=96 tgid=93 ms=66 at=240304 clock=#35 n=6 U=0 R=0 T=1 F=0 O=0 K=47:1,0:4 pc=0x0x10800510ED,0x0x10800503CC Cyberpunk2077.e
+[AWAY-Z] tid=163 tgid=93 ms=85971 at=154405 clock=#5 n=8597 U=38 R=1 T=0 F=8558(0x0x14F3420250) O=0 waker=97 wk=U:22,B230:1,T:9 Cyberpunk2077.e
+[AWAY-Z] tid=169 tgid=93 ms=84470 at=155906 clock=#14 n=8447 U=1 R=15 T=1 F=8426(0x0x14F342025C) O=0 K=0:1,47:1 B=0:2 pc=0x0x10800503CC,0x0x10800510ED waker=97 wk=U:22,B230:1,T:9 Cyberpunk2077.e
+[SND] zeros n=5 t_ms=208840 up_ms=240331 frames=1440 q_vis=917 q_hw=0 call_frames=224 call_all_zero=1 calls=5 gap_ms=0 since_gap_ms=-1 since_prepare_ms=206371
