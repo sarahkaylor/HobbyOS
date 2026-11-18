@@ -1,0 +1,156 @@
+# H5-audio2 round 2: winealsa lead-in variants on the host model (tools/cp/audio2/leadin-model-ab.sh + extra runs), strix, 15 s per run
+# kernel = cp-audio2 (044b517e linux_snd.c); kernel_xruns = close-row total incl. 1-2 at stream start; wav_dropouts = wavgaps.py
+# shapes: A fill=1 skip=8, B fill=2 skip=4, C fill=0, D fill=1; variants: orig (Wine 11.0), fix (round-1 accounting), gateN / ghN (lead-in only when the play clock has < N periods / N half periods queued), topN (top-up to N/2 periods)
+## matrix (2 runs each)
+A orig run1: kernel_xruns=365 zero_runs=9 wav_dropouts=9 xrun_state=338 leadin=10 gated=0 
+A orig run2: kernel_xruns=385 zero_runs=9 wav_dropouts=9 xrun_state=364 leadin=10 gated=0 
+A fix run1: kernel_xruns=374 zero_runs=0 wav_dropouts=0 xrun_state=340 leadin=1 gated=0 
+A fix run2: kernel_xruns=378 zero_runs=1 wav_dropouts=1 xrun_state=339 leadin=2 gated=0 
+A gate2 run1: kernel_xruns=373 zero_runs=9 wav_dropouts=9 xrun_state=351 leadin=10 gated=0 
+A gate2 run2: kernel_xruns=369 zero_runs=9 wav_dropouts=9 xrun_state=349 leadin=10 gated=0 
+A gate3 run1: kernel_xruns=368 zero_runs=9 wav_dropouts=9 xrun_state=339 leadin=10 gated=0 
+A gate3 run2: kernel_xruns=375 zero_runs=9 wav_dropouts=9 xrun_state=347 leadin=10 gated=0 
+B orig run1: kernel_xruns=2 zero_runs=9 wav_dropouts=9 xrun_state=2 leadin=14 gated=0 
+B orig run2: kernel_xruns=2 zero_runs=7 wav_dropouts=7 xrun_state=2 leadin=12 gated=0 
+B fix run1: kernel_xruns=7 zero_runs=7 wav_dropouts=7 xrun_state=7 leadin=13 gated=0 
+B fix run2: kernel_xruns=9 zero_runs=9 wav_dropouts=9 xrun_state=9 leadin=15 gated=0 
+B gate2 run1: kernel_xruns=3 zero_runs=2 wav_dropouts=2 xrun_state=3 leadin=5 gated=8 
+B gate2 run2: kernel_xruns=3 zero_runs=2 wav_dropouts=2 xrun_state=3 leadin=5 gated=10 
+B gate3 run1: kernel_xruns=1 zero_runs=10 wav_dropouts=10 xrun_state=1 leadin=14 gated=0 
+B gate3 run2: kernel_xruns=2 zero_runs=7 wav_dropouts=7 xrun_state=2 leadin=10 gated=3 
+C orig run1: kernel_xruns=1 zero_runs=0 wav_dropouts=0 xrun_state=1 leadin=1 gated=0 
+C orig run2: kernel_xruns=1 zero_runs=0 wav_dropouts=0 xrun_state=1 leadin=1 gated=0 
+C fix run1: kernel_xruns=1 zero_runs=0 wav_dropouts=0 xrun_state=1 leadin=1 gated=0 
+C fix run2: kernel_xruns=1 zero_runs=0 wav_dropouts=0 xrun_state=1 leadin=1 gated=0 
+C gate2 run1: kernel_xruns=1 zero_runs=0 wav_dropouts=0 xrun_state=1 leadin=1 gated=0 
+C gate2 run2: kernel_xruns=1 zero_runs=0 wav_dropouts=0 xrun_state=1 leadin=1 gated=0 
+C gate3 run1: kernel_xruns=1 zero_runs=0 wav_dropouts=0 xrun_state=1 leadin=1 gated=0 
+C gate3 run2: kernel_xruns=1 zero_runs=0 wav_dropouts=0 xrun_state=1 leadin=1 gated=0 
+D orig run1: kernel_xruns=6 zero_runs=0 wav_dropouts=0 xrun_state=6 leadin=1 gated=0 
+D orig run2: kernel_xruns=11 zero_runs=0 wav_dropouts=0 xrun_state=10 leadin=1 gated=0 
+D fix run1: kernel_xruns=TIMEOUT zero_runs=0 wav_dropouts=0 
+D fix run2: kernel_xruns=6 zero_runs=0 wav_dropouts=0 xrun_state=6 leadin=1 gated=0 
+D gate2 run1: kernel_xruns=4 zero_runs=0 wav_dropouts=0 xrun_state=4 leadin=1 gated=0 
+D gate2 run2: kernel_xruns=5 zero_runs=0 wav_dropouts=0 xrun_state=5 leadin=1 gated=0 
+D gate3 run1: kernel_xruns=6 zero_runs=0 wav_dropouts=0 xrun_state=6 leadin=1 gated=0 
+D gate3 run2: kernel_xruns=4 zero_runs=0 wav_dropouts=0 xrun_state=4 leadin=1 gated=0 
+## B / E extra runs (gate1, gate2)
+B orig run3: kernel_xruns=1 wav_dropouts=8 leadin=13 gated=0 
+B orig run4: kernel_xruns=2 wav_dropouts=8 leadin=14 gated=0 
+B orig run5: kernel_xruns=1 wav_dropouts=8 leadin=13 gated=0 
+B orig run6: kernel_xruns=2 wav_dropouts=8 leadin=13 gated=0 
+B gate1 run3: kernel_xruns=3 wav_dropouts=0 leadin=2 gated=13 
+B gate1 run4: kernel_xruns=3 wav_dropouts=0 leadin=2 gated=12 
+B gate1 run5: kernel_xruns=4 wav_dropouts=0 leadin=2 gated=12 
+B gate1 run6: kernel_xruns=3 wav_dropouts=0 leadin=2 gated=14 
+B gate2 run3: kernel_xruns=3 wav_dropouts=8 leadin=13 gated=0 
+B gate2 run4: kernel_xruns=3 wav_dropouts=4 leadin=7 gated=5 
+B gate2 run5: kernel_xruns=3 wav_dropouts=7 leadin=12 gated=1 
+B gate2 run6: kernel_xruns=4 wav_dropouts=7 leadin=12 gated=1 
+E orig run3: kernel_xruns=1 wav_dropouts=0 leadin=1 gated=0 
+E orig run4: kernel_xruns=1 wav_dropouts=0 leadin=1 gated=0 
+E orig run5: kernel_xruns=1 wav_dropouts=0 leadin=1 gated=0 
+E orig run6: kernel_xruns=1 wav_dropouts=0 leadin=1 gated=0 
+## top-up runs
+B orig run3: kernel_xruns=2 wav_dropouts=8 leadin=14 gated=0 
+B orig run4: kernel_xruns=2 wav_dropouts=8 leadin=13 gated=0 
+B orig run5: kernel_xruns=2 wav_dropouts=8 leadin=13 gated=0 
+B orig run6: kernel_xruns=4 wav_dropouts=8 leadin=14 gated=0 
+B top3 run3: kernel_xruns=6 wav_dropouts=1 leadin=6 gated=8 
+B top3 run4: kernel_xruns=5 wav_dropouts=0 leadin=5 gated=9 
+B top3 run5: kernel_xruns=5 wav_dropouts=0 leadin=5 gated=10 
+B top3 run6: kernel_xruns=5 wav_dropouts=2 leadin=6 gated=9 
+B top4 run3: kernel_xruns=5 wav_dropouts=5 leadin=9 gated=4 
+B top4 run4: kernel_xruns=4 wav_dropouts=3 leadin=6 gated=7 
+B top4 run5: kernel_xruns=5 wav_dropouts=2 leadin=7 gated=8 
+B top4 run6: kernel_xruns=2 wav_dropouts=1 leadin=5 gated=9 
+E orig run3: kernel_xruns=1 wav_dropouts=0 leadin=1 gated=0 
+E orig run4: kernel_xruns=1 wav_dropouts=0 leadin=1 gated=0 
+## half-period thresholds (gh4 = gate2)
+B orig run1: kernel_xruns=2 wav_dropouts=8 leadin=13 gated=0 
+B orig run2: kernel_xruns=2 wav_dropouts=8 leadin=12 gated=0 
+B orig run3: kernel_xruns=2 wav_dropouts=8 leadin=14 gated=0 
+B orig run4: kernel_xruns=2 wav_dropouts=8 leadin=13 gated=0 
+B orig run5: kernel_xruns=2 wav_dropouts=7 leadin=12 gated=0 
+B orig run6: kernel_xruns=3 wav_dropouts=8 leadin=13 gated=0 
+B gh4 run1: kernel_xruns=3 wav_dropouts=1 leadin=4 gated=9 
+B gh4 run2: kernel_xruns=3 wav_dropouts=8 leadin=12 gated=0 
+B gh4 run3: kernel_xruns=2 wav_dropouts=2 leadin=5 gated=9 
+B gh4 run4: kernel_xruns=2 wav_dropouts=7 leadin=12 gated=2 
+B gh4 run5: kernel_xruns=2 wav_dropouts=7 leadin=11 gated=1 
+B gh4 run6: kernel_xruns=2 wav_dropouts=8 leadin=13 gated=0 
+B gh5 run1: kernel_xruns=4 wav_dropouts=8 leadin=13 gated=0 
+B gh5 run2: kernel_xruns=2 wav_dropouts=7 leadin=12 gated=0 
+B gh5 run3: kernel_xruns=2 wav_dropouts=8 leadin=13 gated=0 
+B gh5 run4: kernel_xruns=2 wav_dropouts=8 leadin=13 gated=0 
+B gh5 run5: kernel_xruns=2 wav_dropouts=8 leadin=13 gated=0 
+B gh5 run6: kernel_xruns=4 wav_dropouts=2 leadin=5 gated=9 
+B gh6 run1: kernel_xruns=2 wav_dropouts=7 leadin=11 gated=1 
+B gh6 run2: kernel_xruns=2 wav_dropouts=7 leadin=12 gated=1 
+B gh6 run3: kernel_xruns=2 wav_dropouts=8 leadin=13 gated=2 
+B gh6 run4: kernel_xruns=2 wav_dropouts=1 leadin=4 gated=13 
+B gh6 run5: kernel_xruns=2 wav_dropouts=8 leadin=13 gated=0 
+B gh6 run6: kernel_xruns=2 wav_dropouts=8 leadin=13 gated=0 
+E orig run1: kernel_xruns=1 wav_dropouts=1 leadin=2 gated=0 
+
+## v2: gate from snd_pcm_delay(), model kernel with DELAY = appl - vis (not in the branch: reverted, untested in a game); dN = gate N periods
+A orig run1: kernel_xruns=372 wav_dropouts=9 leadin=10 gated=0 
+A orig run2: kernel_xruns=374 wav_dropouts=9 leadin=10 gated=0 
+A orig run3: kernel_xruns=354 wav_dropouts=9 leadin=10 gated=0 
+A orig run4: kernel_xruns=382 wav_dropouts=9 leadin=10 gated=0 
+A d2 run1: kernel_xruns=417 wav_dropouts=9 leadin=10 gated=0 
+A d2 run2: kernel_xruns=413 wav_dropouts=9 leadin=10 gated=0 
+A d2 run3: kernel_xruns=401 wav_dropouts=9 leadin=10 gated=0 
+A d2 run4: kernel_xruns=416 wav_dropouts=9 leadin=10 gated=0 
+A d3 run1: kernel_xruns=385 wav_dropouts=9 leadin=10 gated=0 
+A d3 run2: kernel_xruns=391 wav_dropouts=9 leadin=10 gated=0 
+A d3 run3: kernel_xruns=388 wav_dropouts=9 leadin=10 gated=0 
+A d3 run4: kernel_xruns=396 wav_dropouts=9 leadin=10 gated=0 
+B orig run1: kernel_xruns=2 wav_dropouts=8 leadin=13 gated=0 
+B orig run2: kernel_xruns=2 wav_dropouts=9 leadin=14 gated=0 
+B orig run3: kernel_xruns=2 wav_dropouts=9 leadin=14 gated=0 
+B orig run4: kernel_xruns=2 wav_dropouts=9 leadin=14 gated=0 
+B d2 run1: kernel_xruns=2 wav_dropouts=7 leadin=12 gated=0 
+B d2 run2: kernel_xruns=3 wav_dropouts=10 leadin=15 gated=0 
+B d2 run3: kernel_xruns=4 wav_dropouts=8 leadin=12 gated=0 
+B d2 run4: kernel_xruns=5 wav_dropouts=10 leadin=14 gated=1 
+B d3 run1: kernel_xruns=6 wav_dropouts=6 leadin=11 gated=0 
+B d3 run2: kernel_xruns=5 wav_dropouts=8 leadin=13 gated=0 
+B d3 run3: kernel_xruns=4 wav_dropouts=8 leadin=14 gated=0 
+B d3 run4: kernel_xruns=4 wav_dropouts=10 leadin=16 gated=0 
+C orig run1: kernel_xruns=1 wav_dropouts=0 leadin=1 gated=0 
+C orig run2: kernel_xruns=1 wav_dropouts=0 leadin=1 gated=0 
+C orig run3: kernel_xruns=1 wav_dropouts=0 leadin=1 gated=0 
+C orig run4: kernel_xruns=1 wav_dropouts=0 leadin=1 gated=0 
+C d2 run1: kernel_xruns=1 wav_dropouts=0 leadin=1 gated=0 
+C d2 run2: kernel_xruns=1 wav_dropouts=0 leadin=1 gated=0 
+C d2 run3: kernel_xruns=1 wav_dropouts=0 leadin=1 gated=0 
+C d2 run4: kernel_xruns=1 wav_dropouts=0 leadin=1 gated=0 
+C d3 run1: kernel_xruns=1 wav_dropouts=0 leadin=1 gated=0 
+C d3 run2: kernel_xruns=1 wav_dropouts=0 leadin=1 gated=0 
+C d3 run3: kernel_xruns=1 wav_dropouts=0 leadin=1 gated=0 
+C d3 run4: kernel_xruns=1 wav_dropouts=0 leadin=1 gated=0 
+D orig run1: kernel_xruns=4 wav_dropouts=0 leadin=1 gated=0 
+D orig run2: kernel_xruns=7 wav_dropouts=0 leadin=1 gated=0 
+D orig run3: kernel_xruns=2 wav_dropouts=0 leadin=1 gated=0 
+D orig run4: kernel_xruns=6 wav_dropouts=0 leadin=1 gated=0 
+D d2 run1: kernel_xruns=4 wav_dropouts=0 leadin=1 gated=0 
+D d2 run2: kernel_xruns=7 wav_dropouts=0 leadin=1 gated=0 
+D d2 run3: kernel_xruns=8 wav_dropouts=0 leadin=1 gated=0 
+D d2 run4: kernel_xruns=8 wav_dropouts=0 leadin=1 gated=0 
+D d3 run1: kernel_xruns=6 wav_dropouts=0 leadin=1 gated=0 
+D d3 run2: kernel_xruns=4 wav_dropouts=0 leadin=1 gated=0 
+D d3 run3: kernel_xruns=6 wav_dropouts=0 leadin=1 gated=0 
+D d3 run4: kernel_xruns=2 wav_dropouts=0 leadin=1 gated=0 
+E orig run1: kernel_xruns=1 wav_dropouts=0 leadin=1 gated=0 
+E orig run2: kernel_xruns=1 wav_dropouts=1 leadin=2 gated=0 
+E orig run3: kernel_xruns=2 wav_dropouts=1 leadin=2 gated=0 
+E orig run4: kernel_xruns=2 wav_dropouts=1 leadin=2 gated=0 
+E d2 run1: kernel_xruns=2 wav_dropouts=1 leadin=2 gated=0 
+E d2 run2: kernel_xruns=2 wav_dropouts=2 leadin=3 gated=0 
+E d2 run3: kernel_xruns=1 wav_dropouts=1 leadin=2 gated=0 
+E d2 run4: kernel_xruns=2 wav_dropouts=1 leadin=2 gated=0 
+E d3 run1: kernel_xruns=1 wav_dropouts=1 leadin=2 gated=0 
+E d3 run2: kernel_xruns=3 wav_dropouts=1 leadin=2 gated=0 
+E d3 run3: kernel_xruns=2 wav_dropouts=1 leadin=2 gated=0 
+E d3 run4: kernel_xruns=1 wav_dropouts=1 leadin=2 gated=0 
