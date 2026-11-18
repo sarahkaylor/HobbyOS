@@ -17,6 +17,7 @@
 
 extern void uart_puts(const char* s);
 extern uint64_t timer_get_ms(void);
+extern uint64_t timer_get_us(void);
 extern void uart_print_hex(uint64_t val);
 extern void print_int(int val);
 extern void *memcpy(void *dest, const void *src, size_t n);
@@ -1677,6 +1678,12 @@ void virtio_blk_diag_row(void) {
   uart_puts(" mmio=");
   print_int((int)blk_mmio_changes);
   uart_puts("\n");
+  /* cp-fat: token wait-time distribution on the same 5 s timeline (only
+     when it changed). */
+  {
+    extern void blk_token_wait_row(void);
+    blk_token_wait_row();
+  }
 }
 
 int virtio_blk_init(void) {
@@ -1939,18 +1946,254 @@ int virtio_blk_init(void) {
  * held while a *lock* is held across the device wait, so the spinlock stall
  * breaker (which frees a lock whose owner stopped taking timer interrupts)
  * cannot admit a second driver entrant — the exact mechanism that used to
- * desynchronize the completion ring.  A waiter sleeps with interrupts on. */
+ * desynchronize the completion ring.  A waiter POLLS (cp-fat, see below).
+ *
+ * cp-fat (P9-8): WHO holds it.  The token is shared by the boot volume (FAT,
+ * namespace 1) and the cp/ext2 data disk (namespace 2), and a FAT directory
+ * operation (rename, unlink, create) takes it while holding fat_lock.  A token
+ * whose holder never runs again therefore surfaces as a fat_lock (or ext2_lock)
+ * wedge whose owner is "RUNNING" on a CPU that is only halting here, with no
+ * [BLKQ] row, because the waiter never reaches a device wait.  Measured shape:
+ * [YLOCK-OWNER] fat_lock pid=10 cpu=4 ost=3 osys=23 with CPU 4 in HLT.  The
+ * waiter names the holder after BLK_TOKEN_REPORT_MS; the wait itself is not
+ * bounded (a FAT metadata write has no error path that leaves the volume
+ * consistent), so this is evidence, not recovery. */
+#define BLK_TOKEN_REPORT_MS 2000u
+static volatile int32_t blk_tok_pid = -1;   /* holder's pid, -1 = none */
+static volatile int32_t blk_tok_cpu = -1;   /* holder's CPU at acquire */
+static volatile uint64_t blk_tok_ms;        /* acquire time */
+static volatile uint64_t blk_tok_site;      /* acquire return address */
+static volatile uint32_t blk_tok_long_waits; /* waits past the report mark */
+
+static void blk_token_note_owner(uint64_t site) {
+  uint32_t c = get_cpuid();
+  blk_tok_cpu = (int32_t)c;
+  blk_tok_pid = (c < MAX_CPUS) ? cpu_current_pids[c] : -1;
+  blk_tok_ms = timer_get_ms();
+  blk_tok_site = site;
+}
+
+/* One record: the token's holder, where (if anywhere) it is running, and the
+ * caller's own context.  Usable from any context (no lock taken; the fields
+ * are a racy snapshot, which is all a wedge report needs). */
+void blk_token_diag_row(const char *why) {
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[BLKTOK] ");
+  kl_s(&kl, why ? why : "state");
+  kl_s(&kl, " in_use=");
+  kl_i(&kl, (long)blk_in_use);
+  kl_s(&kl, " inside=");
+  kl_i(&kl, (long)blk_inside);
+  int32_t hp = blk_tok_pid;
+  kl_s(&kl, " holder pid=");
+  kl_i(&kl, (long)hp);
+  kl_s(&kl, " cpu=");
+  kl_i(&kl, (long)blk_tok_cpu);
+  if (blk_in_use) {
+    kl_s(&kl, " held_ms=");
+    kl_i(&kl, (long)(timer_get_ms() - blk_tok_ms));
+  }
+  kl_s(&kl, " site=");
+  kl_hex(&kl, blk_tok_site);
+  struct process *hpcb = (hp >= 0) ? process_get_pcb((int)hp) : 0;
+  if (hpcb) {
+    kl_s(&kl, " st=");
+    kl_i(&kl, (long)hpcb->state);
+    kl_s(&kl, " kern=");
+    kl_i(&kl, (long)hpcb->is_kernel_process);
+    kl_s(&kl, " osys=");
+    kl_i(&kl, (long)hpcb->last_syscall);
+  }
+  /* Is the holder on a CPU right now?  -1: on none (preempted or lost). */
+  int on = -1;
+  if (hp >= 0)
+    for (uint32_t c = 0; c < MAX_CPUS; c++)
+      if (cpu_current_pids[c] == hp) { on = (int)c; break; }
+  kl_s(&kl, " on_cpu=");
+  kl_i(&kl, (long)on);
+  uint32_t me = get_cpuid();
+  kl_s(&kl, " me pid=");
+  kl_i(&kl, (long)((me < MAX_CPUS) ? cpu_current_pids[me] : -1));
+  kl_s(&kl, " cpu=");
+  kl_i(&kl, (long)me);
+  kl_s(&kl, " holds=");
+  kl_s(&kl, lock_audit_held_outermost());
+  kl_s(&kl, " long_waits=");
+  kl_i(&kl, (long)blk_tok_long_waits);
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+}
+
+/* cp-fat (P9-8): the token wait.
+ *
+ * It was safe_wfi() in a loop, rechecking only at the CPU's next interrupt,
+ * and blk_token_release() woke nobody.  On x86_64 an AP's only periodic
+ * interrupt was CPU 0's broadcast 0x81, and CPU 0 stops sending it whenever it
+ * spins in ylock_acquire inside a syscall (SFMASK masks IF).  The waiter here
+ * usually holds the very lock CPU 0 spins on (fat_lock / fat_wr_lock around
+ * directory and FAT-sector I/O, ext2_lock around ext2 I/O): the token was
+ * released, the halted holder never woke, nothing moved again.  Measured with
+ * linux_probe_fatren (3 of 4 boots wedged): CPU 0 RFL=0x97 spinning on
+ * fat_wr_lock, the holder in HLT here, [BLKTOK] in_use=0.
+ *
+ * C1-k6 (9d47b051) bounds every task halt to 1 ms (safe_wfi arms this CPU's
+ * one-shot), which ends the wedge by itself.  On top of that, with
+ * BLK_TOKEN_RELEASE_WAKE (default on): a USER waiter that finds the token
+ * busy twice registers its CPU in blk_tok_sleepers and halts; the release
+ * sends a directed 0x81 to every registered CPU, so the waiter sees the token
+ * in microseconds instead of at the next 1 ms bound (linux_probe_fatren on
+ * integ10 + 9d47b051: +30-45 % FAT ops, halted waits 0.1-1 ms instead of
+ * >= 1 ms.  A 50 us pause-spin before the halt was measured too: renames a
+ * little faster, but 4x the wake IPIs and up to 50 us of burnt vCPU per
+ * wait, and Venus/P9 boots are vCPU-bound, so there is none).  Registration and the last recheck run with
+ * interrupts off and safe_wfi() halts with "sti; hlt", so a wake sent in
+ * between is held pending and ends the halt: no lost wake.  (0x81 on a CPU
+ * whose user thread is in kernel mode only ends the halt -- trap.c returns at
+ * once.)  A KERNEL TASK never registers: 0x81 on a kernel task is a
+ * reschedule, which preempted the ext2 flusher holding ext2_lock while every
+ * other CPU spun unpreemptibly on it (measured: [YLOCK-OWNER] ext2_lock pid=1
+ * ost=2), and a task resumed elsewhere would clear a bit no longer its own.
+ * Kernel tasks halt in plain safe_wfi(), bounded by C1-k6.  The caller's
+ * interrupt state is restored on the way out. */
+#ifndef BLK_TOKEN_RELEASE_WAKE
+#define BLK_TOKEN_RELEASE_WAKE 1
+#endif
+static volatile uint32_t blk_tok_sleepers;   /* CPUs halted on the token */
+/* Wait-time distribution (all waits that did not get the token at once). */
+static volatile uint64_t blk_tw_n, blk_tw_halts, blk_tw_ipis, blk_tw_max_us,
+    blk_tw_sum_us;
+static volatile uint64_t blk_tw_hist[6]; /* <10us <100us <1ms <10ms <100ms >= */
+
+static inline uint64_t blk_irq_save_off(void) {
+  uint64_t fl;
+  __asm__ volatile("pushfq; popq %0; cli" : "=r"(fl) : : "memory");
+  return fl;
+}
+static inline void blk_irq_restore(uint64_t fl) {
+  if (fl & 0x200) __asm__ volatile("sti" ::: "memory");
+  else __asm__ volatile("cli" ::: "memory");
+}
+
+/* Directed 0x81 to one CPU (same ICR protocol as process.c resched_cpu);
+   interrupts off around the two ICR writes so an interrupt handler on this
+   CPU cannot interleave its own IPI between them. */
+static void blk_wake_cpu(uint32_t c) {
+  uint64_t fl = blk_irq_save_off();
+  volatile uint32_t *icr_hi = (volatile uint32_t *)phys_to_virt(0xFEE00310);
+  volatile uint32_t *icr_lo = (volatile uint32_t *)phys_to_virt(0xFEE00300);
+  for (int i = 0; i < 200000 && (*icr_lo & (1u << 12)); i++)
+    __asm__ volatile("pause" ::: "memory");
+  *icr_hi = c << 24;
+  *icr_lo = 0x00002081u; /* fixed, vector 0x81, assert, edge */
+  for (int i = 0; i < 200000 && (*icr_lo & (1u << 12)); i++)
+    __asm__ volatile("pause" ::: "memory");
+  blk_irq_restore(fl);
+}
+
+void blk_token_wait_row(void);
+static void blk_tw_account(uint64_t us, int halted) {
+  uint64_t n = __atomic_add_fetch(&blk_tw_n, 1, __ATOMIC_RELAXED);
+  __atomic_add_fetch(&blk_tw_sum_us, us, __ATOMIC_RELAXED);
+  if (halted) __atomic_add_fetch(&blk_tw_halts, 1, __ATOMIC_RELAXED);
+  int b = us < 10 ? 0 : us < 100 ? 1 : us < 1000 ? 2 : us < 10000 ? 3
+        : us < 100000 ? 4 : 5;
+  __atomic_add_fetch(&blk_tw_hist[b], 1, __ATOMIC_RELAXED);
+  uint64_t m = blk_tw_max_us;
+  while (us > m && !__atomic_compare_exchange_n(&blk_tw_max_us, &m, us, 0,
+                                                __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+  }
+  if ((n & 1023) == 0) blk_token_wait_row(); /* a bounded running record */
+}
+
+/* One [BLKTOKW] row: how long token waiters waited (cp-fat). */
+void blk_token_wait_row(void) {
+  static uint64_t last_n;
+  uint64_t n = blk_tw_n;
+  if (n == last_n) return;
+  last_n = n;
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[BLKTOKW] waits=");
+  kl_i(&kl, (long)n);
+  kl_s(&kl, " halts=");
+  kl_i(&kl, (long)blk_tw_halts);
+  kl_s(&kl, " ipis=");
+  kl_i(&kl, (long)blk_tw_ipis);
+  kl_s(&kl, " mean_us=");
+  kl_i(&kl, (long)(n ? blk_tw_sum_us / n : 0));
+  kl_s(&kl, " max_us=");
+  kl_i(&kl, (long)blk_tw_max_us);
+  kl_s(&kl, " hist(<10us,<100us,<1ms,<10ms,<100ms,more)=");
+  for (int i = 0; i < 6; i++) {
+    kl_i(&kl, (long)blk_tw_hist[i]);
+    if (i < 5) kl_c(&kl, ',');
+  }
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+}
+
 static void blk_token_acquire(void) {
+  uint64_t site = (uint64_t)(uintptr_t)__builtin_return_address(0);
+  uint64_t t0 = 0, t0us = 0;
+  int reported = 0, halted = 0;
+  uint64_t entry_fl = blk_irq_save_off();
+  blk_irq_restore(entry_fl);
+  /* Kernel tasks never register for the release wake (see above). */
+  int kern = 1;
+  {
+    struct process *cp = current_process();
+    if (cp && !cp->is_kernel_process) kern = 0;
+  }
   for (;;) {
+    if (!t0us) t0us = timer_get_us();
+    int sleep = BLK_TOKEN_RELEASE_WAKE && t0 && !kern;
+    uint32_t mybit = 0;
+    /* Interrupts off from the last check to the halt (see above); the CPU is
+       read with them off, so a kernel-task waiter cannot migrate meanwhile. */
+    if (sleep) {
+      (void)blk_irq_save_off();
+      uint32_t me = get_cpuid();
+      mybit = (me < 32) ? (1u << me) : 0;
+      if (!mybit) sleep = 0;
+      else __atomic_or_fetch(&blk_tok_sleepers, mybit, __ATOMIC_SEQ_CST);
+    }
     uint64_t flags = spinlock_acquire_irqsave(&blk_request_lock);
     if (!blk_in_use) {
       blk_in_use = 1;
+      blk_token_note_owner(site);
       spinlock_release_irqrestore(&blk_request_lock, flags);
+      if (sleep)
+        __atomic_and_fetch(&blk_tok_sleepers, ~mybit, __ATOMIC_SEQ_CST);
       break;
     }
     spinlock_release_irqrestore(&blk_request_lock, flags);
-    safe_wfi();
+    uint64_t now = timer_get_ms();
+    if (!t0) {
+      t0 = now;
+    } else if (!reported && now - t0 >= BLK_TOKEN_REPORT_MS) {
+      reported = 1;
+      uint32_t n = __atomic_add_fetch(&blk_tok_long_waits, 1, __ATOMIC_SEQ_CST);
+      if (n <= 8 || (n & 63) == 0)
+        blk_token_diag_row("wait>2s");
+    }
+    if (sleep) {
+      halted = 1;
+      safe_wfi(); /* sti; hlt -- a wake IPI pending since the cli ends it */
+      __atomic_and_fetch(&blk_tok_sleepers, ~mybit, __ATOMIC_SEQ_CST);
+    } else if (t0 && (kern || !BLK_TOKEN_RELEASE_WAKE)) {
+      halted = 1;
+      safe_wfi(); /* kernel task, or no release wake: C1-k6's 1 ms bound */
+    }
+    /* else: a user waiter's FIRST failed check retries at once and registers
+       on the next pass -- it must never halt unregistered, because nothing
+       would wake it (measured: that halt was every lost wake of the first cut
+       of this loop, and the 1-10 ms bucket once C1-k6's bound covered it). */
   }
+  blk_irq_restore(entry_fl);
+  if (t0us) blk_tw_account(timer_get_us() - t0us, halted);
+  if (reported)
+    blk_token_diag_row("wait-ended");
   if (__atomic_add_fetch(&blk_inside, 1, __ATOMIC_SEQ_CST) > 1) {
     uart_puts("[BLKRACE] two drivers inside the queue, inside=");
     print_int((int)blk_inside);
@@ -1961,31 +2204,45 @@ static void blk_token_acquire(void) {
 static void blk_token_release(void) {
   __atomic_sub_fetch(&blk_inside, 1, __ATOMIC_SEQ_CST);
   uint64_t flags = spinlock_acquire_irqsave(&blk_request_lock);
+  blk_tok_pid = -1;
+  blk_tok_cpu = -1;
   blk_in_use = 0;
   spinlock_release_irqrestore(&blk_request_lock, flags);
+  /* Wake every halted waiter (wake-all: they race for the token as usual).
+     The set is TAKEN, not read: a woken waiter that loses the race registers
+     again before it halts again, so no CPU is sent a second IPI for a halt it
+     has already left. */
+  uint32_t sl = __atomic_exchange_n(&blk_tok_sleepers, 0, __ATOMIC_SEQ_CST);
+  uint32_t self = get_cpuid();
+  while (sl) {
+    uint32_t c = (uint32_t)__builtin_ctz(sl);
+    sl &= sl - 1;
+    if (c == self || c >= MAX_CPUS) continue;
+    blk_wake_cpu(c);
+    __atomic_add_fetch(&blk_tw_ipis, 1, __ATOMIC_RELAXED);
+  }
 }
 
-/* L78: bounded token wait (see the prototype).  The first ~2 ms poll with a
- * pause; after that the caller is a kernel thread and sleeps in 1 ms slices,
- * so a probe waiting behind the game's loader costs no CPU and is always
- * preemptible.  Never call this with the token already held. */
+/* L78: bounded token wait (see the prototype).  It polls with a pause until
+ * the deadline (cp-fat: it used to halt after ~200 polls, and a halt whose
+ * wake never comes has no deadline at all); a kernel-thread caller stays
+ * preemptible by the tick.  Never call this with the token already held. */
 static int blk_token_try_acquire(uint32_t timeout_ms) {
   uint64_t t0 = timer_get_ms();
-  uint32_t spins = 0;
   for (;;) {
     uint64_t flags = spinlock_acquire_irqsave(&blk_request_lock);
     if (!blk_in_use) {
       blk_in_use = 1;
+      blk_token_note_owner((uint64_t)(uintptr_t)__builtin_return_address(0));
       spinlock_release_irqrestore(&blk_request_lock, flags);
       break;
     }
     spinlock_release_irqrestore(&blk_request_lock, flags);
     if (timer_get_ms() - t0 >= timeout_ms)
       return 0;
-    if (spins++ < 200)
-      __asm__ volatile("pause");
-    else
-      safe_wfi(); /* bounded: the deadline check above ends the wait */
+    /* cp-fat (P9-8): poll, never halt -- a halt is only bounded if some
+       interrupt arrives, and none may (see blk_token_acquire). */
+    __asm__ volatile("pause" ::: "memory");
   }
   if (__atomic_add_fetch(&blk_inside, 1, __ATOMIC_SEQ_CST) > 1) {
     uart_puts("[BLKRACE] two drivers inside the queue, inside=");
@@ -2845,4 +3102,7 @@ void blk_data_stats(uint64_t *cmds, uint64_t *sectors, uint32_t *max_sectors) {
   if (sectors) *sectors = 0;
   if (max_sectors) *max_sectors = 0;
 }
+/* cp-fat: the ARM transport has no shared token holder to name. */
+void blk_token_diag_row(const char *why) { (void)why; }
+void blk_token_wait_row(void) {}
 #endif

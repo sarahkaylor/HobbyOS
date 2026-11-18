@@ -157,6 +157,10 @@ int fat16_stats(uint64_t* out_total, uint64_t* out_free);
 uint32_t fat16_io_under_lock(void);
 /* Write dirty FAT sectors to the device.  Call with NO filesystem lock held. */
 void fat16_flush_pending(void);
+/* cp-fat (P9-8): a syscall must never return to user space holding a FAT
+ * lock.  Called on the way out of every Linux-compat syscall; reports a hold
+ * the CALLER still owns as [FAT-LEAK] (lock, acquire site, syscall). */
+void fat16_syscall_exit_check(long sysno);
 
 /**
  * L78: where the FAT entry for `lba` lives (block-stress write-verify guard).

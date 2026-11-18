@@ -373,3 +373,7 @@ src/kernel/frame.c	P2I	frame_raw_hex((uint64_t)(uintptr_t)__builtin_return_addre
 src/kernel/linux_compat_fd.c	P2I	if (l_copy_to_user(cur, (uint64_t)(uintptr_t)buf + (uint64_t)i * L_SSI_SIZE,
 # C1-k6 round 2: poll_key_bit hashes an object pointer into a notification key bit (never dereferenced).
 src/include/process.h	P2I	return (int)(((((uint64_t)(uintptr_t)obj >> 4) * 0x9E3779B97F4A7C15ULL) >> 58) % 63);
+# C3-fat: lock_audit_held_site compares a lock pointer against the held-stack words (never dereferenced); the [BLKTOK] token-holder row records the acquire's return address as a number.
+src/kernel/lockscale.c	P2I	if (ls_held[c][i] == (uint64_t)(uintptr_t)lock)
+src/kernel/virtio_blk.c	P2I	blk_token_note_owner((uint64_t)(uintptr_t)__builtin_return_address(0));
+src/kernel/virtio_blk.c	P2I	uint64_t site = (uint64_t)(uintptr_t)__builtin_return_address(0);

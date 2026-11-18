@@ -369,6 +369,17 @@ void lock_audit_held_pop(const void *lock) {
 
 int lock_audit_held_depth(void) { return ls_held_n[ls_cpu()]; }
 
+/* cp-fat: the acquire site recorded for `lock` on this CPU's held stack, or 0
+ * when this CPU does not hold it (diagnostics: names a leaked hold). */
+uint64_t lock_audit_held_site(const void *lock) {
+  uint32_t c = ls_cpu();
+  uint8_t n = ls_held_n[c];
+  for (int i = (int)n - 1; i >= 0; i--)
+    if (ls_held[c][i] == (uint64_t)(uintptr_t)lock)
+      return ls_held_pc[c][i];
+  return 0;
+}
+
 const char *lock_audit_held_outermost(void) {
   uint32_t c = ls_cpu();
   if (!ls_held_n[c])
@@ -775,6 +786,12 @@ void ylock_acquire(ylock_t *lock) {
         }
         kl_c(&ko, '\n');
         kl_emit(&ko);
+      }
+      /* cp-fat (P9-8): a filesystem-lock holder that is "RUNNING" on a halted
+         CPU is waiting for the device token; name the token's holder. */
+      {
+        extern void blk_token_diag_row(const char *why);
+        blk_token_diag_row("at-ylock-wedge");
       }
       lock_audit_dump_ylocks();
     }

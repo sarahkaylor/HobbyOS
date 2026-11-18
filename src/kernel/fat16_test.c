@@ -1766,6 +1766,83 @@ static void test_fat16_no_device_io_under_fat_lock(void) {
   EXPECT_EQ(fat16_io_under_lock(), before);
 }
 
+/* cp-fat (P9-8): fontconfig's cache update, the rename IceWM was inside when
+ * the X session wedged on fat_lock.  Each generation creates a long-named
+ * "<hash>-x86_64.cache-12.TMP-XXXXXX", renames it to ".NEW", then renames
+ * ".NEW" over the final name.  All three long names truncate to the SAME 8.3
+ * form.  Pre-fix (both measured by linux_probe_fatren and here):
+ *   - the final kept generation 1's bytes for ever: rename compared short
+ *     names to decide "the destination is a different entry", they collided,
+ *     the old final was never unlinked and answered every lookup;
+ *   - a stale final entry per generation grew the directory, and once the
+ *     0x00 end marker reached the last slots of its first cluster the next
+ *     VFAT run was written into a new cluster BEHIND that marker: the create
+ *     succeeded and the TMP name then failed to resolve (rename: ENOENT). */
+#define FCREN_GENS 120
+static void fcren_path(char *out, const char *suffix, int g) {
+  const char *base = "/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12";
+  int n = 0;
+  while (base[n]) { out[n] = base[n]; n++; }
+  for (int i = 0; suffix[i]; i++) out[n++] = suffix[i];
+  if (g >= 0) { out[n++] = (char)('a' + g % 26); out[n++] = (char)('a' + (g / 26) % 26); }
+  out[n] = 0;
+}
+static void test_fat16_rename_fontconfig_cache(void) {
+  uart_puts("  Running test_fat16_rename_fontconfig_cache...\n");
+  tests_run++;
+  (void)fat16_mkdir("/FCREN");
+  char tmp[96], nw[96], fin[96];
+  fcren_path(nw, ".NEW", -1);
+  fcren_path(fin, "", -1);
+  int bad_resolve = 0, bad_rename = 0, bad_bytes = 0, bad_stale = 0;
+  for (int g = 1; g <= FCREN_GENS; g++) {
+    fcren_path(tmp, ".TMP-aAz8", g);
+    struct file f;
+    if (fat16_open(tmp, &f) != 0) { bad_resolve++; break; }
+    uint8_t body[64];
+    for (int i = 0; i < 64; i++) body[i] = (uint8_t)(g + i);
+    (void)fat16_write(&f, body, 64);
+    fat16_close(&f);
+    struct fat16_dir_entry e;
+    if (fat16_resolve_path(tmp, &e, 0, 0) != 0) { bad_resolve++; break; }
+    if (fat16_rename(tmp, nw) != 0) { bad_rename++; break; }
+    if (fat16_rename(nw, fin) != 0) { bad_rename++; break; }
+    if (fat16_resolve_path(tmp, &e, 0, 0) == 0 ||
+        fat16_resolve_path(nw, &e, 0, 0) == 0) bad_stale++;
+    struct file rf;
+    uint8_t back[64] = {0};
+    if (fat16_open(fin, &rf) != 0) { bad_resolve++; break; }
+    int got = fat16_read(&rf, back, 64);
+    fat16_close(&rf);
+    if (got != 64 || back[0] != (uint8_t)(g) || back[63] != (uint8_t)(g + 63)) {
+      if (bad_bytes++ == 0) {
+        uart_puts("    fcren: final holds generation ");
+        print_int((int)back[0]);
+        uart_puts(" at generation ");
+        print_int(g);
+        uart_puts("\n");
+      }
+    }
+  }
+  EXPECT_EQ(bad_resolve, 0);
+  EXPECT_EQ(bad_rename, 0);
+  EXPECT_EQ(bad_bytes, 0);
+  EXPECT_EQ(bad_stale, 0);
+  /* Exactly one live entry is left: the final (no stale finals or twins). */
+  int live = 0;
+  for (int i = 0; i < 400; i++) {
+    char name[64];
+    uint8_t attr = 0;
+    uint32_t sz = 0;
+    if (fat16_read_dir("/FCREN", i, name, &attr, &sz) != 0) break;
+    if (name[0] == '.') continue;
+    live++;
+  }
+  EXPECT_EQ(live, 1);
+  (void)fat16_unlink(fin);
+  (void)fat16_rmdir("/FCREN");
+}
+
 void fat16_test_suite(void) {
   uart_puts("fat16_test_suite:\n");
   test_fat16_no_device_io_under_fat_lock();
@@ -1787,6 +1864,7 @@ void fat16_test_suite(void) {
   test_fat16_lfn_read_dir_listing();
   test_fat16_lfn_mkdir_long();
   test_fat16_lfn_rename_long();
+  test_fat16_rename_fontconfig_cache(); /* cp-fat: P9-8 rename reproducer */
   test_fat16_clang_temp_rename_no_twins(); /* W9: in-OS clang temp+rename twin repro */
   test_fat16_83_alias_collision_lookup();  /* W9: 8.3-vs-LFN-alias collision reader fix */
   test_fat16_lfn_checksum_reject();
