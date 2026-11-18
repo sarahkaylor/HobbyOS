@@ -161,7 +161,7 @@ REDEngineErrorReporter appears.
 | r1: 12 fresh-session launches, lavapipe, before the fix | 0 / 12 |
 | r2: 40 kept-session launches, lavapipe, relay tracing, before the fix | 0 / 40 |
 | c-1, c-2: cold boots (2 launches each), diagnostic Wine, before the fix | 0 / 4 |
-| after the fix: P8 boots | see the report / gate table |
+| after the fix: P8 boots, one launch each (f1-f6 + the gate batch's lvp1, lvp2, venus) | **0 / 9** (lavapipe 0/6, Venus 0/3), every config listing right |
 
 The loop did not raise the rate.  Repeat launches find the game's config listings
 and the fonts listing at different moments, so they rarely overlap.  With the root
