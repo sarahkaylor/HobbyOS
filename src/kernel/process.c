@@ -4461,6 +4461,36 @@ int process_signal_directed(int pid, int sig, int directed) {
     struct process *snd = current_process();
     struct process *sg = snd ? process_group(snd) : 0;
     pender->sig_sender[sig] = (int16_t)((sg && !snd->is_kernel_process) ? sg->pid : 0);
+    /* H4-kglitch (H2-F2): SIGINT is rare (wineserver -k sends one per
+       shutdown) and every other signal row's budget is spent before it
+       comes, so the 10.5 s ignored SIGINT left no trace.  Its own small
+       budget: who sent it to whom, the target's state, mask and handler.
+       [SIGINT-D] (linux_compat_thr.c) is the delivery half. */
+    if (sig == 2) {
+      static int si_rows;
+      if (si_rows < 24) {
+        si_rows++;
+        extern uint64_t linux_compat_sigmask_get(struct process *);
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[SIGINT-S] from=");
+        kl_i(&kl, sg ? sg->pid : -1);
+        kl_s(&kl, " to=");
+        kl_i(&kl, pender->pid);
+        kl_s(&kl, " tgid=");
+        kl_i(&kl, target->pid);
+        kl_s(&kl, " st=");
+        kl_i(&kl, pender->state);
+        kl_s(&kl, " mask=0x");
+        kl_hex(&kl, (unsigned long)linux_compat_sigmask_get(pender));
+        kl_s(&kl, " h=0x");
+        kl_hex(&kl, (unsigned long)target->sig_handler[sig]);
+        kl_s(&kl, " inh=");
+        kl_i(&kl, pender->sig_in_handler);
+        kl_s(&kl, thread_directed ? " dir\n" : " grp\n");
+        kl_emit(&kl);
+      }
+    }
   }
   /* M6/L45: per-target rows for the two Boehm stop-the-world signals.  The
      global [SIG] rows are capped at 400 and the interesting pids (the pool

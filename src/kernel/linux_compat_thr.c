@@ -3150,6 +3150,22 @@ static void l_sf_record(struct process *p, struct trap_frame *tf,
   l_sf_src = 0; /* one shot: the next plant defaults to a trap-exit delivery */
   d.flags_hi = (uint8_t)(((tf->spsr >> 8) & 0xff));
   d.pad = 0;
+  if (sig == 2) { /* H4-kglitch (H2-F2): the delivery half of [SIGINT-S] */
+    static int sid_rows;
+    if (sid_rows < 24) {
+      sid_rows++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SIGINT-D] pid=");
+      kl_i(&kl, p->pid);
+      kl_s(&kl, " ip=0x");
+      kl_hex(&kl, (unsigned long)ip);
+      kl_s(&kl, " alt=");
+      kl_i(&kl, alt ? 1 : 0);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
   l_sf_ring[l_sf_ring_n % L_SF_RING] = d;
   l_sf_ring_n++;
   l_sf_last[p->pid] = d;
