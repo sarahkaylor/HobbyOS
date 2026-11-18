@@ -14,7 +14,23 @@ seeded prefix a copy of integ's `obj/cp-p8/pfx-seeded.img` (sha256
 `/tmp/cp-bigguest.lock`.  Other lanes' guests ran beside every boot (H2-early,
 H3-winefix, H4-kglitch, the integ16 gate batch); the host sampler lists them.
 
-<!-- RESULTS -->
+## Result
+
+<!-- SUMMARY -->
+
+## The catalog (sorted by severity × rate)
+
+Format per the wave-8 overrides: ID, symptom, rate (k/n boots, boot IDs),
+first-seen evidence, signature, suspected layer, severity, status.  "This
+lane's boots" are the `h-*` boots below (integ15 code); "old boots" are the
+census of 128 earlier game boots (§ Old logs), quoted only to show whether
+something recurs.
+
+<!-- CATALOG -->
+
+<!-- FPS -->
+
+<!-- MATRIX -->
 
 ## Old logs on strix: the census (`classify.py --mine`, `mine_report.py`)
 
