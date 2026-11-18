@@ -155,6 +155,7 @@ BENIGN = [
     (r"DXGI: Failed to parse display metadata", "DXVK: no EDID / HDR metadata"),
     (r"winediag:.*ntsync", "ntsync availability note"),
     (r"wineusb|hidclass|plugplay", "no USB / HID devices"),
+    (r"wine: failed to start .*syswow64", "no 32-bit Wine: the prefix update's Wow64Install step (stale prefix stamp, see cp-hunt H1-07)"),
 ]
 BENIGN_RX = [(re.compile(p), why) for p, why in BENIGN]
 
@@ -244,6 +245,10 @@ def classify_serial(text):
         m = VKD3D_RX.match(x)
         if m and m.group(1) in ("err", "warn"):
             add("dxvk", f"{m.group(1)}:{m.group(2)}:{m.group(3)} {norm(m.group(4))}", ln, line)
+            continue
+        m = re.match(r"wine: failed to start (.*)", x)
+        if m:
+            add("wine_err", "wine: failed to start " + norm(m.group(1)), ln, line)
             continue
         m = WINE_ERR_RX.match(x)
         if m and m.group(1) == "err":

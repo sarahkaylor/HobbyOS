@@ -1,4 +1,4 @@
-== classify golden: tools/cp/hunt/golden/serial-mini.txt (24 lines, sha dd31740809d818b5)
+== classify golden: tools/cp/hunt/golden/serial-mini.txt (25 lines, sha 7097c90e2b4546eb)
    verdict: main-menu
    rc: 0
    launch_s: 21.3
@@ -18,10 +18,11 @@
 -- process exits (by name): 2 rows, 2 signatures
        1  L4       wine
        1  L15      REDEngineErrorR
--- Wine err: lines: 3 rows, 3 signatures
+-- Wine err: lines: 4 rows, 4 signatures
        1  L3       winediag:getaddrinfo Failed to resolve your host name IP  [benign: no DNS name for the guest]
        1  L7       wineboot:process_run_key Error running cmd L"C:\\windows\\system32\\winemenubuilder.exe -a -r" (N).  [benign: winemenubuilder disabled in the prefix]
        1  L8       module:import_dll Library mfc140u.dll (which is needed by L"Z:\\GAME\\bin\\x64\\CChromaEditorLibrary64.dll") not found  [benign: Razer Chroma plugin needs MFC; game ignores it]
+       1  L25      wine: failed to start L"C:\windows\syswow64\rundll32.exe": #  [benign: no 32-bit Wine: the prefix update's Wow64Install step (stale prefix stamp, see cp-hunt H1-07)]
 -- DXVK / vkd3d-proton err+warn: 3 rows, 3 signatures
        1  L9       err:vkd3d-proton:d3d12_device_create Something went wrong 0x#.  [new]
        1  L10      err: DXGI: Failed to parse display metadata + colorimetry info, using blank.  [benign: DXVK: no EDID / HDR metadata]

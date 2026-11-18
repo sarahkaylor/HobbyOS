@@ -1,0 +1,8 @@
+# H1-hunt: [BADELR] false positives on the game's PE image (strix, integ15, h-p8v1 serial.txt; source src/kernel/process.c:2697-2716)
+# check: implausible = elr < 0x1000 || (elr >= 0x70000000 && elr < USER_VA_BASE); a Windows PE image (Cyberpunk2077.exe at 0x140000000, wineboot.exe/services.exe/vkcube.exe at 0x140000000) lives in that range; the 20-row cap is spent on these.
+2371:[BADELR] picking a user slot with an implausible frame.elr=0x00000001406A5043 slot=109 pid=109 sp=0x00007FFFFE2FFCE8 Cyberpunk2077.e
+2373:[BADELR] picking a user slot with an implausible frame.elr=0x0000000140275783 slot=109 pid=109 sp=0x00007FFFFE2FFC48 Cyberpunk2077.e
+2374:[BADELR] picking a user slot with an implausible frame.elr=0x0000000141CE5B2C slot=109 pid=109 sp=0x00007FFFFE2FFEA0 Cyberpunk2077.e
+... rows in h-p8v1: 20 (cap 20)
+2188:[X] 0184:trace:loaddll:build_module Loaded L"Z:\\GAME\\bin\\x64\\Cyberpunk2077.exe" at 0000000140000000: native
+# old-log census (128 deduplicated game boots, tools/cp/hunt/mine_report.py): badelr elr~0x140000000 in Cyberpunk2077.e: 127/128 boots
