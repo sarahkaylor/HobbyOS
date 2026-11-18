@@ -1,0 +1,68 @@
+# H7-fault: NFS pipeline stalls in fp720 boots (strix, P9 32 GiB Venus, wine-cp2), the instrument tree af9da50b unless named
+# per boot: the [NFSPIPE] stall + [NFSRS] rows, the last [NFSRTH]/[NFSNET] rows, the host side (hostnet.sh via pfsum.py)
+
+== fa-fp1
+   last [NFSRTH] rtt=54498,36819,4949,1558,1210,7118,631,61,38,6,0,0,0 late=0,0,0,0,0,0,0,0,0,0,0,0,0 stale=5 late_orig=0 sstale=80 rxq_max=48 rxq_full=0
+   last [NFSNET] frags=2451743 done=106744 drop_timeout=0 drop_evict=0 drop_full=0 drop_bad=0 nosock=0 dgfull=0 stalls=0 inj_dropped=0 socks=158 pool_temp=0
+   Udp deltas: InDatagrams=239114 NoPorts=27 InErrors=0 OutDatagrams=475539 RcvbufErrors=0 SndbufErrors=0
+   QEMU UDP sockets: drops first=0 max=0 last=0; recv-queue max=33856
+   nfsd :2049 socket drops: first=0 last=0
+
+== ab-base-fp1
+   last [NFSRTH] rtt=42854,45048,7482,1050,638,2655,3102,68,0,0,0,0,0 late=0,0,0,0,0,0,0,0,0,0,0,0,0 stale=7 late_orig=0 sstale=143 rxq_max=48 rxq_full=0
+   last [NFSNET] frags=2361347 done=102812 drop_timeout=0 drop_evict=0 drop_full=0 drop_bad=0 nosock=0 dgfull=0 stalls=0 inj_dropped=0 socks=138 pool_temp=0
+   Udp deltas: InDatagrams=173988 NoPorts=25 InErrors=0 OutDatagrams=345969 RcvbufErrors=0 SndbufErrors=0
+   QEMU UDP sockets: drops first=0 max=0 last=0; recv-queue max=67712
+   nfsd :2049 socket drops: first=0 last=0
+   /etc/exports edits during the boot (any lane): 0
+
+== ab-base-fp2
+[NFSPIPE] stall inflight=1 issued=8 replies=7 contig=301793280 end=302055424 us=151210 budget=32768 xids=1213240218/301793280 
+[NFSRS] off=301793280 want=32768 age_ms=151 inflight=1 sys_kib=32 resend_ms=8 late_ms=-1 iters=2385569 gap_max_us=43 pend=0 rxpk=1 frags+=23 ipr_to+=0 stale=0 stalls=1 at=90415
+   last [NFSRTH] rtt=47866,42018,6035,1214,911,4516,1416,38,4,0,0,0,0 late=0,0,0,0,0,0,0,0,0,0,0,0,0 stale=7 late_orig=0 sstale=130 rxq_max=48 rxq_full=0
+   last [NFSNET] frags=2386860 done=103921 drop_timeout=2 drop_evict=0 drop_full=0 drop_bad=0 nosock=0 dgfull=0 stalls=1 inj_dropped=0 socks=146 pool_temp=0
+   Udp deltas: InDatagrams=284984 NoPorts=24 InErrors=0 OutDatagrams=567771 RcvbufErrors=0 SndbufErrors=0
+   QEMU UDP sockets: drops first=0 max=0 last=0; recv-queue max=67712
+   nfsd :2049 socket drops: first=0 last=0
+   /etc/exports edits during the boot (any lane): 2
+   NFSRS at=90415 ms -> host 1795038284: exports edit within 3 s: no
+
+== ab-base-fp3
+[NFSPIPE] stall inflight=2 issued=2 replies=0 contig=3136552960 end=3136618496 us=150445 budget=65536 xids=1213245290/3136552960 1213245291/3136585728 
+[NFSRS] off=3136552960 want=32768 age_ms=150 inflight=2 sys_kib=64 resend_ms=328 late_ms=328 iters=2271792 gap_max_us=13 pend=0 rxpk=0 frags+=92 ipr_to+=0 stale=2 stalls=1 at=181781
+   last [NFSRTH] rtt=45153,42789,8296,1959,1594,4441,2027,54,0,0,0,0,0 late=0,0,0,0,0,0,0,0,0,0,0,0,2 stale=8 late_orig=2 sstale=129 rxq_max=48 rxq_full=0
+   last [NFSNET] frags=2439678 done=106217 drop_timeout=0 drop_evict=0 drop_full=0 drop_bad=0 nosock=0 dgfull=0 stalls=1 inj_dropped=0 socks=160 pool_temp=0
+   Udp deltas: InDatagrams=398885 NoPorts=24 InErrors=0 OutDatagrams=794205 RcvbufErrors=0 SndbufErrors=0
+   QEMU UDP sockets: drops first=0 max=0 last=0; recv-queue max=33856
+   nfsd :2049 socket drops: first=0 last=0
+   /etc/exports edits during the boot (any lane): 4
+   NFSRS at=181781 ms -> host 1795039087: exports edit within 3 s: no
+
+== ab-lane-fp1
+   last [NFSRTH] rtt=34015,51773,7370,1052,720,3159,2333,101,2,0,0,0,0 late=0,0,0,0,0,0,0,0,0,0,0,0,0 stale=11 late_orig=0 sstale=134 rxq_max=48 rxq_full=0
+   last [NFSNET] frags=2306699 done=100436 drop_timeout=0 drop_evict=0 drop_full=0 drop_bad=0 nosock=0 dgfull=0 stalls=0 inj_dropped=0 socks=132 pool_temp=0
+   Udp deltas: InDatagrams=288525 NoPorts=21 InErrors=0 OutDatagrams=575031 RcvbufErrors=0 SndbufErrors=0
+   QEMU UDP sockets: drops first=0 max=0 last=0; recv-queue max=67712
+   nfsd :2049 socket drops: first=0 last=0
+   /etc/exports edits during the boot (any lane): 2
+
+== ab-lane-fp2
+   last [NFSRTH] rtt=39857,47729,6903,1087,850,4285,1583,70,0,2,0,0,0 late=0,0,0,0,0,0,0,0,0,0,0,0,0 stale=8 late_orig=0 sstale=117 rxq_max=48 rxq_full=0
+   last [NFSNET] frags=2348551 done=102257 drop_timeout=0 drop_evict=0 drop_full=0 drop_bad=0 nosock=0 dgfull=0 stalls=0 inj_dropped=0 socks=136 pool_temp=0
+   Udp deltas: InDatagrams=254563 NoPorts=24 InErrors=0 OutDatagrams=506620 RcvbufErrors=0 SndbufErrors=0
+   QEMU UDP sockets: drops first=0 max=0 last=0; recv-queue max=33856
+   nfsd :2049 socket drops: first=0 last=0
+   /etc/exports edits during the boot (any lane): 2
+
+# H4 kg2 boots (integ19-21, round 2), census of [NFSPIPE] stall rows and the boot-end [NFSNET] counters
+kg2-fp10 stallrows=0 drop_timeout=0 stalls=0 
+kg2-fp11 stallrows=1 drop_timeout=2 stalls=1 
+kg2-fp12 stallrows=0 drop_timeout=0 stalls=0 
+kg2-fp1 stallrows=0 drop_timeout=0 stalls=0 
+kg2-fp2 stallrows=1 drop_timeout=2 stalls=1 
+kg2-fp3 stallrows=1 drop_timeout=2 stalls=1 
+kg2-fp4 stallrows=0 drop_timeout=0 stalls=0 
+kg2-fp5 stallrows=1 drop_timeout=2 stalls=1 
+kg2-fp6 stallrows=0 drop_timeout=0 stalls=0 
+kg2-fp7 stallrows=0 drop_timeout=0 stalls=0 
+kg2-fp9 stallrows=2 drop_timeout=6 stalls=2 

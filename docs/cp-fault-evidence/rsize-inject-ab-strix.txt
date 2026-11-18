@@ -1,0 +1,26 @@
+# H7-05 bench: cpnfsbench inject phase (rsize_guard G9: every 5th NFS reply dropped on receipt, then an 8 s blackout), strix, tree fault-dev
+# before: d419ec9d (NFS_PIPE_TIMEOUT_MS 150, a late original skipped); after: 1164f98f (50 ms, a late original completes the READ)
+== before
+[NB] inject.every5.read pages=1024 bad=0 short=0 eio=0 ms=2974 read ok
+[NB] inject.every5.mmap pages=1024 bad=0 short=0 eio=0 ms=2501 mmap ok
+[NB] inject.blackout.read pages=1024 bad=0 short=0 eio=0 ms=8926 read ok
+[NB] inject.blackout.mmap pages=1024 bad=0 short=0 eio=0 ms=8952 mmap ok
+[NB] inject.blackout.open pages=1024 bad=0 short=0 eio=0 ms=8276 read ok
+rsize_guard: PASS (/home/sarah/cp/lanes/fault-dev)
+[NFSRTH] rtt=6765,1740,185,52,21,6,0,0,0,0,0,0,0 late=0,0,0,0,0,0,0,0,0,0,0,0,0 stale=3 late_orig=0 sstale=4 rxq_max=47 rxq_full=0
+[NFSRS] rows: 34
+[NFSRS] off=98304 want=32768 age_ms=151 inflight=2 sys_kib=64 resend_ms=1 late_ms=-1 iters=2359714 gap_max_us=121 pend=0 rxpk=1 frags+=69 ipr_to+=0 stale=0 stalls=1 at=5857
+[NFSRS] off=360448 want=32768 age_ms=151 inflight=2 sys_kib=64 resend_ms=1 late_ms=-1 iters=2266718 gap_max_us=55 pend=0 rxpk=1 frags+=69 ipr_to+=0 stale=0 stalls=1 at=6012
+[NFSRS] off=589824 want=32768 age_ms=154 inflight=2 sys_kib=64 resend_ms=1 late_ms=-1 iters=2228672 gap_max_us=67 pend=0 rxpk=1 frags+=69 ipr_to+=0 stale=0 stalls=1 at=6170
+== after
+[NB] inject.every5.read pages=1024 bad=0 short=0 eio=0 ms=1374 read ok
+[NB] inject.every5.mmap pages=1024 bad=0 short=0 eio=0 ms=910 mmap ok
+[NB] inject.blackout.read pages=1024 bad=0 short=0 eio=0 ms=8826 read ok
+[NB] inject.blackout.mmap pages=1024 bad=0 short=0 eio=0 ms=8852 mmap ok
+[NB] inject.blackout.open pages=1024 bad=0 short=0 eio=0 ms=8276 read ok
+rsize_guard: PASS (/home/sarah/cp/lanes/fault-dev)
+[NFSRTH] rtt=6618,1735,249,95,55,17,0,0,0,0,0,0,0 late=0,0,0,0,0,0,0,0,0,0,0,0,0 stale=2 late_orig=0 late_used=0 sstale=4 rxq_max=45 rxq_full=0
+[NFSRS] rows: 35
+[NFSRS] off=163840 want=32768 age_ms=51 inflight=1 sys_kib=32 resend_ms=1 late_ms=-1 iters=556256 gap_max_us=660 pend=0 rxpk=6296 frags+=23 ipr_to+=0 stale=0 stalls=1 ipr=1/10704/51 last=0x80011/0x0/156/19 at=1619
+[NFSRS] off=98304 want=32768 age_ms=51 inflight=2 sys_kib=64 resend_ms=2 late_ms=-1 iters=792223 gap_max_us=61 pend=0 rxpk=1 frags+=69 ipr_to+=0 stale=0 stalls=1 ipr=0/0/0 last=0x80006/0x0/40/51 at=6106
+[NFSRS] off=327680 want=32768 age_ms=51 inflight=2 sys_kib=64 resend_ms=1 late_ms=-1 iters=791106 gap_max_us=12 pend=0 rxpk=1 frags+=69 ipr_to+=0 stale=0 stalls=1 ipr=0/0/0 last=0x80006/0x0/40/51 at=6162

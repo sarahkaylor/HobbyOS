@@ -1,0 +1,69 @@
+# [PFX] long-fault rows with lh (vm_lock hold) >= 4 ms: base af9da50b (ab-base-fp1) vs lane F1+F2 92f7fbb4 (ab-lane-fp1), strix fp720
+== ab-base-fp1
+[PFX] F tid=19 at=21223 us=4411 kind=shobj va=0x1080308000 io=0 lw=0 lh=4411 zero=0 shoot=0 rpc=0 km=0
+[PFX] F tid=95 at=30693 us=4612 kind=anon va=0x7FEFFFF59000 io=0 lw=0 lh=4611 zero=8 shoot=0 rpc=0 km=0
+[PFX] F tid=96 at=37513 us=6294 kind=anon va=0x14FCAA7000 io=0 lw=8 lh=6285 zero=9 shoot=0 rpc=0 km=0
+[PFX] F tid=96 at=37765 us=4189 kind=anon va=0x14FCADA000 io=0 lw=0 lh=4189 zero=8 shoot=0 rpc=0 km=0
+[PFX] F tid=96 at=37998 us=6899 kind=anon va=0x7FE3467C7000 io=0 lw=0 lh=6899 zero=7 shoot=0 rpc=0 km=0
+[PFX] F tid=95 at=38554 us=4197 kind=anon va=0x14F0A97000 io=0 lw=0 lh=4196 zero=7 shoot=0 rpc=0 km=0
+[PFX] F tid=95 at=38645 us=7003 kind=anon va=0x14F104F000 io=0 lw=0 lh=7003 zero=7 shoot=0 rpc=0 km=0
+[PFX] F tid=96 at=38825 us=4380 kind=anon va=0x7FE346951000 io=0 lw=0 lh=4380 zero=7 shoot=0 rpc=0 km=0
+[PFX] F tid=96 at=38939 us=5148 kind=anon va=0x7FE346800000 io=0 lw=0 lh=5147 zero=8 shoot=0 rpc=0 km=0
+[PFX] F tid=96 at=39248 us=8655 kind=anon va=0x7FE346252000 io=0 lw=0 lh=8654 zero=8 shoot=0 rpc=0 km=0
+== ab-lane-fp1
+[PFX] F tid=92 at=25872 us=4051 kind=anon va=0x7FE7F85C2000 io=0 lw=0 lh=4043 zero=6 shoot=0 rpc=0 km=0
+[PFX] F tid=141 at=31438 us=5370 kind=retry va=0x7FE374832000 io=0 lw=0 lh=5368 zero=0 shoot=0 rpc=0 km=0
+[PFX] F tid=149 at=33263 us=5095 kind=anon va=0x7FE80629F000 io=0 lw=0 lh=5085 zero=8 shoot=0 rpc=0 km=0
+[PFX] F tid=149 at=33316 us=8841 kind=anon va=0x7FE8071C5000 io=0 lw=0 lh=8833 zero=7 shoot=0 rpc=0 km=0
+[PFX] F tid=149 at=33397 us=15244 kind=anon va=0x7FE8081BC000 io=0 lw=0 lh=15235 zero=7 shoot=0 rpc=0 km=0
+[PFX] F tid=96 at=35511 us=4125 kind=anon va=0x7FE34D51F000 io=0 lw=0 lh=4116 zero=8 shoot=0 rpc=0 km=0
+[PFX] F tid=96 at=35637 us=5647 kind=anon va=0x14FCB05000 io=0 lw=0 lh=5646 zero=0 shoot=0 rpc=0 km=0
+[PFX] F tid=95 at=36547 us=4563 kind=anon va=0x14F2AAC000 io=0 lw=0 lh=4562 zero=0 shoot=0 rpc=0 km=0
+[PFX] F tid=96 at=36912 us=7014 kind=anon va=0x7FE802E63000 io=0 lw=0 lh=6999 zero=5 shoot=0 rpc=0 km=0
+[PFX] F tid=96 at=37266 us=4610 kind=anon va=0x7FF007B61000 io=0 lw=0 lh=4602 zero=7 shoot=0 rpc=0 km=0
+
+# the [PUBS] row printed under vm_lock (stash-only build, linux_probe_pfpar r2): tid 6 holds the lock while the row prints, tid 4 waits
+[PFX] F tid=6 at=1632 us=2268 kind=anon va=0x1091240000 io=0 lw=0 lh=2261 zero=6 shoot=0 rpc=0 km=0
+[PFX] F tid=4 at=1632 us=4701 kind=anon va=0x1084C54000 io=0 lw=1302 lh=2 zero=3395 shoot=0 rpc=0 km=0
+[PFX] F tid=6 at=1635 us=2447 kind=anon va=0x109125F000 io=0 lw=0 lh=0 zero=2445 shoot=0 rpc=0 km=0
+
+# final lane (1164f98f, ab-fin-fp1): every [PFX] fault row that waited >= 1 ms for vm_lock, and the [PFL] intervals whose longest all-site hold or wait was > 2 ms (vml=n/w=sum/max@line/h=sum/max@line; lines of 1164f98f vm.c: 2609 vm_touch, 3493 vm_handle_fault, 5174 vm_mmap, 5426 vm_unmap_span_jit, 5573 vm_mprotect)
+[PFX] F tid=144 at=32672 us=2259 kind=retry va=0x7FE3745AA000 io=0 lw=1473 lh=785 zero=0 shoot=0 rpc=0 km=0
+[PFX] F tid=131 at=32672 us=2273 kind=anon va=0x7FE34F9A2000 io=0 lw=2263 lh=0 zero=8 shoot=0 rpc=0 km=0
+[PFX] F tid=135 at=32672 us=2282 kind=ext2 va=0x7FE3745AA000 io=11 lw=2267 lh=0 zero=0 shoot=0 rpc=0 km=0
+[PFX] F tid=143 at=32672 us=2280 kind=ext2 va=0x7FE3745AA000 io=27 lw=2251 lh=0 zero=0 shoot=0 rpc=0 km=0
+[PFX] F tid=134 at=32672 us=2311 kind=ext2 va=0x7FE3745AA000 io=47 lw=2262 lh=0 zero=0 shoot=0 rpc=0 km=0
+[PFX] F tid=96 at=47949 us=2716 kind=anon va=0x10A0293000 io=0 lw=2714 lh=0 zero=0 shoot=0 rpc=0 km=0
+[PFX] F tid=96 at=56053 us=2583 kind=anon va=0x14FEDA4000 io=0 lw=2578 lh=2 zero=0 shoot=0 rpc=0 km=0
+t=13350 vml=217342/w=77270/4582@2609/h=225075/4732@5573
+t=34686 vml=996783/w=191900/8471@2609/h=398184/3107@5174
+t=44707 vml=646579/w=93648/539@3493/h=232641/540@5426
+t=54725 vml=577036/w=73220/2714@3493/h=155358/2720@2609
+t=64779 vml=996452/w=80273/3759@2609/h=137457/3015@5573
+t=74816 vml=1055779/w=75859/4718@2609/h=142307/5459@3493
+t=84860 vml=1071715/w=57460/431@2609/h=136541/839@3493
+t=95033 vml=742496/w=45600/1117@2609/h=115051/981@3493
+t=105377 vml=427388/w=32470/881@2609/h=101866/965@2609
+t=116860 vml=343950/w=32342/503@2609/h=95718/503@2609
+t=126861 vml=303602/w=26710/958@2609/h=82267/954@2609
+t=136884 vml=284183/w=22106/1493@2609/h=64691/324@2609
+t=146884 vml=499131/w=47737/580@2609/h=119772/629@5174
+t=156887 vml=602710/w=64121/342@2609/h=173311/944@5174
+t=166890 vml=583329/w=51429/1152@2609/h=127634/1158@2609
+t=176898 vml=523774/w=40582/1006@2609/h=120700/1243@2609
+t=186902 vml=542727/w=50126/401@2609/h=127771/356@2609
+t=196908 vml=441497/w=39960/706@2609/h=111912/451@2609
+t=206910 vml=522816/w=52893/1756@2609/h=129194/2150@2609
+t=216912 vml=598701/w=61645/997@3493/h=121743/1001@3493
+t=226912 vml=922098/w=79859/1977@2609/h=119566/1404@3493
+t=236914 vml=783450/w=38108/79@2609/h=94175/125@5174
+t=246916 vml=804442/w=43977/2092@2609/h=97371/2111@2609
+t=256920 vml=867736/w=42337/958@2609/h=98019/286@5174
+t=266920 vml=893413/w=41794/345@2609/h=99744/759@2609
+t=276942 vml=806577/w=42097/331@2609/h=95904/475@2609
+t=286960 vml=855624/w=40832/660@2609/h=91200/82@5174
+t=296983 vml=836109/w=39450/1037@2609/h=93941/1129@2609
+t=306994 vml=738240/w=47189/1621@2609/h=102336/1656@2609
+t=317267 vml=861974/w=33570/245@2609/h=90555/138@5174
+t=327702 vml=929098/w=32039/70@2609/h=82591/69@2609
+t=338694 vml=968574/w=33821/289@2609/h=86598/290@2609
