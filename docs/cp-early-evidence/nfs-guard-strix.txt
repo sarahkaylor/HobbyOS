@@ -1,0 +1,47 @@
+H2-early NFS listing-cache fix: rsize_guard (incl. new G11) on strix, lane tree ~/cp/lanes/early, 2026-11-18
+
+== PRE-FIX kernel (lane tree with src/kernel/nfs.c, fs.c, src/include/nfs.h at f0ca9786; bench + guard with dirs6/G11)
+$ TOOLS_SKIP=1 MAKEFLAGS=-j16 bash tools/cp/nfs/rsize_guard.sh
+rsize_guard: FAIL G1 a bench phase failed (bad byte count or checksum) ([NB] lookstorm stats=6000 failed_procs=0 ms=315 ok [NB] done rc=1 )
+rsize_guard: G6 6/6 concurrent readers, every 4 KiB page correct
+rsize_guard: G7 6/6 readers of 6 files, every page correct; read_kib=12288 fetched_kib=12288 rpcs=385 amp_pct=100 hit_pct_est=93
+rsize_guard: FAIL G11 concurrent listings: 6/6 reported, 7 FAIL rows: [NB] dirs6.child k=0 dir=dA listings=40 wrong=40 first_wrong=0 its_count=173 first_bad_name=b00 FAIL [NB] dirs6.child k=5 dir=dB listings=40 wrong=1 first_wrong=0 its_count=50 first_bad_name=a22 FAIL [NB] dirs6.child k=4 dir=dA listings=40 wrong=40 first_wrong=0 its_count=134 first_bad_name=b00 FAIL 
+rsize_guard: G8 one 176 MiB read() hash match, stat times, 5/5 symlinked paths
+rsize_guard: G9 5/5 injected-loss rows right (inject.blackout.read pages=1024 bad=0 short=0 eio=0 ms=8978)
+rsize_guard: G10 lookstorm stats=6000 failed_procs=0 ms=315 ok with 0 new sockets
+rsize_guard: [NFS] fsinfo rc=0 rtmax=32768 rtpref=32768 rsize=32768
+rsize_guard: G4 1/1 sampled 64 KiB reads: rs=32768 issued<=2
+rsize_guard: G5 8642 READ RPCs for 283116297 bytes: 32760 bytes/RPC, 2.0 RPCs per 64 KiB
+rsize_guard: FAIL (/home/sarah/cp/lanes/early; console /home/sarah/cp/lanes/early/obj/nfs-bench/console.log)
+[NB] dirs6.child k=0 dir=dA listings=40 wrong=40 first_wrong=0 its_count=173 first_bad_name=b00 FAIL
+[NB] dirs6.child k=5 dir=dB listings=40 wrong=1 first_wrong=0 its_count=50 first_bad_name=a22 FAIL
+[NB] dirs6.child k=4 dir=dA listings=40 wrong=40 first_wrong=0 its_count=134 first_bad_name=b00 FAIL
+[NB] dirs6.child k=1 dir=dB listings=40 wrong=6 first_wrong=34 its_count=20 first_bad_name=a00 FAIL
+[NB] dirs6.child k=3 dir=dB listings=40 wrong=4 first_wrong=0 its_count=50 first_bad_name=a04 FAIL
+[NB] dirs6.child k=2 dir=dA listings=40 wrong=30 first_wrong=0 its_count=3 first_bad_name=b00 FAIL
+[NB] dirs6 a=6 pages=40 bad=6 first_bad=- FAIL
+
+== FIXED kernel (dcache_lock)
+$ TOOLS_SKIP=1 MAKEFLAGS=-j16 bash tools/cp/nfs/rsize_guard.sh
+rsize_guard: G6 6/6 concurrent readers, every 4 KiB page correct
+rsize_guard: G7 6/6 readers of 6 files, every page correct; read_kib=12288 fetched_kib=12288 rpcs=384 amp_pct=100 hit_pct_est=93
+rsize_guard: G11 6/6 listers x 40 listings of dA/dB, every listing its own directory's names
+rsize_guard: G8 one 176 MiB read() hash match, stat times, 5/5 symlinked paths
+rsize_guard: G9 5/5 injected-loss rows right (inject.blackout.read pages=1024 bad=0 short=0 eio=0 ms=8921)
+rsize_guard: G10 lookstorm stats=6000 failed_procs=0 ms=243 ok with 0 new sockets
+rsize_guard: [NFS] fsinfo rc=0 rtmax=32768 rtpref=32768 rsize=32768
+rsize_guard: G4 1/1 sampled 64 KiB reads: rs=32768 issued<=2
+rsize_guard: G5 8641 READ RPCs for 283116297 bytes: 32764 bytes/RPC, 2.0 RPCs per 64 KiB
+rsize_guard: PASS (/home/sarah/cp/lanes/early)
+[NB] dirs6.child k=2 dir=dA listings=40 wrong=0 ok
+[NB] dirs6.child k=0 dir=dA listings=40 wrong=0 ok
+[NB] dirs6.child k=3 dir=dB listings=40 wrong=0 ok
+[NB] dirs6.child k=5 dir=dB listings=40 wrong=0 ok
+[NB] dirs6.child k=1 dir=dB listings=40 wrong=0 ok
+[NB] dirs6.child k=4 dir=dA listings=40 wrong=0 ok
+[NB] dirs6 a=6 pages=40 bad=0 first_bad=- ok
+contention note: one [YLOCK-STALL] row in the fixed run (6 listers spinning on nfs_dir_lock while one fill does READDIRPLUS RPCs; report-only, memoised once):
+[YLOCK-STALL] site=nfs_dir_lock lock=nfs_dir_lock addr=0x74D19C30 pc=0x7 extra=0x100000 cpu=3
+
+$ make -s nfs_rsize_scan   (fixed tree)
+rsize_scan: PASS (32 KiB NFS READ paths intact)

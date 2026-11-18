@@ -50,6 +50,15 @@
  *   lookstorm   cp/nfs2b (test kernels): 4 x 1500 stat()s; the kernel's
  *               socket count (socks=) before and after says whether every
  *               RPC took a fresh socket (a host ephemeral port via slirp).
+ *   dirs6       H2-early: 6 forked listers, even ones listing /NFS/dA (40
+ *               files a00..a39), odd ones /NFS/dB (50 files b00..b49), 40
+ *               times each, all at once, through read_dir(); every listing
+ *               must have exactly its own directory's names, once each.  The
+ *               kernel's one-directory NFS listing cache was shared with no
+ *               lock: a getdents of the game's engine/config/base returned
+ *               Wine's fonts directory (56 entries) while conhost listed it,
+ *               and the game quit 2.6-2.9 s in (docs/cp-early.md).  One row
+ *               per lister and a summary row; a wrong listing fails it.
  *   done rc=<n> n = phases that failed (bad byte count or checksum)
  * MB/s is 10^6 bytes per second of guest wall time (CLOCK_MONOTONIC).
  */
@@ -282,6 +291,82 @@ static int phase_multi(void) {
   line[n] = 0;
   pc(line);
   phase_row("multi6", "", MULTI_READERS, (unsigned long)pages, (unsigned long)failed, -1, failed == 0);
+  return failed ? 1 : 0;
+}
+
+/* ---- H2-early: concurrent listings of two different directories ------- */
+#define DIRS_LISTERS 6
+#define DIRS_ROUNDS 40
+
+/* one listing of dir (prefix c, n names): 0 = exactly c00..c<n-1> once each */
+static int dirs_check(const char *path, char c, int n, int *got_n, char *bad_name) {
+  uint8_t seen[64];
+  for (int i = 0; i < 64; i++) seen[i] = 0;
+  int cnt = 0, bad = 0;
+  struct sys_dirent e;
+  for (int i = 0; i < 200; i++) {
+    if (read_dir(path, i, &e) != 0) break;
+    cnt++;
+    int v = (e.name[1] >= '0' && e.name[1] <= '9' && e.name[2] >= '0' && e.name[2] <= '9' && !e.name[3])
+              ? (e.name[1] - '0') * 10 + (e.name[2] - '0') : -1;
+    if (e.name[0] != c || v < 0 || v >= n || seen[v]) {
+      if (!bad) { for (int k = 0; k < 8; k++) { bad_name[k] = e.name[k]; if (!e.name[k]) break; } bad_name[8] = 0; }
+      bad++;
+    } else {
+      seen[v] = 1;
+    }
+  }
+  *got_n = cnt;
+  return (bad || cnt != n) ? 1 : 0;
+}
+
+static int dirs_lister(int k) {
+  const char *path = (k & 1) ? NB_MNT "/dB" : NB_MNT "/dA";
+  char c = (k & 1) ? 'b' : 'a';
+  int n = (k & 1) ? 50 : 40;
+  int wrong = 0, last_n = 0;
+  long first = -1;
+  char bad_name[9] = "-";
+  for (int r = 0; r < DIRS_ROUNDS; r++) {
+    int got = 0;
+    if (dirs_check(path, c, n, &got, bad_name)) {
+      wrong++;
+      if (first < 0) { first = r; last_n = got; }
+    }
+  }
+  char line[200];
+  int m = 0;
+  kv(line, &m, "[NB] dirs6.child k=", (unsigned long)k);
+  const char *p = (k & 1) ? " dir=dB" : " dir=dA";
+  while (*p) line[m++] = *p++;
+  kv(line, &m, " listings=", DIRS_ROUNDS);
+  kv(line, &m, " wrong=", (unsigned long)wrong);
+  if (wrong) {
+    kv(line, &m, " first_wrong=", (unsigned long)first);
+    kv(line, &m, " its_count=", (unsigned long)last_n);
+    p = " first_bad_name="; while (*p) line[m++] = *p++;
+    for (p = bad_name; *p; p++) line[m++] = *p;
+  }
+  p = wrong ? " FAIL\n" : " ok\n";
+  while (*p) line[m++] = *p++;
+  line[m] = 0;
+  pc(line);
+  return wrong ? 1 : 0;
+}
+
+static int phase_dirs(void) {
+  int pid[DIRS_LISTERS];
+  for (int k = 0; k < DIRS_LISTERS; k++) {
+    pid[k] = fork();
+    if (pid[k] == 0) exit(dirs_lister(k));
+    if (pid[k] < 0) { phase_row("dirs6", " fork", (unsigned long)k, 0, 1, 0, 0); return 1; }
+  }
+  int failed = 0;
+  for (int k = 0; k < DIRS_LISTERS; k++) {
+    int st = 0;
+    if (waitpid(pid[k], &st, 0) != pid[k] || st != 0) failed++;
+  }
+  phase_row("dirs6", "", DIRS_LISTERS, DIRS_ROUNDS, (unsigned long)failed, -1, failed == 0);
   return failed ? 1 : 0;
 }
 
@@ -858,6 +943,7 @@ int main(void) {
   fails += phase("seq1344", 1344, 4u * 1024u * 1024u, 0, 0);
   fails += phase_conc();
   fails += phase_multi();
+  fails += phase_dirs();
   fails += phase_stat();
   fails += phase_symlink();
   fails += phase_one();
