@@ -1,16 +1,9 @@
-# tools/cp/hunt/settings.p9 -- H1-hunt matrix item 6b (docs/cp-hunt.md): main
-# menu -> SETTINGS (the first Down shows the hidden focus on SETTINGS in every
-# 720p boot so far: inputcheck.py), then interactive (`ctl`): the graphics
-# change and apply are driven from ssh by appending boot_p9 lines to
-# OUT/ctl.txt, reading each `shot`'s OCR in the run log.  In-game menus only;
-# no first-run screen is ever answered (boot_p9 stops on one).
+# tools/cp/hunt/settings.p9 -- H1-hunt matrix items 3 + 6b, driven by hand
+# (docs/cp-hunt.md): from the main menu the boot goes interactive (`ctl`): the
+# reload of a save and the graphics-settings change + apply are driven from
+# ssh by appending boot_p9 lines to OUT/ctl.txt and reading each `shot`'s OCR
+# in the run log.  In-game menus only; no first-run screen is ever answered
+# (boot_p9 stops on one).  Run with HUNT_FROM=<a play boot> to reload its save.
 phase menu
 shot menu
-key down
-wait 1
-seek settings-focus main down 4 SETTINGS
-key ret
-wait 4
-phase settings
-shot settings
 ctl
