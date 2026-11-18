@@ -44,6 +44,15 @@ if r.stdout != exp:
 check("classify golden", r.stdout == exp and r.returncode == 0)
 
 with tempfile.TemporaryDirectory() as t:
+    j = os.path.join(t, "early.json")
+    run("tools/cp/hunt/classify.py", "--log", f"{G}/runlog-early.txt", "--json", j, f"{G}/serial-mini.txt")
+    j2 = os.path.join(t, "menu.json")
+    run("tools/cp/hunt/classify.py", "--log", f"{G}/runlog-mini.txt", "--json", j2, f"{G}/serial-mini.txt")
+    e, m = json.load(open(j))["runlog"], json.load(open(j2))["runlog"]
+    check("early exit flagged", e.get("early_exit") is True and e.get("game_ms") == 2886 and not m.get("early_exit"),
+          f"early={e.get('early_exit')} menu={m.get('early_exit')}")
+
+with tempfile.TemporaryDirectory() as t:
     js = []
     for i in (1, 2):
         j = os.path.join(t, f"b{i}.json")

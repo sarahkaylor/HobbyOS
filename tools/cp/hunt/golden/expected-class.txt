@@ -6,10 +6,10 @@
    launch_to_menu_s: 222.2
    REDEngineErrorReporter: started (exited)
 -- kernel faults: 2 rows, 2 signatures
-       1  L18      user-fault: [KERNEL] User process fault! Vector: N pid=N rip=0x#
-       1  L19      lcompat-fault: [LCOMPAT] fault sig=N pid=N rip=0x# addr=0x#
+       1  L18      user-fault: [KERNEL] User process fault! Vector: 14
+       1  L19      lcompat-fault: [LCOMPAT] fault sig=11 pid=N rip=0x# addr=0x#
 -- kernel stalls / lost wakes / timeouts: 3 rows, 2 signatures
-       2  L16      venus: [VENUS] fence_wait2 timeout pid=N ctx=N ring=N seqno=0x# issued=0x# done=0x# ctx_inflight=N
+       2  L16      venus: [VENUS] fence_wait2 timeout pid=N ctx=N ring=N
        1  L20      nfspipe: [NFSPIPE] stall inflight=N issued=N replies=N
 -- kernel diagnostics (instrument rows): 2 rows, 1 signatures
        2  L13      badelr: elr~0x140000000 in Cyberpunk2077.e

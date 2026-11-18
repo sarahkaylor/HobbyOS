@@ -59,6 +59,27 @@ def norm(s, keep_hex=False):
     return s[:150]
 
 
+INNER_TAG_RX = re.compile(r"\[[A-Z][A-Z0-9_-]{1,14}\]")
+KEEP_RX = re.compile(r"\b(sig=|Vector: |vector=|code=)(0x[0-9A-Fa-f]+|\d+)")
+
+
+def ksig(tag, line, m):
+    """a kernel row's signature: from where the pattern matched, cut at the next
+    row tag (old boots' serial consoles interleaved rows from two CPUs), the
+    first 6 normalised tokens, with signal / vector / code numbers kept."""
+    s = line[m.start():]
+    t = INNER_TAG_RX.search(s, 1)
+    if t:
+        s = s[:t.start()]
+    n = norm(s)
+    for k, v in KEEP_RX.findall(s):
+        for ph in ("N", "0x#"):
+            if k + ph in n:
+                n = n.replace(k + ph, k + v, 1)
+                break
+    return f"{tag}: {' '.join(n.split()[:6])}"
+
+
 def strip_x(line):
     """Drop the session's "[X] " prefix, a Wine +timestamp and the tid."""
     if line.startswith("[X] "):
@@ -181,15 +202,17 @@ def classify_serial(text):
             continue
         hit = False
         for tag, rx in KFAULT:
-            if rx.search(line):
-                add("kfault", f"{tag}: {norm(line)}", ln, line)
+            m = rx.search(line)
+            if m:
+                add("kfault", ksig(tag, line, m), ln, line)
                 hit = True
                 break
         if hit:
             continue
         for tag, rx in KSTALL:
-            if rx.search(line):
-                add("kstall", f"{tag}: {norm(line)}", ln, line)
+            m = rx.search(line)
+            if m:
+                add("kstall", ksig(tag, line, m), ln, line)
                 hit = True
                 break
         if hit:
@@ -254,6 +277,12 @@ def parse_runlog(path):
     m = re.search(r"game process ended: (.*)", t)
     if m:
         r["game_end"] = m.group(1).strip()[:120]
+        m2 = re.search(r"end game status=(-?\d+) ms=(\d+)", m.group(1))
+        if m2:
+            r["game_status"], r["game_ms"] = int(m2.group(1)), int(m2.group(2))
+            # the H2-early signature: the game is gone seconds after launch
+            # (the grader still calls this rc=0 "launcher-done")
+            r["early_exit"] = int(m2.group(2)) < 60000 and "main menu OCR" not in t
     phases = re.findall(r"\[P9W\] \+\s+([0-9.]+) s\s+(\d\d:\d\d:\d\d)\s+phase (\S+)", t)
     if phases:
         r["phases"] = [(float(a), b, c) for a, b, c in phases]
@@ -299,9 +328,21 @@ def parse_host(path, phases=None):
     return {"gpu_busy_all": mq(busy), "gpu_busy_world": mq(world), "guests": sorted(guests)}
 
 
+def q10(v):
+    """summarize.py's interpolated 10th percentile, so the tables agree"""
+    v = sorted(v)
+    k = (len(v) - 1) * 0.1
+    lo = int(k)
+    hi = min(lo + 1, len(v) - 1)
+    return v[lo] + (v[hi] - v[lo]) * (k - lo)
+
+
 def fps_gaps(serial_path):
     """Largest gap (game s) between fps rows in each world phase, from fps.csv."""
-    p = os.path.join(os.path.dirname(serial_path), "fps.csv")
+    if serial_path.endswith(".serial.txt"):            # run-hunt.sh's copy: RUN.serial.txt + RUN.fps.csv
+        p = serial_path[:-len(".serial.txt")] + ".fps.csv"
+    else:
+        p = os.path.join(os.path.dirname(serial_path), "fps.csv")
     if not os.path.exists(p):
         return None
     rows = list(csv.DictReader(open(p)))
@@ -313,7 +354,7 @@ def fps_gaps(serial_path):
             continue
         gaps = [b - a for a, b in zip(t, t[1:])]
         out[ph] = {"rows": len(t), "max_gap_s": round(max(gaps), 1), "median": round(statistics.median(v), 1),
-                   "p10": round(sorted(v)[int(0.1 * (len(v) - 1))], 1)}
+                   "p10": round(q10(v), 1)}
     return out
 
 
@@ -351,7 +392,7 @@ def report(args):
     if args.json:
         json.dump(res, open(args.json, "w"), indent=1)
     print(f"== classify {rid}: {args.serial} ({res['serial_lines']} lines, sha {res['sha']})")
-    for k in ("verdict", "rc", "launch_s", "menu_s", "launch_to_menu_s", "game_end", "script_fail"):
+    for k in ("verdict", "rc", "launch_s", "menu_s", "launch_to_menu_s", "game_end", "early_exit", "script_fail"):
         if k in rl:
             print(f"   {k}: {rl[k]}")
     print(f"   REDEngineErrorReporter: {'started' if res['classes']['red'] else 'not started'}"
