@@ -248,6 +248,18 @@ def grade(args, probes, serial, shots):
     bad = [ln for ln in lines if any(k in ln for k in ("memory fault", "page fault", "FATAL"))]
     if bad:
         fails.append(f"{len(bad)} fault line(s): {bad[0][:160]}")
+    # H3-winefix: NAME a known Wine signature (it still FAILS: no allowlist).
+    # W1 = wineserver's SIGQUIT landing in a thread that is already exiting:
+    # quit_handler reads NtCurrentTeb()==NULL + 0x3a8 (docs/cp-winefix.md §1),
+    # fixed by tools/cp/wine-patches/0001-ntdll-block-sigquit-in-thread-exit.patch.
+    w1 = [ln for ln in bad if re.search(r"memory fault VA=0x0*3A8 ", ln)]
+    if w1:
+        pf = os.path.join(args.out, "wine-patches.txt")
+        pset = open(pf).read().split() if os.path.exists(pf) else []
+        has = any(x.startswith("0001-ntdll-block-sigquit") for x in pset)
+        log(f"known signature W1 (SIGQUIT in an exiting Wine thread, quit_handler NULL TEB) x{len(w1)}; "
+            f"stage {'HAS' if has else 'LACKS'} the 0001 SIGQUIT patch"
+            + ("" if has else " (build it: CP_WINE_PATCHES=tools/cp/wine-patches tools/cp/build-wine.sh)"))
     for f in fails:
         log("FAIL: " + f)
     if nfs_bad:

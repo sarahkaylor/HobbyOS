@@ -69,6 +69,11 @@ done
 case "$EXPORT" in /srv/nfs/?*) ;; *) die "P5_EXPORT must be under /srv/nfs/ ($EXPORT)";; esac
 [ -e "$EXPORT" ] && die "$EXPORT already exists: not this run's to reuse or delete; remove it by hand"
 
+# H3-winefix: which Wine source patches the stage carries (build-wine.sh CP_WINE_PATCHES);
+# the grader names known signatures against it (docs/cp-winefix.md).
+if [ -f "$WINE/share/wine/cp-wine-patches.txt" ]; then cp "$WINE/share/wine/cp-wine-patches.txt" "$OUT/wine-patches.txt"
+else : > "$OUT/wine-patches.txt"; fi
+echo "== Wine stage patches: $(awk '{printf "%s ", $2}' "$OUT/wine-patches.txt")$([ -s "$OUT/wine-patches.txt" ] || echo none)"
 echo "== build: kernel + disk (intel, default desktop/icewm), WINEP5.BIN, PE probes"
 make ARCH=intel hobbyos.elf disk.img >"$OUT/build.log" 2>&1 || { tail -30 "$OUT/build.log"; die "kernel/disk build"; }
 make -s ARCH=intel obj/intel/libc.a >>"$OUT/build.log" 2>&1 || die "libc.a"
