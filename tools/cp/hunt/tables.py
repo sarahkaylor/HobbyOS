@@ -43,6 +43,9 @@ for j in runs:
             v = [float(x["approx_fps"]) for x in rows if x["phase"] == ph]
             if v:
                 row[ph] = (round(statistics.median(v), 1), round(q10(v), 1), len(v))
+        sv = [float(x["approx_fps"]) for x in rows if x["phase"].startswith("soak")]
+        if sv:            # the soak walks in soak1..soak6: its "world" is all of them
+            row["world"] = (round(statistics.median(sv), 1), round(q10(sv), 1), len(sv))
         fg = (r.get("fps_gaps") or {})
         row["hitch"] = sum(v.get("hitches", 0) for k, v in fg.items() if k == "world" or k.startswith("soak"))
         row["wmin"] = min((v["min"] for k, v in fg.items() if k == "world" or k.startswith("soak")), default="-")
