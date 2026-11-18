@@ -1,0 +1,41 @@
+H3-winefix: patched stage vs stock stage (strix)
+stock   /home/sarah/cp/wine-cp/stage/CP/WINE  files=1012 du=205M
+patched /home/sarah/cp/lanes/winefix-wine/stage/CP/WINE  files=1013 du=205M
+
+== diff of file lists (find . | sort):
+894a895
+> ./share/wine/cp-wine-patches.txt
+== /home/sarah/cp/lanes/winefix-wine/stage/CP/WINE/share/wine/cp-wine-patches.txt:
+1bbd0895703aafe47d9fccda98668818d2bbdbc7260625a3339035e9510fffeb  0001-ntdll-block-sigquit-in-thread-exit.patch
+f220f21f8d691e4fd70be5890e0d2bd8e3a07c61143a61d61c2f4247ee8b8889  0002-ntdll-quit-handler-no-syscall-frame.patch
+
+== files whose sha256 differs: 769 of 1012
+   (two builds from different work dirs are not bit-identical: the work-dir path is embedded (__FILE__ strings,
+    e.g. 21 'cp/wine-cp' strings in win32u.so), which shifts addresses, so even the disassembly of unpatched
+    files differs.  Code identity outside ntdll.so is NOT verified; the patches touch only ntdll.so's sources.)
+
+== code check, patched ntdll.so (build tree, unstripped):
+   58914:	call   cad0 <sigaddset@plt>
+   58920:	call   c070 <pthread_sigmask@plt>
+000000000003e900 <quit_handler>:
+   3e900:	push   %rbx
+   3e901:	mov    %rdx,%rbx
+   3e904:	call   3abe8 <clear_alignment_flag>
+   3e909:	cmpw   $0x0,0x6b139(%rip)        # a9a4a <fs32_sel>
+   3e911:	je     3e934 <quit_handler+0x34>
+   3e913:	mov    %rsp,%rax
+   3e916:	and    $0xffffffffffff0000,%rax
+   3e91c:	mov    0x320(%rax),%rdx
+   3e923:	mov    $0x9e,%edi
+   3e928:	mov    $0x1002,%esi
+   3e92d:	xor    %eax,%eax
+   3e92f:	call   c550 <syscall@plt>
+   3e934:	call   57dc0 <NtCurrentTeb>
+   3e939:	mov    0x378(%rax),%rcx
+   3e940:	test   %rcx,%rcx
+   3e943:	je     3e96f <quit_handler+0x6f>
+   3e945:	mov    0xa0(%rbx),%rdx
+   3e94c:	cmp    %rdx,0x3a8(%rax)
+   3e953:	setbe  %al
+   3e956:	cmp    %rdx,%rcx
+   3e959:	setae  %cl

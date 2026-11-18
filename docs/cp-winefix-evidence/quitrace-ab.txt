@@ -1,0 +1,193 @@
+H3-winefix quitrace A/B on strix (KVM, -smp 8 -m 12G, MODE=test kernel = cp-winefix tree, console Wine over NFS).
+stock   = ~/cp/wine-cp/stage/CP/WINE (integ default, no patches)
+patched = ~/cp/lanes/winefix-wine/stage/CP/WINE (0001 + 0002)
+batch: ~/cp/lanes/winefix-ab.sh (alternating stock/patched); harness tools/cp/p5/run-quitrace.sh; QR_REPEAT=3
+boots #1-#3: QR_PLAN=thr:5000:4,proc:40:900 (20000 kills per thr run); #4-#5: thr:2000:4,proc:40:900 (8000)
+
+== per-boot summary (ab.txt)
+stock#1 rc=1 [QRG] runs=6 ok=3 faults=9 va3a8=3 vaa8=3 hung=1 silent_exit=2 == run thr#1 NOT ok: [QRL] end thr#1 status=0 ms=4120 == run thr#2 NOT ok: [QRL] end thr#2 status=256 ms=208 == run thr#3 NOT ok: [QRL] end thr#3 status=768 ms=60272  02:47
+patched#1 rc=1 [QRG] runs=6 ok=5 faults=30 va3a8=0 vaa8=0 hung=0 silent_exit=1 == run thr#1 NOT ok: [QRL] end thr#1 status=256 ms=27783  02:54
+stock#2 rc=1 [QRG] runs=6 ok=3 faults=0 va3a8=0 vaa8=0 hung=3 silent_exit=2 == run thr#1 NOT ok: [QRL] end thr#1 status=768 ms=62694 == run thr#2 NOT ok: [QRL] end thr#2 status=0 ms=259 == run thr#3 NOT ok: [QRL] end thr#3 status=0 ms=20058  03:05
+patched#2 rc=1 [QRG] runs=6 ok=5 faults=27 va3a8=0 vaa8=0 hung=0 silent_exit=1 == run thr#1 NOT ok: [QRL] end thr#1 status=256 ms=28746  03:10
+stock#3 rc=1 [QRG] runs=6 ok=3 faults=4 va3a8=1 vaa8=3 hung=2 silent_exit=1 == run thr#1 NOT ok: [QRL] end thr#1 status=768 ms=62636 == run thr#2 NOT ok: [QRL] end thr#2 status=-1 ms=574 == run thr#3 NOT ok: [QRL] end thr#3 status=0 ms=60263  03:23
+patched#3 rc=1 [QRG] runs=6 ok=5 faults=29 va3a8=0 vaa8=0 hung=0 silent_exit=1 == run thr#1 NOT ok: [QRL] end thr#1 status=256 ms=48310  03:35
+stock#4 plan=thr:2000:4,proc:40:900 rc=1 [QRG] runs=6 ok=3 faults=8 va3a8=0 vaa8=8 hung=3 silent_exit=0 == run thr#1 NOT ok: [QRL] end thr#1 status=768 ms=61121 == run thr#2 NOT ok: [QRL] end thr#2 status=768 ms=60287 == run thr#3 NOT ok: [QRL] end thr#3 status=0 ms=60235  03:45
+patched#4 plan=thr:2000:4,proc:40:900 rc=0 [QRG] runs=6 ok=6 faults=0 va3a8=0 vaa8=0 hung=0 silent_exit=0  03:52
+stock#5 plan=thr:2000:4,proc:40:900 rc=1 [QRG] runs=6 ok=3 faults=2 va3a8=0 vaa8=2 hung=2 silent_exit=1 == run thr#1 NOT ok: [QRL] end thr#1 status=0 ms=1175 == run thr#2 NOT ok: [QRL] end thr#2 status=768 ms=60256 == run thr#3 NOT ok: [QRL] end thr#3 status=768 ms=60450  04:00
+patched#5 plan=thr:2000:4,proc:40:900 rc=0 [QRG] runs=6 ok=6 faults=0 va3a8=0 vaa8=0 hung=0 silent_exit=0  04:06
+
+== ab-stock-1: run rows + fault lines (first 6)
+[QRL] begin thr#1 : wine Z:\CP\QR\quitrace.exe thr 5000 4
+[QRL] end thr#1 status=0 ms=4120
+[QRL] begin proc#1 : wine Z:\CP\QR\quitrace.exe proc 40 900
+[QR] proc end started=40 fail=0 ms=26336
+[QR] done rc=0
+[QRL] end proc#1 status=0 ms=26456
+[QRL] begin thr#2 : wine Z:\CP\QR\quitrace.exe thr 5000 4
+[QRL] end thr#2 status=256 ms=208
+[QRL] begin proc#2 : wine Z:\CP\QR\quitrace.exe proc 40 900
+[QR] proc end started=40 fail=0 ms=23213
+[QR] done rc=0
+[QRL] end proc#2 status=0 ms=23302
+[QRL] begin thr#3 : wine Z:\CP\QR\quitrace.exe thr 5000 4
+[QR] thr HUNG rounds=6 alive_killers=4 s=60
+[QR] done rc=3
+[QRL] end thr#3 status=768 ms=60272
+[QRL] begin proc#3 : wine Z:\CP\QR\quitrace.exe proc 40 900
+[QR] proc end started=40 fail=0 ms=24765
+[QR] done rc=0
+[QRL] end proc#3 status=0 ms=24832
+[KERNEL] pid=296 (quitrace.exe) memory fault VA=0x00000010802394BC PC=0x000000108032AA93 rw=r  in=PROT region=NONE rsp=0x000000007FF9F3D0 live=0 inH=1 cr3frame=0x0000000259C02
+[KERNEL] pid=78 (quitrace.exe) memory fault VA=0x00000000000003A8 PC=0x0000001080293940 rw=r  in=HOLE region=NONE rsp=0x0000001081F6FA30 live=137 inH=1 cr3frame=0x00000003074C
+[KERNEL] pid=113 (quitrace.exe) memory fault VA=0x00000000000003A8 PC=0x0000001080293940 rw=r  in=HOLE region=NONE rsp=0x000000007FF2FA30 live=37 inH=1 cr3frame=0x000000032938
+[KERNEL] pid=113 (quitrace.exe) memory fault VA=0x00000000000002F0 PC=0x00000010802971E6 rw=r  in=HOLE region=NONE rsp=0x000000007FF2F410 live=25 inH=2 cr3frame=0x000000032938
+[KERNEL] pid=204 (quitrace.exe) memory fault VA=0x00000000000003A8 PC=0x0000001080293940 rw=r  in=HOLE region=NONE rsp=0x00000010D138FA30 live=305 inH=1 cr3frame=0x000000002AD
+[KERNEL] pid=204 (quitrace.exe) memory fault VA=0x00000000000002F0 PC=0x00000010802971E6 rw=r  in=HOLE region=NONE rsp=0x00000010D138F410 live=293 inH=2 cr3frame=0x000000002AD
+
+== ab-stock-3: run rows + fault lines (first 6)
+[QRL] begin thr#1 : wine Z:\CP\QR\quitrace.exe thr 5000 4
+[QR] thr HUNG rounds=5 alive_killers=4 s=60
+[QR] done rc=3
+[QRL] end thr#1 status=768 ms=62636
+[QRL] begin proc#1 : wine Z:\CP\QR\quitrace.exe proc 40 900
+[QR] proc end started=40 fail=0 ms=26701
+[QR] done rc=0
+[QRL] end proc#1 status=0 ms=26787
+[QRL] begin thr#2 : wine Z:\CP\QR\quitrace.exe thr 5000 4
+[QRL] end thr#2 status=-1 ms=574
+[QRL] begin proc#2 : wine Z:\CP\QR\quitrace.exe proc 40 900
+[QR] proc end started=40 fail=0 ms=24391
+[QR] done rc=0
+[QRL] end proc#2 status=0 ms=24569
+[QRL] begin thr#3 : wine Z:\CP\QR\quitrace.exe thr 5000 4
+[QR] thr HUNG rounds=4 alive_killers=4 s=60
+[QR] done rc=3
+[QRL] end thr#3 status=0 ms=60263
+[QRL] begin proc#3 : wine Z:\CP\QR\quitrace.exe proc 40 900
+[QR] proc end started=40 fail=0 ms=25612
+[QR] done rc=0
+[QRL] end proc#3 status=0 ms=25710
+[KERNEL] pid=362 (quitrace.exe) memory fault VA=0x00000000000003A8 PC=0x0000001080293940 rw=r  in=HOLE region=NONE rsp=0x0000001081C0FA30 live=28 inH=1 cr3frame=0x000000024DF0
+[KERNEL] pid=471 (quitrace.exe) memory fault VA=0x00000000000000A8 PC=0x000000108028FD58 rw=r  in=HOLE region=NONE rsp=0x0000001081D2FA28 live=8 inH=1 cr3frame=0x0000000352882
+[KERNEL] pid=191 (quitrace.exe) memory fault VA=0x00000000000000A8 PC=0x000000108028FD58 rw=r  in=HOLE region=NONE rsp=0x000000007FE6FA28 live=35 inH=1 cr3frame=0x00000000583C
+[KERNEL] pid=192 (quitrace.exe) memory fault VA=0x00000000000000A8 PC=0x000000108028FD58 rw=r  in=HOLE region=NONE rsp=0x000000007FEDFA28 live=25 inH=1 cr3frame=0x00000000583C
+
+== ab-stock-4: run rows + fault lines (first 6)
+[QRL] begin thr#1 : wine Z:\CP\QR\quitrace.exe thr 2000 4
+[QR] thr HUNG rounds=8 alive_killers=4 s=60
+[QR] done rc=3
+[QRL] end thr#1 status=768 ms=61121
+[QRL] begin proc#1 : wine Z:\CP\QR\quitrace.exe proc 40 900
+[QR] proc end started=40 fail=0 ms=25023
+[QR] done rc=0
+[QRL] end proc#1 status=0 ms=25119
+[QRL] begin thr#2 : wine Z:\CP\QR\quitrace.exe thr 2000 4
+[QR] thr HUNG rounds=5 alive_killers=4 s=60
+[QR] done rc=3
+[QRL] end thr#2 status=768 ms=60287
+[QRL] begin proc#2 : wine Z:\CP\QR\quitrace.exe proc 40 900
+[QR] proc end started=40 fail=0 ms=25261
+[QR] done rc=0
+[QRL] end proc#2 status=0 ms=25313
+[QRL] begin thr#3 : wine Z:\CP\QR\quitrace.exe thr 2000 4
+[QR] thr HUNG rounds=6 alive_killers=4 s=60
+[QR] done rc=3
+[QRL] end thr#3 status=0 ms=60235
+[QRL] begin proc#3 : wine Z:\CP\QR\quitrace.exe proc 40 900
+[QR] proc end started=40 fail=0 ms=20360
+[QR] done rc=0
+[QRL] end proc#3 status=0 ms=20483
+[KERNEL] pid=73 (quitrace.exe) memory fault VA=0x00000000000000A8 PC=0x000000108028FD58 rw=r  in=HOLE region=NONE rsp=0x00000010820EFA28 live=15 inH=1 cr3frame=0x000000024DE42
+[KERNEL] pid=314 (quitrace.exe) memory fault VA=0x00000000000000A8 PC=0x000000108028FD58 rw=r  in=HOLE region=NONE rsp=0x0000001081AEFA28 live=8 inH=1 cr3frame=0x000000030C8C2
+[KERNEL] pid=240 (quitrace.exe) memory fault VA=0x00000000000000A8 PC=0x000000108028FD58 rw=r  in=HOLE region=NONE rsp=0x00000010AE69FA28 live=12 inH=1 cr3frame=0x0000000335B8
+[KERNEL] pid=176 (quitrace.exe) memory fault VA=0x00000000000000A8 PC=0x000000108028FD58 rw=r  in=HOLE region=NONE rsp=0x00000010C129FA28 live=52 inH=1 cr3frame=0x000000037EA8
+[KERNEL] pid=249 (quitrace.exe) memory fault VA=0x00000000000000A8 PC=0x000000108028FD58 rw=r  in=HOLE region=NONE rsp=0x00000010C494FA28 live=129 inH=1 cr3frame=0x00000000377
+[KERNEL] pid=508 (quitrace.exe) memory fault VA=0x00000000000000A8 PC=0x000000108028FD58 rw=r  in=HOLE region=NONE rsp=0x00000010C6C9FA28 live=176 inH=1 cr3frame=0x000000014DF
+
+== ab-stock-5: run rows + fault lines (first 6)
+[QRL] begin thr#1 : wine Z:\CP\QR\quitrace.exe thr 2000 4
+[QRL] end thr#1 status=0 ms=1175
+[QRL] begin proc#1 : wine Z:\CP\QR\quitrace.exe proc 40 900
+[QR] proc end started=40 fail=0 ms=24566
+[QR] done rc=0
+[QRL] end proc#1 status=0 ms=24658
+[QRL] begin thr#2 : wine Z:\CP\QR\quitrace.exe thr 2000 4
+[QR] thr HUNG rounds=6 alive_killers=4 s=60
+[QR] done rc=3
+[QRL] end thr#2 status=768 ms=60256
+[QRL] begin proc#2 : wine Z:\CP\QR\quitrace.exe proc 40 900
+[QR] proc end started=40 fail=0 ms=23716
+[QR] done rc=0
+[QRL] end proc#2 status=0 ms=23775
+[QRL] begin thr#3 : wine Z:\CP\QR\quitrace.exe thr 2000 4
+[QR] thr HUNG rounds=5 alive_killers=4 s=60
+[QR] done rc=3
+[QRL] end thr#3 status=768 ms=60450
+[QRL] begin proc#3 : wine Z:\CP\QR\quitrace.exe proc 40 900
+[QR] proc end started=40 fail=0 ms=20784
+[QR] done rc=0
+[QRL] end proc#3 status=0 ms=20828
+[KERNEL] pid=80 (quitrace.exe) memory fault VA=0x00000000000000A8 PC=0x000000108028FD58 rw=r  in=HOLE region=NONE rsp=0x00000010DCBFFA28 live=468 inH=1 cr3frame=0x000000017C58
+[KERNEL] pid=315 (quitrace.exe) memory fault VA=0x00000000000000A8 PC=0x000000108028FD58 rw=r  in=HOLE region=NONE rsp=0x000000108271FA28 live=11 inH=1 cr3frame=0x000000004718
+
+== ab-patched-1: run rows + fault lines (first 6)
+[QRL] begin thr#1 : wine Z:\CP\QR\quitrace.exe thr 5000 4
+[QRL] end thr#1 status=256 ms=27783
+[QRL] begin proc#1 : wine Z:\CP\QR\quitrace.exe proc 40 900
+[QR] proc end started=40 fail=0 ms=22815
+[QR] done rc=0
+[QRL] end proc#1 status=0 ms=22912
+[QRL] begin thr#2 : wine Z:\CP\QR\quitrace.exe thr 5000 4
+[QR] thr end rounds=20000 create_fail=0 wait_fail=0 exit_code_terminate=20000 exit_code_self=0 stuck=0 ms=9417
+[QR] done rc=0
+[QRL] end thr#2 status=0 ms=9666
+[QRL] begin proc#2 : wine Z:\CP\QR\quitrace.exe proc 40 900
+[QR] proc end started=40 fail=0 ms=23036
+[QR] done rc=0
+[QRL] end proc#2 status=0 ms=23085
+[QRL] begin thr#3 : wine Z:\CP\QR\quitrace.exe thr 5000 4
+[QR] thr end rounds=20000 create_fail=0 wait_fail=0 exit_code_terminate=20000 exit_code_self=0 stuck=0 ms=6943
+[QR] done rc=0
+[QRL] end thr#3 status=0 ms=7008
+[QRL] begin proc#3 : wine Z:\CP\QR\quitrace.exe proc 40 900
+[QR] proc end started=40 fail=0 ms=20655
+[QR] done rc=0
+[QRL] end proc#3 status=0 ms=20694
+[KERNEL] pid=168 (quitrace.exe) memory fault VA=0x0000001371EE2030 PC=0x00000010802B64EF rw=w  in=HOLE region=NONE near=0x0000001371EF0000+0x0000000000010000 below=0x000000000
+[KERNEL] pid=168 (quitrace.exe) memory fault VA=0x0000001371ED2030 PC=0x00000010802B64EF rw=w  in=HOLE region=NONE near=0x0000001371EF0000+0x0000000000010000 below=0x000000000
+[KERNEL] pid=168 (quitrace.exe) memory fault VA=0x0000001371EC2030 PC=0x00000010802B64EF rw=w  in=HOLE region=NONE near=0x0000001371EF0000+0x0000000000010000 below=0x000000000
+[KERNEL] pid=168 (quitrace.exe) memory fault VA=0x0000001371EB2030 PC=0x00000010802B64EF rw=w  in=HOLE region=NONE near=0x0000001371EF0000+0x0000000000010000 below=0x000000000
+[KERNEL] pid=168 (quitrace.exe) memory fault VA=0x0000001371EA2030 PC=0x00000010802B64EF rw=w  in=HOLE region=NONE near=0x0000001371EF0000+0x0000000000010000 below=0x000000000
+[KERNEL] pid=168 (quitrace.exe) memory fault VA=0x0000001371E92030 PC=0x00000010802B64EF rw=w  in=HOLE region=NONE near=0x0000001371EF0000+0x0000000000010000 below=0x000000000
+
+== ab-patched-4: run rows + fault lines (first 6)
+[QRL] begin thr#1 : wine Z:\CP\QR\quitrace.exe thr 2000 4
+[QR] thr end rounds=8000 create_fail=0 wait_fail=0 exit_code_terminate=8000 exit_code_self=0 stuck=0 ms=6685
+[QR] done rc=0
+[QRL] end thr#1 status=0 ms=7909
+[QRL] begin proc#1 : wine Z:\CP\QR\quitrace.exe proc 40 900
+[QR] proc end started=40 fail=0 ms=27166
+[QR] done rc=0
+[QRL] end proc#1 status=0 ms=27236
+[QRL] begin thr#2 : wine Z:\CP\QR\quitrace.exe thr 2000 4
+[QR] thr end rounds=8000 create_fail=0 wait_fail=0 exit_code_terminate=8000 exit_code_self=0 stuck=0 ms=10148
+[QR] done rc=0
+[QRL] end thr#2 status=0 ms=10580
+[QRL] begin proc#2 : wine Z:\CP\QR\quitrace.exe proc 40 900
+[QR] proc end started=40 fail=0 ms=22436
+[QR] done rc=0
+[QRL] end proc#2 status=0 ms=22490
+[QRL] begin thr#3 : wine Z:\CP\QR\quitrace.exe thr 2000 4
+[QR] thr end rounds=8000 create_fail=0 wait_fail=0 exit_code_terminate=8000 exit_code_self=0 stuck=0 ms=2742
+[QR] done rc=0
+[QRL] end thr#3 status=0 ms=2820
+[QRL] begin proc#3 : wine Z:\CP\QR\quitrace.exe proc 40 900
+[QR] proc end started=40 fail=0 ms=25221
+[QR] done rc=0
+[QRL] end proc#3 status=0 ms=25277
+
+== stock2 (calibration boot, thr:5000:4): the double-abort silent exit of pid 186 (rows up to the run end; later pid-186 rows are a reused pid)
+[SIGR] pid=186 sig=3 ipc=0x1080178B9B mask=0x10012A07
+[KERNEL] Process 186: quitrace.exe exited unexpectedly or gracefully.
+[EXITPC] pid=186 last_user_pc=0x1080143146 code=0x0
+[QRL] end thr#1 status=0 ms=1648

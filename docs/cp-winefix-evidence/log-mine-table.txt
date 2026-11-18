@@ -1,0 +1,120 @@
+H3-winefix log mine, strix 2026-11-18: find ~/cp (*.serial, serial*.log|txt, *.gate, *serial*), 8815 files, 3120 unique (sha256), 884 mention wine.
+Tool: mine.py + table.py (strix:~/cp/lanes/winefix-ev/). boots = distinct file stems (.log/.txt/.serial of one boot = 1); events = distinct lines.
+Paths are relative to strix:~/cp.  'first:' = first file:line seen.
+
+kfault     boots= 28 events=  49  winprobe.exe VA=0x0000000000000000 PC=0x00000001400013B0
+            first: integ14/p2.1.serial:2208
+kfault     boots= 28 events=  49  winprobe.exe VA=0x0000000000000000 PC=0x0000000140001445
+            first: integ14/p2.1.serial:2236
+kfault     boots= 28 events=  49  winprobe.exe VA=0x0000000000000000 PC=0x00000001400014D2
+            first: integ14/p2.1.serial:2264
+kfault     boots= 11 events=  16  Cyberpunk2077.e VA=0x0000000143059FC0 PC=0x0000000143059FC0
+            first: lanes/game/obj/cp-p8/run15-venus-vndebug/serial.txt:25819
+kfault     boots=  8 events=   8  Cyberpunk2077.e VA=0x00006FFFFF37712C PC=0x00006FFFFF37712C
+            first: lanes/game/obj/cp-p8/run11-venus/serial.txt:38607
+kfault     boots=  8 events=   8  Cyberpunk2077.e VA=0x0000000000000001 PC=0x0000000000000001
+            first: lanes/game/obj/cp-p8/run11-venus/serial.txt:38646
+kfault     boots=  8 events=   8  Cyberpunk2077.e VA=0x0000000000000001 PC=0x0000001080326C60
+            first: lanes/game/obj/cp-p8/run11-venus/serial.txt:38696
+kfault     boots=  7 events=   2  wine: Unhandled page fault on execute access to # at address # (thread #), starting debugger...
+            first: lanes/game/obj/cp-p8/run11-venus/serial.txt:33838
+kfault     boots=  5 events=   5  wineserver VA=0x0000000000000000 PC=0x0000001000043D20
+            first: lanes/game/obj/cp-p8/run3/serial.txt:17800
+kfault     boots=  3 events=   3  services.exe VA=0x00000000000003A8 PC=0x0000001080293940
+            first: integ14/p5.2.serial:1485
+kfault     boots=  3 events=   3  Cyberpunk2077.e VA=0x00000000000000F8 PC=0x00000001422CA324
+            first: lanes/game/obj/cp-p8/run12-venus/serial.txt:27309
+kfault     boots=  3 events=   3  wine: Unhandled page fault on read access to # at address # (thread #), starting debugger...
+            first: lanes/game/obj/cp-p8/pfx-try2/serial.txt:10193
+kfault     boots=  2 events=   1  wineboot.exe VA=0x00007FFFFE23FFF8 PC=0x00007FFFFFC5685D
+            first: base5/docs/cp-vk2-evidence/winep5-run1-serial.txt:1017
+kfault     boots=  2 events=   2  Cyberpunk2077.e VA=0x0000000943046208 PC=0x00000001408C1B96
+            first: lanes/venus-p8/obj/cp-p8/v3-rtti/serial.txt:27044
+kfault     boots=  2 events=   3  winedevice.exe VA=0x0000000000000000 PC=0x000000108074F736
+            first: lanes/nfs2-p2-run4-serial.log:14992
+kfault     boots=  1 events=   2  /CP/WINE/bin/wine VA=0x0000000000000000 PC=0x0000001080190915
+            first: lanes/game/obj/cp-p8/pfx-try1/serial.txt:2908
+kfault     boots=  1 events=   1  Cyberpunk2077.e VA=0x0000000143040348 PC=0x0000000140195769
+            first: lanes/game/obj/cp-p8/run16-venus-vendor/serial.txt:25149
+kfault     boots=  1 events=   1  vkcube.exe VA=0x000000018007DE97 PC=0x00007FFFFFA0CE90
+            first: lanes/game/obj/cp-p8/run2/serial.txt:8030
+kfault     boots=  1 events=   1  Cyberpunk2077.e VA=0x0000000000000000 PC=0x0000000000000000
+            first: lanes/game/obj/cp-p8/run2/serial.txt:17046
+kfault     boots=  1 events=   2  start.exe VA=0x0000000000000000 PC=0x00006FFFFFF79148
+            first: lanes/pe-ev/storm6/storm-lane-run1.serial:66409
+kfault     boots=  1 events=   2  vkcube.exe VA=0x0000000000000000 PC=0x00006FFFFFF78E66
+            first: lanes/pe-ev/storm6/storm-base-run1-partial.serial:38860
+kfault     boots=  1 events=   1  wine VA=0x0000000000000000 PC=0x000000108026C37B
+            first: lanes/pe-ev/storm6/storm-base-run1-partial.serial:95289
+kfault     boots=  1 events=   1  explorer.exe VA=0x0000000000112000 PC=0x00007FFFFFCA3940
+            first: lanes/x3-basefs1.serial:5905
+kfault     boots=  1 events=   1  explorer.exe VA=0x00000000C0000005 PC=0x00007FFFFFCA3940
+            first: lanes/x3-basefs1.serial:5955
+kfault     boots=  1 events=   1  Cyberpunk2077.e VA=0x0000000000000000 PC=0x0000000140A09B6C
+            first: lanes/venus-p8b/obj/cp-p8/v13-uname7/serial.txt:28514
+kfault     boots=  1 events=   1  Cyberpunk2077.e VA=0x0000000000000000 PC=0x0000000140FDC6D0
+            first: lanes/venus-p8b/obj/cp-p8/v13-uname7/serial.txt:28601
+kfault     boots=  1 events=   1  plugplay.exe VA=0x00000010802DE7C0 PC=0x0000001080329A93
+            first: lanes/ext2w3k/obj/montest/serial-b1.txt:1651
+kfault     boots=  1 events=   1  explorer.exe VA=0x0000000000000008 PC=0x00006FFFFFF6D990
+            first: lanes/x3/obj/p4/run2/serial.txt:7261
+kfault     boots=  1 events=   1  Cyberpunk2077.e VA=0x00000001430406B8 PC=0x0000000140195769
+            first: lanes/venus-p8c/obj/cp-p8/v14-smp16/serial.txt:26156
+kfault     boots=  1 events=   1  vkcube.exe VA=0x0000000170075860 PC=0x00006FFFFFF647D3
+            first: lanes/x3-basefs2.serial:22800
+kfault     boots=  1 events= 451  vkcube.exe VA=0x0000000170099160 PC=0x00006FFFFFF63D50
+            first: lanes/x3-basefs2.serial:22836
+kfault     boots=  1 events=   1  vkcube.exe VA=0x00007FFFFE100FD8 PC=0x00006FFFFFF63CCE
+            first: lanes/x3-basefs2.serial:23870
+kfault     boots=  1 events=   1  explorer.exe VA=0x0000001080057804 PC=0x0000001080329A93
+            first: lanes/console-logs/p5.3.serial:3470
+unhandled  boots=  7 events=   2  wine: Unhandled page fault on execute access to # at address # (thread #), starting debugger...
+            first: lanes/game/obj/cp-p8/run11-venus/serial.txt:33838
+unhandled  boots=  3 events=   3  err:seh:NtRaiseException Unhandled exception code c0000005 flags 0 addr 0x#
+            first: lanes/game/obj/cp-p8/run2/serial.txt:8017
+unhandled  boots=  3 events=   3  wine: Unhandled page fault on read access to # at address # (thread #), starting debugger...
+            first: lanes/game/obj/cp-p8/pfx-try2/serial.txt:10193
+unhandled  boots=  1 events=   1  err:seh:NtRaiseException Unhandled exception code c00000fd flags 0 addr 0x#
+            first: lanes/ext2w-base/obj/ext2w-reg/serial-b2.log:19666
+unhandled  boots=  1 events=   1  wine: Unhandled exception 0x# in thread # at address # (thread #), starting debugger...
+            first: lanes/ext2w-p8/obj/cp-p8/ext2w-run1-oldharness/serial.log:60834
+unhandled  boots=  1 events=   1  [X] 0138:warn:seh:dispatch_exception "Unhandled exception: ExceptionCode=0x# at address 0x#\n"
+            first: lanes/venus-p8/obj/cp-p8/v1-diag/serial.txt:28219
+seh        boots=  8 events=   3  err:seh:segv_handler Got unexpected trap 128
+            first: lanes/game/obj/cp-p8/run11-venus/serial.txt:38633
+seh        boots=  3 events=   3  err:seh:NtRaiseException Unhandled exception code c0000005 flags 0 addr 0x#
+            first: lanes/game/obj/cp-p8/run2/serial.txt:8017
+seh        boots=  3 events=   3  err:seh:start_debugger Couldn't start debugger L"winedbg --auto # #" (#)
+            first: lanes/game/obj/cp-p8/pfx-try2/serial.txt:10203
+seh        boots=  1 events=   1  err:seh:NtRaiseException Unhandled exception code c00000fd flags 0 addr 0x#
+            first: lanes/ext2w-base/obj/ext2w-reg/serial-b2.log:19666
+seh        boots=  1 events=   1  err:seh:user_callback_handler ignoring exception c0000005
+            first: lanes/x3/obj/p4/run2/serial.txt:7307
+wineserver boots=  5 events=   1  wineserver crashed, please enable coredumps (ulimit -c unlimited) and restart.
+            first: lanes/game/obj/cp-p8/run3/serial.txt:17819
+wineserver boots=  1 events=   5  wine client error:#: pipe: Too many open files
+            first: lanes/pe-ev/storm6/storm-base-run1-partial.serial:48434
+wineserver boots=  1 events=   1  wine client error:#: err:environ:read_nls_file failed to load /CP/WINE/lib/wine/../../share/wine/nls/c_20127.nls
+            first: lanes/pe-ev/storm6/storm-base-run1-partial.serial:95119
+wineserver boots=  1 events=   1  wine client error:#: [PUB] who=fault_obj va=0x# off=0x# prot=RX priv=1 src=file zero=702 ver=1
+            first: lanes/k5/obj/cp-k5/ts-merged/serial.log:15493
+wineserver boots=  1 events=   1  wine client error:#: [PIPE_WRITE_EPIPE] PID 103 pipe 0x# reader_count is 0
+            first: lanes/k5/obj/cp-k5/ts-merged/serial.log:17229
+virterr    boots=  8 events=   7  err:virtual:virtual_setup_exception nested exception on signal stack addr 0x# stack 0x#
+            first: lanes/game/obj/cp-p8/run11-venus/serial.txt:38694
+virterr    boots=  1 events=   1  err:virtual:virtual_setup_exception stack overflow 1856 bytes addr 0x# stack 0x# (0x#-0x#-0x#)
+            first: lanes/x3-basefs2.serial:23877
+syncerr    boots=  2 events=   3  err:sync:RtlpWaitForCriticalSection section # "/home/sarah/cp/wine-build-x/src/wine-11.0/dlls/ntdll/loader.c: loader_section" wait timed out
+            first: lanes/venus-p8b/obj/cp-p8/v6-xcmp/serial.txt:42804
+fatal      boots=  1 events=   1  [KERNEL] FATAL: Exception in Kernel Mode! Vector: 14 Error Code: 0x#
+            first: integ12/p5.1.serial:3377
+fatal      boots=  1 events=   1  [KERNEL] FATAL kernel-mode fault, halting this CPU: vector=14 rip=0x# cr2=0x# pid=9 err=0 cr3=0x# pd480=0x#
+            first: integ12/p5.1.serial:3386
+fatal      boots=  1 events=   1  [KERNEL] FATAL: Exception in Kernel Mode! Vector: 13 Error Code: 0x#
+            first: integ12/p5.1.serial:3390
+fatal      boots=  1 events=   1  [KERNEL] FATAL kernel-mode fault, halting this CPU: vector=13 rip=0x# cr2=0x# pid=270 err=0 cr3=0x# pd480=0x#
+            first: integ12/p5.1.serial:3398
+fatal      boots=  1 events=   1  [KERNEL] FATAL:= 0Exx6c0e0p0t0i okni nidn= 7K eprrnoetl= 5Mode! Vector: 13 Erro
+            first: lanes/game/obj/cp-p8/run7/serial.txt:34452
+fatal      boots=  1 events=   1  [KERNEL] FATAL:= 0Exx6c0e0p0t0i okni nidn= 7K eprrnoetl= 5Mode! Vector: 13 Erro
+            first: lanes/game/obj/cp-p8/run7/serial.log:34452

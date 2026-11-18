@@ -23,7 +23,7 @@
 #      build tree for the PE headers/import libs; default the stage's work dir),
 #      GLIBC231_LIB (default ~/cp/sysroot-glibc231/lib/x86_64-linux-gnu),
 #      QR_EXPORT (default /srv/nfs/cp-winefix-qr), QR_PLAN (default
-#      "thr:20000:4,proc:60:900"), QR_REPEAT (default 3), TIMEOUT_S (default 5400),
+#      "thr:2000:4,proc:40:900"; more thr rounds exhaust the TEB area, docs/cp-winefix.md §4b), QR_REPEAT (default 3), TIMEOUT_S (default 5400),
 #      QR_WINEDEBUG (default err+all,fixme-all), QR_OUT (default obj/cp-qr/run),
 #      QR_GRADE_ONLY=1 (re-grade QR_OUT/serial.log, no boot).
 set -uo pipefail
@@ -33,7 +33,7 @@ STAGE="${CP_WINE_STAGE:-$HOME/cp/wine-cp/stage/CP/WINE}"
 WB="${WINE_BUILD:-${STAGE%/stage/CP/WINE}}"
 LDIR="${GLIBC231_LIB:-$HOME/cp/sysroot-glibc231/lib/x86_64-linux-gnu}"
 EXPORT="${QR_EXPORT:-/srv/nfs/cp-winefix-qr}"
-PLAN="${QR_PLAN:-thr:20000:4,proc:60:900}"
+PLAN="${QR_PLAN:-thr:2000:4,proc:40:900}"
 REPEAT="${QR_REPEAT:-3}"
 TIMEOUT_S="${TIMEOUT_S:-5400}"
 WDBG="${QR_WINEDEBUG:-err+all,fixme-all}"
