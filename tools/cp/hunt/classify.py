@@ -339,14 +339,12 @@ def parse_host(path, phases=None):
         v = sorted(v)
         return {"median": v[len(v) // 2], "p90": v[min(len(v) - 1, int(len(v) * 0.9))], "n": len(v)}
     # the longest stretch with no serial output once the guest has printed
-    silent, cur, last = 0, 0, None
+    silent, since, size = 0, None, None
     for t, n in ser:
-        if last is not None and n == last[1] and n > 0:
-            cur = t - last[0] + cur if cur else t - last[0]
-        else:
-            cur = 0
-        silent = max(silent, cur)
-        last = (t, n)
+        if n != size:
+            since, size = t, n
+        elif n > 0:
+            silent = max(silent, t - since)
     return {"gpu_busy_all": mq(busy), "gpu_busy_world": mq(world), "guests": sorted(guests),
             "serial_silent_max_s": silent if ser else None}
 
