@@ -37,7 +37,13 @@ H3-winefix, H4-kglitch, the integ16 gate batch); the host sampler lists them.
   20 s" is a false positive in every boot (H1-14, root cause: an unsigned
   wrap; one-line diff), `[BADELR]` fires on the game's PE image (H1-06),
   the Venus fence-timeout rows are spent in the first 6 s (H1-07).
-* **P9 fps verdict (≥ 30 fps world median at 1280×720 Low):** {FPSVERDICT}
+* **P9 fps verdict (≥ 30 fps world median at 1280×720 Low):** **met at the median, not with margin**: the three 1280×720
+  fpsprobe boots give world medians 29.0, 33.4 and 30.0 (median of medians
+  **30.0**, p10 20.6–26.4); the two 1920×1080 boots 29.8 and 33.0 (p10 17.4,
+  26.3) — the same as 720p, so the frame is not GPU-fill bound; the 10-minute
+  play boot 30.5 (p10 21.8) and the 28-minute soak 35.9 (p10 23.9).  The 9070
+  XT was 33–54 % busy in the world phases.  That is ~3–5 fps above cp-k7's
+  integ11 numbers (25.5–27.9), on integ15 with ntsync.
 * **Soak (28 min in the world):** no fps decay (phase medians 34.5 → 43.0,
   scene-dependent), the game's resident memory 4309 → 4473 MiB (+5.9
   MiB/min, flat over the last two phases), virtual anon +33 MiB, threads 48
@@ -67,7 +73,7 @@ something recurs.
 | **H1-03** | ~2-minute silent stall between the X session and the launcher: the console stops reaching the host, the guest waits in the UART TX path | {R03} | `cp-hunt-evidence/pregame-console-stall.txt` | `no launcher/Wine row for 120 s before the game: sampling the vCPUs (prof-prestall)`; prof: `cons_hw_tx`, `uart_puts` | kernel console TX / QEMU serial chardev on a loaded host | hang (recovers) | open (H4-kglitch: console) |
 | **H1-12** | reload.p9's CONTINUE seek loses the focus after the second Up (focus not visible anywhere; consistent with a doubled Up onto the patch-notes button) | {R12} | `cp-hunt-evidence/reload-seek-continue.txt` | `SEEK FAILED menu-continue: main menu row 'CONTINUE' not focused after 6 x up` | input (QMP → X → Wine) or harness | wrong output (input) | open |
 | **H1-08** | P9 `seek` never finds the main-menu focus at a 1920×1080 game resolution | {R08} | `cp-hunt-evidence/p9-seek-1080.txt` | `SEEK FAILED menu-load: main menu row 'LOAD GAME' not focused after 6 x down` | harness (`boot_p9.canon`) | harness | worked around (`fpsprobe-blind.p9`); diff below (H2-early) |
-| **H1-09** | P9 world median below the 30 fps target in most boots; p10 17–25 | {R09} | P9 table below | `world median 29.0 (p10 24.7)` (h-fp1) | user code + Venus fence/present path (cp-k7 §6) | perf | open |
+| **H1-09** | the ≥ 30 fps world target is met only at the median: fpsprobe 720p medians 29.0 / 33.4 / 30.0, 1080p 29.8 / 33.0; p10 17–26; single ~1.5 s rows down to 6–13 fps | 2/5 fpsprobe boots below 30 (h-fp1, h-fq1b) | P9 table below | `world median 29.0 (p10 24.7)` (h-fp1) | game user code + Venus fence/present path (cp-k7 §6); 1080p ≈ 720p, so not GPU fill | perf | open |
 | **H1-04** | every game boot re-runs wineboot's prefix update (~9.5 s, writes the prefix) | {R04} | `cp-hunt-evidence/prefix-stale-stamp.txt` | `wine: failed to start L"C:\\windows\\syswow64\\rundll32.exe": c0000135` (its last step) | harness (seeded prefix from another Wine stage) | perf | open (integ16's p8_pfx rebuilds it; check diff below for H2-early) |
 | **H1-10** | ~1.5 s freeze on the first frame after closing the map | {R10} | h-play1 `fps.csv` (game s 752.9) | one `approx 0.61fps` row after `unwind map-close2` | game / Venus (first frame of a scene) | perf | open |
 | **H1-13** | 150–260 ms NFS reply loss + resend pauses on the game copy | {R13} | `classify.py` kstall `nfspipe` | `[NFSPIPE] stall inflight=1 issued=518 replies=517 … us=258904` | kernel NFS / slirp | perf | open (known class, recovers) |
