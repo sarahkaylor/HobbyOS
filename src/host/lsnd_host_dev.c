@@ -8,9 +8,20 @@
  * after PCM_START (real time, CLOCK_MONOTONIC).  Completed bytes are appended
  * to the WAV at $LSND_HOST_WAV (16-bit stereo 48 kHz), like QEMU's `wav`
  * audiodev, so tools/cp/audio/wavcheck.py grades a host run exactly as it
- * grades a guest run.  Nothing here opens a real sound device. */
+ * grades a guest run.  Nothing here opens a real sound device.
+ *
+ * LSND_HOST_QEMU=1 (H5-audio2, tools/cp/audio2/pace-host-test.sh) swaps the
+ * ideal device for QEMU 10.2's audio path as docs/cp-audio2.md §2 describes
+ * it: a 10 ms audio timer that fires once when due (late after a stall, never
+ * twice), a 1024-frame mixing buffer that the virtio-snd callback fills from
+ * the TX queue (a message completes when its last frame is mixed), and the
+ * wav backend's rate control -- frames owed = elapsed time x rate - frames
+ * written, reset when outside [0, 65536] -- which drains the mixing buffer by
+ * what is owed.  Time the device starved is owed and paid back faster than
+ * real time: the behaviour the guest driver's pacing exists for. */
 #include "lsnd_host.h"
 #include "../include/virtio_snd.h"
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -85,7 +96,82 @@ static void wav_open(void) {
   atexit(wav_fini);
 }
 
-int virtio_snd_init(void) { wav_open(); return 0; }
+/* --- LSND_HOST_QEMU: QEMU's audio timer + mixing buffer + rate control ----- */
+#define QMIX 1024
+static int qemu_mode = -1;
+static uint64_t q_next_tick, q_rate_start, q_sent;
+static uint32_t q_live;            /* frames in the mixing buffer */
+static uint32_t q_off[NSLOT];      /* bytes of a queued message already mixed */
+static uint64_t q_done;            /* messages returned to the guest */
+static int is_qemu(void) {
+  if (qemu_mode < 0) qemu_mode = getenv("LSND_HOST_QEMU") && getenv("LSND_HOST_QEMU")[0] == '1';
+  return qemu_mode;
+}
+static void q_tick(uint64_t now) {
+  uint32_t fb = channels * 2;
+  /* virtio_snd_pcm_out_cb: copy queued messages into the free mixing space */
+  for (int i = 0; i < fcount && q_live < QMIX; i++) {
+    int k = fifo[(fhead + i) % NSLOT];
+    if (slot[k].due == 0) continue; /* already complete */
+    uint32_t left = (slot[k].len - q_off[k]) / fb;
+    uint32_t take = QMIX - q_live < left ? QMIX - q_live : left;
+    if (wav && channels == 2) fwrite(slot[k].data + q_off[k], 1, take * fb, wav), wav_bytes += take * fb;
+    q_off[k] += take * fb;
+    q_live += take;
+    if (q_off[k] >= slot[k].len) slot[k].due = 0, q_done++; /* returned to the guest */
+  }
+  /* wav_write_out: audio_rate_get_bytes */
+  int64_t owed = (int64_t)((now - q_rate_start) * rate / 1000000u) - (int64_t)q_sent;
+  if (owed < 0 || owed > 65536) {
+    q_rate_start = now;
+    q_sent = 0;
+    owed = 0;
+    st.ctl_timeouts++; /* "Resetting rate control" count, reported in the close row */
+  }
+  uint32_t w = owed < (int64_t)q_live ? (uint32_t)owed : q_live;
+  q_live -= w;
+  q_sent += w;
+}
+
+/* QEMU's audio timer runs on its own (main-loop) thread: a late timer fires
+   once and re-arms from now (audio_reset_timer); SIGSTOP of the process
+   freezes it with the "guest", like a host stall of the whole QEMU. */
+static pthread_mutex_t q_mu = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t lsnd_host_big = PTHREAD_MUTEX_INITIALIZER; /* lsnd_preload.c */
+extern void linux_snd_irq(void);
+static void *q_timer(void *a) {
+  (void)a;
+  for (;;) {
+    uint64_t now = timer_get_us();
+    if (now < q_next_tick) {
+      struct timespec ts = {(time_t)((q_next_tick - now) / 1000000u), (long)((q_next_tick - now) % 1000000u) * 1000L};
+      nanosleep(&ts, 0);
+      continue;
+    }
+    pthread_mutex_lock(&q_mu);
+    uint64_t done0 = q_done;
+    if (started) q_tick(now);
+    int irq = q_done != done0;
+    pthread_mutex_unlock(&q_mu);
+    if (irq) { /* virtio_notify: the guest's completion interrupt */
+      pthread_mutex_lock(&lsnd_host_big);
+      linux_snd_irq();
+      pthread_mutex_unlock(&lsnd_host_big);
+    }
+    q_next_tick = timer_get_us() + 10000;
+  }
+  return 0;
+}
+
+int virtio_snd_init(void) {
+  wav_open();
+  if (is_qemu()) {
+    pthread_t t;
+    q_next_tick = timer_get_us() + 10000;
+    pthread_create(&t, 0, q_timer, 0);
+  }
+  return 0;
+}
 int virtio_snd_present(void) { return 1; }
 int virtio_snd_caps(struct vsnd_stream_caps *o) {
   memset(o, 0, sizeof *o);
@@ -103,9 +189,22 @@ int virtio_snd_set_params(uint32_t b, uint32_t p, uint8_t c, uint8_t f, uint8_t 
   if (s) *s = VSND_S_OK;
   return 0;
 }
+static int pcm_cmd_locked(uint32_t code, uint32_t *s);
 int virtio_snd_pcm_cmd(uint32_t code, uint32_t *s) {
+  pthread_mutex_lock(&q_mu);
+  int r = pcm_cmd_locked(code, s);
+  pthread_mutex_unlock(&q_mu);
+  return r;
+}
+static int pcm_cmd_locked(uint32_t code, uint32_t *s) {
   st.ctl_cmds++;
-  if (code == VSND_R_PCM_START) {
+  if (code == VSND_R_PCM_START && is_qemu()) {
+    if (!started) { /* wav_enable_out: audio_rate_start */
+      q_rate_start = timer_get_us();
+      q_sent = 0;
+    }
+    started = 1;
+  } else if (code == VSND_R_PCM_START) {
     started = 1;
     uint64_t now = timer_get_us();
     for (int i = 0; i < fcount; i++) { /* queued before START: play from now */
@@ -125,7 +224,14 @@ int virtio_snd_pcm_cmd(uint32_t code, uint32_t *s) {
 }
 int virtio_snd_tx_slots(void) { return NSLOT; }
 int virtio_snd_tx_inflight(void) { return inflight; }
+static int tx_post_locked(uint64_t pa, uint32_t len);
 int virtio_snd_tx_post(uint64_t pa, uint32_t len) {
+  pthread_mutex_lock(&q_mu);
+  int r = tx_post_locked(pa, len);
+  pthread_mutex_unlock(&q_mu);
+  return r;
+}
+static int tx_post_locked(uint64_t pa, uint32_t len) {
   int k;
   for (k = 0; k < NSLOT; k++)
     if (!slot[k].busy) break;
@@ -135,7 +241,10 @@ int virtio_snd_tx_post(uint64_t pa, uint32_t len) {
   slot[k].data = realloc(slot[k].data, len);
   memcpy(slot[k].data, (const void *)(uintptr_t)pa, len); /* QEMU copies at pop */
   uint64_t now = timer_get_us();
-  if (started) {
+  if (is_qemu()) {
+    slot[k].due = ~0ull; /* completes when q_tick has mixed it */
+    q_off[k] = 0;
+  } else if (started) {
     if (last_due < now) last_due = now;
     last_due += (uint64_t)len * 1000000u / (rate * channels * 2);
     slot[k].due = last_due;
@@ -151,12 +260,13 @@ int virtio_snd_tx_post(uint64_t pa, uint32_t len) {
 int virtio_snd_tx_reap(void (*cb)(int, uint32_t, void *), void *ctx) {
   int n = 0;
   uint64_t now = timer_get_us();
+  pthread_mutex_lock(&q_mu);
   while (fcount) {
     int k = fifo[fhead];
     if (slot[k].due > now) break;
     fhead = (fhead + 1) % NSLOT;
     fcount--;
-    if (wav && slot[k].due) { /* a flushed message was not played */
+    if (wav && slot[k].due && !is_qemu()) { /* a flushed message was not played */
       if (channels == 2) fwrite(slot[k].data, 1, slot[k].len, wav), wav_bytes += slot[k].len;
     }
     slot[k].busy = 0;
@@ -165,6 +275,7 @@ int virtio_snd_tx_reap(void (*cb)(int, uint32_t, void *), void *ctx) {
     n++;
     if (cb) cb(k, VSND_S_OK, ctx);
   }
+  pthread_mutex_unlock(&q_mu);
   return n;
 }
 void virtio_snd_handle_irq(void) {}
