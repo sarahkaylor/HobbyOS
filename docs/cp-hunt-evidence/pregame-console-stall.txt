@@ -22,3 +22,29 @@
 # launcher mounts NFS at +84.3 s. Host at that minute: Dirty 3.3 GB falling to 1.0 GB (writeback), and /proc/pressure/io
 # "full avg10=20 avg60=24 avg300=47" (about half of the last 5 minutes with every non-idle host task stalled on I/O).
 # So at least this occurrence is the host's I/O, before the guest kernel runs; the sampler logs io_full10 from h-p8l4 on.
+# h-p8v6 (06:32, P8 Venus): slot 06:32:38; serial at the firmware's 113 bytes until 06:34:07 (~85 s); launcher NFS mount at +94.3 s.
+# sampler every 5th second: time, serial bytes, host Dirty kB, PSI io full avg10:
+06:32:38 - 3247308 io_full10=22.70
+06:32:43 113 3679268 io_full10=24.03
+06:32:48 113 3530724 io_full10=33.73
+06:32:53 113 3383784 io_full10=38.38
+06:32:58 113 3245068 io_full10=44.91
+06:33:04 113 3066376 io_full10=48.35
+06:33:09 113 2917416 io_full10=50.93
+06:33:15 113 2742980 io_full10=55.54
+06:33:20 113 2587948 io_full10=55.00
+06:33:25 113 2688824 io_full10=53.69
+06:33:30 113 2618152 io_full10=49.60
+06:33:35 113 2499672 io_full10=49.55
+06:33:41 113 2306168 io_full10=49.89
+06:33:46 113 2134032 io_full10=51.96
+06:33:52 113 1993680 io_full10=52.01
+06:33:57 113 2375852 io_full10=51.46
+06:34:02 113 2243248 io_full10=51.54
+06:34:07 696 1177420 io_full10=52.12
+06:34:12 37500 609040 io_full10=32.89
+06:34:17 111860 685492 io_full10=22.05
+06:34:22 142233 698840 io_full10=16.11
+06:34:27 156024 550420 io_full10=15.18
+06:34:32 197701 513932 io_full10=11.13
+# the guest stays in the firmware while the host's I/O pressure climbs to 50-55 % 'full' and falls back to 9-16 % right after it gets through. Candidate mechanism: QEMU honours guest flushes (default cache=writeback): OVMF's variable writes to the per-run ovmf.fd pflash and the guest's NVMe flushes become host fsync()s, which wait behind everyone's dirty data (Dirty 2-3.7 GB here).
