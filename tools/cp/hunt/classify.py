@@ -349,7 +349,7 @@ def parse_host(path, phases=None):
     for t, n in ser:
         if n != size:
             since, size = t, n
-        elif n > 0:
+        elif n > 4096:              # past the firmware's ~113 bytes of screen codes
             silent = max(silent, t - since)
     return {"gpu_busy_all": mq(busy), "gpu_busy_world": mq(world), "guests": sorted(guests),
             "serial_silent_max_s": silent if ser else None}
