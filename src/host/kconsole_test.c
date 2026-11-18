@@ -21,7 +21,7 @@ static char stackbuf[0x20000];
 static int cur_irqon = 1;
 static uint64_t now_us = 1000;
 static int halted[MAX_CPUS];
-const char *cons_host_sp = stackbuf + 0x10000;
+_Thread_local const char *cons_host_sp = stackbuf + 0x10000;
 static int fails;
 
 uint32_t get_cpuid(void) { return cur_cpu; }
@@ -39,7 +39,7 @@ int cons_hw_irqs_on(uint64_t f) { return f != 0; }
 const void *cons_hw_ctx(uint32_t cpu) { return cur_ctx[cpu]; }
 int cons_hw_in_panic(void) { return 0; }
 int cons_hw_bootarg(char *b, int cap) { (void)b; (void)cap; return 0; }
-void cons_hw_relax(void) { now_us += 50; }
+void cons_hw_relax(void) { now_us += 5; }
 
 static void reset(void) { wn = 0; wire[0] = 0; }
 static void on(uint32_t cpu, int ctx) { cur_cpu = cpu; cur_ctx[cpu] = ctx ? (const void *)&ctxs[ctx] : 0; }
@@ -199,6 +199,28 @@ int main(void) {
   EXPECT("T13 interrupted thread's row not pushed", "");
   kw(" e=3\n");
   EXPECT("T13b and it ends whole", "[CSTR] c=5 k=1 s=1 p=abc e=3\n");
+
+  /* T14 a host stall of the whole guest (CPU 0's tick sees the clock jump
+     400 ms) does not make a preempted thread's half row look stale: before
+     H4-kglitch the next tick pushed it out as a piece, and the row was torn
+     by the first other writer. */
+  now_us += 10000; cons_tick(0);           /* CPU 0's periodic tick (and T10's */
+  uint64_t st0 = cons_stats.stalls;        /* "[CONS] takeover" row)            */
+  reset();
+  on(6, 90); cur_irqon = 1; kw("[CSTR] c=6 k=0 s=7 p=");
+  on(6, 91);                               /* its thread is preempted */
+  now_us += 10000; cons_tick(0);
+  now_us += 400000;                        /* the host stops the guest */
+  cons_tick(0);                            /* the first tick after it */
+  now_us += 10000; cons_tick(0);
+  cons_tick(6);
+  on(2, 0); kw("[K] other row\n");
+  on(6, 90); kw("xyz e=3\n");
+  EXPECT("T14 whole-guest stall is not staleness", "[K] other row\n[CSTR] c=6 k=0 s=7 p=xyz e=3\n");
+  if (cons_stats.stalls != st0 + 1) {
+    printf("FAIL T14 stalls=+%llu, want +1\n", (unsigned long long)(cons_stats.stalls - st0));
+    fails++;
+  }
 
   printf("kconsole_test: %s (%d failure%s)\n", fails ? "FAIL" : "PASS", fails, fails == 1 ? "" : "s");
   return fails ? 1 : 0;
