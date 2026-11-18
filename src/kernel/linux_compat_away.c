@@ -48,7 +48,13 @@ struct away_clock {
   uint64_t win_ms;
   uint32_t sets;
   uint8_t is_clock;
+  uint8_t audio;    /* set by the thread that writes the ALSA PCM */
 };
+/* pid of the last /dev/snd WRITEI caller (winealsa's timer thread, which
+   also sets the client's period event): its clocks are AUDIO clocks, and
+   the threads waiting on those are the WASAPI client. */
+static volatile int away_pcm_writer = -1;
+void away_audio_writer(int pid) { away_pcm_writer = pid; }
 static struct away_clock away_clk[AWAY_CLOCKS];
 
 struct away_kv {
@@ -144,8 +150,13 @@ void away_clock_set(const void *obj) {
     c->win_ms = now;
     c->sets = 0;
     c->is_clock = 0;
+    c->audio = 0;
   }
   c->sets++;
+  {
+    struct process *cur = current_process();
+    if (cur && cur->pid == away_pcm_writer) c->audio = 1;
+  }
   if (now - c->win_ms >= 1000) {
     if (c->sets >= 50 && c->sets <= 200)
       c->is_clock = 1;
@@ -258,6 +269,7 @@ static void away_fmt(struct kline *kl, const char *tag, const struct process *t,
     if (away_clk[i].obj == clock) ci = i;
   kl_s(kl, " clock=#");
   kl_i(kl, ci);
+  if (ci >= 0 && away_clk[ci].audio) kl_s(kl, " audio=1");
   kl_s(kl, " n=");
   kl_i(kl, a->ns);
   kl_s(kl, " U=");
@@ -395,6 +407,7 @@ void away_sample(int slot, int kind, int nr, uint64_t word, uint64_t pc) {
 void away_ring_note(int slot, int kind, int nr) { (void)slot; (void)kind; (void)nr; }
 void away_futex_woken(int woken, int waker) { (void)woken; (void)waker; }
 void away_dump_since(uint64_t from_ms) { (void)from_ms; }
+void away_audio_writer(int pid) { (void)pid; }
 void away_clock_set(const void *obj) { (void)obj; }
 void away_wait_return(struct process *t) { (void)t; }
 void away_wait_begin(struct process *t, void *const *objs, int n) {

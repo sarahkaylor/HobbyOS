@@ -1475,7 +1475,12 @@ static int pcm_ioctl(struct process *p, uint32_t req, uint64_t arg, int nonblock
     if (e) return e;
     return cout(p, arg, &moved, 8); /* Linux: 0, the count written back */
   }
-  case PCM_WRITEI: S.n_writei++; return do_writei(p, arg, nonblock);
+  case PCM_WRITEI: {
+    S.n_writei++;
+    extern void away_audio_writer(int pid); /* H4-kglitch [AWAY]: the PCM writer */
+    away_audio_writer(p ? p->pid : -1);
+    return do_writei(p, arg, nonblock);
+  }
   case PCM_RESUME: return -ENOSYS;
   case PCM_CHANNEL_INFO:
   case PCM_LINK:
