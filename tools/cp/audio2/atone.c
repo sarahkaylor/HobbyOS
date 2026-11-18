@@ -29,6 +29,14 @@
  *     fmt=float|s16  client format
  *     skip=0         the game renders nothing on 1 event in N (random; a late
  *                    audio thread)
+ *     gate=0         the candidate lead-in gate (wine-candidates/0101): a play
+ *                    clock of what is still queued (frames written minus
+ *                    elapsed x rate, never below buffer - avail); the lead-in
+ *                    is written only when that is under gate periods
+ *                    (gateh=N: N half periods)
+ *     top=0          the top-up variant: lead-in only when the play clock says
+ *                    fewer than top/2 periods are queued, and only enough
+ *                    silence to bring the queue back to top/2 periods
  *     acct=orig|fix  winealsa's played-frames accounting: orig = Wine 11.0
  *                    (min(data_in_alsa, avail)), fix = the proposed patch
  *                    (data_in_alsa minus what ALSA still holds), docs/cp-audio2.md §6
@@ -76,7 +84,9 @@ static short *local_s;
 static float *sil_f;
 static short *sil_s;
 static double ph, hz = 440.0;
-static int fill_periods, skip_n, acct_fix;
+static int fill_periods, skip_n, acct_fix, gate_periods, top_half;
+static double q_est, q_est_t;
+static long n_gated;
 static unsigned rng = 12345;
 
 /* counters */
@@ -108,6 +118,7 @@ static snd_pcm_sframes_t write_best_effort(const void *buf, snd_pcm_uframes_t fr
     if (r < 0) return r;
     w = snd_pcm_writei(pcm, buf, frames);
   }
+  if (w > 0) q_est += (double)w;
   return w;
 }
 
@@ -139,17 +150,30 @@ static unsigned data_not_in_alsa(void) {
 static void write_data(double t_rel) {
   snd_pcm_sframes_t a = snd_pcm_avail_update(pcm);
   snd_pcm_uframes_t avail = a < 0 ? 0 : (snd_pcm_uframes_t)a;
+  {
+    double tn = now_s();
+    if (q_est_t > 0) q_est -= (tn - q_est_t) * RATE;
+    q_est_t = tn;
+    double queued = avail < alsa_bufsize ? (double)(alsa_bufsize - avail) : 0;
+    if (q_est < queued) q_est = queued;
+  }
   if (snd_pcm_state(pcm) == SND_PCM_STATE_XRUN) {
     n_xrun_state++;
     if (n_xrun_state <= 64)
       printf("[AT] xrun-state t=%.3f held=%u in_alsa=%u\n", t_rel, held_frames, data_in_alsa);
     avail = alsa_bufsize;
+    q_est = 0;
     snd_pcm_recover(pcm, -EPIPE, 1);
     snd_pcm_reset(pcm);
     snd_pcm_prepare(pcm);
   }
-  if (data_in_alsa == 0 && held_frames < alsa_period) {
-    unsigned n = (unsigned)alsa_period - held_frames;
+  double top_q = top_half * (double)alsa_period / 2;
+  if (data_in_alsa == 0 && held_frames < alsa_period &&
+      ((gate_periods > 0 && q_est >= (double)gate_periods * alsa_period / 2) || (top_half > 0 && q_est >= top_q)))
+    n_gated++;
+  else if (data_in_alsa == 0 && held_frames < alsa_period) {
+    unsigned n = top_half > 0 ? (unsigned)(top_q - q_est) + 1 : (unsigned)alsa_period - held_frames;
+    if (n > alsa_period) n = (unsigned)alsa_period;
     write_best_effort(use_float ? (const void *)sil_f : (const void *)sil_s, n);
     n_leadin++;
     frames_silence += n;
@@ -227,11 +251,14 @@ int main(int argc, char **argv) {
     else if (!strncmp(argv[i], "fill=", 5)) fill_periods = atoi(argv[i] + 5);
     else if (!strncmp(argv[i], "skip=", 5)) skip_n = atoi(argv[i] + 5);
     else if (!strncmp(argv[i], "acct=", 5)) acct_fix = argv[i][5] == 'f';
+    else if (!strncmp(argv[i], "gate=", 5)) gate_periods = atoi(argv[i] + 5) * 2;
+    else if (!strncmp(argv[i], "gateh=", 6)) gate_periods = atoi(argv[i] + 6);
+    else if (!strncmp(argv[i], "top=", 4)) top_half = atoi(argv[i] + 4);
   }
   setvbuf(stdout, 0, _IOLBF, 0);
-  printf("[AT] atone alsa-lib %s secs=%.0f hz=%.0f lbuf_ms=%d stall_ms=%d stall_every=%.1f fmt=%s fill=%d skip=%d acct=%s\n",
+  printf("[AT] atone alsa-lib %s secs=%.0f hz=%.0f lbuf_ms=%d stall_ms=%d stall_every=%.1f fmt=%s fill=%d skip=%d acct=%s gate=%d top=%d\n",
          snd_asoundlib_version(), secs, hz, lbuf_ms, stall_ms, stall_every, use_float ? "float" : "s16", fill_periods, skip_n,
-         acct_fix ? "fix" : "orig");
+         acct_fix ? "fix" : "orig", gate_periods, top_half);
   snd_lib_error_set_handler(lib_err);
   snd_config_t *top = 0;
   snd_input_t *in = 0;
@@ -344,9 +371,9 @@ int main(int argc, char **argv) {
   snd_pcm_close(pcm);
   double el = now_s() - t0;
   printf("[AT] total elapsed_s=%.2f ticks=%ld late15=%ld late25=%ld late40=%ld xrun_state=%ld epipe=%ld leadin=%ld "
-         "silence_s=%.3f written_s=%.2f stalls=%ld\n",
+         "silence_s=%.3f written_s=%.2f stalls=%ld gated=%ld\n",
          el, n_ticks, n_late15, n_late25, n_late40, n_xrun_state, n_epipe, n_leadin,
-         frames_silence / (double)RATE, frames_written / (double)RATE, stalls);
+         frames_silence / (double)RATE, frames_written / (double)RATE, stalls, n_gated);
   printf("[AT] done rc=0\n");
   return 0;
 }
