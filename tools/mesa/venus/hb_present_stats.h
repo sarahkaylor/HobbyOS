@@ -73,7 +73,40 @@ enum {
    HB_PS_N
 };
 
+/* C6-present (docs/cp-present.md): where venus' own threads wait, per window
+ * ([HBV] row, printed next to [HBP]).  Every entry is count + TSC sum + max. */
+enum {
+   HB_VS_RING,   /* vn_ring_wait_seqno on the instance ring (a reply)        */
+   HB_VS_TLS,    /* vn_ring_wait_seqno on a thread's TLS ring (a reply)      */
+   HB_VS_SPACE,  /* waiting for ring space                                   */
+   HB_VS_SLP_R,  /* vn_relax sleeps: ring / TLS ring seqno                   */
+   HB_VS_SLP_O,  /* vn_relax sleeps: space, semaphore, query                 */
+   HB_VS_YIELD,  /* vn_relax thrd_yield                                      */
+   HB_VS_NOTIFY, /* vkNotifyRingMESA (renderer submit_simple, unfenced)      */
+   HB_VS_SUBF,   /* hobbyos_submit with fence(s): GPU_IOC_SUBMIT2            */
+   HB_VS_SUBU,   /* hobbyos_submit without fence (cs only)                   */
+   HB_VS_WAIT,   /* hobbyos_wait: vkWaitForFences/vkWaitSemaphores/...       */
+   HB_VS_FWAIT,  /* GPU_IOC_FENCE_WAIT2 with a timeout (inside WAIT)         */
+   HB_VS_QSUB,   /* app-thread vkQueueSubmit/2/BindSparse                    */
+   HB_VS_PWAIT,  /* vkWaitForPresentKHR / vkWaitForPresent2KHR               */
+   HB_VS_N
+};
+/* per thread: renderer waits (w), queue submits (q), present waits (p) */
+#define HB_VS_TIDS 32
+struct hb_vtid {
+   int32_t tid;  /* 0 = free */
+   uint64_t cnt[3], sum[3];
+};
+#define HB_VS_CMDS 64
+struct hb_vcmd {
+   uint32_t type1;  /* VkCommandTypeEXT + 1, 0 = free */
+   uint64_t cnt, sum, max;
+};
+
 struct hb_pstats {
+   uint64_t vsum[HB_VS_N], vmax[HB_VS_N], vcnt[HB_VS_N];
+   struct hb_vcmd vcmd[HB_VS_CMDS];  /* replies waited for, by command type */
+   struct hb_vtid vtid[HB_VS_TIDS];
    int state;                  /* 0 unread env, 1 on, -1 off */
    uint64_t window_ms;
    uint64_t tsc0, ns0;         /* calibration origin */
@@ -130,6 +163,85 @@ hb_pstats_add(int k, uint64_t cyc)
    while (cyc > m && !__atomic_compare_exchange_n(&s->max[k], &m, cyc, 1, __ATOMIC_RELAXED,
                                                   __ATOMIC_RELAXED))
       ;
+}
+
+static inline void
+hb_vmax(uint64_t *mp, uint64_t cyc)
+{
+   uint64_t m = __atomic_load_n(mp, __ATOMIC_RELAXED);
+   while (cyc > m && !__atomic_compare_exchange_n(mp, &m, cyc, 1, __ATOMIC_RELAXED,
+                                                  __ATOMIC_RELAXED))
+      ;
+}
+
+/* C6-present: one venus-side wait/submit sample, in TSC cycles. */
+static inline void
+hb_vstats_add(int k, uint64_t cyc)
+{
+   struct hb_pstats *s = &hb_pstats;
+   if (!hb_pstats_on())
+      return;
+   __atomic_fetch_add(&s->vsum[k], cyc, __ATOMIC_RELAXED);
+   __atomic_fetch_add(&s->vcnt[k], 1, __ATOMIC_RELAXED);
+   hb_vmax(&s->vmax[k], cyc);
+}
+
+#include <sys/syscall.h>
+/* C6-present: per-thread totals; which: 0 wait, 1 queue submit, 2 present wait. */
+static inline void
+hb_vtid_add(int which, uint64_t cyc)
+{
+   struct hb_pstats *s = &hb_pstats;
+   if (!hb_pstats_on())
+      return;
+   static __thread int32_t my_tid;
+   if (!my_tid)
+      my_tid = (int32_t)syscall(SYS_gettid);
+   const int32_t t = my_tid;
+   for (uint32_t i = 0; i < HB_VS_TIDS; i++) {
+      struct hb_vtid *e = &s->vtid[((uint32_t)t + i) % HB_VS_TIDS];
+      int32_t cur = __atomic_load_n(&e->tid, __ATOMIC_ACQUIRE);
+      if (cur == 0) {
+         int32_t z = 0;
+         cur = __atomic_compare_exchange_n(&e->tid, &z, t, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)
+                  ? t
+                  : z;
+      }
+      if (cur != t)
+         continue;
+      __atomic_fetch_add(&e->cnt[which], 1, __ATOMIC_RELAXED);
+      __atomic_fetch_add(&e->sum[which], cyc, __ATOMIC_RELAXED);
+      return;
+   }
+}
+
+/* C6-present: a reply waited for, by its command type (first dword of the
+ * command stream). */
+static inline void
+hb_vstats_cmd(uint32_t type, uint64_t cyc)
+{
+   struct hb_pstats *s = &hb_pstats;
+   if (!hb_pstats_on())
+      return;
+   const uint32_t t1 = type + 1;
+   for (uint32_t i = 0; i < HB_VS_CMDS; i++) {
+      struct hb_vcmd *c = &s->vcmd[(type + i) % HB_VS_CMDS];
+      uint32_t cur = __atomic_load_n(&c->type1, __ATOMIC_ACQUIRE);
+      if (cur == 0) {
+         uint32_t z = 0;
+         if (!__atomic_compare_exchange_n(&c->type1, &z, t1, 0, __ATOMIC_ACQ_REL,
+                                          __ATOMIC_ACQUIRE))
+            cur = z;
+         else
+            cur = t1;
+      }
+      if (cur != t1)
+         continue;
+      __atomic_fetch_add(&c->cnt, 1, __ATOMIC_RELAXED);
+      __atomic_fetch_add(&c->sum, cyc, __ATOMIC_RELAXED);
+      hb_vmax(&c->max, cyc);
+      return;
+   }
 }
 
 /* A kernel-measured stage, in microseconds (converted with the current
@@ -194,6 +306,93 @@ hb_pstats_present(int path, int refused)
                       (unsigned long long)s->total_presents);
    if (len > 0)
       (void)!write(2, row, (size_t)(len < (int)sizeof row ? len : (int)sizeof row - 1));
+
+   /* C6-present: [HBV] -- the same window's venus waits.  Per entry:
+    * count / avg us / total ms (max us for the waits). */
+   static const char *const vn[HB_VS_N] = { "ring", "tls", "space", "slpR", "slpO", "yield",
+                                            "ntf", "subF", "subU", "wait", "fwait", "qsub",
+                                            "pwait" };
+   char vrow[2000];
+   int vl = snprintf(vrow, sizeof vrow, "[HBV] pid=%d n=%llu win_ms=%.0f", (int)getpid(),
+                     (unsigned long long)n, win_s * 1000.0);
+   for (int k = 0; k < HB_VS_N && vl > 0 && vl < (int)sizeof vrow - 64; k++) {
+      uint64_t c = __atomic_exchange_n(&s->vcnt[k], 0, __ATOMIC_RELAXED);
+      uint64_t su = __atomic_exchange_n(&s->vsum[k], 0, __ATOMIC_RELAXED);
+      uint64_t m = __atomic_exchange_n(&s->vmax[k], 0, __ATOMIC_RELAXED);
+      vl += snprintf(vrow + vl, sizeof vrow - vl, " %s=%llu/%.0f/%.1f/%.0f", vn[k],
+                     (unsigned long long)c, c ? (double)su / (double)c / cpn / 1000.0 : 0.0,
+                     (double)su / cpn / 1e6, (double)m / cpn / 1000.0);
+   }
+   /* the six command types whose replies cost the most this window */
+   struct { uint32_t t; uint64_t c, su, m; } top[6] = { { 0 } };
+   for (int i = 0; i < HB_VS_CMDS; i++) {
+      struct hb_vcmd *c = &s->vcmd[i];
+      uint32_t t1 = __atomic_load_n(&c->type1, __ATOMIC_ACQUIRE);
+      if (!t1)
+         continue;
+      uint64_t cc = __atomic_exchange_n(&c->cnt, 0, __ATOMIC_RELAXED);
+      uint64_t su = __atomic_exchange_n(&c->sum, 0, __ATOMIC_RELAXED);
+      uint64_t m = __atomic_exchange_n(&c->max, 0, __ATOMIC_RELAXED);
+      if (!cc)
+         continue;
+      for (int j = 0; j < 6; j++) {
+         if (su > top[j].su) {
+            for (int q = 5; q > j; q--)
+               top[q] = top[q - 1];
+            top[j].t = t1 - 1;
+            top[j].c = cc;
+            top[j].su = su;
+            top[j].m = m;
+            break;
+         }
+      }
+   }
+   if (vl > 0 && vl < (int)sizeof vrow - 16)
+      vl += snprintf(vrow + vl, sizeof vrow - vl, " cmd");
+   for (int j = 0; j < 6 && top[j].c && vl > 0 && vl < (int)sizeof vrow - 48; j++)
+      vl += snprintf(vrow + vl, sizeof vrow - vl, " %u:%llu/%.0f/%.0f", top[j].t,
+                     (unsigned long long)top[j].c, (double)top[j].su / top[j].c / cpn / 1000.0,
+                     (double)top[j].m / cpn / 1000.0);
+   /* the threads that waited longest this window: w/q/p = count/ms */
+   struct { int32_t t; uint64_t c[3], su[3], key; } tt[6] = { { 0 } };
+   for (int i = 0; i < HB_VS_TIDS; i++) {
+      struct hb_vtid *e = &s->vtid[i];
+      int32_t t = __atomic_load_n(&e->tid, __ATOMIC_ACQUIRE);
+      if (!t)
+         continue;
+      uint64_t c[3], su[3];
+      for (int w = 0; w < 3; w++) {
+         c[w] = __atomic_exchange_n(&e->cnt[w], 0, __ATOMIC_RELAXED);
+         su[w] = __atomic_exchange_n(&e->sum[w], 0, __ATOMIC_RELAXED);
+      }
+      const uint64_t key = su[0] + su[1] + su[2];
+      if (!key)
+         continue;
+      for (int j = 0; j < 6; j++) {
+         if (key > tt[j].key) {
+            for (int q = 5; q > j; q--)
+               tt[q] = tt[q - 1];
+            tt[j].t = t;
+            tt[j].key = key;
+            for (int w = 0; w < 3; w++) {
+               tt[j].c[w] = c[w];
+               tt[j].su[w] = su[w];
+            }
+            break;
+         }
+      }
+   }
+   if (vl > 0 && vl < (int)sizeof vrow - 16)
+      vl += snprintf(vrow + vl, sizeof vrow - vl, " tid");
+   for (int j = 0; j < 6 && tt[j].key && vl > 0 && vl < (int)sizeof vrow - 96; j++)
+      vl += snprintf(vrow + vl, sizeof vrow - vl, " %d:w=%llu/%.1f,q=%llu/%.1f,p=%llu/%.1f", tt[j].t,
+                     (unsigned long long)tt[j].c[0], (double)tt[j].su[0] / cpn / 1e6,
+                     (unsigned long long)tt[j].c[1], (double)tt[j].su[1] / cpn / 1e6,
+                     (unsigned long long)tt[j].c[2], (double)tt[j].su[2] / cpn / 1e6);
+   if (vl > 0 && vl < (int)sizeof vrow - 1) {
+      vrow[vl++] = '\n';
+      (void)!write(2, vrow, (size_t)vl);
+   }
 }
 
 #endif /* HB_PRESENT_STATS_H */

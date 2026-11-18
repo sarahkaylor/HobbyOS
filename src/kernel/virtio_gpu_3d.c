@@ -1420,8 +1420,21 @@ struct gpu3d_blob {
   uint64_t win_off;
 };
 
+/* C6-present (docs/cp-present.md): a slot carries one of three kinds of
+ * command.  KIND_FENCE: a fenced SUBMIT_3D, completed when its fence retires
+ * (P6).  KIND_POSTED: an unfenced SUBMIT_3D sent without waiting (Venus' ring
+ * notifies and virtqueue seqnos; the virtio queue keeps it in order with
+ * everything after it), freed when QEMU has processed it.  KIND_WAITED: a
+ * kernel command whose caller waits for it with gpu_lock dropped (the scanout
+ * flip), freed by that caller. */
+#define GPU3D_KIND_FENCE 0
+#define GPU3D_KIND_POSTED 1
+#define GPU3D_KIND_WAITED 2
 struct gpu3d_fslot {
   int used;
+  int kind;
+  volatile int done;      /* KIND_WAITED: completed */
+  uint32_t done_rt;       /* KIND_WAITED: the response type */
   int ctx_index;
   uint32_t ctx_id;
   uint32_t ring;
@@ -1451,6 +1464,9 @@ static struct pid_mask gpu3d_waiters;
  * Sleep() and timed waits in a Venus game returned early at random. */
 static uint8_t gpu3d_parked[MAX_PROCESSES];
 static uint32_t gpu3d_fence_errors = 0;
+/* C6-present: unfenced SUBMIT2s posted without waiting (KIND_POSTED). */
+static uint32_t gpu3d_posted_done = 0, gpu3d_posted_errors = 0;
+int gpu3d_post_unfenced = 1; /* 0: the synchronous unfenced path (A/B) */
 static uint32_t gpu3d_fence_retired = 0;
 static uint32_t gpu3d_stale_skips = 0; /* fence wakes withheld from non-parked pids */
 /* post -> retire latency histogram (us bucket upper bounds) and where the
@@ -1480,6 +1496,8 @@ static void gpu3d_fence_stats_row(const char* why) {
   print_int((int)gpu3d_retire_tick);
   uart_puts(" stale_skips=");
   print_int((int)gpu3d_stale_skips);
+  uart_puts(" posted=");
+  print_int((int)gpu3d_posted_done);
   uart_puts(" post->retire_us");
   for (int i = 0; i < GPU3D_HIST_N; i++) {
     uart_puts(i + 1 < GPU3D_HIST_N ? " <=" : " >");
@@ -1952,6 +1970,23 @@ void virtio_gpu_3d_async_done(int slot, uint32_t resp_type) {
   if (slot < 0 || slot >= VGPU_ASYNC_SLOTS) return;
   struct gpu3d_fslot* f = &gpu3d_fslots[slot];
   if (!f->used) return;
+  if (f->kind == GPU3D_KIND_WAITED) {
+    f->done_rt = resp_type;
+    f->done = 1; /* the waiter frees it (virtio_gpu_3d_waited_poll) */
+    return;
+  }
+  if (f->kind == GPU3D_KIND_POSTED) {
+    gpu3d_posted_done++;
+    if (resp_type >= 0x1200 && gpu3d_posted_errors++ < 8) {
+      uart_puts("[VENUS] posted submit error resp=");
+      uart_print_hex(resp_type);
+      uart_puts(" ctx=");
+      print_int((int)f->ctx_id);
+      uart_puts("\n");
+    }
+    f->used = 0;
+    return;
+  }
   if (f->ctx_index >= 0) {
     struct gpu3d_ctx2* c2 = &gpu3d_ctx2s[f->ctx_index];
     if (c2->m2 && c2->ctx_id == f->ctx_id) {
@@ -1982,6 +2017,58 @@ void virtio_gpu_3d_async_done(int slot, uint32_t resp_type) {
   gpu3d_wake_pending = 1;
 }
 
+/* C6-present: a kernel command sent on a slot and waited for with gpu_lock
+ * dropped (the scanout flip: QEMU's egl-headless reads the scanout back
+ * inside RESOURCE_FLUSH, ~3 ms, and holding gpu_lock with interrupts off for
+ * that long stalled every other GPU ioctl and the device interrupt).
+ * Caller holds gpu_lock.  Returns the slot, or -1 when none is free (the
+ * caller then uses the synchronous path).  `req` must stay untouched until
+ * the slot completes. */
+int virtio_gpu_3d_post_waited(const void* req, uint32_t req_len) {
+  if (!gpu3d_ready) return -1;
+  for (int k = 0; k < VGPU_ASYNC_SLOTS; k++) {
+    struct gpu3d_fslot* f = &gpu3d_fslots[k];
+    if (f->used) continue;
+    f->used = 1;
+    f->kind = GPU3D_KIND_WAITED;
+    f->done = 0;
+    f->done_rt = 0;
+    f->ctx_index = -1;
+    f->ctx_id = 0;
+    f->ring = 0;
+    f->seqno = 0;
+    f->t_post_us = timer_get_us();
+    if (virtio_gpu_x64_post_async(k, req, req_len, &f->resp, sizeof(f->resp)) != 0) {
+      f->used = 0;
+      return -1;
+    }
+    return k;
+  }
+  return -1;
+}
+
+/* Caller holds gpu_lock.  1 (and *rt, slot freed) once the command has
+ * completed, else 0.  Drains first. */
+int virtio_gpu_3d_waited_poll(int slot, uint32_t* rt) {
+  if (slot < 0 || slot >= VGPU_ASYNC_SLOTS) return 1;
+  struct gpu3d_fslot* f = &gpu3d_fslots[slot];
+  virtio_gpu_x64_drain();
+  if (!f->used || f->kind != GPU3D_KIND_WAITED) return 1;
+  if (!f->done) return 0;
+  if (rt) *rt = f->done_rt;
+  f->used = 0;
+  f->done = 0;
+  return 1;
+}
+
+/* Caller holds gpu_lock: free slots right now (diagnostics / fallbacks). */
+int virtio_gpu_3d_free_slots(void) {
+  int n = 0;
+  for (int k = 0; k < VGPU_ASYNC_SLOTS; k++)
+    if (!gpu3d_fslots[k].used) n++;
+  return n;
+}
+
 int virtio_gpu_3d_submit2(uint32_t ctx_id, uint32_t ring_idx, int fenced, const void* cs,
                           uint32_t len, uint64_t* seqno) {
   if (!gpu3d_ready) return -ENODEV;
@@ -1998,7 +2085,8 @@ int virtio_gpu_3d_submit2(uint32_t ctx_id, uint32_t ring_idx, int fenced, const 
       return -EINVAL;
     }
     uint32_t rlen = 0, rtype = 0;
-    if (!stream_sent && (!fenced || len > GPU_SUBMIT2_FENCED_CS_MAX)) {
+    const int post_unfenced = !fenced && gpu3d_post_unfenced && len <= GPU_SUBMIT2_FENCED_CS_MAX;
+    if (!stream_sent && !post_unfenced && (!fenced || len > GPU_SUBMIT2_FENCED_CS_MAX)) {
       /* Unfenced (or the long stream ahead of a fence): synchronous up to
        * the device's acceptance, like M1's unfenced submit. */
       struct virtio_gpu_cmd_submit* sc = (struct virtio_gpu_cmd_submit*)gpu3d_submit_buf;
@@ -2046,8 +2134,35 @@ int virtio_gpu_3d_submit2(uint32_t ctx_id, uint32_t ring_idx, int fenced, const 
       continue;
     }
     struct gpu3d_fslot* f = &gpu3d_fslots[k];
-    uint64_t seq = ++gpu3d_seq64;
     struct virtio_gpu_cmd_submit* sc = (struct virtio_gpu_cmd_submit*)f->req;
+    if (post_unfenced) {
+      /* C6-present: an unfenced stream (Venus: vkNotifyRingMESA,
+       * vkSubmitVirtqueueSeqnoMESA, 8-32 bytes) is posted like a fenced one
+       * and not waited for -- as Linux virtgpu's EXECBUFFER returns before the
+       * host has run it.  The queue keeps it ahead of every later command. */
+      hdr_init(&sc->hdr, VIRTIO_GPU_CMD_SUBMIT_3D, 0, 0, ctx_id);
+      sc->size = len;
+      sc->padding = 0;
+      gpu3d_copy(f->req + sizeof(*sc), cs, len);
+      f->used = 1;
+      f->kind = GPU3D_KIND_POSTED;
+      f->done = 0;
+      f->ctx_index = -1;
+      f->ctx_id = ctx_id;
+      f->ring = 0;
+      f->seqno = 0;
+      f->t_post_us = timer_get_us();
+      if (virtio_gpu_x64_post_async(k, f->req, (uint32_t)(sizeof(*sc) + len), &f->resp,
+                                    sizeof(f->resp)) != 0) {
+        f->used = 0;
+        virtio_gpu_x64_unlock(fl);
+        return -EIO;
+      }
+      virtio_gpu_x64_unlock(fl);
+      if (seqno) *seqno = 0;
+      return 0;
+    }
+    uint64_t seq = ++gpu3d_seq64;
     hdr_init(&sc->hdr, VIRTIO_GPU_CMD_SUBMIT_3D,
              VIRTIO_GPU_FLAG_FENCE | VIRTIO_GPU_FLAG_INFO_RING_IDX, seq, ctx_id);
     sc->hdr.padding = ring_idx & 0xFFu; /* ctrl_hdr.ring_idx is the low byte */
@@ -2056,6 +2171,8 @@ int virtio_gpu_3d_submit2(uint32_t ctx_id, uint32_t ring_idx, int fenced, const 
     if (len) gpu3d_copy(f->req + sizeof(*sc), cs, len);
     struct gpu3d_ctx* c = gpu3d_find_ctx(ctx_id);
     f->used = 1;
+    f->kind = GPU3D_KIND_FENCE;
+    f->done = 0;
     f->ctx_index = (int)(c - gpu3d_ctxs);
     f->ctx_id = ctx_id;
     f->ring = ring_idx;

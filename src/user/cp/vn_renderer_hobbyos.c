@@ -41,6 +41,7 @@
 #include "vn_renderer_internal.h"
 
 #include "gpu_abi.h" /* HobbyOS src/include/gpu_abi.h (copied next to this file) */
+#include "hb_present_stats.h" /* [HBV] (C6-present, docs/cp-present.md) */
 
 #define HB_PCI_VENDOR_ID 0x1af4
 #define HB_PCI_DEVICE_ID 0x1050
@@ -133,7 +134,12 @@ hb_fence_wait(struct hobbyos *hb, uint32_t ring, uint64_t seqno, uint64_t timeou
       .timeout_ns = timeout_ns,
       .deadline_ms = 0,
    };
-   return hb_ioctl(hb, GPU_IOC_FENCE_WAIT2, &w);
+   if (!timeout_ns)
+      return hb_ioctl(hb, GPU_IOC_FENCE_WAIT2, &w);
+   const uint64_t t0 = hb_tsc();
+   int r = hb_ioctl(hb, GPU_IOC_FENCE_WAIT2, &w);
+   hb_vstats_add(HB_VS_FWAIT, hb_tsc() - t0);
+   return r;
 }
 
 /* Retire every pending entry whose fence is done (non-blocking) and fold its
@@ -313,7 +319,21 @@ hb_left(int64_t abs)
 }
 
 static VkResult
+hobbyos_wait_impl(struct vn_renderer *renderer, const struct vn_renderer_wait *wait);
+
+static VkResult
 hobbyos_wait(struct vn_renderer *renderer, const struct vn_renderer_wait *wait)
+{
+   const uint64_t t0 = hb_tsc();
+   VkResult r = hobbyos_wait_impl(renderer, wait);
+   const uint64_t dt = hb_tsc() - t0;
+   hb_vstats_add(HB_VS_WAIT, dt);
+   hb_vtid_add(0, dt);
+   return r;
+}
+
+static VkResult
+hobbyos_wait_impl(struct vn_renderer *renderer, const struct vn_renderer_wait *wait)
 {
    struct hobbyos *hb = (struct hobbyos *)renderer;
    const int64_t abs = os_time_get_absolute_timeout(wait->timeout);
@@ -392,7 +412,9 @@ hobbyos_submit(struct vn_renderer *renderer, const struct vn_renderer_submit_bat
       .cs_size = (uint32_t)batch->cs_size,
       .cs = (uint64_t)(uintptr_t)batch->cs_data,
    };
+   const uint64_t t0 = hb_tsc();
    int r = hb_ioctl(hb, GPU_IOC_SUBMIT2, &s);
+   hb_vstats_add(batch->sync_count ? HB_VS_SUBF : HB_VS_SUBU, hb_tsc() - t0);
    if (r) {
       vn_log(hb->instance, "SUBMIT2 failed: ring=%u cs=%zu syncs=%u err=%s", batch->ring_idx,
              batch->cs_size, batch->sync_count, strerror(-r));

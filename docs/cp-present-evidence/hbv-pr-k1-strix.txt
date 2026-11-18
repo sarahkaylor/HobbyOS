@@ -1,0 +1,34 @@
+# pr-k1: [HBV] per phase (tools/cp/present/hbv_summary.py), strix fpsprobe boot
+== fps (winevulkan trace:fps 'approx' rows) in /home/sarah/cp/lanes/venus/obj/cp-p9/pr-k1
+phase           rows          game s   median     p10     min     max    mean
+launch            86          16-144     89.4    74.4     0.0   224.7   100.9
+menu              14         149-165    107.4   103.8    95.2   116.4   108.0
+loading           68         166-268    183.7    27.5     8.5   230.4   149.7
+world             60         270-360     26.0    14.4    11.8    32.9    24.7
+prof-fp-world     15         362-382     26.5    24.1    23.1    30.8    26.8
+# [HBV] per phase: per frame = count/frame, ms/frame (sum over all threads)
+== launch         frames  12885  fps 93.2  [HBP] sub 2.93 ms flip 3.13 ms (avg/frame)
+   ring 0.34/0.04ms  tls 0.08/0.15ms  space 1.65/0.53ms  slpR 0.83/0.19ms  slpO 1.86/0.52ms  yield 18.32/0.00ms  ntf 0.84/0.02ms  subF 16.12/0.26ms  subU 16.95/0.22ms  wait 36.29/9.51ms  fwait 11.49/9.15ms  qsub 16.09/3.46ms  pwait 0.00/0.00ms
+   threads (per frame: wait n/ms, submit n/ms, present-wait n/ms): t166 w4.0/2.8 q4.0/3.0 p0.00/0.0  t122 w23.4/3.8 q0.0/0.0 p0.00/0.0  t163 w0.9/2.0 q0.0/0.0 p0.00/0.0  t123 w2.5/0.0 q9.7/0.4 p0.00/0.0  t124 w4.4/0.3 q0.0/0.0 p0.00/0.0  t125 w0.0/0.0 q1.4/0.0 p0.00/0.0
+   replies: vkCreateComputePipelines 0.05/0.10ms  vkCreateGraphicsPipelines 0.03/0.05ms  vkGetRayTracingShaderGroupHandlesKHR 0.03/0.01ms  vkGetDeviceImageMemoryRequirements 0.02/0.01ms  vkCreateRayTracingPipelinesKHR 0.00/0.00ms  vkGetRayTracingShaderGroupStackSizeKHR 0.06/0.00ms  vkCreateBuffer 0.01/0.00ms  vkCreateInstance 0.00/0.00ms
+== menu           frames   2372  fps 107.4  [HBP] sub 1.83 ms flip 2.83 ms (avg/frame)
+   ring 0.01/0.00ms  tls 0.00/0.00ms  space 0.88/0.10ms  slpR 0.00/0.00ms  slpO 0.44/0.09ms  yield 3.20/0.00ms  ntf 1.31/0.02ms  subF 9.01/0.11ms  subU 10.32/0.12ms  wait 18.01/5.12ms  fwait 6.35/5.02ms  qsub 9.01/2.03ms  pwait 0.00/0.00ms
+   threads (per frame: wait n/ms, submit n/ms, present-wait n/ms): t166 w4.0/1.7 q4.0/1.9 p0.00/0.0  t122 w10.0/1.9 q0.0/0.0 p0.00/0.0  t163 w1.0/1.5 q0.0/0.0 p0.00/0.0  t123 w3.0/0.0 q5.0/0.2 p0.00/0.0  t126 w0.0/0.0 q0.0/0.0 p0.00/0.0  t127 w0.0/0.0 q0.0/0.0 p0.00/0.0
+   replies: vkGetDeviceImageMemoryRequirements 0.00/0.00ms  vkCreateBuffer 0.00/0.00ms  vkCreateImage 0.00/0.00ms  vkGetImageMemoryRequirements2 0.00/0.00ms  vkGetBufferMemoryRequirements2 0.00/0.00ms
+== loading        frames  15455  fps 150.2  [HBP] sub 3.50 ms flip 2.96 ms (avg/frame)
+   ring 0.08/0.02ms  tls 0.00/0.00ms  space 1.66/0.96ms  slpR 0.08/0.02ms  slpO 3.48/0.95ms  yield 19.54/0.00ms  ntf 0.40/0.01ms  subF 9.73/0.11ms  subU 10.13/0.11ms  wait 19.68/9.90ms  fwait 8.05/9.75ms  qsub 9.59/3.80ms  pwait 0.00/0.00ms
+   threads (per frame: wait n/ms, submit n/ms, present-wait n/ms): t166 w4.0/3.4 q4.0/3.5 p0.00/0.0  t122 w10.5/3.0 q0.0/0.0 p0.00/0.0  t163 w1.0/3.0 q0.0/0.0 p0.00/0.0  t126 w0.5/0.3 q0.0/0.0 p0.00/0.0  t123 w1.1/0.0 q1.8/0.1 p0.00/0.0  t124 w0.1/0.0 q0.0/0.0 p0.00/0.0
+   replies: vkGetDeviceImageMemoryRequirements 0.03/0.02ms  vkCreateBuffer 0.01/0.00ms  vkCreateImage 0.01/0.00ms  vkGetImageMemoryRequirements2 0.01/0.00ms  vkGetBufferDeviceAddress 0.01/0.00ms  vkGetBufferMemoryRequirements2 0.01/0.00ms
+== world          frames   2277  fps 24.5  [HBP] sub 4.63 ms flip 2.95 ms (avg/frame)
+   ring 0.31/0.04ms  tls 0.00/0.00ms  space 0.44/0.73ms  slpR 0.16/0.03ms  slpO 1.19/0.73ms  yield 22.05/0.00ms  ntf 3.14/0.04ms  subF 24.86/0.49ms  subU 28.00/0.32ms  wait 58.77/16.85ms  fwait 17.91/16.03ms  qsub 24.72/5.84ms  pwait 0.00/0.00ms
+   threads (per frame: wait n/ms, submit n/ms, present-wait n/ms): t166 w4.0/4.3 q4.0/4.9 p0.00/0.0  t122 w40.0/7.6 q0.0/0.0 p0.00/0.0  t163 w1.0/4.1 q0.0/0.0 p0.00/0.0  t123 w2.6/0.0 q14.6/0.8 p0.00/0.0  t124 w5.2/0.3 q0.0/0.0 p0.00/0.0  t126 w0.4/0.1 q0.0/0.0 p0.00/0.0
+   replies: vkGetDeviceImageMemoryRequirements 0.12/0.03ms  vkCreateImage 0.08/0.00ms  vkGetImageMemoryRequirements2 0.08/0.00ms  vkCreateBuffer 0.01/0.00ms  vkGetBufferMemoryRequirements2 0.01/0.00ms  vkGetBufferDeviceAddress 0.01/0.00ms
+== prof-fp-world  frames    591  fps 26.7  [HBP] sub 3.86 ms flip 2.98 ms (avg/frame)
+   ring 0.05/0.00ms  tls 0.00/0.00ms  space 0.33/0.15ms  slpR 0.01/0.00ms  slpO 0.53/0.15ms  yield 6.07/0.00ms  ntf 3.10/0.04ms  subF 24.51/0.30ms  subU 27.62/0.30ms  wait 58.06/14.53ms  fwait 16.87/13.79ms  qsub 24.44/4.66ms  pwait 0.00/0.00ms
+   threads (per frame: wait n/ms, submit n/ms, present-wait n/ms): t166 w4.0/3.7 q4.0/3.9 p0.00/0.0  t122 w40.0/6.6 q0.0/0.0 p0.00/0.0  t163 w1.0/3.6 q0.0/0.0 p0.00/0.0  t123 w3.0/0.0 q17.0/0.7 p0.00/0.0  t124 w7.4/0.4 q0.0/0.0 p0.00/0.0  t125 w0.0/0.0 q1.6/0.0 p0.00/0.0
+   replies: vkGetDeviceImageMemoryRequirements 0.01/0.00ms  vkGetBufferDeviceAddress 0.01/0.00ms  vkCreateImage 0.01/0.00ms  vkCreateBuffer 0.01/0.00ms  vkGetBufferMemoryRequirements2 0.01/0.00ms  vkGetImageMemoryRequirements2 0.01/0.00ms
+## raw [HBP]+[HBV] rows, two windows from the middle of the world phase
+[X] [HBP] pid=93 n=54 fps=26.6 path=scanout acq=1/5 sub=3515/7105 wait=7/33 flip=2936/3451 geom=0/0 set=147 flush=2741 us scanout=54 putimage=0 refused=0 total=31823
+[X] [HBV] pid=93 n=54 win_ms=2032 ring=7/73/0.5/322 tls=0/0/0.0/0 space=11/1346/14.8/8331 slpR=1/173/0.2/173 slpO=64/229/14.7/438 yield=721/0/0.0/0 ntf=175/12/2.1/59 subF=1350/12/16.1/99 subU=1525/13/19.3/2133 wait=3182/230/731.5/9537 fwait=910/760/691.2/6638 qsub=1335/176/235.6/6701 pwait=0/0/0.0/0 cmd 231:2/181/322 175:1/111/111 50:1/27/27 54:1/6/6 145:1/3/3 144:1/2/2 tid 166:w=216/181.4,q=216/194.0,p=0/0.0 122:w=2163/334.4,q=0/0.0,p=0/0.0 163:w=54/174.4,q=0/0.0,p=0/0.0 123:w=162/0.7,q=919/35.6,p=0/0.0 124:w
+[X] [HBP] pid=93 n=56 fps=27.6 path=scanout acq=1/5 sub=3550/5479 wait=10/63 flip=2925/4096 geom=0/0 set=132 flush=2737 us scanout=56 putimage=0 refused=0 total=31879
+[X] [HBV] pid=93 n=56 win_ms=2031 ring=20/68/1.4/354 tls=0/0/0.0/0 space=25/468/11.7/3034 slpR=2/193/0.4/195 slpO=56/204/11.4/504 yield=1769/0/0.0/0 ntf=176/12/2.1/136 subF=1411/13/18.7/578 subU=1587/12/19.6/136 wait=3331/228/760.0/5314 fwait=936/758/709.9/5303 qsub=1404/177/248.9/5361 pwait=0/0/0.0/0 cmd 231:7/85/354 50:1/345/345 54:5/41/159 144:5/24/90 175:1/81/81 145:1/6/6 tid 166:w=224/190.7,q=224/202.0,p=0/0.0 122:w=2237/350.5,q=0/0.0,p=0/0.0 163:w=56/180.6,q=0/0.0,p=0/0.0 123:w=168/0.7,q=951/39.8,p=0/0.0
