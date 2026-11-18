@@ -5238,7 +5238,8 @@ void cp_wait_sample(int emit) {
          (linux_compat_away.c): what is it doing this tick? */
       extern int away_flagged(int slot);
       extern void away_sample(int slot, int kind, int nr, uint64_t word, uint64_t pc);
-      if (away_flagged(i)) {
+      extern void away_ring_note(int slot, int kind, int nr);
+      {
         int kind = 'O';
         uint64_t pc = 0;
         if (st == PROC_STATE_RUNNING) {
@@ -5266,7 +5267,9 @@ void cp_wait_sample(int emit) {
         } else if (st == PROC_STATE_BLOCKED) {
           kind = 'B';
         }
-        away_sample(i, kind, (int)q->last_syscall, q->futex_uaddr, pc);
+        away_ring_note(i, kind, (int)q->last_syscall);
+        if (away_flagged(i))
+          away_sample(i, kind, (int)q->last_syscall, q->futex_uaddr, pc);
       }
     }
     struct cpw_group *g = cpw_find(q->tgid);

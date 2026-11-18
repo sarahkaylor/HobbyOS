@@ -1113,6 +1113,8 @@ static void zero_end_locked(uint64_t now) {
       kl_i(&kl, (long)S.z_runs);
       kl_s(&kl, " t_ms=");
       kl_i(&kl, S.run_start_us ? (long)((int64_t)(S.z_t_us - S.run_start_us) / 1000) : -1);
+      kl_s(&kl, " up_ms="); /* H4-kglitch: uptime, the [AWAY] rows' clock */
+      kl_i(&kl, (long)(S.z_t_us / 1000));
       kl_s(&kl, " frames=");
       kl_i(&kl, (long)S.z_run);
       kl_s(&kl, " q_vis=");

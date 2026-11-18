@@ -64,9 +64,29 @@ struct away_thr {
   uint64_t fword;
   struct away_kv k[AWAY_NK], b[AWAY_NK];
   uint64_t pc[AWAY_NPC];
+  int waker;        /* pid + 1 of the thread whose FUTEX_WAKE ended its park */
 };
 static struct away_thr away_t[MAX_PROCESSES];
 static int away_rows;
+
+/* Every Linux-ABI thread's last AWAY_RING samples (kind << 9 | nr), so a row
+   can say what the WAKER was doing while the away thread waited for it. */
+#define AWAY_RING 32
+static uint16_t away_ring[MAX_PROCESSES][AWAY_RING];
+static uint8_t away_ring_pos[MAX_PROCESSES];
+
+void away_ring_note(int slot, int kind, int nr) {
+  if (slot <= 0 || slot >= MAX_PROCESSES) return;
+  uint8_t p = away_ring_pos[slot];
+  away_ring[slot][p % AWAY_RING] = (uint16_t)(((kind & 0x7F) << 9) | (nr & 0x1FF));
+  away_ring_pos[slot] = (uint8_t)((p + 1) % AWAY_RING);
+}
+
+/* A FUTEX_WAKE by `waker` made `woken` READY: remembered if `woken` is away. */
+void away_futex_woken(int woken, int waker) {
+  if (woken > 0 && woken < MAX_PROCESSES && away_t[woken].flagged && away_t[woken].away)
+    away_t[woken].waker = waker + 1;
+}
 
 static int away_is_clock(const void *obj) {
   for (int i = 0; i < AWAY_CLOCKS; i++)
@@ -134,6 +154,41 @@ static void away_reset(struct away_thr *a) {
   }
   for (int i = 0; i < AWAY_NPC; i++)
     a->pc[i] = 0;
+  a->waker = 0;
+}
+
+/* The waker's last `ticks` samples, newest last: "K0:7,U:2,B230:1" style. */
+static void kl_waker(struct kline *kl, int w, int ticks) {
+  if (w <= 0 || w >= MAX_PROCESSES) return;
+  if (ticks > AWAY_RING) ticks = AWAY_RING;
+  struct away_kv kv[AWAY_NK + 2];
+  int kinds[AWAY_NK + 2];
+  int nk = 0;
+  uint8_t p = away_ring_pos[w];
+  for (int i = 0; i < ticks; i++) {
+    uint16_t e = away_ring[w][(p + AWAY_RING - ticks + i) % AWAY_RING];
+    if (!e) continue;
+    int kind = e >> 9, nr = (kind == 'K' || kind == 'B') ? (e & 0x1FF) : -1;
+    int j = 0;
+    for (; j < nk; j++)
+      if (kinds[j] == kind && kv[j].nr == nr) break;
+    if (j == nk) {
+      if (nk == AWAY_NK + 2) continue;
+      kinds[nk] = kind;
+      kv[nk].nr = (int16_t)nr;
+      kv[nk].n = 0;
+      nk++;
+    }
+    kv[j].n++;
+  }
+  kl_s(kl, " wk=");
+  for (int j = 0; j < nk; j++) {
+    if (j) kl_c(kl, ',');
+    kl_c(kl, (char)kinds[j]);
+    if (kv[j].nr >= 0) kl_i(kl, kv[j].nr);
+    kl_c(kl, ':');
+    kl_i(kl, kv[j].n);
+  }
 }
 
 /* A clock wait of thread `t` returned: it is now away until its next wait. */
@@ -219,8 +274,14 @@ void away_wait_begin(struct process *t, void *const *objs, int n) {
       if (i) kl_s(&kl, "0x");
       kl_hex(&kl, (unsigned long)a->pc[i]);
     }
+    if (a->waker) {
+      kl_s(&kl, " waker=");
+      kl_i(&kl, a->waker - 1);
+      kl_waker(&kl, a->waker - 1, (int)((now - a->ret_ms) / 10));
+    }
     kl_c(&kl, ' ');
     kl_s(&kl, t->name);
+    if (kl.n > (int)sizeof kl.b - 2) kl.n = (int)sizeof kl.b - 2; /* the newline always fits */
     kl_c(&kl, '\n');
     kl_emit(&kl);
   }
@@ -261,6 +322,8 @@ void away_sample(int slot, int kind, int nr, uint64_t word, uint64_t pc) {
 }
 
 #else /* !__x86_64__: no Linux ABI */
+void away_ring_note(int slot, int kind, int nr) { (void)slot; (void)kind; (void)nr; }
+void away_futex_woken(int woken, int waker) { (void)woken; (void)waker; }
 void away_clock_set(const void *obj) { (void)obj; }
 void away_wait_return(struct process *t) { (void)t; }
 void away_wait_begin(struct process *t, void *const *objs, int n) {
