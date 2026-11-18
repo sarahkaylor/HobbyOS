@@ -23,6 +23,15 @@ static void test_park_sentinels(void) {
   EXPECT_EQ(GPU_ABI_PARKED != -ENOENT && GPU_ABI_PARKED != -EAGAIN && GPU_ABI_PARKED != -EINTR, 1);
 }
 
+/* H4-kglitch (cp-hunt H1-07): short polls never earn a timeout row. */
+static void test_fence_timeout_reportable(void) {
+  EXPECT_EQ(gpu_abi_fence_timeout_reportable(0), 0);
+  EXPECT_EQ(gpu_abi_fence_timeout_reportable(5000000ull), 0);      /* 5 ms poll */
+  EXPECT_EQ(gpu_abi_fence_timeout_reportable(999999999ull), 0);
+  EXPECT_EQ(gpu_abi_fence_timeout_reportable(1000000000ull), 1);   /* 1 s */
+  EXPECT_EQ(gpu_abi_fence_timeout_reportable(~0ull), 1);           /* INFINITE */
+}
+
 static void test_gpu_m2_layout(void) {
   uart_puts("  Running test_gpu_m2_layout...\n");
   tests_run++;
@@ -308,6 +317,7 @@ static void test_gpu_m2_scanout(void) {
 void gpu_abi_m2_test_suite(void) {
   uart_puts("gpu_abi_m2_test_suite:\n");
   test_park_sentinels();
+  test_fence_timeout_reportable();
   test_gpu_m2_layout();
   test_gpu_m2_req_size();
   test_gpu_m2_ctx2_ok();
