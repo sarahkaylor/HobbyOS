@@ -1113,6 +1113,12 @@ static void zero_end_locked(uint64_t now) {
       kl_i(&kl, (long)S.z_runs);
       kl_s(&kl, " t_ms=");
       kl_i(&kl, S.run_start_us ? (long)((int64_t)(S.z_t_us - S.run_start_us) / 1000) : -1);
+      {
+        /* H4-kglitch (H5-05): first the absences of the periodic waiters
+           that ended within 500 ms before this run (linux_compat_away.c) */
+        extern void away_dump_since(uint64_t from_ms);
+        away_dump_since(S.z_t_us / 1000 > 500 ? S.z_t_us / 1000 - 500 : 0);
+      }
       kl_s(&kl, " up_ms="); /* H4-kglitch: uptime, the [AWAY] rows' clock */
       kl_i(&kl, (long)(S.z_t_us / 1000));
       kl_s(&kl, " frames=");

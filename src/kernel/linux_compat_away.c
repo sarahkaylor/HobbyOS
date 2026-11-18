@@ -69,6 +69,19 @@ struct away_thr {
 static struct away_thr away_t[MAX_PROCESSES];
 static int away_rows;
 
+/* Flight recorder: the last AWAY_FR absences, kept whether or not the row
+   budget printed them.  linux_snd's [SND] zeros row calls away_dump_since()
+   so the absences behind every audible dropout reach the console, however
+   late in the boot it comes (tagged [AWAY-Z]). */
+#define AWAY_FR 48
+struct away_fr {
+  uint64_t at, end;
+  uint8_t shown;
+  struct kline kl;
+};
+static struct away_fr away_fr[AWAY_FR];
+static uint32_t away_fr_n;
+
 /* Every Linux-ABI thread's last AWAY_RING samples (kind << 9 | nr), so a row
    can say what the WAKER was doing while the away thread waited for it. */
 #define AWAY_RING 32
@@ -233,9 +246,7 @@ void away_wait_begin(struct process *t, void *const *objs, int n) {
     return;
   }
   uint64_t now = timer_get_ms();
-  if (a->flagged && a->away && a->gen == process_slot_seq(t->pid) && now - a->ret_ms >= AWAY_MIN_MS &&
-      away_rows < AWAY_ROWS) {
-    away_rows++;
+  if (a->flagged && a->away && a->gen == process_slot_seq(t->pid) && now - a->ret_ms >= AWAY_MIN_MS) {
     struct kline kl;
     kl_init(&kl);
     kl_s(&kl, "[AWAY] tid=");
@@ -283,11 +294,36 @@ void away_wait_begin(struct process *t, void *const *objs, int n) {
     kl_s(&kl, t->name);
     if (kl.n > (int)sizeof kl.b - 2) kl.n = (int)sizeof kl.b - 2; /* the newline always fits */
     kl_c(&kl, '\n');
-    kl_emit(&kl);
+    struct away_fr *fr = &away_fr[away_fr_n++ % AWAY_FR];
+    fr->at = a->ret_ms;
+    fr->end = now;
+    fr->kl = kl;
+    fr->shown = 0;
+    if (away_rows < AWAY_ROWS) {
+      away_rows++;
+      fr->shown = 1;
+      kl_emit(&kl);
+    }
   }
   a->flagged = 1;
   a->clock = clock;
   a->away = 0;
+}
+
+/* Print the recorded absences that ended at or after from_ms and were not
+   printed yet (the [SND] zeros row: what kept the client away). */
+void away_dump_since(uint64_t from_ms) {
+  for (uint32_t i = 0; i < AWAY_FR; i++) {
+    struct away_fr *fr = &away_fr[i];
+    if (!fr->end || fr->shown || fr->end < from_ms) continue;
+    fr->shown = 1;
+    struct kline z;
+    kl_init(&z);
+    kl_s(&z, "[AWAY-Z] ");
+    for (int j = 7; j < fr->kl.n && z.n < (int)sizeof z.b - 2; j++) z.b[z.n++] = fr->kl.b[j];
+    if (z.n && z.b[z.n - 1] != '\n') kl_c(&z, '\n');
+    kl_emit(&z);
+  }
 }
 
 int away_flagged(int slot) {
@@ -324,6 +360,7 @@ void away_sample(int slot, int kind, int nr, uint64_t word, uint64_t pc) {
 #else /* !__x86_64__: no Linux ABI */
 void away_ring_note(int slot, int kind, int nr) { (void)slot; (void)kind; (void)nr; }
 void away_futex_woken(int woken, int waker) { (void)woken; (void)waker; }
+void away_dump_since(uint64_t from_ms) { (void)from_ms; }
 void away_clock_set(const void *obj) { (void)obj; }
 void away_wait_return(struct process *t) { (void)t; }
 void away_wait_begin(struct process *t, void *const *objs, int n) {
