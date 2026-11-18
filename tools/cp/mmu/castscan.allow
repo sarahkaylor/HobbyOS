@@ -17,7 +17,7 @@ src/kernel/arch/x64/locks.c	P2I	lock_audit_note_irqsave_acquire(lock, (uint64_t)
 src/kernel/arch/x64/locks.c	P2I	lock_wait_addr[cpu] = (uint64_t)lock;
 src/kernel/arch/x64/locks.c	P2I	lock_wait_caller2[cpu] = (uint64_t)__builtin_return_address(1);
 src/kernel/arch/x64/locks.c	P2I	lock_wait_caller[cpu] = (uint64_t)__builtin_return_address(0);
-src/kernel/arch/x64/locks.c	P2I	plh[cc].site3 = (uint64_t)__builtin_return_address(1);
+src/kernel/arch/x64/locks.c	P2I	plh_pc[cc].h.site3 = (uint64_t)__builtin_return_address(1);
 src/kernel/arch/x64/locks.c	P2I	proclock_hold_note(1, (uint64_t)__builtin_return_address(0));
 src/kernel/arch/x64/locks.c	P2I	proclock_hold_note(2, (uint64_t)__builtin_return_address(0));
 src/kernel/arch/x64/locks.c	P2I	scream_hex(" lock=", (uint64_t)lock);
@@ -205,7 +205,7 @@ src/kernel/arch/x64/trap.c	P2I	uint64_t tfu = (uint64_t)tf;
 src/kernel/arch/x64/trap.c	P2I	uint64_t tfu = (uint64_t)tf;
 src/kernel/arch/x64/trap.c	P2I	uint64_t top = (uint64_t)&__stack_top;
 src/kernel/arch/x64/trap.c	P2I	uint64_t tss_addr = (uint64_t)&tss_entries[cpu];
-src/kernel/arch/x64/trap.c	P2I	wd_last_tfp[cpu] = (uint64_t)tf;
+src/kernel/arch/x64/trap.c	P2I	wd_pc[cpu].tfp = (uint64_t)tf;
 src/kernel/arch/x64/trap.c	P2I	} else if (buf && sys_user_range((uint64_t)buf, (uint64_t)size, 1)) {
 src/kernel/arch/x64/uart.c	P2I	uint64_t v = (uint64_t)&uart_lock;
 src/kernel/fb_mmap.c	P2I	return hb_fb_blank_ioctl((unsigned long)arg);
@@ -265,14 +265,14 @@ src/kernel/linux_compat_thr.c	P2I	kl_hex(&kl, (unsigned long)(uintptr_t)s->as);
 src/kernel/linux_compat_thr.c	P2I	return l_pi_acquire_word((uint64_t)(uintptr_t)word, pid, trylock);
 src/kernel/linux_compat_thr.c	P2I	return l_pi_cas((uint64_t)(uintptr_t)word, expect, desire);
 src/kernel/linux_compat_thr.c	P2I	return l_pi_release_word((uint64_t)(uintptr_t)word, pid);
-src/kernel/lockscale.c	I2P	const void *lk = (const void *)(uintptr_t)ls_held[c][i];
-src/kernel/lockscale.c	I2P	const void *lw = (const void *)(uintptr_t)ls_irqoff_max_lock[c];
-src/kernel/lockscale.c	I2P	hn ? (const void *)(uintptr_t)ls_held[hc][hn - 1] : (const void *)0,
+src/kernel/lockscale.c	I2P	const void *lk = (const void *)(uintptr_t)ls_pc[c].held[i];
+src/kernel/lockscale.c	I2P	const void *lw = (const void *)(uintptr_t)ls_pc[c].irqoff_max_lock;
+src/kernel/lockscale.c	I2P	hn ? (const void *)(uintptr_t)ls_pc[hc].held[hn - 1] : (const void *)0,
 src/kernel/lockscale.c	I2P	if (ls_memo_new("preempt", (void *)0x9E11)) {
-src/kernel/lockscale.c	I2P	return lock_name((const void *)(uintptr_t)ls_held[c][0]);
+src/kernel/lockscale.c	I2P	return lock_name((const void *)(uintptr_t)ls_pc[c].held[0]);
 src/kernel/lockscale.c	P2I	kl_hex(&k, (uint64_t)(uintptr_t)lk);
-src/kernel/lockscale.c	P2I	ls_held[c][n] = (uint64_t)(uintptr_t)lock;
-src/kernel/lockscale.c	P2I	ls_preempt_site[c] = (uint64_t)(uintptr_t)__builtin_return_address(0);
+src/kernel/lockscale.c	P2I	ls_pc[c].held[n] = (uint64_t)(uintptr_t)lock;
+src/kernel/lockscale.c	P2I	ls_pc[c].preempt_site = (uint64_t)(uintptr_t)__builtin_return_address(0);
 src/kernel/lockscale.c	P2I	uint64_t a = (uint64_t)(uintptr_t)lock;
 src/kernel/lockscale.c	P2I	uint64_t site = (uint64_t)(uintptr_t)__builtin_return_address(0);
 src/kernel/lockscale.c	P2I	uint64_t v = (uint64_t)(uintptr_t)p;
@@ -374,6 +374,10 @@ src/kernel/linux_compat_fd.c	P2I	if (l_copy_to_user(cur, (uint64_t)(uintptr_t)bu
 # C1-k6 round 2: poll_key_bit hashes an object pointer into a notification key bit (never dereferenced).
 src/include/process.h	P2I	return (int)(((((uint64_t)(uintptr_t)obj >> 4) * 0x9E3779B97F4A7C15ULL) >> 58) % 63);
 # C3-fat: lock_audit_held_site compares a lock pointer against the held-stack words (never dereferenced); the [BLKTOK] token-holder row records the acquire's return address as a number.
-src/kernel/lockscale.c	P2I	if (ls_held[c][i] == (uint64_t)(uintptr_t)lock)
+src/kernel/lockscale.c	P2I	if (ls_pc[c].held[i] == (uint64_t)(uintptr_t)lock)
 src/kernel/virtio_blk.c	P2I	blk_token_note_owner((uint64_t)(uintptr_t)__builtin_return_address(0));
 src/kernel/virtio_blk.c	P2I	uint64_t site = (uint64_t)(uintptr_t)__builtin_return_address(0);
+# C1-k7: the futex fast path's trace record (the same field as the locked path's ev.as) and the
+# futex bucket hash of the address-space pointer -- both values, never dereferenced.
+src/kernel/linux_compat_thr.c	P2I	ev.as = (uint64_t)(uintptr_t)as;
+src/kernel/linux_compat_thr.c	P2I	uint64_t h = (uaddr >> 2) ^ ((uint64_t)(uintptr_t)as >> 4);

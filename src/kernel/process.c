@@ -6018,6 +6018,9 @@ int poll_park_bloom_locked(struct process *p, uint64_t seen, uint64_t bloom) {
   if (!p || p->pid <= 0 || p->pid >= MAX_PROCESSES)
     return 0;
   p->poll_bloom = bloom;
+  /* C1-k7: the filter before the bit, for poll_notify_bits' lock-free look
+     (a no-op on x86's TSO; ordered on ARM) */
+  __atomic_thread_fence(__ATOMIC_RELEASE);
   pid_mask_set(&poll_waiters, p->pid);
   p->poll_waiting = 1;
   __atomic_thread_fence(__ATOMIC_SEQ_CST);
@@ -6075,7 +6078,7 @@ static void poll_notify_bits(uint64_t bits) {
       int pid = (wi << 6) + __builtin_ctzll(x);
       x &= x - 1;
       if (pid < MAX_PROCESSES &&
-          (__atomic_load_n(&proc_table[pid].poll_bloom, __ATOMIC_RELAXED) & bits)) {
+          (__atomic_load_n(&proc_table[pid].poll_bloom, __ATOMIC_ACQUIRE) & bits)) {
         any = 1;
         break;
       }

@@ -2768,7 +2768,7 @@ int vm_kwrite(struct process *p, uint64_t va, const void *src, int len) {
     return 0;
   if (!p->as)
     return -1; /* v1: the caller owns the translation */
-  if (vm_copy_fast(p, va, (void *)(uintptr_t)src, len, 1) == 0)
+  if (vm_copy_fast(p, va, (void *)src, len, 1) == 0)
     return 0;
   const unsigned char *s = (const unsigned char *)src;
 

@@ -82,7 +82,7 @@ int l_copy_to_user(struct process *p, uint64_t udst, const void *ksrc,
                    uint64_t len) {
   if (len == 0) return 0;
   if (len > (uint64_t)(1 << 20)) return -EINVAL;
-  if (vm_copy_fast(p, udst, (void *)(uintptr_t)ksrc, (int)len, 1) == 0) return 0;
+  if (vm_copy_fast(p, udst, (void *)ksrc, (int)len, 1) == 0) return 0;
   if (!l_user_ok(p, udst, len, 1)) return -EFAULT;
   return vm_kwrite(p, udst, ksrc, (int)len) == 0 ? 0 : -EFAULT;
 }
