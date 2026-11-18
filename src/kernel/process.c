@@ -6059,12 +6059,28 @@ static void poll_notify_bits(uint64_t bits) {
     extern void lt_epoll_pend_bits(uint64_t bits) __attribute__((weak));
     if (lt_epoll_pend_bits) lt_epoll_pend_bits(bits);
   }
+  /* C1-k7 (docs/cp-k7.md §5): look for a parked poller whose filter has
+     these keys before taking proc_lock.  Every pipe write (each wineserver
+     reply) notified, and with any poller parked anywhere in the system (the
+     X server, the wineserver itself) it took proc_lock to find that none of
+     them cared.  The look is the other half of poll_park_bloom_locked's
+     Dekker pair: the parker stores its filter and its bit, fences, then
+     reads the sequence this function has already moved, so either it sees
+     the new sequence and does not sleep, or this look sees its bit and
+     filter. */
   int any = 0;
-  for (int wi = 0; wi < PID_MASK_WORDS; wi++)
-    if (__atomic_load_n(&poll_waiters.w[wi], __ATOMIC_SEQ_CST)) {
-      any = 1;
-      break;
+  for (int wi = 0; wi < PID_MASK_WORDS && !any; wi++) {
+    uint64_t x = __atomic_load_n(&poll_waiters.w[wi], __ATOMIC_SEQ_CST);
+    while (x) {
+      int pid = (wi << 6) + __builtin_ctzll(x);
+      x &= x - 1;
+      if (pid < MAX_PROCESSES &&
+          (__atomic_load_n(&proc_table[pid].poll_bloom, __ATOMIC_RELAXED) & bits)) {
+        any = 1;
+        break;
+      }
     }
+  }
   if (!any)
     return;
   int woke = 0;

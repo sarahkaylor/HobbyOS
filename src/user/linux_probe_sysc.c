@@ -20,6 +20,9 @@
  *   S8  epoll_wait(1 idle fd, timeout 0)
  *   S9  poll(NULL, 0, 0)
  *   S10 an unknown syscall number (ENOSYS)
+ *   S11 S6 again while another thread sleeps in poll() on an unrelated pipe
+ *       (every pipe write notifies pollers: does it pay for one that does
+ *       not care?)
  *   M2/M4/M8  getpid on 2 / 4 / 8 threads at once: ns per call per thread
  *   M4f       futex wake-nobody on 4 threads (each its own word)
  *   M4c       clock_gettime (raw) on 4 threads
@@ -79,7 +82,13 @@ static int cmp64(const void *a, const void *b) {
   return x < y ? -1 : x > y;
 }
 
-static int pfd[2], ep, efd[2];
+static int pfd[2], ep, efd[2], ufd[2];
+static void *s11_poller(void *a) {
+  (void)a;
+  struct pollfd q = {ufd[0], POLLIN, 0};
+  poll(&q, 1, -1);
+  return 0;
+}
 static volatile int fwords[16 * 16];
 
 /* one call of kind k by thread t */
@@ -122,6 +131,12 @@ static inline void call(int k, int t) {
   }
   case 9: poll(NULL, 0, 0); break;
   case 10: syscall(4000); break;
+  case 11: {
+    char b[8] = {0};
+    (void)!write(efd[1], b, 8);
+    (void)!read(efd[0], b, 8);
+    break;
+  }
   }
 }
 
@@ -245,15 +260,24 @@ int main(void) {
     "getpid", "gettid", "clock_gettime raw", "clock_gettime libc (vDSO if any)",
     "futex wake, nobody waiting", "read empty nonblocking pipe (EAGAIN)",
     "pipe write 8 + read 8 (2 calls)", "rt_sigprocmask(SIG_BLOCK, {})",
-    "epoll_wait(1 idle fd, 0)", "poll(NULL, 0, 0)", "unknown nr (ENOSYS)"};
+    "epoll_wait(1 idle fd, 0)", "poll(NULL, 0, 0)", "unknown nr (ENOSYS)",
+    "S6 with an unrelated poller parked"};
   struct res s0 = {0, 0, 0};
-  for (int k = 0; k <= 10; k++) {
+  if (pipe(ufd)) { row("pipe failed errno=%d", errno); return 1; }
+  pthread_t s11;
+  for (int k = 0; k <= 11; k++) {
+    if (k == 11) {
+      pthread_create(&s11, 0, s11_poller, 0);
+      struct timespec d = {0, 20000000};
+      nanosleep(&d, 0); /* let it park */
+    }
     struct res r = single(k);
     if (k == 0) s0 = r;
     char id[8];
     snprintf(id, sizeof id, "S%d", k);
     show(id, names[k], r, k != 0 || r.p50 <= SYSC_S0_MAX);
   }
+  { char c = 'x'; (void)!write(ufd[1], &c, 1); pthread_join(s11, 0); }
   {
     struct res r;
     r = multi(0, 2); show("M2", "getpid, 2 threads at once", r, 1);
