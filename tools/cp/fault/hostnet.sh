@@ -8,6 +8,10 @@
 #   N <s> nfsd_drops=<skmem d of the :2049 UDP socket> rq=<its recv queue>
 #   R <s> <the /proc/net/rpc/nfsd "th" and "rc" lines>
 #   V <s> compact_stall= thp_fault_alloc= thp_fault_fallback=
+#   E <s> <mtime of /etc/exports> <mtime of /var/lib/nfs/etab>: every
+#       tools/cp/exports.sh add/remove (any lane) rewrites both and runs
+#       exportfs -ra, which flushes nfsd's export caches
+#   S <qemu start, epoch s>  (once: guest uptime + this ~ host time)
 # Nothing is written outside OUT.
 set -u
 PAT="${1:?pattern}"; OUT="${2:?out}"
@@ -20,6 +24,7 @@ done
 [ -n "$pid" ] || { echo "# hostnet: no qemu matching $PAT" > "$OUT"; exit 1; }
 {
   echo "# hostnet pid=$pid pattern=$PAT start=$(date -Is)"
+  echo "S $(stat -c %Y /proc/$pid)"
   while kill -0 "$pid" 2>/dev/null; do
     s=$(date +%s)
     echo "U $s $(awk '/^Udp: [0-9]/ {$1=""; print}' /proc/net/snmp)"
@@ -30,6 +35,7 @@ done
                 if (lp ~ /:2049$/) { nd += d; nrq = rq } }
       END { printf "Q %s socks=%d rq_max=%d drops=%d\nN %s nfsd_drops=%d rq=%d\n", s, n, rqm, dsum, s, nd, nrq }'
     echo "R $s $(grep -E '^(th|rc)' /proc/net/rpc/nfsd 2>/dev/null | tr '\n' ' ')"
+    echo "E $s $(stat -c %Y /etc/exports 2>/dev/null) $(stat -c %Y /var/lib/nfs/etab 2>/dev/null)"
     echo "V $s $(awk '/^(compact_stall|thp_fault_alloc|thp_fault_fallback) / {printf "%s=%s ", $1, $2}' /proc/vmstat)"
     sleep 1
   done

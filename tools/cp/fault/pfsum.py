@@ -245,6 +245,16 @@ def main():
         print(f"   absences with a long fault inside: {hit}/{len(aw)}")
     stalls = [tail_of(ln, "[NFSPIPE] stall") for ln in lines if "[NFSPIPE] stall" in ln]
     rs = [tail_of(ln, "[NFSRS] ") for ln in lines if "[NFSRS] " in ln]
+    rs_at = [int(m.group(1)) for m in (re.search(r" at=(\d+)", r) for r in rs) if m]
+    # a stall row has no uptime; the [PFK] t= before it bounds it
+    stall_at = []
+    last_t = 0
+    for ln in lines:
+        m = re.search(r"\[PF[KHLI]\] t=(\d+)", ln)
+        if m:
+            last_t = int(m.group(1))
+        if "[NFSPIPE] stall" in ln and not rs_at:
+            stall_at.append(last_t)
     print(f"== NFS: [NFSPIPE] stall rows={len(stalls)} [NFSRS] rows={len(rs)}")
     for r in rs:
         print("   " + r[:240])
@@ -281,6 +291,23 @@ def main():
         if N:
             nd = [int(re.search(r"nfsd_drops=(\d+)", q).group(1)) for q in N]
             print(f"   nfsd :2049 socket drops: first={nd[0]} last={nd[-1]}")
+        # exports edits (exportfs -ra) near each NFS stall: guest uptime ->
+        # host time through the QEMU start (S row); +-3 s
+        S = [ln for ln in hn if ln.startswith("S ")]
+        E = [ln.split() for ln in hn if ln.startswith("E ")]
+        chg = []
+        for i in range(1, len(E)):
+            if E[i][2:] != E[i - 1][2:]:
+                chg.append(int(E[i][1]))
+        print(f"   /etc/exports edits during the boot (any lane): {len(chg)}")
+        if S and (stall_at or rs_at):
+            q0 = int(S[0].split()[1])
+            for kind, ats in (("stall", stall_at), ("NFSRS", rs_at)):
+                for at in ats:
+                    h = q0 + at / 1000.0
+                    near = [c - h for c in chg if abs(c - h) <= 3.0]
+                    print(f"   {kind} at={at} ms -> host {h:.0f}: exports edit within 3 s: "
+                          f"{'yes (%+.1f s)' % near[0] if near else 'no'}")
         if len(V) >= 2:
             def kv(s):
                 return {k: int(v) for k, v in re.findall(r"(\w+)=(\d+)", s)}
