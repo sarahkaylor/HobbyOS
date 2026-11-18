@@ -17,6 +17,9 @@
 #   5. strips wineserver and ntdll.so into the copied stage exactly as
 #      `make install` does (tools/install --strip-program=strip, i.e. strip -g; proven on the
 #      original pair first).
+#   6. drops the build copy (KEEP_BUILD=1 keeps it) and links SRC's build-x86_64
+#      and src next to the stage, which run-p4.sh needs (it derives the Wine
+#      build dir from CP_WINE_STAGE).
 # Env: SRC (default ~/cp/wine-build-x), OUT (default ~/cp/lanes/ntsync-wine),
 #      HDR (default /usr/include/linux/ntsync.h, the strix host's UAPI copy).
 set -euo pipefail
@@ -29,6 +32,10 @@ log() { echo "[ntsync-wine] $*"; }
 [ -f "$HDR" ] || { echo "no UAPI header at $HDR"; exit 2; }
 grep -q NTSYNC_IOC_EVENT_READ "$HDR" || { echo "$HDR lacks NTSYNC_IOC_EVENT_READ"; exit 2; }
 mkdir -p "$OUT"
+# A finished OUT keeps build-x86_64 / src as symlinks to SRC's (the P4 helper
+# builds rawinput.exe from them).  Never build through such a link: that
+# would write SRC's tree.  Replace the link with a fresh copy.
+[ -L "$OUT/build-x86_64" ] && rm -f "$OUT/build-x86_64"
 if [ ! -d "$OUT/build-x86_64" ]; then
   log "copying $SRC/build-x86_64 and stage (cp -a, preserves mtimes)"
   cp -a "$SRC/build-x86_64" "$OUT/build-x86_64"
@@ -91,3 +98,12 @@ done
 strings "$OUT/stage/CP/WINE/bin/wineserver" | grep -c '/dev/ntsync' | sed 's/^/wineserver mentions \/dev\/ntsync: /'
 (cd "$OUT/stage" && find CP -type f | sort | xargs sha256sum) > "$OUT/stage-manifest.sha256"
 log "done: stage $OUT/stage/CP/WINE"
+# 6. the 1.3 GiB build copy is scratch (strix's disk): keep config.h, link
+#    SRC's build tree and source for run-p4.sh's rawinput.exe build.
+if [ "${KEEP_BUILD:-0}" != 1 ]; then
+  cp "$B/include/config.h" "$OUT/config-ntsync.h"
+  rm -rf "$B"
+  ln -s "$SRC/build-x86_64" "$OUT/build-x86_64"
+  log "build copy removed; $OUT/build-x86_64 -> $SRC/build-x86_64 (KEEP_BUILD=1 keeps it)"
+fi
+[ -e "$OUT/src" ] || ln -s "$SRC/src" "$OUT/src"

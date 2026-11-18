@@ -1,0 +1,238 @@
+# C2-ntsync fpsprobe A/B on the lane kernel (strix, Zen 5; P9 defaults: -smp 8 -m 32G under
+# /tmp/cp-bigguest.lock, Venus RX 9070 XT via tools/cp/host-venus.sh, VENUS_BUILD=~/cp/lanes/present-venus,
+# X screen 1280x720, zero-copy scanout; script tools/cp/p9/fpsprobe.p9 = LOAD GAME ManualSave-86,
+# 90 s walk = 'world', 20 s standing = 'prof-fp-world'); on = ~/cp/lanes/ntsync-wine stage, off =
+# ~/cp/wine-build-x stage (stock: no ntsync); everything else identical.  Interleaved on/off.
+# Kernel: the lane at d6174e3f (driver + [NTSYNC] diagnostics; the later commits add only the
+# per-call accounting and probe rows).  Other lanes' guests shared strix throughout.
+# driver log (~/cp/lanes/ntsync-ab.txt):
+start ns-s-on1 20:54:47 wine=/home/sarah/cp/lanes/ntsync-wine/stage/CP/WINE
+end ns-s-on1 rc=0 21:06:29 taken=2 world             62         254-345     26.8    23.5    20.2    36.6    27.9
+start ns-s-off1 21:06:29 wine=/home/sarah/cp/wine-build-x/stage/CP/WINE
+end ns-s-off1 rc=0 21:20:17 taken=2 world             62         271-362     22.7    17.9    11.6    30.2    22.5
+start ns-s-on2 21:20:17 wine=/home/sarah/cp/lanes/ntsync-wine/stage/CP/WINE
+end ns-s-on2 rc=0 21:33:55 taken=2 world             63         240-332     24.9    22.8    17.7    30.7    25.4
+start ns-s-off2 21:33:55 wine=/home/sarah/cp/wine-build-x/stage/CP/WINE
+end ns-s-off2 rc=0 21:46:58 taken=2 world             61         264-353     20.5    17.5    14.5    34.6    23.0
+start ns-s-on3 21:46:58 wine=/home/sarah/cp/lanes/ntsync-wine/stage/CP/WINE
+end ns-s-on3 rc=0 22:00:12 taken=2 world             60         253-342     26.6    20.9    18.6    33.9    25.6
+start ns-s-off3 22:00:12 wine=/home/sarah/cp/wine-build-x/stage/CP/WINE
+end ns-s-off3 rc=0 22:14:43 taken=2 world             63         282-371     28.2    14.9    11.0    33.3    26.2
+
+## per boot: tools/cp/ntsync/ab_summary.py
+run        world fps med (p10) n  wineserver run/kern game run/kern (threads)    hot threads run%/kern%
+ns-s-on1   26.8 (23.5) 62         0.07 / 0.06        2.62 / 1.04                t96 94/15 t92 92/16
+           [NTSYNC] stats opens=1 sem/mutex/event=11/31/88904 live=912 max=954 any/all=454137/0 imm=227562 parks=223054 tmo=33519 eintr=209 alert=0 dead=0 wakes=420365 set/rel/unl/kill=1477815/156595/67/569 skip=0 stale=0
+ns-s-off1  22.7 (17.9) 62         0.29 / 0.26        2.26 / 0.91                t96 86/16 t92 82/21
+ns-s-on2   24.9 (22.8) 63         0.08 / 0.07        2.57 / 1.01                t96 93/15 t92 91/17
+           [NTSYNC] stats opens=1 sem/mutex/event=11/31/79668 live=906 max=956 any/all=402596/0 imm=206468 parks=193793 tmo=31068 eintr=205 alert=0 dead=0 wakes=371278 set/rel/unl/kill=1377378/134108/67/569 skip=0 stale=0
+ns-s-off2  20.5 (17.5) 61         0.30 / 0.27        2.26 / 0.90                t96 87/15 t92 82/21
+ns-s-on3   26.6 (20.9) 60         0.07 / 0.07        2.57 / 0.94                t96 94/13 t92 92/14
+           [NTSYNC] stats opens=1 sem/mutex/event=11/31/86003 live=907 max=956 any/all=449918/0 imm=232861 parks=213739 tmo=30524 eintr=212 alert=0 dead=0 wakes=419137 set/rel/unl/kill=1516475/169457/67/569 skip=0 stale=0
+ns-s-off3  28.2 (14.9) 63         0.30 / 0.27        2.30 / 0.96                t96 86/17 t92 81/21
+
+## reference: the k7 lane's own base boot on integ11 + stock Wine (k7-base/obj/cp-p9/k7b-1), same harness
+run        world fps med (p10) n  wineserver run/kern game run/kern (threads)    hot threads run%/kern%
+k7b-1      27.9 (19.6) 59         0.30 / 0.27        2.27 / 0.90                t96 86/15 t92 82/20
+
+## ns-s-on1: summary.txt fps per phase
+== fps (winevulkan trace:fps 'approx' rows) in /home/sarah/cp/lanes/p7/obj/cp-p9/ns-s-on1
+phase           rows          game s   median     p10     min     max    mean
+launch            85          14-141     97.9    91.9     0.0   221.0   126.2
+menu              12         145-159    193.2   175.2   174.6   206.2   190.5
+loading           61         161-251    185.6    29.4    20.2   212.1   150.7
+world             62         254-345     26.8    23.5    20.2    36.6    27.9
+prof-fp-world     14         347-366     32.7    29.9    26.3    36.2    32.7
+== frame pool free MiB ([P8MEM]) by phase: first / min / last
+## ns-s-on1: [THRW] world phase (tools/cp/present/hbv_summary.py)
+== world          pid19:wineserver                   rows  18  run 0.07 ready 0.03 futex 0.00 kern 0.06 trap 0.01
+   blk 232:0.89
+   ksys 232:0.03 1:0.00 16:0.00 46:0.00 96:0.00 20:0.00 228:0.00 233:0.00
+   top (run/ready/kern/trap %) t19 6/3/6/1%(232=2,1=0,16=0,96=0,20=0,46=0,233=0,228=0,3=0)
+== world          pid92:Cyberpunk2077.e              rows  18  run 2.62 ready 0.25 futex 27.07 kern 1.04 trap 0.08
+   blk 16:12.05 23:4.90 0:0.04 230:0.02 7:0.01 1:0.00
+   ksys 16:0.59 202:0.24 228:0.03 14:0.03 23:0.01 47:0.01 20:0.00 9:0.00
+   top (run/ready/kern/trap %) t96 94/2/15/0%(202=8,14=2,16=1,228=0,9=0,230=0,0=0,186=0) t92 92/2/16/1%(202=9,228=1,16=0,47=0,14=0,20=0,7=0,1=0,0=0,230=0,98=0) t121 24/0/24/0%(16=23,202=0)
+== prof-fp-world  pid92:Cyberpunk2077.e              rows   4  run 2.60 ready 0.25 futex 27.05 kern 1.02 trap 0.05
+## ns-s-on1: timeline
++    35.0 s  21:00:17  phase launch
++    49.5 s  21:00:31  kernel: [P7] scanout taken res/window 4158 20971570 seq=1
++    50.0 s  21:00:32  kernel: [P7] scanout taken res/window 4161 20971570 seq=2
++   158.7 s  21:02:21  title prompt 'PRESS ... TO CONTINUE' at s009-t000122-pre: sent one Space (#1)
++   178.3 s  21:02:40  main menu reached: running the play script fpsprobe.p9
++   195.4 s  21:02:57  phase loading
++   287.4 s  21:04:29  phase world
++   402.2 s  21:06:24  phase world
+## ns-s-on1: [NTSYNC] rows
+[NTSYNC] waiters long=38 satisfiable=0
+[NTSYNC] stats opens=1 sem/mutex/event=11/31/88904 live=912 max=954 any/all=454137/0 imm=227562 parks=223054 tmo=33519 eintr=209 alert=0 dead=0 wakes=420365 set/rel/unl/kill=1477815/156595/67/569 skip=0 stale=0
+[NTSYNC] waiters long=38 satisfiable=0
+
+## ns-s-off1: summary.txt fps per phase
+== fps (winevulkan trace:fps 'approx' rows) in /home/sarah/cp/lanes/p7/obj/cp-p9/ns-s-off1
+phase           rows          game s   median     p10     min     max    mean
+launch            86          14-142     80.3    70.8     0.0   227.2   110.3
+menu              14         145-163    173.8   133.1   103.9   188.5   161.6
+loading           69         165-268    188.5    28.4    12.4   232.5   154.4
+world             62         271-362     22.7    17.9    11.6    30.2    22.5
+prof-fp-world     14         365-385     24.7    19.5    16.7    26.1    23.8
+== frame pool free MiB ([P8MEM]) by phase: first / min / last
+## ns-s-off1: [THRW] world phase (tools/cp/present/hbv_summary.py)
+== world          pid19:wineserver                   rows  20  run 0.29 ready 0.09 futex 0.00 kern 0.26 trap 0.09
+   blk 232:0.61
+   ksys 232:0.09 1:0.06 96:0.00 20:0.00 228:0.00 46:0.00 257:0.00 233:0.00
+   top (run/ready/kern/trap %) t19 29/8/26/8%(232=8,1=6,96=0,20=0,46=0,228=0,257=0,233=0)
+== world          pid92:Cyberpunk2077.e              rows  20  run 2.26 ready 0.27 futex 27.36 kern 0.91 trap 0.18
+   blk 0:12.04 23:4.91 16:0.11 230:0.01 7:0.01 1:0.00
+   ksys 16:0.39 202:0.17 14:0.05 1:0.03 228:0.03 0:0.02 20:0.01 23:0.00
+   top (run/ready/kern/trap %) t96 86/4/16/2%(202=6,14=2,228=0,1=0,0=0,9=0,20=0,16=0) t92 82/7/21/7%(202=6,1=1,14=1,228=0,0=0,47=0,98=0,20=0,16=0) t121 18/0/18/0%(16=18,202=0)
+== prof-fp-world  pid19:wineserver                   rows   4  run 0.23 ready 0.07 futex 0.00 kern 0.21 trap 0.08
+## ns-s-off1: timeline
++    23.8 s  21:13:17  phase launch
++    37.5 s  21:13:31  kernel: [P7] scanout taken res/window 4157 20971570 seq=1
++    38.0 s  21:13:31  kernel: [P7] scanout taken res/window 4160 20971570 seq=2
++   147.6 s  21:15:21  title prompt 'PRESS ... TO CONTINUE' at s009-t000122-pre: sent one Space (#1)
++   167.2 s  21:15:40  main menu reached: running the play script fpsprobe.p9
++   187.6 s  21:16:01  phase loading
++   292.1 s  21:17:45  phase world
++   408.5 s  21:19:42  phase world
+## ns-s-off1: [NTSYNC] rows
+
+## ns-s-on2: summary.txt fps per phase
+== fps (winevulkan trace:fps 'approx' rows) in /home/sarah/cp/lanes/p7/obj/cp-p9/ns-s-on2
+phase           rows          game s   median     p10     min     max    mean
+launch            75          13-126     93.6    37.1     0.0   226.5   104.1
+menu              12         129-144    197.6   181.9   181.2   211.6   196.5
+loading           61         145-236    191.9    32.3    22.6   215.7   144.1
+world             63         240-332     24.9    22.8    17.7    30.7    25.4
+prof-fp-world     14         333-353     31.5    28.2    27.2    32.5    30.6
+== frame pool free MiB ([P8MEM]) by phase: first / min / last
+## ns-s-on2: [THRW] world phase (tools/cp/present/hbv_summary.py)
+== world          pid19:wineserver                   rows  20  run 0.08 ready 0.03 futex 0.00 kern 0.07 trap 0.01
+   blk 232:0.88
+   ksys 232:0.03 1:0.01 46:0.00 16:0.00 96:0.00 3:0.00 228:0.00 20:0.00
+   top (run/ready/kern/trap %) t19 7/3/7/1%(232=3,1=0,46=0,16=0,20=0,228=0,0=0,3=0,96=0)
+== world          pid92:Cyberpunk2077.e              rows  20  run 2.57 ready 0.24 futex 27.18 kern 1.01 trap 0.11
+   blk 16:11.98 23:4.93 0:0.04 230:0.02 7:0.01 1:0.00
+   ksys 16:0.53 202:0.24 228:0.04 14:0.02 47:0.01 23:0.00 1:0.00 9:0.00
+   top (run/ready/kern/trap %) t96 93/3/15/0%(202=9,14=1,228=0,16=0,9=0,98=0,10=0,230=0) t92 91/3/17/1%(202=10,228=1,16=0,47=0,98=0,0=0,14=0,1=0,20=0,7=0) t121 21/0/21/0%(16=21,202=0) t95 1/0/1/1%(3=0)
+== prof-fp-world  pid92:Cyberpunk2077.e              rows   4  run 2.56 ready 0.29 futex 27.05 kern 1.01 trap 0.07
+## ns-s-on2: timeline
++    24.5 s  21:27:55  phase launch
++    37.9 s  21:28:09  kernel: [P7] scanout taken res/window 4159 20971570 seq=1
++    37.9 s  21:28:09  kernel: [P7] scanout taken res/window 4162 20971570 seq=2
++   134.1 s  21:29:45  title prompt 'PRESS ... TO CONTINUE' at s008-t000107-pre: sent one Space (#1)
++   152.1 s  21:30:03  main menu reached: running the play script fpsprobe.p9
++   169.7 s  21:30:21  phase loading
++   261.1 s  21:31:52  phase world
++   377.6 s  21:33:49  phase world
+## ns-s-on2: [NTSYNC] rows
+[NTSYNC] waiters long=38 satisfiable=0
+[NTSYNC] stats opens=1 sem/mutex/event=11/31/79668 live=906 max=956 any/all=402596/0 imm=206468 parks=193793 tmo=31068 eintr=205 alert=0 dead=0 wakes=371278 set/rel/unl/kill=1377378/134108/67/569 skip=0 stale=0
+[NTSYNC] waiters long=38 satisfiable=0
+
+## ns-s-off2: summary.txt fps per phase
+== fps (winevulkan trace:fps 'approx' rows) in /home/sarah/cp/lanes/p7/obj/cp-p9/ns-s-off2
+phase           rows          game s   median     p10     min     max    mean
+launch            83          17-141    103.3    82.0     0.0   226.2   130.9
+menu              12         144-159    170.6   157.0   155.6   180.8   169.9
+loading           67         160-260    186.4    29.0    12.8   222.4   156.8
+world             61         264-353     20.5    17.5    14.5    34.6    23.0
+prof-fp-world     14         354-374     31.8    30.4    27.0    32.6    31.3
+== frame pool free MiB ([P8MEM]) by phase: first / min / last
+## ns-s-off2: [THRW] world phase (tools/cp/present/hbv_summary.py)
+== world          pid19:wineserver                   rows  19  run 0.30 ready 0.09 futex 0.00 kern 0.27 trap 0.09
+   blk 232:0.60
+   ksys 232:0.09 1:0.07 96:0.00 20:0.00 46:0.00 228:0.00
+   top (run/ready/kern/trap %) t19 30/8/27/9%(232=8,1=6,96=0,20=0,46=0,228=0)
+== world          pid92:Cyberpunk2077.e              rows  19  run 2.26 ready 0.26 futex 27.35 kern 0.90 trap 0.16
+   blk 0:12.05 23:4.93 16:0.12 7:0.01 230:0.01 1:0.00
+   ksys 16:0.39 202:0.17 14:0.05 1:0.03 228:0.02 0:0.02 20:0.01 23:0.00
+   top (run/ready/kern/trap %) t96 87/4/15/2%(202=6,14=2,228=0,1=0,0=0,9=0,20=0,10=0,16=0) t92 82/6/21/7%(202=6,1=1,14=1,228=0,0=0,20=0,47=0,98=0,16=0,7=0) t121 19/0/19/0%(16=19,202=0)
+== prof-fp-world  pid19:wineserver                   rows   4  run 0.18 ready 0.06 futex 0.00 kern 0.15 trap 0.05
+## ns-s-off2: timeline
++    23.5 s  21:40:40  phase launch
++    40.1 s  21:40:57  kernel: [P7] scanout taken res/window 4159 20971570 seq=1
++    40.1 s  21:40:57  kernel: [P7] scanout taken res/window 4162 20971570 seq=2
++   117.7 s  21:42:14  title prompt 'PRESS ... TO CONTINUE' at s007-t000092-pre: sent one Space (#1)
++   146.9 s  21:42:44  title prompt 'PRESS ... TO CONTINUE' at s009-t000122-pre: sent one Space (#2)
++   166.3 s  21:43:03  main menu reached: running the play script fpsprobe.p9
++   183.3 s  21:43:20  phase loading
++   283.7 s  21:45:00  phase world
+## ns-s-off2: [NTSYNC] rows
+
+## ns-s-on3: summary.txt fps per phase
+== fps (winevulkan trace:fps 'approx' rows) in /home/sarah/cp/lanes/p7/obj/cp-p9/ns-s-on3
+phase           rows          game s   median     p10     min     max    mean
+launch            85          15-142    130.2   104.1     0.0   236.2   150.1
+menu              13         147-161    227.5   201.8   199.7   230.9   219.5
+loading           60         162-251    151.4    34.2    23.1   230.2   136.2
+world             60         253-342     26.6    20.9    18.6    33.9    25.6
+prof-fp-world     14         344-364     21.5    16.3    15.6    24.3    20.3
+== frame pool free MiB ([P8MEM]) by phase: first / min / last
+## ns-s-on3: [THRW] world phase (tools/cp/present/hbv_summary.py)
+== world          pid19:wineserver                   rows  18  run 0.07 ready 0.02 futex 0.00 kern 0.07 trap 0.01
+   blk 232:0.89
+   ksys 232:0.03 1:0.00 46:0.00 228:0.00 20:0.00 96:0.00 16:0.00 6:0.00
+   top (run/ready/kern/trap %) t19 7/2/6/1%(232=2,1=0,46=0,228=0,20=0,96=0,16=0,6=0,3=0)
+== world          pid92:Cyberpunk2077.e              rows  18  run 2.57 ready 0.21 futex 27.14 kern 0.94 trap 0.09
+   blk 16:12.04 23:4.93 0:0.04 230:0.02 7:0.01 1:0.00
+   ksys 16:0.54 202:0.20 228:0.03 14:0.02 47:0.01 23:0.00 9:0.00 0:0.00
+   top (run/ready/kern/trap %) t96 94/1/13/0%(202=8,14=1,228=0,16=0,9=0) t92 92/2/14/1%(202=7,228=0,16=0,47=0,14=0,1=0,0=0,20=0,98=0) t121 22/0/21/0%(16=21,202=0) t95 1/0/1/1%(47=0)
+== prof-fp-world  pid92:Cyberpunk2077.e              rows   5  run 2.49 ready 0.28 futex 27.17 kern 0.84 trap 0.05
+## ns-s-on3: timeline
++    25.3 s  21:54:06  phase launch
++    40.2 s  21:54:21  kernel: [P7] scanout taken res/window 4159 20971570 seq=1
++    40.7 s  21:54:21  kernel: [P7] scanout taken res/window 4162 20971570 seq=2
++   149.8 s  21:56:10  title prompt 'PRESS ... TO CONTINUE' at s009-t000122-pre: sent one Space (#1)
++   169.9 s  21:56:30  main menu reached: running the play script fpsprobe.p9
++   187.4 s  21:56:48  phase loading
++   276.9 s  21:58:17  phase world
++   389.1 s  22:00:10  phase world
+## ns-s-on3: [NTSYNC] rows
+[NTSYNC] waiters long=38 satisfiable=0
+[NTSYNC] stats opens=1 sem/mutex/event=11/31/86003 live=907 max=956 any/all=449918/0 imm=232861 parks=213739 tmo=30524 eintr=212 alert=0 dead=0 wakes=419137 set/rel/unl/kill=1516475/169457/67/569 skip=0 stale=0
+[NTSYNC] waiters long=38 satisfiable=0
+
+## ns-s-off3: summary.txt fps per phase
+== fps (winevulkan trace:fps 'approx' rows) in /home/sarah/cp/lanes/p7/obj/cp-p9/ns-s-off3
+phase           rows          game s   median     p10     min     max    mean
+launch            84          21-143     99.6    86.1     0.0   227.0   127.7
+menu              17         148-169    192.3   183.6   167.0   211.1   192.6
+loading           70         170-276    175.4    25.6    11.5   241.4   140.3
+world             63         282-371     28.2    14.9    11.0    33.3    26.2
+prof-fp-world     14         373-393     30.3    27.1    26.9    32.5    29.9
+== frame pool free MiB ([P8MEM]) by phase: first / min / last
+## ns-s-off3: [THRW] world phase (tools/cp/present/hbv_summary.py)
+== world          pid19:wineserver                   rows  19  run 0.30 ready 0.08 futex 0.00 kern 0.27 trap 0.09
+   blk 232:0.61
+   ksys 232:0.09 1:0.06 96:0.01 228:0.00 20:0.00 46:0.00 233:0.00 257:0.00
+   top (run/ready/kern/trap %) t19 29/7/26/9%(232=9,1=6,96=0,20=0,228=0,46=0,257=0)
+== world          pid92:Cyberpunk2077.e              rows  19  run 2.30 ready 0.23 futex 27.41 kern 0.96 trap 0.23
+   blk 0:11.99 23:4.93 16:0.08 7:0.01 230:0.01 1:0.00
+   ksys 16:0.37 202:0.16 14:0.05 228:0.03 1:0.02 0:0.02 20:0.01 9:0.00
+   top (run/ready/kern/trap %) t96 86/4/17/4%(202=5,14=2,228=0,1=0,0=0,186=0,9=0,24=0,20=0,230=0) t92 81/6/21/6%(202=5,14=1,1=1,228=0,0=0,20=0,47=0,9=0,7=0,16=0,186=0) t121 16/0/15/0%(16=15,202=0) t95 3/0/3/3%(20=0,47=0,1=0,14=0,72=0)
+== prof-fp-world  pid19:wineserver                   rows   4  run 0.22 ready 0.07 futex 0.00 kern 0.19 trap 0.07
+## ns-s-off3: timeline
++    32.7 s  22:07:57  phase launch
++    53.4 s  22:08:18  kernel: [P7] scanout taken res/window 4159 20971570 seq=1
++    53.4 s  22:08:18  kernel: [P7] scanout taken res/window 4162 20971570 seq=2
++   158.4 s  22:10:03  title prompt 'PRESS ... TO CONTINUE' at s009-t000123-pre: sent one Space (#1)
++   178.1 s  22:10:22  main menu reached: running the play script fpsprobe.p9
++   202.6 s  22:10:47  phase loading
++   309.7 s  22:12:34  phase world
++   426.0 s  22:14:30  phase world
+## ns-s-off3: [NTSYNC] rows
+
+## launch -> title prompt / main menu, LOAD GAME -> in the world (host s, timeline.txt)
+ns-s-on1 launch->title 123.7 s, launch->menu 143.3 s, load->world 92.0 s
+ns-s-off1 launch->title 123.8 s, launch->menu 143.4 s, load->world 104.5 s
+ns-s-on2 launch->title 109.6 s, launch->menu 127.6 s, load->world 91.4 s
+ns-s-off2 launch->title 94.2 s, launch->menu 142.8 s, load->world 100.4 s
+ns-s-on3 launch->title 124.5 s, launch->menu 144.6 s, load->world 89.5 s
+ns-s-off3 launch->title 125.7 s, launch->menu 145.4 s, load->world 107.1 s
+
+## the three boots before the prefix was regenerated (stale wave-5 obj/cp-p8/pfx-seeded.img): scanout refused, title never OCR-able
+ns-on1 taken=0 refused=8 == run-p9 run=ns-on1 script=tools/cp/p9/fpsprobe.p9 mem=32768M from=<fresh: pfx-saves.img> xscreen=1280x720 scanout=1 venus=/home/sarah/cp/lanes/ntsync-venus vnc=1 2026-11-17T20:21:13-06:00
+ns-on2 taken=0 refused=8 == run-p9 run=ns-on2 script=tools/cp/p9/fpsprobe.p9 mem=32768M from=<fresh: pfx-saves.img> xscreen=1280x720 scanout=1 venus=/home/sarah/cp/lanes/present-venus vnc=1 2026-11-17T20:35:20-06:00
+ns-off1 taken=0 refused=8 == run-p9 run=ns-off1 script=tools/cp/p9/fpsprobe.p9 mem=32768M from=<fresh: pfx-saves.img> xscreen=1280x720 scanout=1 venus=/home/sarah/cp/lanes/present-venus vnc=1 2026-11-17T20:43:12-06:00

@@ -1,0 +1,56 @@
+# thrstorm (tools/cp/k5/run-thrstorm.sh: 256 Wine threads, 60 s storm of SetEvent + WaitForMultipleObjects
+# + pipe / named-pipe I/O), the same lane kernel with the ntsync Wine and with the stock X Wine, strix.
+# The storm is bounded by the wineserver (named-pipe I/O goes through it either way: 0.71-0.81 of a vCPU).
+
+== first pair, lane kernel a6efd84e: thrstorm ntsync1 (ntsync Wine ~/cp/lanes/ntsync-wine)
+[TS] thrstorm (C1-k5): threads=256 secs=60 pid=32
+[TS] PASS T1 create (threads=256 why=0)
+[TS] PASS T1 start (started=256 toolhelp=257)
+[TS] info startup ms=1118
+[TS] t=60s rounds=821 trips=210176 worst_round_ms=286 threads=257
+[TS] PASS T2 storm (rounds=821 ms=60079)
+[TS] PASS T3 stop (bad=0 first=0)
+[TS] done rc=0
+  [THRW] storm phase (rows with thrstorm.exe in the storm): wineserver / thrstorm.exe means
+    wineserver 16 {'run': 0.72, 'ready': 0.09, 'kern': 0.63, 'trap': 0.21}
+    thrstorm.exe 12 {'run': 0.49, 'ready': 0.9, 'kern': 0.43, 'trap': 0.17}
+[NTSYNC] stats opens=2 sem/mutex/event=7/54/11411 live=2710 max=2800 any/all=197714/0 imm=733 parks=196981 tmo=1 eintr=679 alert=0 dead=0 wakes=196754 set/rel/unl/kill=1774419/3/48/592 skip=0 stale=0
+== thrstorm stock1 (stock X Wine ~/cp/wine-build-x), lane kernel a6efd84e, strix
+[TS] thrstorm (C1-k5): threads=256 secs=60 pid=32
+[TS] PASS T1 create (threads=256 why=0)
+[TS] PASS T1 start (started=256 toolhelp=257)
+[TS] info startup ms=1668
+[TS] t=60s rounds=847 trips=216832 worst_round_ms=100 threads=257
+[TS] PASS T2 storm (rounds=847 ms=60062)
+[TS] PASS T3 stop (bad=0 first=0)
+[TS] done rc=0
+  [THRW] storm phase (rows with thrstorm.exe in the storm): wineserver / thrstorm.exe means
+    wineserver 15 {'run': 0.81, 'ready': 0.06, 'kern': 0.71, 'trap': 0.3}
+    thrstorm.exe 11 {'run': 0.35, 'ready': 0.7, 'kern': 0.29, 'trap': 0.16}
+
+# --- second pair, lane HEAD e779730a (tree ~/cp/lanes/ntsync-dev), same commands ---
+== thrstorm-ntsync
+[TS] thrstorm (C1-k5): threads=256 secs=60 pid=32
+[TS] PASS T1 create (threads=256 why=0)
+[TS] PASS T1 start (started=256 toolhelp=257)
+[TS] info startup ms=497
+[TS] t=60s rounds=973 trips=249088 worst_round_ms=354 threads=257
+[TS] PASS T2 storm (rounds=973 ms=60059)
+[TS] PASS T3 stop (bad=0 first=0)
+[TS] done rc=0
+[K5] end wineboot status=0 ms=11222
+   [THRW] storm-phase mean wineserver rows 16 {'run': 0.71, 'ready': 0.07, 'kern': 0.61, 'trap': 0.2}
+   [THRW] storm-phase mean thrstorm.exe rows 12 {'run': 0.47, 'ready': 0.78, 'kern': 0.41, 'trap': 0.17}
+[NTSYNC] stats calls=1354596 ns/call=978 opens=2 sem/mutex/event=7/54/11410 live=2708 max=2798 any/all=146514/0 imm=735 parks=145779 tmo=1 eintr=687 alert=0 dead=0 wakes=145546 set/rel/unl/kill=1313627/3/48/590 skip=0 stale=0
+== thrstorm-stock
+[TS] thrstorm (C1-k5): threads=256 secs=60 pid=32
+[TS] PASS T1 create (threads=256 why=0)
+[TS] PASS T1 start (started=256 toolhelp=257)
+[TS] info startup ms=968
+[TS] t=60s rounds=781 trips=199936 worst_round_ms=178 threads=257
+[TS] PASS T2 storm (rounds=781 ms=60048)
+[TS] PASS T3 stop (bad=0 first=0)
+[TS] done rc=0
+[K5] end wineboot status=0 ms=15551
+   [THRW] storm-phase mean wineserver rows 17 {'run': 0.71, 'ready': 0.07, 'kern': 0.63, 'trap': 0.26}
+   [THRW] storm-phase mean thrstorm.exe rows 12 {'run': 0.36, 'ready': 0.66, 'kern': 0.31, 'trap': 0.16}
