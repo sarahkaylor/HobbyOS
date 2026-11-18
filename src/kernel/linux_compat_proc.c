@@ -192,6 +192,33 @@ uint64_t linux_compat_samask_get(struct process *p, int sig) {
   return l_samask[slot][sig];
 }
 
+/* H4-kglitch round 2 (H2-F2): a process the kernel creates from scratch
+   (spawn_ex, the wave/XSTART loaders) starts with an empty signal mask, no
+   sigaltstack and no SA_* flag words, as a Linux process started by a parent
+   that blocks nothing does.  These arrays are indexed by pid slot and were
+   never reset there, so the new process inherited the slot's last occupant:
+   a Wine client that died with ntdll's server_block_set (SIGINT included)
+   blocked.  p8launch spawn_ex()es `wine` onto such a slot from a session's
+   5th relaunch on; wine forks the wineserver (fork copies the mask), and
+   that server ignored `wineserver -k`'s SIGINT for 10.5 s until SIGKILL
+   (linux_probe_sigmask via tools/cp/kglitch/sigmask-gate.sh).  fork and
+   clone overwrite all of it afterwards (linux_compat_sig_fork/_clone).
+   Called from process.c's fresh-PCB init for every new slot. */
+void linux_compat_sig_slot_reset(struct process *p);
+void linux_compat_sig_slot_reset(struct process *p) {
+  int cs = l_slot(p);
+  if (cs < 0) return;
+  l_sigmask[cs] = 0;
+  for (int i = 0; i < HO_SIG_MAX; i++) {
+    l_sigflags[cs][i] = 0;
+    l_samask[cs][i] = 0;
+  }
+  l_altstack[cs].ss_sp = 0;
+  l_altstack[cs].ss_size = 0;
+  l_altstack[cs].ss_flags = 0;
+  l_altstack[cs].in_use = 0;
+}
+
 /* C1-thr: a new THREAD (clone CLONE_THREAD) starts with its creator's signal
    mask -- Linux copies `blocked` in copy_process, and glibc 2.31's
    pthread_create relies on it (start_thread sets no mask).  It used to start

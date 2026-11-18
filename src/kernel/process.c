@@ -1614,6 +1614,11 @@ static int process_create_internal_ver(int ver) {
         __attribute__((weak));
     if (linux_compat_thr_slot_reset)
       linux_compat_thr_slot_reset(p);
+    /* H4-kglitch round 2: nor its signal mask, altstack or SA_* flags */
+    extern void linux_compat_sig_slot_reset(struct process *)
+        __attribute__((weak));
+    if (linux_compat_sig_slot_reset)
+      linux_compat_sig_slot_reset(p);
   }
   p->vfork_own_as = 0; /* C1-thr: no borrowed AS, no vfork link */
   p->vfork_parent = 0;
