@@ -1,6 +1,6 @@
 # Cyberpunk 2077 on HobbyOS — the Proton track
 
-Status: **v1 — P0 closed (GO for Venus), wave 1 merged, wave 2 executing.**
+Status: **v7 — Gates P2–P8 passed; P9's functional half (play 10 min, save, reload) passes on Venus, its 30 fps target does not yet; wave 6 merged (integ11), wave 7 executing (§7.2g).**
 Planning + execution document; v0 written 2026-11-14, v1 2026-11-15. **§0.2
 records what P0 and wave 1 measured and is binding where it disagrees with
 older text below.** Every statement about HobbyOS carries a `path:line`; every
@@ -850,9 +850,9 @@ names the Radeon via Venus); fence latency reported. Evidence: screendumps,
 
 ### P7 — Zero-copy presentation (size M)
 
-- [ ] WSI path that presents a swapchain blob with `SET_SCANOUT_BLOB` (AD-6)
-      and hands the screen back to X on exit or focus loss.
-- [ ] Present-cost instrument comparable to RimWorld's `[HBT]` rows
+- [x] WSI path that presents a swapchain blob with `SET_SCANOUT_BLOB` (AD-6)
+      and hands the screen back to X on exit or focus loss. *(C6-p7, `docs/cp-p7.md`)*
+- [x] Present-cost instrument comparable to RimWorld's `[HBT]` rows
       (`docs/l88-fps-report.md`).
 
 **Gate P7:** `vkcube.exe` fullscreen at 1920×1080 runs at the host's refresh
@@ -1189,6 +1189,70 @@ Merge order: C0-console first (every later grade depends on it). Then C1-k6, C6-
 whatever order they go green. Each merge is re-gated on the merged tree with the full batch, P2, P4, P5,
 the Venus P6 rows and one P8 boot on each GPU.
 
+#### Wave 6 results (integ11 = 13dc693b, landed on `cyberpunk` 2026-11-17)
+
+integ11 is `cyberpunk` c0dbe5a2 (C0-console) plus integ9 (C1-k6 rounds 1–2, C6-p7, cp-fork, cp-play round 1), integ10
+(cp-play round 2, cp-ext2w3, cp-p7b docs) and integ11 (cp-k6 9d47b051/ea464119, cp-fat, cp-present), then cp-p7c's
+docs. Batch `strix:~/cp/integ-gates14.txt` (logs `~/cp/integ14/`): every probe passes (57 rows, including the new
+kstack, wfibound, fatren, forkcow, forkva, hrtimer, killgrp, sigfd, rusage, fdrace, ipclat, epserver); ext2_gate,
+ext2w_gate (green for the first time), reg_gate, exec_gate, pfx_gate, NFS guards, castscan, ARM build; P2, P4, P5 ×2,
+P6 Venus, P7 fullscreen, thrstorm, P8 lavapipe ×2 (menu at 262 s and 299 s) and P8 Venus (menu at 200 s). Known reds:
+unit `virtio_gpu_test.c:214/:244`, host 38/40. P5 run #2's one fault line is pre-existing (below).
+
+- **Console (C0-console, `docs/cp-console.md`).** Kernel rows are written whole; diagnostic rows sit behind a knob;
+  graders match rows anywhere in a line. integ10's console probe: 27 927 kernel + 12 807 user rows, 0 torn.
+- **Timers, signals, fds (C1-k6, `docs/cp-k6.md`).** One-shot high-resolution timeouts (p50 error 19–37 µs, was
+  9–10 ms), `clock_nanosleep(TIMER_ABSTIME)`, SIGKILL to a leader-exited group, `signalfd`, `ru_stime`, locked fd
+  installs, the `[FRAME-DFREE]` tripwire. Round 2 cut READY-but-unscheduled threads from 1.0–1.8 to 0.24.
+  **kstack race:** a preempted task was marked READY while its CPU was still on its stack; fixed with
+  `cpu_locals.kstack_pin` (probe `linux_probe_kstack`). **Lost wakeup (stop P9-8):** an AP's only tick is CPU 0's
+  broadcast, which stops while CPU 0 spins with IF=0; `safe_wfi` now arms a ≤1 ms one-shot first (9d47b051, probe
+  `linux_probe_wfibound`), and `blk_token` release wakes user waiters (cp-fat f1cb959e).
+- **Zero-copy present (C6-p7, Gate P7 PASS, `docs/cp-p7.md`).** `SET_SCANOUT_BLOB` flips for fullscreen
+  swapchains with X hand-back; `VK_KHR_present_wait` and Venus async present are back (the async-present fault was
+  root-caused). vkcube.exe fullscreen 1920×1080 93 fps (put_image 37); there is no host refresh rate to reach
+  (monitor off, egl-headless), and each flip costs 6.1 ms of QEMU readback.
+- **Fork (cp-fork, `docs/cp-fork.md`).** `vm_as_clone_into` walks only what is mapped: the crash reporter's
+  CreateProcess drops from 16.5–17.6 s to 0.1 s and stop P9-1 (the game's own early exit) is gone (0 in 11 boots).
+- **FAT (cp-fat).** Rename fixes for fontconfig's cache (`linux_probe_fatren`, unit
+  `test_fat16_rename_fontconfig_cache`), `[BLKTOK]`/`[FAT-LEAK]` rows, and the P9-8 root cause above.
+- **ext2 write grading (cp-ext2w3, `docs/cp-ext2w.md`).** reg_gate grades WEDGE / stack smash / QUARANTINE;
+  HMP register dumps when the serial goes silent.
+- **P9 (C9-play, `docs/cp-p9.md`).** Load ManualSave-86, 10.5 min of scripted play, F5, quit, reboot, reload to
+  the identical position: **pass** on Venus. The game's 1280×720 window now fills a 1280×720 X screen
+  (`HB_SCREEN_SIZE`) and every frame is a blob flip. **World fps 19–33 median (p10 12–21) across integ9–integ10
+  boots; target 30 not reliably met.** Menus 90–110 fps.
+- **Where the frame goes (C6-present, `docs/cp-present.md`).** The frame is CPU/kernel-bound in the guest, not
+  present- or host-bound: the host GPU is 23–30 % busy; two game threads run 60–90 % of a vCPU with 11–25 % of
+  their time in the kernel; wineserver uses 40–56 % of a vCPU, ~95 % of it in the kernel. Venus ioctls are now
+  11–12 µs (posted unfenced SUBMIT2, `ioeventfd=on`), fps-neutral within the ±5 fps boot-to-boot spread.
+- **P5 run #2's fault line (C6-p7c, `docs/cp-p7c-evidence/p5-services-quit-handler-fault.txt`).**
+  `services.exe` NULL+0x3A8 in Wine's unix-side `quit_handler`: wineserver SIGQUITs a thread that is already in
+  glibc's exit path (TEB key destroyed). Wine's own race; ~0.7 % of boots since 2026-11-16, also on trees without
+  wave-6 kernel code. Fix in Wine (wave 7 crash hunt).
+- **Open items carried into wave 7:** the 30 fps world target and the 1920×1080 Low column; Wine sync through
+  wineserver; the P8 lavapipe early exit (1 of 3 on integ10, 0 of 2 on integ11); Wine's `quit_handler` race;
+  `make host_tests` leaves `EDITOR.BIN_host` processes running; audio (AD-9); the §8.3 regression rows.
+
+### 7.2g Wave 7 (v7, 2026-11-17) — the 30 fps target, audio, regressions, then a crash hunt
+
+Wave 7 starts from integ11 (13dc693b). Parity reference: the integ11 batch above. On 2026-11-17 the user approved
+the alsa-lib 1.2.14 download (sha256 `be9c88a0…7a32`, signature verified against the ALSA release key
+F04DF50737AC1A884C4B3D718380596DA6E59C91, at `strix:~/cp/lanes/audio-dl/`) and the deletion of the merged wave 1–5
+lane trees on strix (the disk was at 97 %). Once the main plan closes, the user asked for a broad testing wave to
+find and fix every crash and glitch.
+
+| Lane | Scope | Owns | Must not touch |
+|---|---|---|---|
+| **C1-k7** | Per-call syscall/trap entry and exit cost vs Linux on strix; why wineserver spends ~95 % of its CPU in the kernel; optionally per-CPU run queues. fpsprobe A/B, ≥3 boots per arm | x86_64 syscall/trap entry, scheduler, `process.c` | ntsync, GPU files |
+| **C2-ntsync** | `/dev/ntsync` in the compat layer (probe vs Linux's selftest expectations), Wine 11 rebuilt with ntsync into `~/cp/lanes/ntsync-wine`, fps A/B | futex/sync paths, new ntsync files, its Wine build | entry/scheduler (C1-k7) |
+| **C4-audio** | AD-9: virtio-sound driver, ALSA kernel ABI subset (`/dev/snd/*`), alsa-lib 1.2.14 on the 2.31 sysroot, Wine with `winealsa.drv`, a WASAPI tone test, the menu's music into a host WAV (never a host audio device), fps cost of audio | new `virtio_snd*`/`linux_snd*`, `tools/cp/audio/`, opt-in hooks in the harnesses and `build-wine.sh` | entry/scheduler, sync, MMU, NFS |
+| **C10-regress** | §8.3's regression rows: Doom ELF, RimWorld (menu and main's colony battery), the IceWM desktop GUI tests, ARM64 boot and unit image, host tests; bisect and fix what Cyberpunk-era commits broke | fixes in files no running lane owns, `docs/cp-regress*` | running lanes' files |
+
+Merge order: whichever goes green first; C1-k7 and C2-ntsync are re-measured together on the merged tree (fpsprobe ≥3
+boots, plus one 1920×1080 Low run) before the 30 fps verdict. C2-ntsync's and C4-audio's Wine changes are combined
+into one Wine build at integration.
+
 ### 7.3 Frozen interfaces (binding)
 
 | # | Interface | Owner (sole writer) | Change protocol |
@@ -1277,11 +1341,12 @@ the Venus P6 rows and one P8 boot on each GPU.
       the new MMU.
 - [x] `wine cmd /c echo` and `winprobe.exe` pass; prefix persists on ext2. *(Gates P2, P3)*
 - [x] `winecfg` in IceWM; raw mouse deltas reach a Windows program. *(Gate P4)*
-- [ ] `vkcube.exe` and the D3D12 triangle on lavapipe and on Venus. *(lavapipe done, Gate P5; Venus is P6)*
-- [ ] Fullscreen scanout present measured.
-- [ ] Cyberpunk main menu screendump, OCR-confirmed.
+- [x] `vkcube.exe` and the D3D12 triangle on lavapipe and on Venus. *(Gates P5, P6)*
+- [x] Fullscreen scanout present measured. *(Gate P7: vkcube.exe 93 fps at 1920×1080, flip 6.3 ms; `docs/cp-p7.md` §1)*
+- [x] Cyberpunk main menu screendump, OCR-confirmed. *(Gate P8, lavapipe and Venus)*
 - [ ] 10 minutes played from a host save; save/reload; fps against both
-      baselines.
+      baselines. *(play/save/reload pass on Venus, `docs/cp-p9.md`; the 30 fps
+      target and the 1920×1080 Low column are open, wave 7)*
 - [ ] `git status` clean of game artifacts; ARM build still compiles.
 
 ### 8.4 Evidence standards
