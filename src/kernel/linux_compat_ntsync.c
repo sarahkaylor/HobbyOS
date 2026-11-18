@@ -121,6 +121,7 @@ struct ns_q {
   uint32_t req;      /* WAIT_ANY_K / WAIT_ALL_K */
   uint64_t uargs;    /* the user args pointer of this call */
   uint64_t deadline_us; /* timer_get_us() base; 0 = none */
+  uint64_t since_ms;    /* when this wait was queued (diagnostics) */
   struct ns_entry ent[NTSYNC_MAX_WAIT_COUNT_K + 1];
 };
 _Static_assert(sizeof(struct ns_q) <= 4096, "ns_q must fit one frame");
@@ -426,6 +427,95 @@ static void ns_row_stats(const char *why) {
   kl_emit(&kl);
 }
 
+/* The waiters queued for 5 s or more, with their objects' states, and every
+   queued waiter that is satisfiable right now ("LOSTWAKE": a grant that
+   should have happened did not -- a driver bug if it ever prints). */
+#define NS_DUMP_ROWS 10
+static int ns_dump_long; /* 1: also list waiters queued >= 5 s (debugging) */
+static void ns_dump_waiters(void) {
+  struct {
+    int pid;
+    uint32_t owner, count, all, age_s, sat, n;
+    int64_t left_ms;
+    uint8_t ty[6];
+    uint32_t a[6], b[6], od[6];
+  } d[NS_DUMP_ROWS];
+  int nd = 0, nlong = 0, nsat = 0;
+  uint64_t now_ms = timer_get_ms(), now_us = timer_get_us();
+  uint64_t fl = spinlock_acquire_irqsave(&ns_lock);
+  for (int pid = 1; pid < MAX_PROCESSES; pid++) {
+    struct ns_q *q = ns_qs[pid];
+    if (!q || !q->active || q->signaled != -1) continue;
+    uint32_t sat = 0;
+    if (q->all) {
+      sat = q->count > 0;
+      for (uint32_t i = 0; i < q->count; i++)
+        if (!ns_is_signaled(q->ent[i].obj, q->owner)) sat = 0;
+    }
+    for (uint32_t i = q->all ? q->count : 0; i < q->total && !sat; i++)
+      if (ns_is_signaled(q->ent[i].obj, q->owner)) sat = 1;
+    if (sat && ns_q_alive(q)) nsat++;
+    int lng = now_ms - q->since_ms >= 5000;
+    if (lng) nlong++;
+    /* the satisfiable ones always; the long ones only on request (a
+       Wine prefix has dozens of idle service threads parked for ever) */
+    if ((!sat && !(lng && ns_dump_long)) || nd >= NS_DUMP_ROWS) continue;
+    d[nd].pid = pid;
+    d[nd].owner = q->owner;
+    d[nd].count = q->count;
+    d[nd].all = q->all | (q->total > q->count ? 2 : 0);
+    d[nd].age_s = (uint32_t)((now_ms - q->since_ms) / 1000);
+    d[nd].sat = sat;
+    d[nd].left_ms = q->deadline_us ? (int64_t)(q->deadline_us - now_us) / 1000 : -1;
+    d[nd].n = q->total < 6 ? q->total : 6;
+    for (uint32_t i = 0; i < d[nd].n; i++) {
+      struct ns_obj *o = q->ent[i].obj;
+      d[nd].ty[i] = (uint8_t)o->type;
+      d[nd].a[i] = o->a;
+      d[nd].b[i] = o->b;
+      d[nd].od[i] = o->ownerdead;
+    }
+    nd++;
+  }
+  spinlock_release_irqrestore(&ns_lock, fl);
+  for (int k = 0; k < nd; k++) {
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, d[k].sat ? "[NTSYNC] LOSTWAKE pid=" : "[NTSYNC] waiter pid=");
+    kl_i(&kl, d[k].pid);
+    kl_s(&kl, " owner=");
+    kl_hex(&kl, d[k].owner);
+    kl_s(&kl, d[k].all & 1 ? " ALL n=" : " ANY n=");
+    kl_i(&kl, (long)d[k].count);
+    if (d[k].all & 2) kl_s(&kl, "+alert");
+    kl_s(&kl, " age_s=");
+    kl_i(&kl, (long)d[k].age_s);
+    kl_s(&kl, " left_ms=");
+    kl_i(&kl, (long)d[k].left_ms);
+    for (uint32_t i = 0; i < d[k].n; i++) {
+      kl_c(&kl, ' ');
+      kl_c(&kl, d[k].ty[i] == NS_SEM ? 'S' : d[k].ty[i] == NS_MUTEX ? 'M' : d[k].ty[i] == NS_EVENT ? 'E' : '?');
+      kl_i(&kl, (long)d[k].a[i]);
+      kl_c(&kl, '/');
+      if (d[k].ty[i] == NS_MUTEX) kl_hex(&kl, d[k].b[i]);
+      else kl_i(&kl, (long)d[k].b[i]);
+      if (d[k].od[i]) kl_c(&kl, '!');
+    }
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+  }
+  if (nlong || nsat) {
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[NTSYNC] waiters long=");
+    kl_i(&kl, nlong);
+    kl_s(&kl, " satisfiable=");
+    kl_i(&kl, nsat);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+  }
+}
+
 /* At most one stats row every 30 s, from the ioctl path itself. */
 static void ns_maybe_row(void) {
   uint64_t now = timer_get_ms();
@@ -435,6 +525,7 @@ static void ns_maybe_row(void) {
                                    __ATOMIC_RELAXED, __ATOMIC_RELAXED))
     return;
   ns_row_stats("stats");
+  ns_dump_waiters();
 }
 
 /* ---- the device file ----------------------------------------------------- */
@@ -636,6 +727,7 @@ static int ns_wait(struct process *p, struct trap_frame *tf, struct ns_obj *dev,
     q->req = req;
     q->uargs = arg;
     q->deadline_us = ns_deadline_us(args.timeout, args.flags);
+    q->since_ms = timer_get_ms();
     q->active = 1;
     /* queue, then the initial try-wake (Linux ntsync_wait_any/_all) */
     for (uint32_t i = 0; i < total; i++) {
