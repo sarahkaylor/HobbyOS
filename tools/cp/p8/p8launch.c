@@ -21,6 +21,18 @@
  *   with a census row every P8_CENSUS_S seconds until the game exits or
  *   P8_GAME_S pass; then wineserver -k, sync, done.
  *
+ * -DP8_LAUNCHES=N (N > 1; lane H2-early, docs/cp-early.md): the repro loop for
+ *   the early exit.  N times: keepalive + warm-up (+ caps), launch the game,
+ *   wait for it to exit ("[P8] end launch <i> ... early-exit") or to be still
+ *   alive P8_AFTER_REP_MS after REDEngineErrorReporter appeared (or at
+ *   P8_LAUNCH_WAIT_S: "... survived"), SIGKILL it, wineserver -k, quiesce.
+ *   -DP8_REPRO_KEEP=1 keeps the wineserver session: only the game,
+ *   the reporter and conhost are SIGKILLed between launches.  Then "[P8] repro early=<k> n=<N>", sync, done.
+ *   No "[P8] begin game" row, so boot_p8.py takes no screendumps; its verdict
+ *   is "repro" (tools/cp/p8/p8grade.py).  -DP8_RELAY='"ntdll.Nt...;..."' first
+ *   writes HKCU\Software\Wine\Debug RelayInclude (with WINEDEBUG=-all) so a
+ *   WINEDEBUG with +relay traces only those functions.
+ *
  * Every step is bracketed by "[P8] begin <tag>" / "[P8] end <tag> status=<n>
  * ms=<n>" (the children inherit the console, so Wine/vkd3d/DXVK rows land
  * between the brackets in the serial log, behind XSESSION's "[X] " prefix).
@@ -59,6 +71,18 @@
 #endif
 #ifndef P8_FD_CAP          /* opens p8fdcount may try at each census */
 #define P8_FD_CAP 24
+#endif
+#ifndef P8_LAUNCHES
+#define P8_LAUNCHES 1
+#endif
+#ifndef P8_LAUNCH_WAIT_S   /* repro loop: a game alive this long has passed the early-exit window */
+#define P8_LAUNCH_WAIT_S 60
+#endif
+#ifndef P8_AFTER_REP_MS    /* repro loop: ... or alive this long after REDEngineErrorReporter appeared */
+#define P8_AFTER_REP_MS 10000
+#endif
+#ifndef P8_REPRO_KEEP      /* repro loop: 1 = relaunch in the same wineserver session */
+#define P8_REPRO_KEEP 0
 #endif
 #define P8_STR_(x) #x
 #define P8_STR(x) P8_STR_(x)
@@ -259,6 +283,143 @@ static __attribute__((unused)) void sync_now(void) {
   if (run("sync", "/PFXSYNC.ELF", a_sync, 120) == 0) pc("[P8] sync done\n");
 }
 
+/* Session warm-up (winep5.c, C4-x2's finding) + the D3D12 caps probe: the
+   keepalive's wineserver first, then winprobe until the display driver loads. */
+static int keep_pid = -1;
+
+static __attribute__((unused)) void session_up(void) {
+  char *a_idle[] = { (char *)"wine", (char *)"Z:\\CP\\P5\\VK\\vkcube.exe", (char *)"--idle",
+                     (char *)"86400", 0 };
+  pc("[P8] begin keepalive (background) :");
+  for (int i = 0; a_idle[i]; i++) { pc(" "); pc(a_idle[i]); }
+  pc("\n");
+  int keep = spawn_ex("/CP/WINE/bin/wine", a_idle, envp, 0, 0);
+  keep_pid = keep;
+  pc("[P8] keepalive pid="); pd(keep); pc("\n");
+  /* Let the keepalive's wineserver come up alone before the first winprobe
+     (docs/cp-p8.md stop 6): run5 started both at once, three wineservers
+     raced for the ext2 prefix, and the kernel wedged on ext2_lock vs a file
+     lock ([YLOCK-WEDGE] site=ext2_lock). */
+  usleep(P8_KEEPALIVE_HEAD_MS * 1000);
+  int warm = 0;
+  for (int t = 1; t <= P8_WARM_TRIES && !warm; t++) {
+    char tag[16] = "winprobe";
+    tag[8] = (char)('0' + t / 10); tag[9] = (char)('0' + t % 10); tag[10] = 0;
+    char *a_wp[] = { (char *)"wine", (char *)"Z:\\CP\\P5\\VK\\vkcube.exe", (char *)"--winprobe", 0 };
+    if (run(tag, "/CP/WINE/bin/wine", a_wp, 300) == 0) warm = 1;
+    else usleep(5000000);
+  }
+  pc(warm ? "[P8] warm-up: display driver loaded\n" : "[P8] warm-up: FAILED (null driver after all tries)\n");
+
+#ifndef P8_NO_CAPS
+  /* src/user/cp/p8d3d12caps.c: what the D3D12 stack offers, before the game */
+  char *a_caps[] = { (char *)"wine", (char *)"Z:\\CP\\P8\\p8caps.exe", 0 };
+  run("d3d12caps", "/CP/WINE/bin/wine", a_caps, 300);
+#endif
+
+}
+
+#if P8_PHASE == 2 && P8_LAUNCHES > 1
+/* -DP8_LAUNCHES=N: the early-exit repro loop (header comment). */
+static int find_proc(const char *name, int skip_pid) {
+  int m = sysinfo(3, tmp, (int)sizeof tmp);
+  for (int i = 0; i < m; i++) {
+    if (tmp[i].pid == skip_pid || tmp[i].state == 4 /* EXITED */ || tmp[i].state == 9) continue;
+    const char *a = tmp[i].name, *b = name;
+    while (*a && *a == *b) { a++; b++; }
+    if (*b == 0) return tmp[i].pid;       /* prefix match: comm is 15 chars */
+  }
+  return 0;
+}
+
+static void kill_by_name(const char *name) {
+  for (int k = 0; k < 8; k++) {
+    int p = find_proc(name, 0);
+    if (!p) return;
+    pc("[P8] SIGKILL "); pc(name); pc("/"); pd(p); pc("\n");
+    kill(p, 9);
+    usleep(300000);
+  }
+}
+
+/* After wineserver -k + quiesce: reap the keepalive and SIGKILL whatever the
+   before-census lacks and is still alive (r1-lvp-fresh12: from the 5th
+   relaunch on, every session's services/winedevice/plugplay/svchost/
+   explorer/rpcss/vkcube stayed blocked after wineserver -k), so each launch
+   starts from the same process table. */
+static void sweep(void) {
+  int st;
+  if (keep_pid > 0) { waitpid(keep_pid, &st, 1 /* WNOHANG */); keep_pid = -1; }
+  int m = sysinfo(3, tmp, (int)sizeof tmp), n = 0;
+  for (int i = 0; i < m; i++) {
+    int seen = 0;
+    for (int j = 0; j < nbefore; j++) if (before[j].pid == tmp[i].pid) seen = 1;
+    if (seen || tmp[i].pid == getpid() || tmp[i].state == 4 || tmp[i].state == 9) continue;
+    if (!n) pc("[P8] sweep: SIGKILL left after wineserver -k:");
+    pc(" "); pc(tmp[i].name); pc("/"); pd(tmp[i].pid); pc(":s"); pd(tmp[i].state);
+    kill(tmp[i].pid, 9);
+    n++;
+  }
+  if (n) { pc("\n"); usleep(2000000); quiesce("sweep", 30); }
+}
+
+static void repro_loop(void) {
+  int early = 0;
+  char *a_game[] = { (char *)"wine", (char *)GAME_EXE, (char *)P8_GAME_ARGS, 0 };
+  char *a_k[] = { (char *)"wineserver", (char *)"-k", 0 };
+  for (int i = 1; i <= P8_LAUNCHES; i++) {
+    if (i > 1 && !P8_REPRO_KEEP) session_up();
+    int cr = chdir(GAME_DIR);
+    pc("[P8] begin launch "); pd(i); pc("/"); pd(P8_LAUNCHES); pc(" : wine " GAME_EXE " " P8_GAME_ARGS " chdir rc="); pd(cr);
+    pc(P8_REPRO_KEEP && i > 1 ? " session=kept\n" : " session=fresh\n");
+    uint64_t t0 = now_ms(), rep_t = 0;
+    int pid = spawn_ex("/CP/WINE/bin/wine", a_game, envp, 0, 0);
+    int status = -1, wp = 0;
+    if (pid < 0) {
+      pc("[P8] end launch "); pd(i); pc(" spawn-failed errno="); pd(errno); pc("\n");
+    } else {
+      /* survived = alive P8_AFTER_REP_MS after REDEngineErrorReporter appeared
+         (every early exit so far came < 1 s after it), or at P8_LAUNCH_WAIT_S */
+      while (now_ms() - t0 < (uint64_t)P8_LAUNCH_WAIT_S * 1000) {
+        wp = waitpid(pid, &status, 1 /* WNOHANG */);
+        if (wp != 0) break;
+        if (!rep_t && find_proc("REDEngineErrorR", 0)) {
+          rep_t = now_ms();
+          pc("[P8] launch "); pd(i); pc(" reporter seen at ms="); pd((long)(rep_t - t0)); pc("\n");
+        }
+        if (rep_t && now_ms() - rep_t > P8_AFTER_REP_MS) break;
+        usleep(50000);
+      }
+      if (wp != 0) {
+        early++;
+        pc("[P8] end launch "); pd(i); pc(" status="); pd(status); pc(" ms="); pd((long)(now_ms() - t0));
+        pc(" -> early-exit\n");
+        census("after-early-exit", t0);
+      } else {
+        pc("[P8] end launch "); pd(i); pc(" alive at "); pd((long)((now_ms() - t0) / 1000)); pc(" s -> survived\n");
+        census("survived", t0);
+        kill_reap(pid, &status);
+      }
+    }
+    if (P8_REPRO_KEEP) {
+      /* the same wineserver session for the next launch: only the game's tree goes */
+      kill_by_name("Cyberpunk2077.e");
+      kill_by_name("REDEngineErrorR");
+      kill_by_name("conhost.exe");
+      usleep(3000000);
+      census("after-kill", t0);
+    } else {
+      run("kill", "/CP/WINE/bin/wineserver", a_k, 60);
+      quiesce("kill", 60);
+      sweep();
+    }
+    pc("[P8] repro so far early="); pd(early); pc(" n="); pd(i); pc("\n");
+  }
+  if (P8_REPRO_KEEP) { run("kill", "/CP/WINE/bin/wineserver", a_k, 60); quiesce("kill", 60); }
+  pc("[P8] repro early="); pd(early); pc(" n="); pd(P8_LAUNCHES); pc("\n");
+}
+#endif
+
 int main(void) {
   pc("[P8] p8launch (C8-game) phase " );
   pd(P8_PHASE);
@@ -335,39 +496,30 @@ int main(void) {
 #else
   if (do_mount(P8_GAME_EXPORT, GMNT) != 0) { pc("[P8] done\n"); return 2; }
 
-  /* Session warm-up (winep5.c, C4-x2's finding). */
-  char *a_idle[] = { (char *)"wine", (char *)"Z:\\CP\\P5\\VK\\vkcube.exe", (char *)"--idle",
-                     (char *)"86400", 0 };
-  pc("[P8] begin keepalive (background) :");
-  for (int i = 0; a_idle[i]; i++) { pc(" "); pc(a_idle[i]); }
-  pc("\n");
-  int keep = spawn_ex("/CP/WINE/bin/wine", a_idle, envp, 0, 0);
-  pc("[P8] keepalive pid="); pd(keep); pc("\n");
-  /* Let the keepalive's wineserver come up alone before the first winprobe
-     (docs/cp-p8.md stop 6): run5 started both at once, three wineservers
-     raced for the ext2 prefix, and the kernel wedged on ext2_lock vs a file
-     lock ([YLOCK-WEDGE] site=ext2_lock). */
-  usleep(P8_KEEPALIVE_HEAD_MS * 1000);
-  int warm = 0;
-  for (int t = 1; t <= P8_WARM_TRIES && !warm; t++) {
-    char tag[16] = "winprobe";
-    tag[8] = (char)('0' + t / 10); tag[9] = (char)('0' + t % 10); tag[10] = 0;
-    char *a_wp[] = { (char *)"wine", (char *)"Z:\\CP\\P5\\VK\\vkcube.exe", (char *)"--winprobe", 0 };
-    if (run(tag, "/CP/WINE/bin/wine", a_wp, 300) == 0) warm = 1;
-    else usleep(5000000);
+#ifdef P8_RELAY
+  {
+    /* before any +relay process starts: only the RelayInclude functions get traced */
+    char *wd = envp[4];
+    envp[4] = (char *)"WINEDEBUG=-all";
+    char *a_rl[] = { (char *)"wine", (char *)"reg", (char *)"add", (char *)"HKCU\\Software\\Wine\\Debug",
+                     (char *)"/v", (char *)"RelayInclude", (char *)"/t", (char *)"REG_SZ",
+                     (char *)"/d", (char *)P8_RELAY, (char *)"/f", 0 };
+    run("reg-relay", "/CP/WINE/bin/wine", a_rl, 300);
+    envp[4] = wd;
   }
-  pc(warm ? "[P8] warm-up: display driver loaded\n" : "[P8] warm-up: FAILED (null driver after all tries)\n");
-
-#ifndef P8_NO_CAPS
-  /* src/user/cp/p8d3d12caps.c: what the D3D12 stack offers, before the game */
-  char *a_caps[] = { (char *)"wine", (char *)"Z:\\CP\\P8\\p8caps.exe", 0 };
-  run("d3d12caps", "/CP/WINE/bin/wine", a_caps, 300);
 #endif
+  session_up();
 
 #ifdef P8_CAPS_ONLY
   pc("[P8] P8_CAPS_ONLY: no game this boot\n");
   char *a_k0[] = { (char *)"wineserver", (char *)"-k", 0 };
   run("kill", "/CP/WINE/bin/wineserver", a_k0, 60);
+  pc("[P8] done\n");
+  return 0;
+#endif
+#if P8_LAUNCHES > 1
+  repro_loop();
+  sync_now();
   pc("[P8] done\n");
   return 0;
 #endif
