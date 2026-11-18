@@ -13,3 +13,16 @@ QuickSave-0      name=QuickSave-0 time=14:15:52, 18.11.2026 playTime=4703.3 pos=
 QuickSave-0      name=QuickSave-0 time=14:15:52, 18.11.2026 playTime=4703.3 pos=(-1451.42, 1214.90, 23.06)
 QuickSave-1      name=QuickSave-1 time=14:33:37, 18.11.2026 playTime=4731.1 pos=(-1451.42, 1214.90, 23.06)
 # QuickSave-1 was written by F5 right after the reload, without moving: same playerPosition as h2-play1's QuickSave-0 -> the reload put the player where boot A saved.
+
+## round 2, h2-rl2 (reload2.p9 = CONTINUE from the FRESH main menu, on h2-play2's disk): fails too
+[P9W] focus s014-t000151-menu-continue0: no highlighted row
+[P9W] focus s015-t000153-menu-continue1: rows 489..524 centre 506 -> NEW GAME
+[P9W] focus s016-t000155-menu-continue2: rows 451..555 centre 503 -> NEW GAME
+[P9W] focus s017-t000156-menu-continue3: no highlighted row
+[P9W] focus s018-t000159-menu-continue4: no highlighted row
+[P9W] focus s019-t000160-menu-continue5: no highlighted row
+[P9W] focus s020-t000163-menu-continue6: no highlighted row
+[P9W] +   186.7 s  09:43:38  SEEK FAILED menu-continue: main menu row 'CONTINUE' not focused after 6 x up
+# the reading after the 2nd Up is one 104 px frame (rows 451..555: CONTINUE and NEW GAME together; a normal frame is 35-37 px) -> the highlight was caught moving; focus_in() labels it NEW GAME by its centre, seek taps Up again and the focus overshoots CONTINUE onto the frameless button above it; the further Ups find nothing.
+# round 1 h-rl1b had the same shape (rows 524..578, 54 px, then nothing); h2-rl1 (pass) read a normal 37 px CONTINUE frame. So H1-12's reload failures are a focus read during the highlight's move plus a tap too many, not lost keys.
+# workaround in reload2.p9 (from h2-rl2b on): keytiming 200 1600 around the seek (1.6 s settle after each tap instead of 0.8 s).
