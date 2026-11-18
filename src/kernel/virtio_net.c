@@ -4,6 +4,12 @@
 #include "arch/cpu.h"
 #include "kmem.h"
 
+/* H7-fault (docs/cp-fault.md §3): RX backlog and TX ring counters for the
+   NFS stall rows; defined on both arches (nfs.c prints them), counted by the
+   x86_64 PCI driver below. */
+volatile uint32_t virtio_net_rx_backlog_max, virtio_net_rx_ring_full;
+volatile uint32_t virtio_net_tx_waits, virtio_net_tx_drops, virtio_net_tx_wait_max_us;
+
 #ifdef __x86_64__
 #define NUM_RX_BUFFERS 512
 #else
@@ -340,6 +346,11 @@ int virtio_net_init(void) {
   return 0;
 }
 
+/* H7-fault (docs/cp-fault.md §3): sends that found all NUM_TX_SLOTS in
+   flight (the device -- QEMU's main loop for a user netdev -- had not taken
+   the last 16 frames), sends dropped after the bounded spin, and the longest
+   wait.  net_socket_send's UDP path ignores the drop, so an NFS READ that is
+   dropped here is a reply that never comes. */
 int virtio_net_send(const void *buf, uint32_t len) {
   /*
   uart_puts("[VIRTIO_NET] Sending packet, len=");
@@ -363,14 +374,24 @@ int virtio_net_send(const void *buf, uint32_t len) {
   uint16_t in_flight = tx_submit_idx - tx_ack_used_idx;
   if (in_flight >= NUM_TX_SLOTS) {
     // All slots in-flight — spin briefly for device to consume one.
+    extern uint64_t timer_get_us(void);
+    uint64_t tw0 = timer_get_us();
+    virtio_net_tx_waits++;
     int spin = 0;
     while (*(volatile uint16_t*)&tx_vq.used.idx == tx_ack_used_idx) {
       __asm__ volatile("pause");
       if (++spin > 100000) {
         // Timeout — drop the packet rather than hang.
+        virtio_net_tx_drops++;
+        uint32_t w = (uint32_t)(timer_get_us() - tw0);
+        if (w > virtio_net_tx_wait_max_us) virtio_net_tx_wait_max_us = w;
         spinlock_release_irqrestore(&net_tx_lock, flags);
         return -1;
       }
+    }
+    {
+      uint32_t w = (uint32_t)(timer_get_us() - tw0);
+      if (w > virtio_net_tx_wait_max_us) virtio_net_tx_wait_max_us = w;
     }
     tx_ack_used_idx = *(volatile uint16_t*)&tx_vq.used.idx;
   }
@@ -432,7 +453,6 @@ volatile int virtio_net_provider_active = 0;
 /* H7-fault: the deepest RX backlog a processing pass found (entries filled
    by the device and not yet processed), and how often it reached every
    posted buffer (the device had nowhere to put the next frame). */
-volatile uint32_t virtio_net_rx_backlog_max, virtio_net_rx_ring_full;
 static void virtio_net_rx_note_backlog(void) {
   uint32_t pend = (uint16_t)(*rx_used_idx - rx_ack_used_idx);
   if (pend > virtio_net_rx_backlog_max) virtio_net_rx_backlog_max = pend;

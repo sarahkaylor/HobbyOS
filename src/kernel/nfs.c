@@ -300,6 +300,7 @@ void nfs_perf_dump(const char *why) {
     /* H7-fault: the READ round-trip histogram and the stall forensics
        counters (docs/cp-fault.md §3) */
     extern volatile uint32_t virtio_net_rx_backlog_max, virtio_net_rx_ring_full;
+    extern volatile uint32_t virtio_net_tx_waits, virtio_net_tx_drops, virtio_net_tx_wait_max_us;
     struct kline kl;
     kl_init(&kl);
     kl_s(&kl, "[NFSRTH] rtt=");
@@ -324,6 +325,12 @@ void nfs_perf_dump(const char *why) {
     kl_i(&kl, (long)virtio_net_rx_backlog_max);
     kl_s(&kl, " rxq_full=");
     kl_i(&kl, (long)virtio_net_rx_ring_full);
+    kl_s(&kl, " txq_wait=");
+    kl_i(&kl, (long)virtio_net_tx_waits);
+    kl_s(&kl, " txq_drop=");
+    kl_i(&kl, (long)virtio_net_tx_drops);
+    kl_s(&kl, " txq_wmax_us=");
+    kl_i(&kl, (long)virtio_net_tx_wait_max_us);
     kl_c(&kl, '\n');
     kl_emit(&kl);
   }
@@ -1761,7 +1768,8 @@ static int nfs_read_serial_into(const struct nfs_mount *m, const struct nfs_fh *
  * end of the pipeline, printed as
  *   [NFSRS] off= want= age_ms= inflight= sys_kib= resend_ms= late_ms=
  *           iters= gap_max_us= pend= rxpk= frags+= ipr_to+= stale= stalls=
- *           ipr=collecting/have/age_ms last=type/frag/len/age_ms at=
+ *           ipr=collecting/have/age_ms last=type/frag/len/age_ms
+ *           txdrop+= txwait+= at=
  * age_ms: since the stalled READ's first send; resend_ms / late_ms: after
  * the timeout, when the re-sent READ's reply / the ORIGINAL reply arrived
  * (-1: not during this pipeline); iters, gap_max_us, pend, rxpk: the timed-
@@ -1784,6 +1792,7 @@ struct nfs_rs {
   uint32_t retired[NFS_READ_DEPTH]; /* first-send xids of re-sent slots */
   uint32_t ipr_n, ipr_have, ipr_age;  /* reassembly at the timeout */
   uint32_t last_type, last_frag, last_len, last_age;  /* last RX frame */
+  uint32_t txd0, txw0;  /* virtio-net TX drops / full-ring waits at pipeline start */
 };
 static void nfs_rs_emit(const struct nfs_rs *r) {
   extern volatile uint32_t ipr_frags, ipr_drop_timeout;
@@ -1835,6 +1844,13 @@ static void nfs_rs_emit(const struct nfs_rs *r) {
   kl_i(&kl, (long)r->last_len);
   kl_c(&kl, '/');
   kl_i(&kl, (long)r->last_age);
+  {
+    extern volatile uint32_t virtio_net_tx_waits, virtio_net_tx_drops;
+    kl_s(&kl, " txdrop+=");
+    kl_i(&kl, (long)(virtio_net_tx_drops - r->txd0));
+    kl_s(&kl, " txwait+=");
+    kl_i(&kl, (long)(virtio_net_tx_waits - r->txw0));
+  }
   kl_s(&kl, " at=");
   kl_i(&kl, (long)(r->t_stall / 1000));
   kl_c(&kl, '\n');
@@ -1847,6 +1863,11 @@ static int nfs_read_pipe(const struct nfs_mount *m, const struct nfs_fh *fh,
   struct nfs_mount *mw = (struct nfs_mount *)m;
   struct nfs_rs rsr;
   rsr.on = 0;
+  {
+    extern volatile uint32_t virtio_net_tx_waits, virtio_net_tx_drops;
+    rsr.txd0 = virtio_net_tx_drops;
+    rsr.txw0 = virtio_net_tx_waits;
+  }
   struct net_wait_st wst;
   if (eof_out) *eof_out = 0;
   uint8_t *rbuf = nfs_rbig_get(); /* cp/nfs: one reply datagram, off the stack */
