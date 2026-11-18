@@ -176,16 +176,109 @@ hw S16, default FLOAT_LE, default 44100 Hz (resampled): all PASS, 1.0 s of
 tone each.
 
 **Status mmap.**  Refused; alsa-lib's fallback is SYNC_PTR (§3).  Counted in
-the guest: alsatone (1.5 s, 1200-frame periods) issued FILL SYNC_PTRs.
+the guest: alsatone (1.5 s through `default`, 1200-frame periods) issued 364
+SYNC_PTRs and 234 WRITEIs; Wine's WASAPI stream (2.0 s) 1233 SYNC_PTRs and
+169 WRITEIs.
 
 ## 6. Wine
 
-FILL
+`tools/cp/audio/build-wine-alsa.sh` (work dir `~/cp/lanes/audio-wine`, never
+`~/cp/wine-build-x` or `~/cp/lanes/ntsync-wine`): the x build's recorded
+configure line (`~/cp/wine-build-x/build-x86_64/config.log`, 35 args) minus
+`--without-alsa`, the same environment (CC/x86_64_CC/CFLAGS/PKG_CONFIG_LIBDIR/
+LDFLAGS with `~/cp/wine-build-x/vkstub`), plus
+`ALSA_CFLAGS=-I$ALSA/include ALSA_LIBS="-L$ALSA/lib -lasound"` and
+`-L$ALSA/lib` appended to LDFLAGS (Wine 11's WINE_PACKAGE_FLAGS keeps only
+`-lasound` for its `snd_pcm_hw_params_get_access_mask` link test; measured).
+Source: `~/cp/wine-build-x/src/wine-11.0`, read-only.  Configure result:
+`ALSA_LIBS = -lasound`, winealsa.drv enabled (Wine 11 defines no
+HAVE_ALSA_* in config.h).  Build 16 jobs; install = build-wine.sh's
+`install-lib` + strip, plus `libasound.so.2*` into `/CP/WINE/lib` and
+`share/alsa` into `/CP/WINE/share`.  Stage 207 MB; vs the x stage: 81 files
+added (winealsa.drv/.so, libasound, the alsa config), 767 differ (a full
+rebuild: every binary changes), none removed.  winealsa.so needs ntdll.so,
+libasound.so.2, libpthread, libdl, libc.  Audit: every ELF ≤ GLIBC_2.31.
+
+**For the integrator's combined build** (C2-ntsync rebuilds Wine too): the
+whole audio change to Wine is the configure delta above and one dependency,
+alsa-lib (`tools/cp/audio/build-alsa.sh` output).  `tools/cp/build-wine.sh`
+takes it as `CP_WINE_ALSA=<alsa prefix>` (…/destdir/CP/WINE): drops alsa
+from WITHOUT, passes ALSA_CFLAGS/ALSA_LIBS, adds `-L` to LDFLAGS, requires
+`ALSA_LIBS = …-lasound` after configure, and stages libasound + share/alsa.
+No source patch to Wine.
+
+**Guest test** (`tools/cp/audio/run-wine-audio.sh`: one P5-harness boot with
+`P5_PROBES=audio` and `CP_AUDIO_WAV`; `src/user/cp/audiotone.c` built by
+`tools/cp/p5/build-pe.sh`):
+
+| step | path | result | WAV (host) |
+|---|---|---|---|
+| alsatone default 660 Hz S16 1.5 s | alsa-lib → plug → mmap_emul → hw | rc 0, 1.401 s write + 0.100 s drain | 1.5 s at 660 Hz |
+| alsatone default 770 Hz FLOAT_LE 1.0 s | lfloat converter | rc 0 | 1.0 s at 770 Hz |
+| audiotone wasapi 880 Hz 2 s | IMMDeviceEnumerator → IAudioClient (shared, mix format float32 48 kHz stereo, 200 ms) → IAudioRenderClient | rc 0, 2 xruns at stream start | 2.0 s at 880 Hz |
+| audiotone waveout 550 Hz 1.5 s | winmm waveOutOpen(WAVE_MAPPER) → mmdevapi → winealsa | rc 0, 2 xruns at start | 1.4 s at 550 Hz |
+
+Total WAV 5.98 s, active RMS −9.1 dBFS, peak −6.0 dBFS.  Wine sees two
+render endpoints (`default` and `plughw:0,0`, "VirtIO SoundCard"); its
+capture probe of `default` is ENOENT (no capture node), as expected.  The
+two xruns per Wine stream are winealsa's start: its timer thread writes one
+period per 10 ms tick and the first periods race the device; no audible gap
+after that (the 880/550 Hz tone seconds equal the stream lengths).
+Evidence: `docs/cp-audio-evidence/wine-audio.txt`.
 
 ## 7. The game
 
-FILL
+One P8 Venus boot to the main menu with the device on
+(`tools/cp/audio/run-game-audio.sh`; Wine = the winealsa stage; the Venus ICD
+is a copy of `~/cp/integ-venus/stage`; seeded prefix = a copy of integ's
+`pfx-seeded.img`): **the menu arrives** (OCR NEW GAME / LOAD GAME / SETTINGS /
+CREDITS / QUIT GAME at +352.7 s, game launch at +148.4 s).  The game opens
+the PCM once (`hw_params rate=48000 ch=2 period=480 periods=4 buffer=1920`,
+i.e. winealsa's 10 ms period, 40 ms ALSA buffer) after 8 endpoint-probe
+open/close pairs, and keeps it open to the menu.
+
+Host WAV (measured, then deleted: game content): **236.6 s** of audio,
+**216.8 s active** (100 ms windows above −50 dBFS; the first 18 s are near
+silence), active RMS **−19.9 dBFS**, peak **−2.0 dBFS**.  236.6 s of samples
+in the ~235 s between the game's first frame (+165 s) and the end of the
+boot (+400 s): the device was fed in real time with no long gaps.  The
+sound device shares INTx line 10 with the Venus GPU (fences): the shared
+branch served both (101 553 interrupts before the game's stream opened, all
+GPU fences; tx 0).
+
+Menu time with vs without the device (strix, consecutive boots, same tree,
+Wine stage and ICD, n = 1 each; `docs/cp-audio-evidence/game-menu-audio.txt`):
+
+| boot | boot→launch | launch→1st title prompt | 1st Space→menu | launch→menu |
+|---|---|---|---|---|
+| audio ON (audio-venus-on) | 148.4 s | 95.1 s | 109.2 s (2 Spaces) | **204.3 s** |
+| audio OFF (audio-venus-off) | 140.8 s | 93.2 s | 46.1 s (2 Spaces) | **139.3 s** |
+| integ14 P8 Venus (x Wine, no device) | 50.3 s | 127.7 s | 16.4 s (1 Space) | 144.1 s |
+
+The boot→launch time (both of this lane's boots ~140 s vs integ14's 50 s)
+is host load (four slots busy, this lane's gate batch beside it).  The ON
+boot's extra minute is after the first Space (the intro sequence with sound
+plays out at its real length; without an endpoint it is skipped faster —
+plausible, not proven with n = 1).  FILL-FPS
 
 ## 8. Facts for other lanes
 
-FILL
+- `~/cp/sysroot-glibc231` is broken for linking: 17 dev symlinks
+  (libpthread.so, libdl.so, librt.so, libutil.so, libresolv.so, libnss_*.so,
+  lib64/ld-linux-x86-64.so.2 …) dangle into the deleted
+  `~/cp/lanes/ext2b/obj/sysroot-glibc231`.  ld then links static archives
+  into shared objects without a word (and configure scripts' pthread checks
+  fail).  Fix (integrator, it is shared): re-point each link at the same
+  sysroot's `lib/x86_64-linux-gnu/<target>`; `~/cp/lanes/audio-sysroot` is
+  such a copy.  Builds made before the deletion (wine-build-x) are fine.
+- A compat ioctl route that parks must not use -2 as its "parked" code:
+  -ENOENT is -2 (§3).  `GPU_ABI_PARKED` is -2 too; gpu_abi.c never returns
+  -ENOENT today, but it is the same trap.
+- alsa-lib on a RW-only hw device needs mmap_emul under plug (§5); any lane
+  that adds its own ALSA config must keep that.
+- The x64 IRQ dispatch (trap.c) now has a virtio-sound branch before the GPU
+  branch; it also serves a GPU/net device that shares the line.  C1-k7 owns
+  trap.c: the hunk is 14 lines in `general_interrupt_inner`'s else-if chain,
+  nowhere near the syscall entry/exit.
+- `FILE_TYPE_DEVSND` is appended at the end of `file_type_t`; C2-ntsync's
+  node type will land next to it (a trivial merge).
