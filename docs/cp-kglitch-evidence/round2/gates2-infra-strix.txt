@@ -1,0 +1,24 @@
+tree  start 13:04:30
+build rc=0 13:04:39
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/kglitch)
+unit rc=0 Tests run:    463 Tests failed: 0   reass=1
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 40/42 passed kconsole=kconsole_test: PASS (0 failures)
+castscan rc=1 src/kernel/linux_compat_away.c	P2I	kl_hex(kl, (unsigned long)(uintptr_t)clock);
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+panic_sink_allowlist rc=0 panic_sink_allowlist: PASS — every reference is accounted for
+pfx_gate rc=0 pfx_gate: PASS
+sigmask_gate rc=0 sigmask-gate: PASS (8/8)
+final_away rc=0 lp_check_away: PASS -- 12 [AWAY] row(s): 6 nanosleep absence(s), 5 busy absence(s)
+final_sigint rc=0 lp_check_sigint: PASS -- 0 [SFX] MISMATCH row(s), 24 [SIGINT-S] and 24 [SIGINT-D] row(s) (both must be > 0)
+final_exitrace rc=0 [LP] done rc=0
+xrun_host rc=0 xrun-host-test: PASS -- the xrun was reported while the PCM was open
+infra end 13:13:24
+gate_p2#1 rc=0 G1 wine cmd /c echo hello prints hello : PASS ([P2] end echo|G2 winprobe.exe every marker + exit 0 : PASS ([P2] end winpr|G3 wineserver -k leaves no processes : PASS ([P2] end kill s| 13:14:12
+gate_p2#2 rc=0 G1 wine cmd /c echo hello prints hello : PASS ([P2] end echo|G2 winprobe.exe every marker + exit 0 : PASS ([P2] end winpr|G3 wineserver -k leaves no processes : PASS ([P2] end kill s| 13:14:53
+gate_p5#1 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 287 s; lock released serial=289484 13:20:07
+gate_p8_venus rc=0    +   139.8 s  13:22:41  main menu OCR at s009-t000114: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   145.4 s  13:22:47  main menu OCR at s010-t000120: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   147.3 s  13:22:49  verdict: main-menu; QEMU stopped, sl 13:22:49
+ALLDONE 13:22:49

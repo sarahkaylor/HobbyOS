@@ -1338,6 +1338,11 @@ static int l_futex_wake_locked(struct addr_space *as, uint64_t uaddr,
     p->wake_ms = 0;
     p->context[0] = 0; /* WAIT returns 0 on wake */
     proc_mark_ready(p);
+    {
+      extern void away_futex_woken(int woken, int waker); /* H4-kglitch [AWAY] */
+      struct process *wk = current_process();
+      away_futex_woken(p->pid, wk ? wk->pid : -1);
+    }
     if (ev) {
       if (woke < 4) {
         ev->woke_pids[woke] = p->pid;

@@ -654,9 +654,14 @@ static uint64_t ns_deadline_us(uint64_t timeout_ns, uint32_t flags) {
 
 /* A satisfied wait: report the index (Linux: even when a signal is
    pending; the handler then runs at this syscall's exit). */
+extern void away_clock_set(const void *obj);      /* H4-kglitch: [AWAY] */
+extern void away_wait_begin(struct process *t, void *const *objs, int n);
+extern void away_wait_return(struct process *t);
+
 static int ns_done(struct process *p, struct trap_frame *tf, uint64_t arg,
                    int32_t sig, uint32_t od, uint32_t cnt) {
   uint32_t idx = (uint32_t)sig;
+  away_wait_return(p);
   ns_maybe_row();
   if (idx == cnt) ns_st.alerts++;
   /* ntsync_wait_args.index is at byte 20 */
@@ -765,8 +770,11 @@ static int ns_wait(struct process *p, struct trap_frame *tf, struct ns_obj *dev,
     /* we are running: no wake for ourselves */
     wake.w[p->pid >> 6] &= ~(1ull << (p->pid & 63));
     if (q->signaled != -1) ns_st.immediate++;
+    void *aw[NTSYNC_MAX_WAIT_COUNT_K + 1];
+    for (uint32_t i = 0; i < total; i++) aw[i] = q->ent[i].obj;
     spinlock_release_irqrestore(&ns_lock, fl);
     ns_wake_drain(&wake); /* the try-wake may have satisfied earlier waiters */
+    away_wait_begin(p, aw, (int)total); /* H4-kglitch: a periodic waiter's absence */
   } else {
     ns_st.restarts++;
   }
@@ -817,10 +825,12 @@ static int ns_wait(struct process *p, struct trap_frame *tf, struct ns_obj *dev,
     ns_maybe_row();
     if (res == 1) {
       ns_st.eintr++;
+      away_wait_return(p);
       return ns_ret(tf, -EINTR);
     }
     if (res == 2) {
       ns_st.timeouts++;
+      away_wait_return(p);
       return ns_ret(tf, -ETIMEDOUT);
     }
     return ns_done(p, tf, arg, sig, od, cnt);
@@ -916,6 +926,7 @@ static int ns_obj_ioctl(struct process *p, struct trap_frame *tf, struct ns_obj 
     spinlock_release_irqrestore(&ns_lock, fl);
     ns_wake_drain(&wake);
     ns_st.sets++;
+    if (!r && req != NTSYNC_IOC_EVENT_RESET_K) away_clock_set(o); /* H4-kglitch: [AWAY] */
     if (r) return ns_ret(tf, r);
     if (l_copy_to_user(p, arg, &prev, 4) != 0) return ns_ret(tf, -EFAULT);
     return ns_ret(tf, 0);

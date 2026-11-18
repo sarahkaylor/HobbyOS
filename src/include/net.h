@@ -161,6 +161,7 @@ struct socket_pcb {
   int lo_backlog;
   struct socket_pcb *lo_q[16];  /* pcbs awaiting accept() */
   int lo_head, lo_tail;
+  int lo_waiter;                /* H4-kglitch K11: pid + 1 parked in accept() */
 };
 
 /**

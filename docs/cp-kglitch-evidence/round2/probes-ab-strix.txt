@@ -1,0 +1,53 @@
+# H4-kglitch round 2: probes tcpconn/loaccept/errnomap/away, integ19 (base: ~/cp/lanes/kglitch) vs lane (kglitch-s4), strix guest
+== base tcpconn
+[LP] C1 blocking TCP connect(10.0.2.2:2049)          rc=-1 errno=115 -> FAIL
+[LP] C2 O_NONBLOCK connect completes                 rc=-1 errno=115 so_error=0 -> PASS
+[LP] C3 blocking loopback connect                    rc=0 errno=0 -> PASS
+t3_linux_probe: FAIL — tcpconn never printed '[LP] done rc=0' (tier rc=1)
+== base loaccept
+[LP] A1 blocking loopback accept sleeps              fd=5 wall_ms=500 cpu_us=341216 -> FAIL
+[LP] A2 the byte sent arrives                        n=1 -> PASS
+t3_linux_probe: FAIL — loaccept never printed '[LP] done rc=0' (tier rc=1)
+== base errnomap
+[LP] R1 read on a closed fd                  rc=-1 errno=9 want=9 -> PASS
+[LP] R2 write on a closed fd                 rc=-1 errno=9 want=9 -> PASS
+[LP] R3 readv on a closed fd                 rc=-1 errno=1 want=9 -> FAIL
+[LP] R4 writev on a closed fd                rc=-1 errno=1 want=9 -> FAIL
+[LP] R5 pread64 on a closed fd               rc=-1 errno=9 want=9 -> PASS
+[LP] R6 pwrite64 on a closed fd              rc=-1 errno=9 want=9 -> PASS
+[LP] S1 write to a write-sealed memfd        rc=-1 errno=9 want=1 -> FAIL
+[LP] S2 pwrite64 to a write-sealed memfd     rc=-1 errno=1 want=1 -> PASS
+t3_linux_probe: FAIL — errnomap never printed '[LP] done rc=0' (tier rc=1)
+== base away
+[LP] W1 a periodic ntsync waiter went away           waits=700 aways=12 -> PASS (the console check decides)
+--- host-side check: lp_check_away.py (console kept: /home/sarah/cp/lanes/kglitch/obj/linux_probe_away.console.log) ---
+lp_check_away: FAIL -- 0 [AWAY] row(s): 0 nanosleep absence(s), 0 busy absence(s)
+t3_linux_probe: FAIL — away reached its done marker but lp_check_away.py failed
+== lane tcpconn
+[LP] C1 blocking TCP connect(10.0.2.2:2049)          rc=0 errno=0 -> PASS
+[LP] C2 O_NONBLOCK connect completes                 rc=-1 errno=115 so_error=0 -> PASS
+[LP] C3 blocking loopback connect                    rc=0 errno=0 -> PASS
+t3_linux_probe: PASS — tcpconn reached its done marker
+== lane loaccept
+[LP] A1 blocking loopback accept sleeps              fd=5 wall_ms=501 cpu_us=443 -> PASS
+[LP] A2 the byte sent arrives                        n=1 -> PASS
+t3_linux_probe: PASS — loaccept reached its done marker
+== lane errnomap
+[LP] R1 read on a closed fd                  rc=-1 errno=9 want=9 -> PASS
+[LP] R2 write on a closed fd                 rc=-1 errno=9 want=9 -> PASS
+[LP] R3 readv on a closed fd                 rc=-1 errno=9 want=9 -> PASS
+[LP] R4 writev on a closed fd                rc=-1 errno=9 want=9 -> PASS
+[LP] R5 pread64 on a closed fd               rc=-1 errno=9 want=9 -> PASS
+[LP] R6 pwrite64 on a closed fd              rc=-1 errno=9 want=9 -> PASS
+[LP] S1 write to a write-sealed memfd        rc=-1 errno=1 want=1 -> PASS
+[LP] S2 pwrite64 to a write-sealed memfd     rc=-1 errno=1 want=1 -> PASS
+t3_linux_probe: PASS — errnomap reached its done marker
+== lane away
+[LP] W1 a periodic ntsync waiter went away           waits=723 aways=12 -> PASS (the console check decides)
+--- host-side check: lp_check_away.py (console kept: /home/sarah/cp/lanes/kglitch-s4/obj/linux_probe_away.console.log) ---
+  e.g. [AWAY] tid=2 tgid=2 ms=80 at=4989 clock=0x0xFFFF800200C2BF30 n=8 U=0 R=0 T=0 F=0 O=0 B=35:8 PROBE.ELF
+  e.g. [AWAY] tid=2 tgid=2 ms=80 at=5553 clock=0x0xFFFF800200C2BF30 n=8 U=5 R=0 T=2 F=0 O=0 K=228:1 pc=0x0x1000006215 PROBE.ELF
+  e.g. [AWAY] tid=2 tgid=2 ms=80 at=6116 clock=0x0xFFFF800200C2BF30 n=8 U=0 R=0 T=0 F=0 O=0 B=35:8 PROBE.ELF
+  e.g. [AWAY] tid=2 tgid=2 ms=80 at=6679 clock=0x0xFFFF800200C2BF30 n=8 U=3 R=0 T=1 F=0 O=0 K=228:4 pc=0x0x1000006215 PROBE.ELF
+lp_check_away: PASS -- 12 [AWAY] row(s): 6 nanosleep absence(s), 4 busy absence(s)
+t3_linux_probe: PASS — away reached its done marker

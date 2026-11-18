@@ -270,6 +270,9 @@ int file_pread_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
 int file_pwrite_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
                      int64_t off, struct trap_frame *tf);
 int file_write(struct process *p, int fd, const void *buf, int size, struct trap_frame *tf);
+/* H4-kglitch K8/K9: the Linux errno for fs.c's generic -1 on this fd
+   (EPERM for a memfd/tmpfs write, whose only -1 is a seal; else EBADF). */
+int file_fail_errno(struct process *p, int fd);
 
 /* GB-308: open flags of an fd (-EBADF if absent), for the mmap access check. */
 int file_open_flags(struct process *p, int fd, uint32_t *out);

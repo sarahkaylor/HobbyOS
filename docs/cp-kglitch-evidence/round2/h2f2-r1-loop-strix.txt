@@ -1,0 +1,99 @@
+# H4-kglitch round 2: H2's r1 loop (-DP8_LAUNCHES=12, fresh sessions, lavapipe, wine-cp2), strix, integ19 (kg-r1-base, ~/cp/lanes/kglitch) and lane f5ba109f (kg-r1-lane, kglitch-s1), booted together
+== kg-r1-base
+[P8] begin launch 1/12 : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip chdir rc=0 session=fresh
+[SIGINT-S] from=214 to=19 tgid=19 st=5 mask=0x0x0 h=0x0x100005F220 inh=0 grp
+[SIGINT-D] pid=19 ip=0x0x108012764A alt=0
+[P8] end kill status=0 ms=182
+[P8] begin launch 2/12 : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip chdir rc=0 session=fresh
+[SIGINT-S] from=392 to=218 tgid=218 st=5 mask=0x0x0 h=0x0x100005F220 inh=0 grp
+[SIGINT-D] pid=218 ip=0x0x108012764A alt=0
+[P8] end kill status=0 ms=172
+[P8] begin launch 3/12 : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip chdir rc=0 session=fresh
+[SIGINT-S] from=65 to=396 tgid=396 st=5 mask=0x0x0 h=0x0x100005F220 inh=0 grp
+[SIGINT-D] pid=396 ip=0x0x108012764A alt=0
+[P8] end kill status=0 ms=185
+[P8] begin launch 4/12 : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip chdir rc=0 session=fresh
+[SIGINT-S] from=260 to=69 tgid=69 st=2 mask=0x0x10012A07 h=0x0x100005F220 inh=0 grp
+[KERNEL] Process 69: wineserver exited (signal 9).
+[P8] end kill status=0 ms=10534
+[P8] begin launch 5/12 : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip chdir rc=0 session=fresh
+[SIGINT-S] from=455 to=264 tgid=264 st=5 mask=0x0x0 h=0x0x100005F220 inh=0 grp
+[SIGINT-D] pid=264 ip=0x0x108012764A alt=0
+[P8] end kill status=0 ms=173
+[P8] begin launch 6/12 : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip chdir rc=0 session=fresh
+[SIGINT-S] from=146 to=459 tgid=459 st=5 mask=0x0x10012A03 h=0x0x100005F220 inh=0 grp
+[KERNEL] Process 459: wineserver exited (signal 9).
+[P8] end kill status=0 ms=10527
+[P8] begin launch 7/12 : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip chdir rc=0 session=fresh
+[SIGINT-S] from=341 to=150 tgid=150 st=5 mask=0x0xFFFFFFFE3FFBFAFF h=0x0x100005F220 inh=0 grp
+[KERNEL] Process 150: wineserver exited (signal 9).
+[P8] end kill status=0 ms=10522
+[P8] begin launch 8/12 : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip chdir rc=0 session=fresh
+[SIGINT-S] from=32 to=345 tgid=345 st=5 mask=0x0xFFFFFFFE3FFBFAFF h=0x0x100005F220 inh=0 grp
+[KERNEL] Process 345: wineserver exited (signal 9).
+[P8] end kill status=0 ms=10525
+[P8] begin launch 9/12 : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip chdir rc=0 session=fresh
+[SIGINT-S] from=233 to=36 tgid=36 st=5 mask=0x0xFFFFFFFE3FFBFAFF h=0x0x100005F220 inh=0 grp
+[KERNEL] Process 36: wineserver exited (signal 9).
+[P8] end kill status=0 ms=10521
+[P8] begin launch 10/12 : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip chdir rc=0 session=fresh
+[SIGINT-S] from=433 to=237 tgid=237 st=2 mask=0x0xFFFFFFFE3FFBFAFF h=0x0x100005F220 inh=0 grp
+[KERNEL] Process 237: wineserver exited (signal 9).
+[P8] end kill status=0 ms=10524
+[P8] begin launch 11/12 : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip chdir rc=0 session=fresh
+[SIGINT-S] from=131 to=437 tgid=437 st=5 mask=0x0xFFFFFFFE3FFBFAFF h=0x0x100005F220 inh=0 grp
+[KERNEL] Process 437: wineserver exited (signal 9).
+[P8] end kill status=0 ms=10541
+[P8] begin launch 12/12 : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip chdir rc=0 session=fresh
+[SIGINT-S] from=332 to=135 tgid=135 st=5 mask=0x0xFFFFFFFE3FFBFAFF h=0x0x100005F220 inh=0 grp
+[KERNEL] Process 135: wineserver exited (signal 9).
+[P8] end kill status=0 ms=10525
+== kg-r1-lane
+[P8] begin launch 1/12 : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip chdir rc=0 session=fresh
+[SIGINT-S] from=197 to=19 tgid=19 st=5 mask=0x0x0 h=0x0x100005F220 inh=0 grp
+[SIGINT-D] pid=19 ip=0x0x108012764A alt=0
+[P8] end kill status=0 ms=173
+[P8] begin launch 2/12 : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip chdir rc=0 session=fresh
+[SIGINT-S] from=375 to=201 tgid=201 st=5 mask=0x0x0 h=0x0x100005F220 inh=0 grp
+[SIGINT-D] pid=201 ip=0x0x108012764A alt=0
+[P8] end kill status=0 ms=172
+[P8] begin launch 3/12 : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip chdir rc=0 session=fresh
+[SIGINT-S] from=48 to=379 tgid=379 st=5 mask=0x0x0 h=0x0x100005F220 inh=0 grp
+[SIGINT-D] pid=379 ip=0x0x108012764A alt=0
+[P8] end kill status=0 ms=170
+[P8] begin launch 4/12 : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip chdir rc=0 session=fresh
+[SIGINT-S] from=226 to=52 tgid=52 st=5 mask=0x0x0 h=0x0x100005F220 inh=0 grp
+[SIGINT-D] pid=52 ip=0x0x108012764A alt=0
+[P8] end kill status=0 ms=170
+[P8] begin launch 5/12 : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip chdir rc=0 session=fresh
+[SIGINT-S] from=360 to=230 tgid=230 st=5 mask=0x0x0 h=0x0x100005F220 inh=0 grp
+[SIGINT-D] pid=230 ip=0x0x108012764A alt=0
+[P8] end kill status=0 ms=175
+[P8] begin launch 6/12 : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip chdir rc=0 session=fresh
+[SIGINT-S] from=51 to=364 tgid=364 st=3 mask=0x0x0 h=0x0x100005F220 inh=0 grp
+[SIGINT-D] pid=364 ip=0x0x1080116297 alt=0
+[P8] end kill status=0 ms=169
+[P8] begin launch 7/12 : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip chdir rc=0 session=fresh
+[SIGINT-S] from=246 to=55 tgid=55 st=5 mask=0x0x0 h=0x0x100005F220 inh=0 grp
+[SIGINT-D] pid=55 ip=0x0x108012764A alt=0
+[P8] end kill status=0 ms=173
+[P8] begin launch 8/12 : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip chdir rc=0 session=fresh
+[SIGINT-S] from=441 to=250 tgid=250 st=5 mask=0x0x0 h=0x0x100005F220 inh=0 grp
+[SIGINT-D] pid=250 ip=0x0x108012764A alt=0
+[P8] end kill status=0 ms=169
+[P8] begin launch 9/12 : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip chdir rc=0 session=fresh
+[SIGINT-S] from=132 to=445 tgid=445 st=5 mask=0x0x0 h=0x0x100005F220 inh=0 grp
+[SIGINT-D] pid=445 ip=0x0x108012764A alt=0
+[P8] end kill status=0 ms=171
+[P8] begin launch 10/12 : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip chdir rc=0 session=fresh
+[SIGINT-S] from=331 to=136 tgid=136 st=2 mask=0x0x0 h=0x0x100005F220 inh=0 grp
+[SIGINT-D] pid=136 ip=0x0x108012764A alt=0
+[P8] end kill status=0 ms=166
+[P8] begin launch 11/12 : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip chdir rc=0 session=fresh
+[SIGINT-S] from=25 to=335 tgid=335 st=5 mask=0x0x0 h=0x0x100005F220 inh=0 grp
+[SIGINT-D] pid=335 ip=0x0x108012764A alt=0
+[P8] end kill status=0 ms=190
+[P8] begin launch 12/12 : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip chdir rc=0 session=fresh
+[SIGINT-S] from=225 to=29 tgid=29 st=5 mask=0x0x0 h=0x0x100005F220 inh=0 grp
+[SIGINT-D] pid=29 ip=0x0x108012764A alt=0
+[P8] end kill status=0 ms=167

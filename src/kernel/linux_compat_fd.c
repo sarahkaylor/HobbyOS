@@ -350,15 +350,25 @@ static int l_connect(struct process *p, int fd, uint64_t usa, int salen,
   uint8_t ksa[K_UNIX_SUN_LEN + 1];
   int klen = 0;
   int use_k = 0;
-  if (salen >= 2 && salen <= K_UNIX_SUN_LEN && usa) {
+  int is_unix = 0;
+  if (salen >= 2 && usa) {
     uint8_t fam[2];
-    if (l_copy_from_user(p, fam, usa, 2) == 0 && fam[0] == K_AF_UNIX &&
-        fam[1] == 0) {
-      char abs[VFS_PATH_MAX];
-      int pr = l_unix_sa_prepare(p, usa, salen, ksa, &klen, abs);
-      if (pr) return pr;
-      use_k = 1;
-    }
+    if (l_copy_from_user(p, fam, usa, 2) == 0 && fam[0] == K_AF_UNIX && fam[1] == 0)
+      is_unix = 1;
+  }
+  if (!is_unix) {
+    /* H4-kglitch round 2 (K10): only unix connect needs the non-blocking
+       probe below (its -2 is ambiguous).  Forcing O_NONBLOCK on an AF_INET
+       socket made a BLOCKING TCP connect return EINPROGRESS (fs.c
+       file_socket_connect takes the pcb->nonblock branch), where Linux
+       blocks until the handshake ends (linux_probe_tcpconn C1). */
+    return file_connect_user(p, fd, usa, salen); /* INET never parks: it is synchronous */
+  }
+  if (salen >= 2 && salen <= K_UNIX_SUN_LEN && usa) {
+    char abs[VFS_PATH_MAX];
+    int pr = l_unix_sa_prepare(p, usa, salen, ksa, &klen, abs);
+    if (pr) return pr;
+    use_k = 1;
   }
   int fl = file_fcntl(p, fd, K_F_GETFL, 0);
   int was_nonblock = (fl >= 0) && (fl & K_O_NONBLOCK);

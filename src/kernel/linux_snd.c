@@ -1113,6 +1113,14 @@ static void zero_end_locked(uint64_t now) {
       kl_i(&kl, (long)S.z_runs);
       kl_s(&kl, " t_ms=");
       kl_i(&kl, S.run_start_us ? (long)((int64_t)(S.z_t_us - S.run_start_us) / 1000) : -1);
+      {
+        /* H4-kglitch (H5-05): first the absences of the periodic waiters
+           that ended within 500 ms before this run (linux_compat_away.c) */
+        extern void away_dump_since(uint64_t from_ms);
+        away_dump_since(S.z_t_us / 1000 > 500 ? S.z_t_us / 1000 - 500 : 0);
+      }
+      kl_s(&kl, " up_ms="); /* H4-kglitch: uptime, the [AWAY] rows' clock */
+      kl_i(&kl, (long)(S.z_t_us / 1000));
       kl_s(&kl, " frames=");
       kl_i(&kl, (long)S.z_run);
       kl_s(&kl, " q_vis=");
@@ -1467,7 +1475,12 @@ static int pcm_ioctl(struct process *p, uint32_t req, uint64_t arg, int nonblock
     if (e) return e;
     return cout(p, arg, &moved, 8); /* Linux: 0, the count written back */
   }
-  case PCM_WRITEI: S.n_writei++; return do_writei(p, arg, nonblock);
+  case PCM_WRITEI: {
+    S.n_writei++;
+    extern void away_audio_writer(int pid); /* H4-kglitch [AWAY]: the PCM writer */
+    away_audio_writer(p ? p->pid : -1);
+    return do_writei(p, arg, nonblock);
+  }
   case PCM_RESUME: return -ENOSYS;
   case PCM_CHANNEL_INFO:
   case PCM_LINK:
