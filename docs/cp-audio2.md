@@ -140,7 +140,13 @@ and lane at the same time, so both saw the same host load.
 | lowpad (one period per event) | 16–22, 3.2–4.9 s | **11331** | **10** (287) | 0 | 0 |
 | load (+ALOAD 8 threads mix) | 102–301, 22–28 s | **2504** | **46** (1248) | 7 (70 ms) | 0 |
 
-Per minute: idle 145 → 0.4, lowpad 4532 → 4, load 1002 → 18.  The lane's one
+Round 2, final kernel 044b517e, lane only: idle 1, stall 1, lowpad 5, load
+173 (host stalls 3–10 except load: 150 / 25.5 s; `late40=160`).  The load
+row reports more than round 1's 46 because 044b517e's clock no longer loses
+time between completions, so a writer that really is late is reported as
+promptly as on hw (base: 2504).
+
+Per minute (round 1): idle 145 → 0.4, lowpad 4532 → 4, load 1002 → 18.  The lane's one
 xrun in idle/stall is the stream start (winealsa's lead-in races the device,
 `t_ms=10`).  The load row's 46 are a different thing: the writer's 10 ms
 tick was more than 40 ms late 150 times (`[AT] late40=150`) with 8 busy

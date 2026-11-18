@@ -48,3 +48,9 @@ base1-lowpad: 2
 base-hs1: 3
 lane1-load: 7
 lane1-lowpad: 2
+
+# round 2, lane only, final kernel 044b517e (base round 2 not run; host load lower than round 1 except the load row)
+lane2-idle 10:36:13 xruns=1 late40=1 xrun_state=1 epipe=0 leadin=1 cons:stalls=3 stolen_ms=409 duration_s=150.04 dropouts=0 dropout_ms_total=0 
+lane2-stall 10:39:08 xruns=1 late40=12 xrun_state=1 epipe=0 leadin=1 cons:stalls=10 stolen_ms=2974 duration_s=150.04 dropouts=0 dropout_ms_total=0 
+lane2-lowpad 10:42:23 xruns=5 late40=2 xrun_state=5 epipe=0 leadin=1 cons:stalls=2 stolen_ms=582 duration_s=150.01 dropouts=0 dropout_ms_total=0 
+lane2-load 10:45:25 xruns=173 late40=160 xrun_state=173 epipe=0 leadin=1 cons:stalls=150 stolen_ms=25525 duration_s=140.84 dropouts=0 dropout_ms_total=0 
