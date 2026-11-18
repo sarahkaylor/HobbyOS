@@ -249,11 +249,12 @@ the OCR `expect`s still guard each step; h-fq1b onwards use it.  Proposed
 +    ap.add_argument("--game-res", default="1280x720", help="the game's own Resolution setting")
 ```
 (plus `P9_GAME_RES` → `--game-res` in `run-p9.sh`).  H1-12: reload.p9's
-CONTINUE seek lost the focus in h-rl1 (evidence file): the reading that fits
-is a doubled Up onto the frameless patch-notes button above CONTINUE.  A
-seek that loses a visible focus after a tap should tap once back the other
-way before giving up; the reload can also take the newest save from the
-LOAD GAME list it already opens.
+CONTINUE seek lost the focus in both reload boots on h-play1's data disk,
+in two different ways (evidence file), so it is the main menu's state after
+the save list with that save set, not a dropped or doubled key (inputcheck
+over 88 P9 logs: 0 dropped).  A seek that loses a visible focus should
+re-read after a second, tap once back the other way, or fall back to taking
+the newest save from the LOAD GAME list it already opened.
 
 **The P8/P9 grader (known, H2-early).**  The overrides already list the P8
 lavapipe exit 2–3 s after launch that the grader records as rc=0
