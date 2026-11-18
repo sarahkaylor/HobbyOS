@@ -429,6 +429,18 @@ int virtio_net_send(const void *buf, uint32_t len) {
 // handle_irq tries to acquire net_lock → deadlock on single CPU.
 volatile int virtio_net_provider_active = 0;
 
+/* H7-fault: the deepest RX backlog a processing pass found (entries filled
+   by the device and not yet processed), and how often it reached every
+   posted buffer (the device had nowhere to put the next frame). */
+volatile uint32_t virtio_net_rx_backlog_max, virtio_net_rx_ring_full;
+static void virtio_net_rx_note_backlog(void) {
+  uint32_t pend = (uint16_t)(*rx_used_idx - rx_ack_used_idx);
+  if (pend > virtio_net_rx_backlog_max) virtio_net_rx_backlog_max = pend;
+  uint32_t posted = rx_qsize / 2;
+  if (posted > NUM_RX_BUFFERS) posted = NUM_RX_BUFFERS;
+  if (pend >= posted) virtio_net_rx_ring_full++;
+}
+
 void virtio_net_handle_irq(void) {
   if (io_base == 0 || !net_rx_ready) return;
   dbg_handle_irq_calls++;
@@ -448,6 +460,7 @@ void virtio_net_handle_irq(void) {
   }
 
   uint64_t flags = spinlock_acquire_irqsave(&net_lock);
+  virtio_net_rx_note_backlog();
 
   // Process all pending packets in the RX used ring
   int irq_processed = 0;
@@ -549,6 +562,7 @@ void virtio_net_poll_rx(void) {
   }
 
   uint64_t flags = spinlock_acquire_irqsave(&net_lock);
+  virtio_net_rx_note_backlog();
 
   int poll_processed = 0;
   while (rx_ack_used_idx != *rx_used_idx) {
@@ -593,6 +607,13 @@ void virtio_net_poll_rx(void) {
 
 int virtio_net_is_active(void) {
   return io_base != 0;
+}
+
+/* H7-fault: RX used-ring entries the device has filled and no path has
+   processed yet (a peek: no lock, no side effect). */
+uint32_t virtio_net_rx_pending(void) {
+  if (io_base == 0 || !net_rx_ready || !rx_used_idx) return 0;
+  return (uint16_t)(*rx_used_idx - rx_ack_used_idx);
 }
 
 #else

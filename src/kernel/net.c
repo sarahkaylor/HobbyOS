@@ -1481,6 +1481,22 @@ int net_socket_recv(struct socket_pcb* pcb, void* buf, uint32_t len) {
 }
 
 int net_socket_recv_timeout(struct socket_pcb* pcb, void* buf, uint32_t len, int timeout_ms) {
+  return net_socket_recv_timeout_st(pcb, buf, len, timeout_ms, 0);
+}
+
+/* H7-fault: RX frames processed by either path (virtio_net.c), and the used
+   ring's unprocessed entries, for net_wait_st. */
+static uint32_t net_rx_frames(void) {
+#if defined(__x86_64__)
+  extern volatile uint32_t dbg_poll_rx_pkts, dbg_handle_irq_pkts;
+  return dbg_poll_rx_pkts + dbg_handle_irq_pkts;
+#else
+  return 0;
+#endif
+}
+
+int net_socket_recv_timeout_st(struct socket_pcb* pcb, void* buf, uint32_t len,
+                               int timeout_ms, struct net_wait_st *st) {
   if (!pcb) return -1;
 
   /* Like net_socket_recv() but with a caller-provided timeout: the NFS RPC
@@ -1501,11 +1517,30 @@ int net_socket_recv_timeout(struct socket_pcb* pcb, void* buf, uint32_t len, int
    * safe_wfi() stays in net_socket_recv() (the 5 s variant other callers
    * use) so a wedged peer still parks instead of burning a core. */
   uint64_t start = timer_get_ms();
+  uint64_t prev_us = st ? timer_get_us() : 0;
+  uint32_t rx0 = st ? net_rx_frames() : 0;
+  if (st) st->iters = st->gap_max_us = st->pend = st->rxpk = 0;
   while (pcb->rx_head == pcb->rx_tail && pcb->state != SOCKET_CLOSED) {
-    if ((int)(timer_get_ms() - start) > timeout_ms) return -1;
+    if (st) {
+      uint64_t now_us = timer_get_us();
+      if (now_us - prev_us > st->gap_max_us) st->gap_max_us = (uint32_t)(now_us - prev_us);
+      prev_us = now_us;
+      st->iters++;
+    }
+    if ((int)(timer_get_ms() - start) > timeout_ms) {
+      if (st) {
+#if defined(__x86_64__)
+        extern uint32_t virtio_net_rx_pending(void);
+        st->pend = virtio_net_rx_pending();
+#endif
+        st->rxpk = net_rx_frames() - rx0;
+      }
+      return -1;
+    }
     net_rx_pump();
     cpu_relax();
   }
+  if (st) st->rxpk = net_rx_frames() - rx0;
 
   uint64_t flags = spinlock_acquire_irqsave(&net_lock);
   int have_dgram = (pcb->protocol == IP_PROTO_UDP &&

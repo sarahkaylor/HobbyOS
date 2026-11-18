@@ -23,6 +23,7 @@
 #include "frame.h" /* cp/nfs: READ reply buffers */
 #include "kmem.h"
 #include "arch/cpu.h" /* cp/nfs2: cpu_relax in the hard-mount backoff */
+#include "vm_pfstat.h" /* H7-fault: a fault that puts a READ on the wire */
 
 struct socket_pcb;      /* net.h's PCB; nfs.h only carries a pointer to it */
 
@@ -132,6 +133,22 @@ static struct {
 static spinlock_t nfs_ra_lock;
 /* cp/nfs2: pipelined READs that timed out waiting for a reply. */
 volatile uint32_t nfs_pipe_stalls;
+/* H7-fault (docs/cp-fault.md §3): where a "lost" READ reply went.
+ *   nfs_rtt_h   every answered READ's round trip, buckets < 128 us << b
+ *               (b0 < 128 us ... b11 < 256 ms, b12 the rest);
+ *   nfs_late_h  the same for an ORIGINAL reply that came after its READ had
+ *               timed out and been re-sent (time since the first send);
+ *   nfs_pipe_stale  datagrams a pipeline skipped (no slot had that xid);
+ *   nfs_late_orig   ... of which the reply of a re-sent READ's first send. */
+#define NFS_RTT_HB 13
+volatile uint32_t nfs_rtt_h[NFS_RTT_HB], nfs_late_h[NFS_RTT_HB];
+volatile uint32_t nfs_pipe_stale, nfs_late_orig, nfs_serial_stale;
+static int nfs_rtt_bucket(uint64_t us) {
+  int b = 0;
+  uint64_t lim = 128;
+  while (b < NFS_RTT_HB - 1 && us >= lim) { b++; lim <<= 1; }
+  return b;
+}
 extern volatile uint32_t nfs_inj_dropped;   /* fault injection, below */
 extern volatile uint32_t nfs_pool_temp;     /* socket pool, below */
 
@@ -278,6 +295,35 @@ void nfs_perf_dump(const char *why) {
     kl_c(&kl, '\n');
     kl_emit(&kl);
   }
+  {
+    /* H7-fault: the READ round-trip histogram and the stall forensics
+       counters (docs/cp-fault.md §3) */
+    extern volatile uint32_t virtio_net_rx_backlog_max, virtio_net_rx_ring_full;
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[NFSRTH] rtt=");
+    for (int b = 0; b < NFS_RTT_HB; b++) {
+      if (b) kl_c(&kl, ',');
+      kl_i(&kl, (long)nfs_rtt_h[b]);
+    }
+    kl_s(&kl, " late=");
+    for (int b = 0; b < NFS_RTT_HB; b++) {
+      if (b) kl_c(&kl, ',');
+      kl_i(&kl, (long)nfs_late_h[b]);
+    }
+    kl_s(&kl, " stale=");
+    kl_i(&kl, (long)nfs_pipe_stale);
+    kl_s(&kl, " late_orig=");
+    kl_i(&kl, (long)nfs_late_orig);
+    kl_s(&kl, " sstale=");
+    kl_i(&kl, (long)nfs_serial_stale);
+    kl_s(&kl, " rxq_max=");
+    kl_i(&kl, (long)virtio_net_rx_backlog_max);
+    kl_s(&kl, " rxq_full=");
+    kl_i(&kl, (long)virtio_net_rx_ring_full);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+  }
   if (nfs_ra.hits | nfs_ra.fills) {
     /* cp/nfs2: hits/fills/saved_kib keep their old meaning (fills now counts
        windows loaded); the rest says where the READ bytes went. */
@@ -321,6 +367,7 @@ void nfs_perf_dump(const char *why) {
 
 static void nfs_pf_record(uint32_t want, uint64_t sock_us, uint64_t send_us,
                           uint64_t wait_us) {
+  nfs_rtt_h[nfs_rtt_bucket(wait_us)]++; /* H7-fault: the RTT distribution */
   struct nfs_perf_bucket *b = nfs_pf_bucket(want);
   if (!b) return;
   b->n++;
@@ -613,6 +660,7 @@ static int rpc_xfer(struct socket_pcb *pcb, uint32_t xid, const uint8_t *call,
                     int n, uint8_t *rbuf, int rcap,
                     const uint8_t **body, int *body_len, int inj) {
   if (net_socket_send(pcb, call, (uint32_t)n) < 0) return -1;
+  pfstat_rpc();
   uint64_t t0 = timer_get_ms();
   for (;;) {
     int left = NFS_RPC_TIMEOUT_MS - (int)(timer_get_ms() - t0);
@@ -622,7 +670,7 @@ static int rpc_xfer(struct socket_pcb *pcb, uint32_t xid, const uint8_t *call,
     if (inj && nfs_inj_drop()) continue;    /* cp/nfs2: injected loss */
     int bo = 0, bl = 0;
     int pr = rpc_parse_reply(rbuf, got, xid, &bo, &bl);
-    if (pr == RPC_E_WRONG_XID) continue;    /* stale datagram */
+    if (pr == RPC_E_WRONG_XID) { nfs_serial_stale++; continue; } /* stale datagram */
     if (pr != RPC_OK) {
       if (pr == RPC_E_DENIED)
         uart_puts("[NFS] rpc: server denied the call\n");
@@ -1584,6 +1632,8 @@ struct nfs_rd_slot {
   uint32_t want;
   uint32_t got;
   uint64_t t_issue;    /* timer_get_us() when the READ went out */
+  uint64_t t_first;    /* H7-fault: ... its first send */
+  uint32_t oxid;       /* H7-fault: the first send's xid once re-sent, else 0 */
   int      state;      /* 0 = free, 1 = in flight, 2 = complete */
   int      eof;
 };
@@ -1612,6 +1662,7 @@ static int nfs_rd_issue(const struct nfs_mount *m, struct socket_pcb *pcb,
                          NFS_PROC_READ, args, w.len);
   if (n <= 0) return -1;
   if (net_socket_send(pcb, cbuf, (uint32_t)n) < 0) return -1;
+  pfstat_rpc();
   s->xid = xid;
   s->off = off;
   s->want = want;
@@ -1696,10 +1747,77 @@ static int nfs_read_serial_into(const struct nfs_mount *m, const struct nfs_fh *
  * socket's rx ring is 4 MiB with per-datagram framing, so N replies queue
  * safely.  A fresh socket per RPC (the old shape) costs one create/close and
  * cannot pipeline at all. */
+/* H7-fault (docs/cp-fault.md §3): one pipeline's first stall, followed to the
+ * end of the pipeline, printed as
+ *   [NFSRS] off= want= age_ms= inflight= sys_kib= resend_ms= late_ms=
+ *           iters= gap_max_us= pend= rxpk= frags+= ipr_to+= stale= stalls=
+ * age_ms: since the stalled READ's first send; resend_ms / late_ms: after
+ * the timeout, when the re-sent READ's reply / the ORIGINAL reply arrived
+ * (-1: not during this pipeline); iters, gap_max_us, pend, rxpk: the timed-
+ * out wait (net_wait_st: looks at the socket, the longest stretch between
+ * two looks, RX ring entries unprocessed at the timeout, RX frames processed
+ * during the wait); frags+/ipr_to+: IP fragments in, and incomplete
+ * datagrams given up, from the stall to the end of the pipeline. */
+#define NFS_RS_ROWS 96
+static int nfs_rs_rows;
+struct nfs_rs {
+  int on;
+  uint64_t t_stall, off, age_us;
+  uint32_t want, inflight, sys_bytes;
+  int64_t resend_us, late_us;
+  struct net_wait_st w;
+  uint32_t frags0, ipr_to0, stale, stalls;
+  uint32_t retired[NFS_READ_DEPTH]; /* first-send xids of re-sent slots */
+};
+static void nfs_rs_emit(const struct nfs_rs *r) {
+  extern volatile uint32_t ipr_frags, ipr_drop_timeout;
+  if (!r->on || nfs_rs_rows >= NFS_RS_ROWS) return;
+  nfs_rs_rows++;
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[NFSRS] off=");
+  kl_i(&kl, (long)r->off);
+  kl_s(&kl, " want=");
+  kl_i(&kl, (long)r->want);
+  kl_s(&kl, " age_ms=");
+  kl_i(&kl, (long)(r->age_us / 1000));
+  kl_s(&kl, " inflight=");
+  kl_i(&kl, (long)r->inflight);
+  kl_s(&kl, " sys_kib=");
+  kl_i(&kl, (long)(r->sys_bytes >> 10));
+  kl_s(&kl, " resend_ms=");
+  kl_i(&kl, r->resend_us < 0 ? -1 : (long)(r->resend_us / 1000));
+  kl_s(&kl, " late_ms=");
+  kl_i(&kl, r->late_us < 0 ? -1 : (long)(r->late_us / 1000));
+  kl_s(&kl, " iters=");
+  kl_i(&kl, (long)r->w.iters);
+  kl_s(&kl, " gap_max_us=");
+  kl_i(&kl, (long)r->w.gap_max_us);
+  kl_s(&kl, " pend=");
+  kl_i(&kl, (long)r->w.pend);
+  kl_s(&kl, " rxpk=");
+  kl_i(&kl, (long)r->w.rxpk);
+  kl_s(&kl, " frags+=");
+  kl_i(&kl, (long)(ipr_frags - r->frags0));
+  kl_s(&kl, " ipr_to+=");
+  kl_i(&kl, (long)(ipr_drop_timeout - r->ipr_to0));
+  kl_s(&kl, " stale=");
+  kl_i(&kl, (long)r->stale);
+  kl_s(&kl, " stalls=");
+  kl_i(&kl, (long)r->stalls);
+  kl_s(&kl, " at=");
+  kl_i(&kl, (long)(r->t_stall / 1000));
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+}
+
 static int nfs_read_pipe(const struct nfs_mount *m, const struct nfs_fh *fh,
                          uint64_t offset, uint8_t *buf, uint8_t *const *segs,
                          uint32_t len, uint32_t rs, int *eof_out) {
   struct nfs_mount *mw = (struct nfs_mount *)m;
+  struct nfs_rs rsr;
+  rsr.on = 0;
+  struct net_wait_st wst;
   if (eof_out) *eof_out = 0;
   uint8_t *rbuf = nfs_rbig_get(); /* cp/nfs: one reply datagram, off the stack */
   if (!rbuf) return nfs_read_serial_into(m, fh, offset, buf, segs, 0, len);
@@ -1749,6 +1867,8 @@ static int nfs_read_pipe(const struct nfs_mount *m, const struct nfs_fh *fh,
         hole = inflight == 0;           /* tail (hard) reads the rest     */
         break;
       }
+      slot[idx].t_first = slot[idx].t_issue;
+      slot[idx].oxid = 0;
       __sync_fetch_and_add(&nfs_inflight_bytes, (int32_t)want);
       mine += (int32_t)want;
       issue_off += want;
@@ -1758,12 +1878,36 @@ static int nfs_read_pipe(const struct nfs_mount *m, const struct nfs_fh *fh,
 
     if (inflight == 0) break;
 
-    int got = net_socket_recv_timeout(pcb, rbuf, NFS_RPC_RBIG,
-                                      stalls ? NFS_RPC_TIMEOUT_MS
-                                             : NFS_PIPE_TIMEOUT_MS);
+    int got = net_socket_recv_timeout_st(pcb, rbuf, NFS_RPC_RBIG,
+                                         stalls ? NFS_RPC_TIMEOUT_MS
+                                                : NFS_PIPE_TIMEOUT_MS, &wst);
     if (got > 0 && nfs_inj_drop()) continue; /* cp/nfs2: injected loss */
     if (got <= 0) {                     /* timeout / socket closed */
       nfs_pipe_stalls++;
+      if (rsr.on) {
+        rsr.stalls++;
+      } else {
+        /* H7-fault: the stalled READ is the oldest one still in flight */
+        extern volatile uint32_t ipr_frags, ipr_drop_timeout;
+        int oi = -1;
+        for (int i = 0; i < NFS_READ_DEPTH; i++)
+          if (slot[i].state == 1 && (oi < 0 || slot[i].t_first < slot[oi].t_first)) oi = i;
+        uint64_t nowu = timer_get_us();
+        rsr.on = 1;
+        rsr.t_stall = nowu;
+        rsr.off = oi >= 0 ? slot[oi].off : 0;
+        rsr.want = oi >= 0 ? slot[oi].want : 0;
+        rsr.age_us = oi >= 0 ? nowu - slot[oi].t_first : 0;
+        rsr.inflight = (uint32_t)inflight;
+        rsr.sys_bytes = (uint32_t)nfs_inflight_bytes;
+        rsr.resend_us = rsr.late_us = -1;
+        rsr.w = wst;
+        rsr.frags0 = ipr_frags;
+        rsr.ipr_to0 = ipr_drop_timeout;
+        rsr.stale = 0;
+        rsr.stalls = 1;
+        for (int i = 0; i < NFS_READ_DEPTH; i++) rsr.retired[i] = 0;
+      }
       /* L41: a stall row, not a guess.  If the load freezes at a byte count,
          the question is whether an issued READ is still unanswered at that
          offset (a lost reply) or no READ is outstanding at all (the client is
@@ -1805,7 +1949,10 @@ static int nfs_read_pipe(const struct nfs_mount *m, const struct nfs_fh *fh,
       if (++stalls > NFS_PIPE_RESENDS) break;
       for (int i = 0; i < NFS_READ_DEPTH; i++) {
         if (slot[i].state != 1) continue;
+        uint32_t first_xid = slot[i].oxid ? slot[i].oxid : slot[i].xid;
         if (nfs_rd_issue(m, pcb, fh, &slot[i], slot[i].off, slot[i].want) == 0) {
+          slot[i].oxid = first_xid;     /* H7-fault: a late original is named */
+          rsr.retired[i] = first_xid;
           resent++;
           continue;
         }
@@ -1821,13 +1968,30 @@ static int nfs_read_pipe(const struct nfs_mount *m, const struct nfs_fh *fh,
     int idx = -1;
     for (int i = 0; i < NFS_READ_DEPTH; i++)
       if (slot[i].state == 1 && slot[i].xid == rxid) { idx = i; break; }
-    if (idx < 0) continue;              /* stale or duplicate datagram */
+    if (idx < 0) {                      /* stale or duplicate datagram */
+      /* H7-fault: is it the ORIGINAL reply of a READ that timed out? */
+      int late = 0;
+      for (int i = 0; i < NFS_READ_DEPTH && rxid; i++)
+        if (rsr.on && rsr.retired[i] == rxid) late = i + 1;
+      nfs_pipe_stale++;
+      if (rsr.on) rsr.stale++;
+      if (late) {
+        uint64_t nowu = timer_get_us();
+        nfs_late_orig++;
+        if (rsr.late_us < 0) rsr.late_us = (int64_t)(nowu - rsr.t_stall);
+        nfs_late_h[nfs_rtt_bucket(nowu - slot[late - 1].t_first)]++;
+        rsr.retired[late - 1] = 0;
+      }
+      continue;
+    }
 
     int bo = 0, bl = 0;
     int pr = rpc_parse_reply(rbuf, got, rxid, &bo, &bl);
     if (pr != RPC_OK) continue;
 
     stalls = 0;
+    if (rsr.on && rsr.resend_us < 0 && slot[idx].oxid && slot[idx].off == rsr.off)
+      rsr.resend_us = (int64_t)(timer_get_us() - rsr.t_stall);
     __sync_fetch_and_sub(&nfs_inflight_bytes, (int32_t)slot[idx].want);
     mine -= (int32_t)slot[idx].want;
     uint32_t count = 0;
@@ -1876,6 +2040,7 @@ static int nfs_read_pipe(const struct nfs_mount *m, const struct nfs_fh *fh,
     if (contig >= end || hit_eof || hole) break;
   }
 
+  nfs_rs_emit(&rsr); /* H7-fault: the stall, if there was one */
   /* Drain the pipeline's bookkeeping: blocks past `contig` were filled but
    * cannot extend the contiguous run (a hole or a timeout stopped it). */
   for (int i = 0; i < NFS_READ_DEPTH; i++) slot[i].state = 0;

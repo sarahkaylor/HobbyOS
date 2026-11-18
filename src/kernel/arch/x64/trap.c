@@ -47,6 +47,7 @@
 #include "kmem.h"
 #include "pipe.h" /* C1-k4: struct pipe_seg for writev on a pipe */
 #include "trapprof.h" /* C1-k7: per-segment syscall cycles (test kernels) */
+#include "vm_pfstat.h" /* H7-fault: [PFI] trap time from user mode */
 #include <stdint.h>
 
 extern void uart_puts(const char *s);
@@ -4850,6 +4851,10 @@ void general_interrupt_handler(struct trap_frame *tf) {
   TP_BEGIN_TF(tf);
   int from_user = (tf->cs & 3) == 3;
   if (from_user) ru_trap_enter();
+  /* H7-fault ([PFI], [AWAY] pf=/irq=): a user thread's time in this trap */
+  uint64_t pf_t0 = from_user ? pf_tsc() : 0;
+  uint64_t pf_vec = tf->vector;
+  struct process *pf_cur0 = from_user ? current_process() : 0;
   /* C1-k6 round 2: trap nesting, for the sync wake (process.c
      sched_wake_sync defers a wake only inside a user thread's own syscall). */
   extern void sched_sync_flush(void);
@@ -4879,6 +4884,8 @@ void general_interrupt_handler(struct trap_frame *tf) {
     }
   }
   TP_MARK(TP_UNWIND);
+  if (from_user && pf_vec != 0x80 && pf_cur0 && current_process() == pf_cur0)
+    pfstat_trap(pf_vec, pf_tsc() - pf_t0);
   if (from_user) {
     ru_trap_exit();
     if (tf->vector == 0x80) {

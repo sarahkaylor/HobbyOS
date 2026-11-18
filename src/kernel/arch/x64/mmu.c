@@ -6,6 +6,7 @@
 #include "vm.h"
 #include "display_mode.h" /* DISPLAY_STRIDE_BYTES/HEIGHT: full fb size (GB-065) */
 #include "kmem.h"
+#include "vm_pfstat.h" /* H7-fault */
 
 extern uint32_t get_cpuid(void);
 extern void uart_puts(const char *s);
@@ -1200,6 +1201,7 @@ void vm_arch_shootdown(struct addr_space *as) {
   }
   if (me < MAX_CPUS)
     x64_tlb_last_targets[me] = (uint8_t)__builtin_popcount(targets);
+  uint64_t sh_t0 = x64_rdtsc(); /* H7-fault: [PFL] shoot= */
   __atomic_store_n(&x64_tlb_root, root, __ATOMIC_RELEASE);
   for (uint32_t c = 0; c < ncpu; c++)
     if (targets & (1u << c))
@@ -1249,6 +1251,7 @@ void vm_arch_shootdown(struct addr_space *as) {
   }
   __atomic_store_n(&x64_tlb_root, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&x64_tlb_lock, 0, __ATOMIC_RELEASE);
+  pfstat_shoot(x64_rdtsc() - sh_t0, __builtin_popcount(targets));
 }
 
 /* Called from the vector 0x82 handler (trap.c): never schedules, never

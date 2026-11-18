@@ -1,6 +1,7 @@
 #include "frame.h"
 #include "lock.h"
 #include "blk_cache.h"
+#include "vm_pfstat.h" /* H7-fault */
 #include <stdint.h>
 
 extern void uart_puts(const char *s);
@@ -375,8 +376,10 @@ uint64_t frame_alloc(void) {
       }
     }
     spinlock_release_irqrestore(&frame_lock, flags);
-    if (res)
+    if (res) {
+      pfstat_frame_alloc(res); /* H7-fault: first frame of a 2 MiB chunk? */
       return res;
+    }
 
     /* Pool exhausted: discard cached units and retry.  evict takes its
        own locks (never called with frame_lock held); a no-progress evict
@@ -392,9 +395,11 @@ uint64_t frame_alloc_zeroed(void) {
   if (!p)
     return 0;
   /* Plain 64-bit stores (kernel C is -mgeneral-regs-only: no SIMD). */
+  uint64_t t0 = pf_tsc(); /* H7-fault: [PFL] zero= / fresh= */
   volatile uint64_t *d = (volatile uint64_t *)phys_to_virt(p);
   for (int i = 0; i < FRAME_SIZE / 8; i++)
     d[i] = 0;
+  pfstat_zeroed(p, pf_tsc() - t0);
   return p;
 }
 
@@ -531,8 +536,10 @@ uint64_t frame_alloc_contig(int n) {
       }
     }
     spinlock_release_irqrestore(&frame_lock, flags);
-    if (res)
+    if (res) {
+      pfstat_frame_alloc(res); /* H7-fault: first frame of a 2 MiB chunk (n frames) */
       return res;
+    }
 
     /* Pool can't provide a contiguous run: evict up to `n` cached units
        (frames go back to the pool) and retry; give up when no progress
