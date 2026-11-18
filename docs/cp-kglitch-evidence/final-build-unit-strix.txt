@@ -1,0 +1,14 @@
+ok   W1 printed 5 s ago: not silent (got 0, want 0)
+ok   W2 stamped 1 ms after now (the tick's own [NFSIO] row): not silent (got 0, want 0)
+ok   W3 stamped at now: not silent (got 0, want 0)
+ok   W4 quiet for 25 s: silent (got 1, want 1)
+ok   W5 quiet for exactly 20 s: silent (got 1, want 1)
+wd_silence_test: PASS (0 failures)
+wd_silence rc=0
+arm rc=0
+armunit rc=0 0000000045591520 B __bss_end
+intel rc=0
+unit rc=0 Tests run:    463 Tests failed: 0  
+kconsole_test: PASS (0 failures)
+kconsole_mt_test: PASS (0 failures)
+S2DONE

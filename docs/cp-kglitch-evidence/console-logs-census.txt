@@ -1,0 +1,36 @@
+# strix: every linux_probe_console.console.log left in a lane tree before H4-kglitch, graded by tools/gate/lp_check_console.py, with the [CONS] summary row (forced= = takeovers)
+== /home/sarah/cp/integ/obj/linux_probe_console.console.log (2026-11-18 02:14)
+lp_check_console: kernel rows intact 26238/26238, user rows intact 12219/12219, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+lp_check_console: PASS -- clean
+lines=25427 user=5537 forced=0 broken=0 raw=0 stale=0 evicted=0 split=0 diag-off:
+== /home/sarah/cp/lanes/audio-g/obj/linux_probe_console.console.log (2026-11-17 22:16)
+lp_check_console: kernel rows intact 25566/25569, user rows intact 11954/11955, interleaved lines 0, torn rows 1, missing 4, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+lp_check_console: FAIL -- 1 torn row(s); 4 missing row(s)
+lines=13056 user=2754 forced=1 broken=0 raw=0 stale=0 evicted=0 split=0 diag-off:
+== /home/sarah/cp/lanes/console/obj/linux_probe_console.console.log (2026-11-17 19:32)
+lp_check_console: kernel rows intact 26304/26304, user rows intact 12362/12362, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+lp_check_console: PASS -- clean
+lines=26007 user=5618 forced=0 broken=0 raw=0 stale=0 evicted=0 split=0 diag-off:
+== /home/sarah/cp/lanes/ext2w3/obj/linux_probe_console.console.log (2026-11-17 14:20)
+lp_check_console: kernel rows intact 23255/23271, user rows intact 11405/11408, interleaved lines 0, torn rows 4, missing 19, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+lp_check_console: FAIL -- 4 torn row(s); 19 missing row(s)
+lines=20752 user=4670 forced=4 broken=0 raw=0 stale=0 evicted=0 split=0 diag-off:
+== /home/sarah/cp/lanes/k6-dev/obj/linux_probe_console.console.log (2026-11-17 15:47)
+lp_check_console: kernel rows intact 26994/26994, user rows intact 12289/12289, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+lp_check_console: PASS -- clean
+lines=26656 user=5637 forced=0 broken=0 raw=0 stale=0 evicted=0 split=0 diag-off:
+== /home/sarah/cp/lanes/k6-dev2/obj/linux_probe_console.console.log (2026-11-17 14:50)
+lp_check_console: kernel rows intact 25688/25722, user rows intact 11824/11836, interleaved lines 1, torn rows 5, missing 46, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+lp_check_console: FAIL -- 1 interleaved line(s); 5 torn row(s); 46 missing row(s)
+lines=22964 user=4891 forced=10 broken=0 raw=0 stale=0 evicted=0 split=0 diag-off:
+== /home/sarah/cp/lanes/p7/obj/linux_probe_console.console.log (2026-11-17 15:25)
+lp_check_console: kernel rows intact 27618/27618, user rows intact 12817/12817, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+lp_check_console: PASS -- clean
+lines=27277 user=5901 forced=0 broken=0 raw=0 stale=0 evicted=0 split=0 diag-off:
+== /home/sarah/cp/lanes/venus/obj/linux_probe_console.console.log (2026-11-17 19:39)
+lp_check_console: kernel rows intact 26949/26949, user rows intact 12283/12283, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+lp_check_console: PASS -- clean
+lines=25331 user=5365 forced=0 broken=0 raw=0 stale=0 evicted=0 split=0 diag-off:
+== integ12 batch (~/cp/integ15/console.gate):
+--- host-side check: lp_check_console.py (console kept: /home/sarah/cp/integ/obj/linux_probe_console.console.log) ---
+lp_check_console: kernel rows intact 24538/24591, user rows intact 11330/11349, interleaved lines 1, torn rows 10, missing 72, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]

@@ -338,6 +338,21 @@ static void check_xrun_locked(void) {
     S.state = ST_XRUN;
     S.xruns++;
     S.trigger_us = timer_get_us();
+    /* H4-kglitch (cp-hunt H1-11): a game never closes its PCM before the
+       boot ends, so the close row never shows its xruns: one row per xrun
+       (the first 32, then every 64th; tools/cp/kglitch/xrun-host-test.sh). */
+    if (S.xruns <= 32 || (S.xruns & 63) == 0) {
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SND] xrun n=");
+      kl_i(&kl, (long)S.xruns);
+      kl_s(&kl, " frames_done=");
+      kl_i(&kl, (long)S.frames_done);
+      kl_s(&kl, " chunks=");
+      kl_i(&kl, (long)S.chunks);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
   }
 }
 

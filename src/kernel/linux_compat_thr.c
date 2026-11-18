@@ -3150,6 +3150,22 @@ static void l_sf_record(struct process *p, struct trap_frame *tf,
   l_sf_src = 0; /* one shot: the next plant defaults to a trap-exit delivery */
   d.flags_hi = (uint8_t)(((tf->spsr >> 8) & 0xff));
   d.pad = 0;
+  if (sig == 2) { /* H4-kglitch (H2-F2): the delivery half of [SIGINT-S] */
+    static int sid_rows;
+    if (sid_rows < 24) {
+      sid_rows++;
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[SIGINT-D] pid=");
+      kl_i(&kl, p->pid);
+      kl_s(&kl, " ip=0x");
+      kl_hex(&kl, (unsigned long)ip);
+      kl_s(&kl, " alt=");
+      kl_i(&kl, alt ? 1 : 0);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+    }
+  }
   l_sf_ring[l_sf_ring_n % L_SF_RING] = d;
   l_sf_ring_n++;
   l_sf_last[p->pid] = d;
@@ -3222,6 +3238,22 @@ static void l_sf_check_restore(struct process *cur, uint64_t frame_rsp,
     kl_i(&kl, (int)(rip & 15));
     kl_c(&kl, '\n');
     kl_emit(&kl);
+  }
+  if (delta != 0) {
+    /* H4-kglitch: a nested delivery (a signal taken inside a handler)
+       planted a second frame over the first, and l_sf_last keeps only the
+       newest plant, so the OUTER frame's return looked like a mismatch
+       ("[SFX] MISMATCH ... delta=576" on a nested fault).  A restored rsp
+       that equals an earlier plant of this pid in the ring is that outer
+       return: no mismatch (linux_probe_sigint I6). */
+    uint32_t n = l_sf_ring_n < L_SF_RING ? l_sf_ring_n : L_SF_RING;
+    for (uint32_t i = 0; i < n; i++) {
+      struct l_sf_diag *r = &l_sf_ring[(l_sf_ring_n - 1 - i) % L_SF_RING];
+      if (r->pid == (uint32_t)cur->pid && r->sp == frame_rsp) {
+        delta = 0;
+        break;
+      }
+    }
   }
   if (delta != 0 && l_sf_xrows < 8) {
     l_sf_xrows++;
@@ -4028,10 +4060,20 @@ int linux_compat_sigreturn(struct process *p, struct trap_frame *tf) {
       kl_emit(&kl);
     }
   }
-  if (!l_user_ok(p, rip, 1, 0) || !l_user_ok(p, rsp, 8, 1)) {
-    /* A corrupt frame must not resume the kernel: force SIGSEGV. */
-    uart_puts("[LCOMPAT] rt_sigreturn: bad rip/rsp -> SIGSEGV\n");
+  /* H4-kglitch: Linux does not check the restored RIP/RSP: a handler may
+     return into an address that is not mapped (Wine does), and the thread
+     then takes an ordinary fault there, with its own trap number.  Refusing
+     it here raised SIGSEGV from this syscall's frame, whose vector (0x80)
+     Wine read as REG_TRAPNO: "Got unexpected trap 128", then "nested
+     exception on signal stack" (linux_probe_sigret S2).  Only what iretq
+     itself cannot take is refused: a non-canonical or kernel-half RIP/RSP
+     would #GP inside the kernel.  That SIGSEGV carries Linux's trap number
+     for it (13). */
+  if (rip >= 0x0000800000000000ULL || rsp >= 0x0000800000000000ULL) {
+    uart_puts("[LCOMPAT] rt_sigreturn: non-canonical rip/rsp -> SIGSEGV\n");
     cur->sig_in_handler = 0;
+    tf->vector = 13;
+    tf->error_code = 0;
     process_fault_exit(tf, HO_SIGSEGV);
     return 1;
   }

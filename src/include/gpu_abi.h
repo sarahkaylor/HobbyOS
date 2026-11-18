@@ -363,8 +363,15 @@ int gpu_abi_map_cache_mode(uint32_t map_info);
 /* FENCE_WAIT2 deadline arithmetic: the absolute deadline in ms for a wait
  * starting at now_ms (UINT64_MAX = never), saturating. */
 uint64_t gpu_abi_deadline_ms(uint64_t now_ms, uint64_t timeout_ns);
-/* The park/restart sentinel FENCE_WAIT2 returns to the compat ioctl path
- * (the NATIVE -2 convention, docs in linux_compat_fd.c). */
-#define GPU_ABI_PARKED (-2)
+/* H4-kglitch: 1 if an expired FENCE_WAIT2 of this timeout earns a row. */
+int gpu_abi_fence_timeout_reportable(uint64_t timeout_ns);
+/* The park/restart sentinel FENCE_WAIT2 returns to the compat ioctl path,
+ * which answers it with l_park (the ioctl restarts on wake).  It must never
+ * be a Linux errno (-1..-4095): it was -2 == -ENOENT, and any -ENOENT that
+ * reached the /dev/gpu route (raw rc pass-through from the capset, blob-map
+ * and scanout helpers) would have restarted the ioctl for ever -- the hang
+ * C4-audio hit with its own -2 (H4-kglitch, docs/cp-kglitch.md §3).
+ * Distinct from LSND_PARKED (-100000). */
+#define GPU_ABI_PARKED (-100001)
 
 #endif /* GPU_ABI_H */

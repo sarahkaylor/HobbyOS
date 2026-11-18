@@ -3798,6 +3798,18 @@ $(INPUT_NODE_TEST): src/host/input_node_test.c src/kernel/input_node.c src/inclu
 KCONSOLE_TEST = kconsole_test_host
 $(KCONSOLE_TEST): src/host/kconsole_test.c src/host/cons_host_shim.h src/kernel/kconsole.c src/include/console.h
 	$(HOST_CC) -Isrc/include -Isrc/host $(HOST_CFLAGS) -DCONS_HOST_TEST src/kernel/kconsole.c src/host/kconsole_test.c -o $@
+# H4-kglitch (cp-hunt H1-14): the x64 stall watchdog's "console silent" test
+# (src/include/wd_silence.h) -- a console stamped after `now` is not silence.
+WD_SILENCE_TEST = wd_silence_test_host
+$(WD_SILENCE_TEST): src/host/wd_silence_test.c src/include/wd_silence.h
+	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/host/wd_silence_test.c -o $@
+
+# H4-kglitch (docs/cp-kglitch.md §1): the wire lock with real threads, one per
+# CPU, and a holder stalled mid-row (a whole-guest host stall, a short and a
+# long single-vCPU stall).  The bound is shortened to 300 ms for the test.
+KCONSOLE_MT_TEST = kconsole_mt_test_host
+$(KCONSOLE_MT_TEST): src/host/kconsole_mt_test.c src/host/cons_host_shim.h src/kernel/kconsole.c src/include/console.h
+	$(HOST_CC) -Isrc/include -Isrc/host $(HOST_CFLAGS) -pthread -DCONS_HOST_TEST -DCONS_WAIT_US=300000ULL src/kernel/kconsole.c src/host/kconsole_mt_test.c -o $@
 
 # C4-audio (docs/cp-audio.md): the ALSA hw_params refine/choose engine
 # (src/kernel/linux_snd_params.c), the same TU the kernel's /dev/snd PCM uses.
@@ -4764,102 +4776,112 @@ test_pr_sync:
 
 # The suite as one list, so a host-portable subset can be derived from it
 # without maintaining a second copy (see host_tests_portable).
-HOST_TESTS_TARGETS = $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness test_pr_sync $(GAMES_SCAN_TEST) $(GFX_STATS_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_SIGFRAME_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(VFS_BIND_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) $(T4_COMPAT_SELFTEST) $(OPEN_MODE_SCAN) $(NFS_RSIZE_SCAN) $(VECTOR_SHAPE_SCAN) $(SDL_TEST_APP_HOST) $(UNAME_PARITY) $(AUDIO_STUB_TEST) $(LINUX_SND_PARAMS_TEST) $(SSP_REPORT_TEST) $(KCONSOLE_TEST)
+HOST_TESTS_TARGETS = $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness test_pr_sync $(GAMES_SCAN_TEST) $(GFX_STATS_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_SIGFRAME_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(VFS_BIND_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) $(T4_COMPAT_SELFTEST) $(OPEN_MODE_SCAN) $(NFS_RSIZE_SCAN) $(VECTOR_SHAPE_SCAN) $(SDL_TEST_APP_HOST) $(UNAME_PARITY) $(AUDIO_STUB_TEST) $(LINUX_SND_PARAMS_TEST) $(SSP_REPORT_TEST) $(KCONSOLE_TEST) $(KCONSOLE_MT_TEST) $(WD_SILENCE_TEST)
+# H4-kglitch: every step of the recipe runs and a red one is recorded, not
+# fatal (tools/host/host_try.sh); the last line lists every failure and exits 1.
+# Before, the first red line (the known-red python suite) ended the recipe and
+# every test binary after it was built but never run.
+HOST_TESTS_FAILS = obj/host_tests.fails.$$PPID
+HOST_TRY = @sh tools/host/host_try.sh $(HOST_TESTS_FAILS)
 host_tests: $(HOST_TESTS_TARGETS)
-	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
-	$(HOST_RUN) ./$(GAMES_SCAN_TEST)
-	$(HOST_RUN) ./$(GFX_STATS_TEST)
-	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
-	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)
-	$(HOST_RUN) ./$(DESKTOP_DAMAGE_TEST)
-	$(HOST_RUN) ./$(DESKTOP_INPUT_TEST)
-	$(HOST_RUN) ./$(DESKTOP_TERM_TEST)
-	$(HOST_RUN) ./$(DESKTOP_PIXEL_TEST)
-	$(HOST_RUN) ./$(X11_LIB_TEST)
-	$(HOST_RUN) ./$(XCALC_TEST)
-	$(HOST_RUN) ./$(ANTFARM_TEST)
-	$(HOST_RUN) ./$(XEYES_TEST)
-	$(HOST_RUN) ./$(XNIBBLER_TEST)
-	$(HOST_RUN) ./$(NANO_TERM_TEST)
-	$(HOST_RUN) ./$(XCRYPT_TEST)
-	$(HOST_RUN) ./$(NFS_PROTO_TEST)
-	$(HOST_RUN) ./$(RESOLV_TEST)
-	$(HOST_RUN) ./$(TIME_MATH_TEST)
-	$(HOST_RUN) ./$(CONSOLE_APP_TEST)
-	$(HOST_RUN) ./$(DIALOG_ARROW_TEST)
-	$(HOST_RUN) ./$(PONG_TEST_BIN)
-	$(HOST_RUN) ./$(STARDUST_TEST)
-	$(HOST_RUN) ./$(KCONSOLE_TEST)
+	@rm -f $(HOST_TESTS_FAILS)
+	$(HOST_TRY) ./$(EDITOR_TEST_BIN)
+	$(HOST_TRY) ./$(GAMES_SCAN_TEST)
+	$(HOST_TRY) ./$(GFX_STATS_TEST)
+	$(HOST_TRY) ./$(DESKTOP_MENU_TEST)
+	$(HOST_TRY) ./$(DESKTOP_DRAG_TEST)
+	$(HOST_TRY) ./$(DESKTOP_DAMAGE_TEST)
+	$(HOST_TRY) ./$(DESKTOP_INPUT_TEST)
+	$(HOST_TRY) ./$(DESKTOP_TERM_TEST)
+	$(HOST_TRY) ./$(DESKTOP_PIXEL_TEST)
+	$(HOST_TRY) ./$(X11_LIB_TEST)
+	$(HOST_TRY) ./$(XCALC_TEST)
+	$(HOST_TRY) ./$(ANTFARM_TEST)
+	$(HOST_TRY) ./$(XEYES_TEST)
+	$(HOST_TRY) ./$(XNIBBLER_TEST)
+	$(HOST_TRY) ./$(NANO_TERM_TEST)
+	$(HOST_TRY) ./$(XCRYPT_TEST)
+	$(HOST_TRY) ./$(NFS_PROTO_TEST)
+	$(HOST_TRY) ./$(RESOLV_TEST)
+	$(HOST_TRY) ./$(TIME_MATH_TEST)
+	$(HOST_TRY) ./$(CONSOLE_APP_TEST)
+	$(HOST_TRY) ./$(DIALOG_ARROW_TEST)
+	$(HOST_TRY) ./$(PONG_TEST_BIN)
+	$(HOST_TRY) ./$(STARDUST_TEST)
+	$(HOST_TRY) ./$(KCONSOLE_TEST)
+	$(HOST_TRY) ./$(KCONSOLE_MT_TEST)
+	$(HOST_TRY) ./$(WD_SILENCE_TEST)
 	@echo "[host] self-registering python host tests (GB-064)"
-	python3 tools/t5/run_t5_tests.py
-	$(HOST_RUN) ./$(NES_TEST)
-	$(HOST_RUN) ./$(GUI_TEST)
-	$(HOST_RUN) ./$(ERRNO_TEST)
-	$(HOST_RUN) ./$(ELF_IMAGE_TEST)
-	$(HOST_RUN) ./$(LINUX_ABI_TEST)
-	$(HOST_RUN) ./$(UNAME_PARITY)
-	$(HOST_RUN) ./$(LINUX_LAYOUT_TEST)
-	$(HOST_RUN) ./$(LINUX_SIGFRAME_TEST)
-	$(HOST_RUN) ./$(LINUX_ABI_CONSTANTS_TEST)
-	$(HOST_RUN) ./$(THRD_TEST_HOST)
-	$(HOST_RUN) ./$(TLS_TEST_HOST)
-	$(HOST_RUN) ./$(WK1C_TEST_HOST)
-	$(HOST_RUN) ./$(IPC_PROTO_TEST)
-	$(HOST_RUN) ./$(IPC_TEST_HOST)
-	$(HOST_RUN) ./$(TORTURE_TEST_HOST)
-	$(HOST_RUN) ./$(GRAPHICS_LIB_TEST)
-	$(HOST_RUN) ./$(WSURF_TEST_HOST)
-	$(HOST_RUN) ./$(FB_IOCTL_TEST)
-	$(HOST_RUN) ./$(FB_PIXEL_TEST)
-	$(HOST_RUN) ./$(M2_CONTRACT_TEST)
-	$(HOST_RUN) ./$(EVDEV_TEST)
-	$(HOST_RUN) ./$(JOYPAD_TEST)
-	$(HOST_RUN) ./$(CLOCKABI_TEST)
-	$(HOST_RUN) ./$(LOCKSTEAL_TEST)
-	$(HOST_RUN) ./$(MEMFD_TEST)
-	$(HOST_RUN) ./$(VFS_BIND_TEST)
-	$(HOST_RUN) ./$(LINUX_INPUT_TEST)
-	$(HOST_RUN) ./$(INPUT_NODE_TEST)
-	$(HOST_RUN) ./$(AUDIO_STUB_TEST)
-	$(HOST_RUN) ./$(LINUX_SND_PARAMS_TEST)
-	$(HOST_RUN) ./$(FB_MMAP_TEST)
-	$(HOST_RUN) ./$(SDL_TEST_APP_HOST)
-	$(HOST_RUN) ./$(WINDOW_DAMAGE_TEST)
-	$(HOST_RUN) ./$(WINDOW_TEXT_TEST)
-	$(HOST_RUN) ./$(STRING_TEST)
-	$(HOST_RUN) ./$(CTYPE_TEST)
-	$(HOST_RUN) ./$(STDLIB_TEST)
-	$(HOST_RUN) ./$(SETJMP_TEST)
-	$(HOST_RUN) ./$(REALLOC_TEST)
-	$(HOST_RUN) ./$(PRINTF_TEST)
-	$(HOST_RUN) ./$(HEADERS_TEST)
-	$(HOST_RUN) ./$(CXXRT_TEST)
-	$(HOST_RUN) ./$(CXX_HEADERS_TEST)
-	$(HOST_RUN) ./$(RTTI_TEST)
-	$(HOST_RUN) ./$(GETOPT_TEST)
+	$(HOST_TRY) -t 1200 python3 tools/t5/run_t5_tests.py
+	$(HOST_TRY) ./$(NES_TEST)
+	$(HOST_TRY) ./$(GUI_TEST)
+	$(HOST_TRY) ./$(ERRNO_TEST)
+	$(HOST_TRY) ./$(ELF_IMAGE_TEST)
+	$(HOST_TRY) ./$(LINUX_ABI_TEST)
+	$(HOST_TRY) ./$(UNAME_PARITY)
+	$(HOST_TRY) ./$(LINUX_LAYOUT_TEST)
+	$(HOST_TRY) ./$(LINUX_SIGFRAME_TEST)
+	$(HOST_TRY) ./$(LINUX_ABI_CONSTANTS_TEST)
+	$(HOST_TRY) ./$(THRD_TEST_HOST)
+	$(HOST_TRY) ./$(TLS_TEST_HOST)
+	$(HOST_TRY) ./$(WK1C_TEST_HOST)
+	$(HOST_TRY) ./$(IPC_PROTO_TEST)
+	$(HOST_TRY) ./$(IPC_TEST_HOST)
+	$(HOST_TRY) ./$(TORTURE_TEST_HOST)
+	$(HOST_TRY) ./$(GRAPHICS_LIB_TEST)
+	$(HOST_TRY) ./$(WSURF_TEST_HOST)
+	$(HOST_TRY) ./$(FB_IOCTL_TEST)
+	$(HOST_TRY) ./$(FB_PIXEL_TEST)
+	$(HOST_TRY) ./$(M2_CONTRACT_TEST)
+	$(HOST_TRY) ./$(EVDEV_TEST)
+	$(HOST_TRY) ./$(JOYPAD_TEST)
+	$(HOST_TRY) ./$(CLOCKABI_TEST)
+	$(HOST_TRY) ./$(LOCKSTEAL_TEST)
+	$(HOST_TRY) ./$(MEMFD_TEST)
+	$(HOST_TRY) ./$(VFS_BIND_TEST)
+	$(HOST_TRY) ./$(LINUX_INPUT_TEST)
+	$(HOST_TRY) ./$(INPUT_NODE_TEST)
+	$(HOST_TRY) ./$(AUDIO_STUB_TEST)
+	$(HOST_TRY) ./$(LINUX_SND_PARAMS_TEST)
+	$(HOST_TRY) ./$(FB_MMAP_TEST)
+	$(HOST_TRY) ./$(SDL_TEST_APP_HOST)
+	$(HOST_TRY) ./$(WINDOW_DAMAGE_TEST)
+	$(HOST_TRY) ./$(WINDOW_TEXT_TEST)
+	$(HOST_TRY) ./$(STRING_TEST)
+	$(HOST_TRY) ./$(CTYPE_TEST)
+	$(HOST_TRY) ./$(STDLIB_TEST)
+	$(HOST_TRY) ./$(SETJMP_TEST)
+	$(HOST_TRY) ./$(REALLOC_TEST)
+	$(HOST_TRY) ./$(PRINTF_TEST)
+	$(HOST_TRY) ./$(HEADERS_TEST)
+	$(HOST_TRY) ./$(CXXRT_TEST)
+	$(HOST_TRY) ./$(CXX_HEADERS_TEST)
+	$(HOST_TRY) ./$(RTTI_TEST)
+	$(HOST_TRY) ./$(GETOPT_TEST)
 ifneq ($(REGEX_TEST),)
-	$(HOST_RUN) ./$(REGEX_TEST)
+	$(HOST_TRY) ./$(REGEX_TEST)
 else
 	@echo "  SKIP: regex layout (glibc-ABI only; this host has no struct re_registers)"
 endif
-	$(HOST_RUN) ./$(LANGINFO_TEST)
-	$(HOST_RUN) ./$(SCANFW_PARITY)
-	$(HOST_RUN) ./$(NUM_PARITY)
-	$(HOST_RUN) ./$(MATH_TX)
-	$(HOST_RUN) ./$(WIDE_PARITY)
-	$(HOST_RUN) ./files_test_host
-	$(HOST_RUN) ./calc_test_host
-	$(HOST_RUN) ./clock_test_host
-	$(HOST_RUN) ./sysmon_test_host
-	$(HOST_RUN) ./hex_test_host
-	$(HOST_RUN) ./tasks_test_host
-	$(HOST_RUN) ./find_test_host
-	$(HOST_RUN) ./$(SSP_REPORT_TEST)
-	$(HOST_RUN) ./diff_test_host
-	$(HOST_RUN) ./notes_test_host
-	$(HOST_RUN) ./unit_test_host
+	$(HOST_TRY) ./$(LANGINFO_TEST)
+	$(HOST_TRY) ./$(SCANFW_PARITY)
+	$(HOST_TRY) ./$(NUM_PARITY)
+	$(HOST_TRY) ./$(MATH_TX)
+	$(HOST_TRY) ./$(WIDE_PARITY)
+	$(HOST_TRY) ./files_test_host
+	$(HOST_TRY) ./calc_test_host
+	$(HOST_TRY) ./clock_test_host
+	$(HOST_TRY) ./sysmon_test_host
+	$(HOST_TRY) ./hex_test_host
+	$(HOST_TRY) ./tasks_test_host
+	$(HOST_TRY) ./find_test_host
+	$(HOST_TRY) ./$(SSP_REPORT_TEST)
+	$(HOST_TRY) ./diff_test_host
+	$(HOST_TRY) ./notes_test_host
+	$(HOST_TRY) ./unit_test_host
 	@mkdir -p obj/host_scratch
-	@cd obj/host_scratch && sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 120 "../../$(APPS_SUITE_TEST)"; else exec "../../$(APPS_SUITE_TEST)"; fi'
+	$(HOST_TRY) -t 120 -C obj/host_scratch ../../$(APPS_SUITE_TEST)
+	@sh tools/host/host_try.sh $(HOST_TESTS_FAILS) --report
 
 # GB-085 concurrency gate: two `make host_tests` at once must both pass
 # (per-process scratch dirs), and a shared-path override must FAIL it.

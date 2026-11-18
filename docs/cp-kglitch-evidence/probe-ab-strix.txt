@@ -1,0 +1,125 @@
+# H4-kglitch §5/§6: probe rows of the A/B runs (base = integ15 kernel in s1/s3, lane = this branch in s4/s5), strix guest
+== exitrace-base-2.gate
+[LP] X1 a worker exit_group(7)s, leader gone         rounds=300 reaped=299 echild=1 (errno 10) wrong-status=0 timeout=0 -> FAIL
+[LP] X2 last worker returns, leader gone             rounds=300 reaped=300 echild=0 (errno 0) wrong-status=0 timeout=0 -> PASS
+t3_linux_probe: FAIL — exitrace never printed '[LP] done rc=0' (tier rc=1)
+== exitrace-lane-1.gate
+[LP] X1 a worker exit_group(7)s, leader gone         rounds=300 reaped=300 echild=0 (errno 0) wrong-status=0 timeout=0 -> PASS
+[LP] X2 last worker returns, leader gone             rounds=300 reaped=300 echild=0 (errno 0) wrong-status=0 timeout=0 -> PASS
+t3_linux_probe: PASS — exitrace reached its done marker
+== sigint-s3-1.gate
+[LP] I1 SIGINT wakes epoll_wait(-1)                    rounds=60 lost=0 worst_us=81 mask_has_sigint=0 -> PASS
+[LP] I2 SIGINT sent during a SIGUSR1 handler           rounds=60 lost=0 worst_us=3985 mask_has_sigint=0 -> PASS
+[LP] I3 handler sa_mask restored by rt_sigreturn       (see mask_has_sigint in I1/I2)
+[LP] I4 F_GETLK names the lock owner                   rc=0 l_type=1 l_pid=4 child=4 -> PASS
+[LP] I5 SIGINT to F_GETLK's pid wakes epoll_wait       rounds=60 lost=0 worst_us=33 mask_has_sigint=0 -> PASS
+t3_linux_probe: PASS — sigint reached its done marker
+== kglitch-s1-exitrace-1-040331.gate
+[LP] X1 a worker exit_group(7)s, leader gone         rounds=300 reaped=299 echild=1 (errno 10) wrong-status=0 timeout=0 -> FAIL
+[LP] X2 last worker returns, leader gone             rounds=300 reaped=300 echild=0 (errno 0) wrong-status=0 timeout=0 -> PASS
+t3_linux_probe: FAIL — exitrace never printed '[LP] done rc=0' (tier rc=1)
+== kglitch-s1-exitrace-1-041300.gate
+[LP] X1 a worker exit_group(7)s, leader gone         rounds=300 reaped=299 echild=1 (errno 10) wrong-status=0 timeout=0 -> FAIL
+[LP] X2 last worker returns, leader gone             rounds=300 reaped=300 echild=0 (errno 0) wrong-status=0 timeout=0 -> PASS
+t3_linux_probe: FAIL — exitrace never printed '[LP] done rc=0' (tier rc=1)
+== kglitch-s1-killgrp-1-040547.gate
+[LP] K3 kill(pid,0) on a leader-exited group     rc=0 errno=0 -> PASS
+[LP] K1 SIGKILL: the group is reaped             kill rc=0 waited=0ms -> PASS
+[LP] K2 SIGKILL: status is killed-by-9           status=0x9 -> PASS
+[LP] K4 SIGTERM (SIG_DFL) terminates it          kill rc=0 waited=0ms status=0xf -> PASS
+[LP] K5 SIGUSR1 (handler) runs on a worker       kill rc=0 waited=50ms status=0x2a00 -> PASS
+[LP] K6 a worker's exit_group(7)                 waited=-1ms status=0x2a00 -> FAIL
+[LP] K7 the last thread returns                  waited=300ms status=0x0 -> PASS
+t3_linux_probe: FAIL — killgrp never printed '[LP] done rc=0' (tier rc=1)
+== kglitch-s3-badelr-1-043249.gate
+[LP] B1 two threads spin at 0x140000000 for 1.5 s    status=0x9 -> PASS (the console check decides)
+--- host-side check: lp_check_badelr.py (console kept: /home/sarah/cp/lanes/kglitch-s3/obj/linux_probe_badelr.console.log) ---
+  e.g. [BADELR] picking a user slot with an implausible frame.elr=0x0000000140000000 slot=4 pid=4 sp=0x0000001080022EC8 PROBE.ELF
+  e.g. [BADELR] picking a user slot with an implausible frame.elr=0x0000000140000000 slot=3 pid=3 sp=0x00000017FFFFFDD8 PROBE.ELF
+  e.g. [BADELR] picking a user slot with an implausible frame.elr=0x0000000140000000 slot=4 pid=4 sp=0x0000001080022EC8 PROBE.ELF
+  e.g. [BADELR] picking a user slot with an implausible frame.elr=0x0000000140000000 slot=3 pid=3 sp=0x00000017FFFFFDD8 PROBE.ELF
+lp_check_badelr: FAIL -- 20 [BADELR] row(s)
+t3_linux_probe: FAIL — badelr reached its done marker but lp_check_badelr.py failed
+== kglitch-s3-exitrace-1-044022.gate
+[LP] X1 a worker exit_group(7)s, leader gone         rounds=300 reaped=299 echild=1 (errno 10) wrong-status=0 timeout=0 -> FAIL
+[LP] X2 last worker returns, leader gone             rounds=300 reaped=300 echild=0 (errno 0) wrong-status=0 timeout=0 -> PASS
+[LP] X3 exit_group(7) while a worker faults pages    rounds=300 reaped=300 echild=0 (errno 0) wrong-status=0 timeout=0 -> PASS
+t3_linux_probe: FAIL — exitrace never printed '[LP] done rc=0' (tier rc=1)
+== kglitch-s3-forkcow-3.gate
+t3_linux_probe: PASS — forkcow reached its done marker
+== kglitch-s3-killgrp-1.gate
+[LP] K3 kill(pid,0) on a leader-exited group     rc=0 errno=0 -> PASS
+[LP] K1 SIGKILL: the group is reaped             kill rc=0 waited=0ms -> PASS
+[LP] K2 SIGKILL: status is killed-by-9           status=0x9 -> PASS
+[LP] K4 SIGTERM (SIG_DFL) terminates it          kill rc=0 waited=0ms status=0xf -> PASS
+[LP] K5 SIGUSR1 (handler) runs on a worker       kill rc=0 waited=50ms status=0x2a00 -> PASS
+[LP] K6 a worker's exit_group(7)                 waited=-1ms status=0x2a00 -> FAIL
+[LP] K7 the last thread returns                  waited=300ms status=0x0 -> PASS
+t3_linux_probe: FAIL — killgrp never printed '[LP] done rc=0' (tier rc=1)
+== kglitch-s3-sigint-1-044145.gate
+[LP] I1 SIGINT wakes epoll_wait(-1)                    rounds=60 lost=0 worst_us=117 mask_has_sigint=0 -> PASS
+[LP] I2 SIGINT sent during a SIGUSR1 handler           rounds=60 lost=0 worst_us=3981 mask_has_sigint=0 -> PASS
+[LP] I7 busy set, 50 ms timeout, SIGINT+SIGCONT        rounds=60 lost=0 worst_us=55 mask_has_sigint=0 -> PASS
+[LP] I8 I7 + a second thread parked in FUTEX_WAIT      rounds=60 lost=0 worst_us=55 mask_has_sigint=0 -> PASS
+[LP] I9 I7 with 96 more idle pipes in the set          rounds=60 lost=0 worst_us=62 mask_has_sigint=0 -> PASS
+[LP] I3 handler sa_mask restored by rt_sigreturn       (see mask_has_sigint in I1/I2)
+[LP] I4 F_GETLK names the lock owner                   rc=0 l_type=1 l_pid=8 child=8 -> PASS
+[LP] I5 SIGINT to F_GETLK's pid wakes epoll_wait       rounds=60 lost=0 worst_us=403 mask_has_sigint=0 -> PASS
+[LP] I6 nested handler frames return intact            rounds=20 maxdepth=2 inner=20 -> PASS (+ console: no [SFX] MISMATCH)
+--- host-side check: lp_check_sigint.py (console kept: /home/sarah/cp/lanes/kglitch-s3/obj/linux_probe_sigint.console.log) ---
+  e.g. [SFX] MISMATCH pid=2 gen=427 planted=0x0x17FFFFF538 restored=0x0x17FFFFFC58 delta=1824
+  e.g. [SFX] MISMATCH pid=2 gen=429 planted=0x0x17FFFFF538 restored=0x0x17FFFFFC58 delta=1824
+  e.g. [SFX] MISMATCH pid=2 gen=431 planted=0x0x17FFFFF538 restored=0x0x17FFFFFC58 delta=1824
+  e.g. [SFX] MISMATCH pid=2 gen=433 planted=0x0x17FFFFF538 restored=0x0x17FFFFFC58 delta=1824
+lp_check_sigint: FAIL -- 9 [SFX] MISMATCH row(s)
+t3_linux_probe: FAIL — sigint reached its done marker but lp_check_sigint.py failed
+== kglitch-s3-sigret-1-045113.gate
+[LP] S1 fault through a NULL pointer                 trapno=14 -> PASS
+[LP] S2 sigreturn into an unmapped RIP faults there  entries=2 trapno=128 si_addr=0x0 -> FAIL
+[LP] S3 recovered through the second frame           -> PASS
+[LCOMPAT] rt_sigreturn: bad rip/rsp -> SIGSEGV
+t3_linux_probe: FAIL — sigret never printed '[LP] done rc=0' (tier rc=1)
+== kglitch-s4-exitrace-1-043527.gate
+[LP] X1 a worker exit_group(7)s, leader gone         rounds=300 reaped=300 echild=0 (errno 0) wrong-status=0 timeout=0 -> PASS
+[LP] X2 last worker returns, leader gone             rounds=300 reaped=300 echild=0 (errno 0) wrong-status=0 timeout=0 -> PASS
+[LP] X3 exit_group(7) while a worker faults pages    rounds=300 reaped=300 echild=0 (errno 0) wrong-status=0 timeout=0 -> PASS
+t3_linux_probe: PASS — exitrace reached its done marker
+== kglitch-s4-killgrp-2-060357.gate
+[LP] K3 kill(pid,0) on a leader-exited group     rc=0 errno=0 -> PASS
+[LP] K1 SIGKILL: the group is reaped             kill rc=0 waited=0ms -> PASS
+[LP] K2 SIGKILL: status is killed-by-9           status=0x9 -> PASS
+[LP] K4 SIGTERM (SIG_DFL) terminates it          kill rc=0 waited=0ms status=0xf -> PASS
+[LP] K5 SIGUSR1 (handler) runs on a worker       kill rc=0 waited=50ms status=0x2a00 -> PASS
+[LP] K6 a worker's exit_group(7)                 waited=350ms status=0x700 -> PASS
+[LP] K7 the last thread returns                  waited=300ms status=0x0 -> PASS
+t3_linux_probe: PASS — killgrp reached its done marker
+== kglitch-s4-pipestorm-1-044309.gate
+== kglitch-s4-pipestorm-1-065024.gate
+t3_linux_probe: PASS — pipestorm reached its done marker
+== kglitch-s5-fpu_sig-1-050513.gate
+[LP] P4 armed: faulting inside the SIGSEGV handler (altstack 4 KiB); this instance is expected to die, the MACHINE is not
+[LP] P1 base=0x100000a030 b16=0 off=568 dst=0x100000a268 d16=8 want=GP got=GP PASS
+[LP] P1 base=0x100000a030 b16=0 off=576 dst=0x100000a270 d16=0 want=ok got=ok PASS
+[LP] P1 base=0x100000a438 b16=8 off=568 dst=0x100000a670 d16=0 want=ok got=ok PASS
+[LP] P1 base=0x100000a438 b16=8 off=576 dst=0x100000a678 d16=8 want=GP got=GP PASS
+[LP] P1 cases=4 (568 is legal only for base%16==8)
+[LP] P2 normal-stack roundtrip calls=1 alt=0 entry_rsp=0x17fffff540 fp_align=0 fxrstor=1 PASS
+[LP] P3 in-handler on altstack
+[LP] P3 altstack-4k roundtrip calls=1 alt=1 entry_rsp=0x1080000a30 fp_align=0 fxrstor=1 PASS
+[LP] P4: nested-fault case runs as the second wave entry ("PROBE.ELF nest"); this instance must still reach done rc=0
+t3_linux_probe: PASS — fpu_sig reached its done marker
+== kglitch-s5-killgrp-1-070656.gate
+== kglitch-s5-sigint-1-043631.gate
+[LP] I1 SIGINT wakes epoll_wait(-1)                    rounds=60 lost=0 worst_us=97 mask_has_sigint=0 -> PASS
+[LP] I2 SIGINT sent during a SIGUSR1 handler           rounds=60 lost=0 worst_us=4019 mask_has_sigint=0 -> PASS
+[LP] I7 busy set, 50 ms timeout, SIGINT+SIGCONT        rounds=60 lost=0 worst_us=563 mask_has_sigint=0 -> PASS
+[LP] I8 I7 + a second thread parked in FUTEX_WAIT      rounds=60 lost=0 worst_us=69 mask_has_sigint=0 -> PASS
+[LP] I9 I7 with 96 more idle pipes in the set          rounds=60 lost=0 worst_us=52 mask_has_sigint=0 -> PASS
+[LP] I3 handler sa_mask restored by rt_sigreturn       (see mask_has_sigint in I1/I2)
+[LP] I4 F_GETLK names the lock owner                   rc=0 l_type=1 l_pid=8 child=8 -> PASS
+[LP] I5 SIGINT to F_GETLK's pid wakes epoll_wait       rounds=60 lost=0 worst_us=34 mask_has_sigint=0 -> PASS
+[LP] I6 nested handler frames return intact            rounds=20 maxdepth=2 inner=20 -> PASS (+ console: no [SFX] MISMATCH)
+--- host-side check: lp_check_sigint.py (console kept: /home/sarah/cp/lanes/kglitch-s5/obj/linux_probe_sigint.console.log) ---
+  e.g. [LP] I6 nested handler frames return intact            rounds=20 maxdepth=2 inner=20 -> PASS (+ console: no [SFX] MISMATCH)
+lp_check_sigint: FAIL -- 1 [SFX] MISMATCH row(s)
+t3_linux_probe: FAIL — sigint reached its done marker but lp_check_sigint.py failed

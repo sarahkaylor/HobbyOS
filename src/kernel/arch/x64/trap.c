@@ -1,3 +1,4 @@
+#include "wd_silence.h"
 #include "trap.h"
 #include "kline.h"
 #include "fs.h"
@@ -3761,7 +3762,10 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
       wd_puts("\n");
     }
   }
-  if (now - uart_last_activity_ms < WATCHDOG_SILENCE_MS) {
+  /* H4-kglitch (cp-hunt H1-14): a stamp after `now` (this tick's own
+     [NFSIO] row above, or another CPU) is not silence; the unsigned
+     difference wrapped (src/include/wd_silence.h, wd_silence_test). */
+  if (!wd_console_silent(now, uart_last_activity_ms, WATCHDOG_SILENCE_MS)) {
     return;
   }
   wd_next_report_ms = now + WATCHDOG_COOLDOWN_MS;

@@ -850,6 +850,12 @@ int gpu_abi_map_cache_mode(uint32_t map_info) {
   }
 }
 
+/* H4-kglitch (cp-hunt H1-07): a FENCE_WAIT2 timeout is reported only when
+   the caller asked for at least 1 s (a short poll timing out is normal). */
+int gpu_abi_fence_timeout_reportable(uint64_t timeout_ns) {
+  return timeout_ns >= 1000000000ull;
+}
+
 uint64_t gpu_abi_deadline_ms(uint64_t now_ms, uint64_t timeout_ns) {
   if (timeout_ns == ~0ull) return ~0ull;
   uint64_t ms = timeout_ns / 1000000ull;
@@ -1406,8 +1412,15 @@ static int gpu_m2_fence_wait2(struct process* p, int fd, uint64_t arg) {
     if (vm_kwrite(p, arg, &fw, sizeof(fw)) != 0) return -EFAULT;
   } else if (fw.deadline_ms != ~0ull && now >= fw.deadline_ms) {
     /* A fence that never retires is the one thing a hang report needs. */
+    /* H4-kglitch (cp-hunt H1-07): every timeout is counted, but only a wait
+       whose caller asked for >= 1 s is a hang candidate worth a row.  The
+       game's short-timeout polls in its first ~6 s of Vulkan spent the
+       16-row budget in 18 of 18 Venus boots, so a real hang later never
+       printed. */
     static int to_rows = 0;
-    if (to_rows++ < 16) {
+    static uint64_t to_all = 0;
+    to_all++;
+    if (gpu_abi_fence_timeout_reportable(fw.timeout_ns) && to_rows++ < 16) {
       uint64_t issued = 0, done = 0;
       int inflight = 0;
       virtio_gpu_3d_fence_state(fw.ctx_id, fw.ring_idx, &issued, &done, &inflight);
@@ -1422,6 +1435,7 @@ static int gpu_m2_fence_wait2(struct process* p, int fd, uint64_t arg) {
       uart_puts(" done=");
       uart_print_hex(done);
       gpu_abi_say(" ctx_inflight=", inflight);
+      gpu_abi_say(" timeouts=", (int)to_all);
       uart_puts("\n");
     }
     return -ETIMEDOUT;

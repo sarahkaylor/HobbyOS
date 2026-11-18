@@ -734,7 +734,10 @@ static int proc_reap_parked_locked(void) {
       q->exit_status = 0;
       n++;
     } else if (q->state == PROC_STATE_THREAD_DONE) {
-      if (!q->is_thread && q->live_threads != 0)
+      /* H4-kglitch: a leader-exited anchor whose group is mid-exit
+         (exit_owner set) is not a tombstone yet: it becomes EXITED when
+         the teardown ends, and freeing it here lost the child to waitpid. */
+      if (!q->is_thread && (q->live_threads != 0 || q->exit_owner))
         continue;
       if (!q->is_thread && (q->phys_block_idx >= 0 || q->as))
         proc_release_mem_locked(q);
@@ -1251,7 +1254,7 @@ static int thread_alloc_slot_locked(void) {
     struct process *q = &proc_table[i];
     if (q->state != PROC_STATE_THREAD_DONE || process_still_running(i))
       continue;
-    if (!q->is_thread && q->live_threads != 0)
+    if (!q->is_thread && (q->live_threads != 0 || q->exit_owner)) /* H4-kglitch */
       continue;
     if (!q->is_thread && (q->phys_block_idx >= 0 || q->as)) {
       /* Defensive: a leader tombstone must not leak its block/AS. */
@@ -1459,7 +1462,7 @@ static int process_create_internal_ver(int ver) {
       struct process *q = &proc_table[i];
       if (q->state != PROC_STATE_THREAD_DONE || process_still_running(i))
         continue;
-      if (!q->is_thread && q->live_threads != 0)
+      if (!q->is_thread && (q->live_threads != 0 || q->exit_owner)) /* H4-kglitch */
         continue;
       if (!q->is_thread && (q->phys_block_idx >= 0 || q->as))
         proc_release_mem_locked(q);
@@ -2698,6 +2701,14 @@ void schedule(struct trap_frame *tf, int is_yield) {
            with a budget is worse than no instrument. */
         int implausible = (elr < 0x1000u) ||
                           (elr >= 0x70000000u && elr < USER_VA_BASE);
+        /* H4-kglitch: a compat (Linux-ABI) process maps below USER_VA_BASE
+           too -- the game's PE image runs at 0x140000000 -- so the band
+           alone flagged every busy PE thread and spent the 20-row budget on
+           healthy resumes.  An elr inside one of the slot's own AS regions is
+           a legal resume (linux_probe_badelr). */
+        if (implausible && elr >= 0x1000u && proc_table[idx].as &&
+            vm_region_find(proc_table[idx].as, elr))
+          implausible = 0;
         if (!proc_table[idx].is_kernel_process && implausible) {
           if (sched_badelr_seen < 20) {
             sched_badelr_seen++;
@@ -4450,6 +4461,36 @@ int process_signal_directed(int pid, int sig, int directed) {
     struct process *snd = current_process();
     struct process *sg = snd ? process_group(snd) : 0;
     pender->sig_sender[sig] = (int16_t)((sg && !snd->is_kernel_process) ? sg->pid : 0);
+    /* H4-kglitch (H2-F2): SIGINT is rare (wineserver -k sends one per
+       shutdown) and every other signal row's budget is spent before it
+       comes, so the 10.5 s ignored SIGINT left no trace.  Its own small
+       budget: who sent it to whom, the target's state, mask and handler.
+       [SIGINT-D] (linux_compat_thr.c) is the delivery half. */
+    if (sig == 2) {
+      static int si_rows;
+      if (si_rows < 24) {
+        si_rows++;
+        extern uint64_t linux_compat_sigmask_get(struct process *);
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[SIGINT-S] from=");
+        kl_i(&kl, sg ? sg->pid : -1);
+        kl_s(&kl, " to=");
+        kl_i(&kl, pender->pid);
+        kl_s(&kl, " tgid=");
+        kl_i(&kl, target->pid);
+        kl_s(&kl, " st=");
+        kl_i(&kl, pender->state);
+        kl_s(&kl, " mask=0x");
+        kl_hex(&kl, (unsigned long)linux_compat_sigmask_get(pender));
+        kl_s(&kl, " h=0x");
+        kl_hex(&kl, (unsigned long)target->sig_handler[sig]);
+        kl_s(&kl, " inh=");
+        kl_i(&kl, pender->sig_in_handler);
+        kl_s(&kl, thread_directed ? " dir\n" : " grp\n");
+        kl_emit(&kl);
+      }
+    }
   }
   /* M6/L45: per-target rows for the two Boehm stop-the-world signals.  The
      global [SIG] rows are capped at 400 and the interesting pids (the pool
@@ -8446,6 +8487,13 @@ void process_thread_exit(struct trap_frame *tf, uint64_t retval) {
   if (grp->live_threads > 0)
     grp->live_threads--;
   int last = (grp->live_threads == 0);
+  /* H4-kglitch: the last thread owns the group's exit from here to the
+     teardown's EXITED, like exit_group's owner (C1-k4).  With the leader
+     gone the anchor is THREAD_DONE, and live_threads == 0 alone made every
+     slot reclaimer free it in that window: waitpid answered ECHILD
+     (linux_probe_exitrace X2; killgrp K6 for the exit_group path). */
+  if (last && !grp->exit_owner)
+    grp->exit_owner = cur->pid;
   /* Keep the caller schedulable until the teardown (if any) is done: a
      timer tick preempting this path must be able to save and later resume
      it (a THREAD_DONE state would abandon the exit path mid-teardown). */

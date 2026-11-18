@@ -1,0 +1,92 @@
+# H4-kglitch §4: make -k host_tests on strix, lane tree (kglitch-s2, 63b6ca73 + cf86edea), MAKEFLAGS=-j16 TOOLS_SKIP=1
+# every recipe step now runs; the steps after the python suite (which never ran before) are listed with their verdict lines
+
+  FAIL  tools/board/sync_gaming_md_test.py  (FileNotFoundError: [Errno 2] No such file or directory: 'gaming.md')
+  FAIL  tools/t5/roadmap_doc_test.py  (FileNotFoundError: [Errno 2] No such file or directory: 'gaming.md')
+[host-tests] done: 40/42 passed
+[host_tests] FAILED: python3 tools/t5/run_t5_tests.py (exit 2) -- continuing
+[host_tests] summary: 1 step(s) failed:
+  FAILED: python3 tools/t5/run_t5_tests.py (exit 2)
+make: *** [Makefile:4873: host_tests] Error 1
+
+== verdict lines of the binaries after the python suite (first line of each that states a result)
+[host_tests] FAILED: python3 tools/t5/run_t5_tests.py (exit 2) -- continuing
+  PASS: reset loads PC from vector $FFFC
+  PASS: ADC/ORA/AND residue A==0x0F
+  PASS: LDX $30 after JSR/RTS sets X==7
+  PASS: STA $20 wrote 5 to RAM
+  PASS: subroutine STA $30 wrote 7 to RAM
+  PASS: JSR/RTS balances the stack (sp back to 0xFD)
+  PASS: CPX #$07 sets Carry
+  PASS: CPX #$07 sets Zero
+  PASS: result is non-negative (N clear)
+  PASS: BEQ + JMP lands PC at $8018
+  PASS: PPU renders tile pattern shades (0x00..0xFF tile)
+  PASS: PPU leaves pixel-0 rows outside the drawn tile dark
+  PASS: $2006 latch commits PPUADDR=$1000
+  PASS: $2007 writes through to the addressed VRAM byte
+  PASS: $2007 auto-increments PPUADDR by 1
+  PASS: $2006 latch commits PPUADDR=$2000
+  PASS: $2007 writes the first nametable cell
+  PASS: controller bit0 read back set
+  PASS: controller bit1 (0 in joy) reads 0
+  PASS: homebrew boots: pattern tile 0 solid bright
+  PASS: homebrew: A released keeps the dark top band (resting frame)
+  PASS: homebrew: sprite tile 3 written and OAM[0] = (y=12,tile=3,x=12)
+  PASS: homebrew: rendered sprite pixel at (12,12) mid-grey over bright field
+  PASS: homebrew: A pressed clears the band (ROM responds to input)
+  PASS: homebrew self-advances: blink cell toggles across frames with no input
+  PASS: 6502 ASL/LSR/ROL/ROR chain yields A==0x06
+  PASS: shift chain leaves Carry clear
+  PASS: STA $10 (absolute,zero-page) stores the shift result
+  PASS: 6502 BCC falls through / BCS taken (X=1, INY skipped)
+  PASS: 6502 JMP ($xxxx) indirect takes the pointer target
+  PASS: 6502 PHA push / PLA pull restores A and balances the stack
+  PASS: OAMDATA ($2004) reads back the written y
+  PASS: sprite glyph blits over the background at (20,10)
+  PASS: background (no sprite there) stays dark at (40,10)
+Tests: passed=34 failed=0 -> ALL PASSED
+=== Results: 12 run, 0 failed ===
+ALL GUI TESTS PASSED
+  PASS errno starts at 0
+  PASS close(-1) -> -1, errno=EBADF
+  PASS read(-1) -> -1, errno=EBADF
+  PASS write(9999) -> -1, errno=EBADF
+  PASS kill(nonexistent,0) -> -1, errno=ESRCH
+  PASS getcwd(tiny buf) -> NULL, errno=ERANGE
+  PASS successful getcwd returns buf, errno stays 0
+ALL ERRNO HOST TESTS PASSED
+  PASS elf_parse(NULL) -> ARGS
+  PASS elf_parse(img=NULL) -> ARGS
+  PASS 8-byte buffer -> HDR_SHORT
+  PASS 64-byte buffer -> PHOFF (no phdr table)
+  PASS every prefix of a valid image is rejected (no OOB read)
+  PASS valid-x86_64-exec parses
+  PASS two PT_LOAD segments
+  PASS phnum preserved
+  PASS e_entry == 0x401000
+  PASS vaddr_base page-aligned to 0x401000
+  PASS vaddr_end covers the last segment
+  PASS span == 0x2000
+  PASS elf_page_down
+  PASS elf_page_up
+  PASS segment 0 is R+X
+  PASS segment 1 is R+W
+  PASS ET_EXEC flagged not-PIE
+  PASS ET_EXEC at 0x400000 flagged needs_low_window (unmappable under the v2 window)
+  PASS elf_copy_into succeeds
+  PASS seg0 first byte copied to vaddr_base
+  PASS seg0 last byte copied
+  PASS seg1 first byte copied (0x00 fill)
+  PASS seg1 bss tail zeroed (filesz=0x10 memsz=0x30)
+  PASS seg1 last memsz byte zeroed
+  PASS inter-segment hole left untouched (caller pre-zeroes)
+  PASS page hole after the last segment untouched
+  PASS short dst -> DST_RANGE
+  PASS valid-exec-bss parses
+  PASS filesz < memsz recorded
+  PASS bss copy_into succeeds
+  PASS bss: file bytes present
+  PASS bss: tail zeroed
+  PASS bss: last memsz byte zeroed
+  PASS tour-exec-3seg parses

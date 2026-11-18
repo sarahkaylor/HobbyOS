@@ -65,6 +65,8 @@ struct cons_stats {
   uint64_t stale;       /* partial line pushed out by age               */
   uint64_t evicted;     /* partial line pushed out for a slot           */
   uint64_t split;       /* line longer than a slot, written in pieces   */
+  uint64_t usurped;     /* an owner found its wire taken over mid-piece */
+  uint64_t stalls;      /* host stalls seen by CPU 0's tick (clipped)   */
   uint64_t dropped[CONS_D_NCLASS]; /* rows held back by the filter      */
 };
 extern struct cons_stats cons_stats;

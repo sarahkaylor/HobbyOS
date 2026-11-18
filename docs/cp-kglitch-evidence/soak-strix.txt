@@ -1,0 +1,99 @@
+# H4-kglitch §5: soak rows (soak.sh), strix.  tree: kglitch-s3 = 63b6ca73 (console fix only), kglitch-s1 = integ15 base,
+# kglitch-s4/s5 = lane with the exit-race fix (s4 at 96b626ed, then 2bb7bc15 for its 3-round soak; s5 at 2bb7bc15).
+# guests_at_end = QEMUs on strix when the boot ended (ours included).
+02:59:44 kglitch-s3 pipestorm #1 rc=0 secs=191 guests_at_end=3 load=18.62 done=[[LP] done rc=0] 
+03:00:21 kglitch-s3 mmap_race #1 rc=0 secs=37 guests_at_end=2 load=18.15 done=[[LP] done rc=0] 
+03:01:17 kglitch-s3 fdrace #1 rc=0 secs=55 guests_at_end=3 load=15.71 done=[[LP] done rc=0] 
+03:01:57 kglitch-s3 forkcow #1 rc=0 secs=40 guests_at_end=3 load=16.31 done=[[LP] done rc=0] 
+03:02:32 kglitch-s3 futex_sig #1 rc=0 secs=35 guests_at_end=3 load=14.88 done=[[LP] done rc=0] 
+03:03:53 kglitch-s3 exitgroup #1 rc=0 secs=81 guests_at_end=2 load=14.71 done=[[LP] done rc=0] 
+03:05:15 kglitch-s3 manythr #1 rc=0 secs=81 guests_at_end=2 load=15.12 done=[[LP] done rc=0] 
+03:07:36 kglitch-s3 sysc #1 rc=0 secs=141 guests_at_end=2 load=27.89 done=[[LP] done rc=0] 
+03:10:54 kglitch-s3 ntsync #1 rc=0 secs=198 guests_at_end=2 load=20.79 done=[[LP] done rc=0] 
+03:13:44 kglitch-s3 execthr #1 rc=0 secs=170 guests_at_end=2 load=15.18 done=[[LP] done rc=0] 
+03:16:12 kglitch-s3 killgrp #1 rc=1 secs=148 guests_at_end=2 load=15.03 done=[t3_linux_probe: FAIL — killgrp never printed '[LP] done rc=0] 
+03:18:17 kglitch-s3 e2stress #1 rc=0 secs=125 guests_at_end=2 load=15.17 done=[[LP] done rc=0] 
+03:19:38 kglitch-s3 fatcoh #1 rc=0 secs=81 guests_at_end=2 load=15.41 done=[[LP] done rc=0] 
+03:20:36 kglitch-s3 pipestorm #2 rc=0 secs=58 guests_at_end=2 load=11.21 done=[[LP] done rc=0] 
+03:21:18 kglitch-s3 mmap_race #2 rc=0 secs=42 guests_at_end=3 load=12.49 done=[[LP] done rc=0] 
+03:22:03 kglitch-s3 fdrace #2 rc=0 secs=45 guests_at_end=3 load=12.61 done=[[LP] done rc=0] 
+03:22:43 kglitch-s3 forkcow #2 rc=0 secs=40 guests_at_end=3 load=12.36 done=[[LP] done rc=0] 
+03:23:45 kglitch-s3 futex_sig #2 rc=0 secs=62 guests_at_end=2 load=15.36 done=[[LP] done rc=0] 
+03:25:40 kglitch-s3 exitgroup #2 rc=0 secs=115 guests_at_end=2 load=17.81 done=[[LP] done rc=0] 
+03:27:31 kglitch-s3 manythr #2 rc=0 secs=111 guests_at_end=3 load=16.90 done=[[LP] done rc=0] 
+03:29:19 kglitch-s3 sysc #2 rc=0 secs=108 guests_at_end=1 load=12.32 done=[[LP] done rc=0] 
+03:32:14 kglitch-s3 ntsync #2 rc=0 secs=175 guests_at_end=1 load=15.94 done=[[LP] done rc=0] 
+03:34:50 kglitch-s3 execthr #2 rc=0 secs=156 guests_at_end=2 load=22.84 done=[[LP] done rc=0] 
+03:37:54 kglitch-s3 killgrp #2 rc=0 secs=184 guests_at_end=2 load=14.62 done=[[LP] done rc=0] 
+03:39:42 kglitch-s3 e2stress #2 rc=0 secs=108 guests_at_end=2 load=13.87 done=[[LP] done rc=0] 
+03:41:11 kglitch-s3 fatcoh #2 rc=0 secs=89 guests_at_end=2 load=13.09 done=[[LP] done rc=0] 
+03:42:33 kglitch-s3 pipestorm #3 rc=0 secs=82 guests_at_end=3 load=23.83 done=[[LP] done rc=0] 
+03:44:37 kglitch-s3 mmap_race #3 rc=0 secs=123 guests_at_end=3 load=16.29 done=[[LP] done rc=0] 
+03:45:40 kglitch-s3 fdrace #3 rc=0 secs=63 guests_at_end=3 load=12.29 done=[[LP] done rc=0] 
+04:00:25 kglitch-s4 exitrace #1 rc=0 secs=299 guests_at_end=2 load=16.94 done=[[LP] done rc=0] 
+04:03:30 kglitch-s4 killgrp #1 rc=0 secs=185 guests_at_end=2 load=22.05 done=[[LP] done rc=0] 
+04:05:47 kglitch-s1 exitrace #1 rc=1 secs=136 guests_at_end=2 load=18.17 done=[t3_linux_probe: FAIL — exitrace never printed '[LP] done rc=] 
+04:07:27 kglitch-s1 killgrp #1 rc=1 secs=100 guests_at_end=1 load=18.16 done=[t3_linux_probe: FAIL — killgrp never printed '[LP] done rc=0] 
+04:10:11 kglitch-s4 exitrace #1 rc=0 secs=164 guests_at_end=1 load=17.72 done=[[LP] done rc=0] 
+04:13:00 kglitch-s4 killgrp #1 rc=0 secs=169 guests_at_end=2 load=35.62 done=[[LP] done rc=0] 
+04:16:21 kglitch-s1 exitrace #1 rc=1 secs=201 guests_at_end=3 load=15.88 done=[t3_linux_probe: FAIL — exitrace never printed '[LP] done rc=] 
+04:18:32 kglitch-s1 killgrp #1 rc=0 secs=131 guests_at_end=3 load=29.26 done=[[LP] done rc=0] 
+04:32:46 kglitch-s4 sigint #1 rc=0 secs=738 guests_at_end=1 load=14.23 done=[[LP] done rc=0] 
+04:35:27 kglitch-s4 badelr #1 rc=0 secs=161 guests_at_end=2 load=16.00 done=[[LP] done rc=0] 
+04:40:22 kglitch-s3 badelr #1 rc=1 secs=453 guests_at_end=2 load=9.95 done=[[LP] done rc=0] 
+04:41:43 kglitch-s3 exitrace #1 rc=1 secs=81 guests_at_end=2 load=11.71 done=[t3_linux_probe: FAIL — exitrace never printed '[LP] done rc=] 
+04:51:09 kglitch-s3 sigint #1 rc=1 secs=564 guests_at_end=2 load=13.09 done=[[LP] done rc=0] 
+04:52:45 kglitch-s5 sigint #1 rc=1 secs=974 guests_at_end=1 load=16.08 done=[[LP] done rc=0] 
+04:55:25 kglitch-s5 sigret #1 rc=0 secs=160 guests_at_end=1 load=14.27 done=[[LP] done rc=0] [KERNEL] pid=2 (PROBE.ELF) memory fault VA=0x0000000000000000 PC=0x0000000000000000 rw=rx in=HOLE region=NONE rsp=0x00000017FFFFFD28 live=1 inH=0 cr3frame=0x0000000200C06000 asroot=0x0000000200C06000 
+05:00:55 kglitch-s3 sigret #1 rc=1 secs=582 guests_at_end=0 load=15.49 done=[t3_linux_probe: FAIL — sigret never printed '[LP] done rc=0'] [KERNEL] pid=2 (PROBE.ELF) memory fault VA=0x0000000000000000 PC=0x0000000000000000 rw=rx in=HOLE region=NONE rsp=0x00000017FFFFFD28 live=1 inH=0 cr3frame=0x0000000200C06000 asroot=0x0000000200C06000 
+05:01:47 kglitch-s5 badelr #1 rc=0 secs=382 guests_at_end=1 load=14.63 done=[[LP] done rc=0] 
+05:05:07 kglitch-s5 exitrace #1 rc=0 secs=200 guests_at_end=3 load=14.55 done=[[LP] done rc=0] 
+05:14:11 kglitch-s4 pipestorm #1 rc=0 secs=538 guests_at_end=1 load=12.08 done=[[LP] done rc=0] 
+05:16:14 kglitch-s4 mmap_race #1 rc=0 secs=123 guests_at_end=0 load=14.65 done=[[LP] done rc=0] 
+05:19:00 kglitch-s4 fdrace #1 rc=0 secs=166 guests_at_end=0 load=13.56 done=[[LP] done rc=0] 
+05:23:55 kglitch-s4 forkcow #1 rc=0 secs=294 guests_at_end=1 load=11.57 done=[[LP] done rc=0] 
+05:25:45 kglitch-s4 futex_sig #1 rc=0 secs=110 guests_at_end=1 load=13.88 done=[[LP] done rc=0] 
+05:27:51 kglitch-s4 exitgroup #1 rc=0 secs=126 guests_at_end=2 load=10.44 done=[[LP] done rc=0] 
+05:29:06 kglitch-s4 manythr #1 rc=0 secs=75 guests_at_end=1 load=13.26 done=[[LP] done rc=0] 
+05:31:08 kglitch-s4 sysc #1 rc=0 secs=122 guests_at_end=2 load=11.52 done=[[LP] done rc=0] 
+05:33:03 kglitch-s4 ntsync #1 rc=0 secs=115 guests_at_end=3 load=11.00 done=[[LP] done rc=0] 
+05:34:13 kglitch-s4 execthr #1 rc=0 secs=70 guests_at_end=2 load=12.25 done=[[LP] done rc=0] 
+05:35:47 kglitch-s4 killgrp #1 rc=0 secs=94 guests_at_end=3 load=13.31 done=[[LP] done rc=0] 
+05:37:37 kglitch-s4 e2stress #1 rc=0 secs=110 guests_at_end=2 load=12.20 done=[[LP] done rc=0] 
+05:39:29 kglitch-s4 fatcoh #1 rc=0 secs=112 guests_at_end=1 load=11.85 done=[[LP] done rc=0] 
+05:41:20 kglitch-s4 exitrace #1 rc=0 secs=111 guests_at_end=0 load=12.01 done=[[LP] done rc=0] 
+05:43:07 kglitch-s4 pipestorm #2 rc=0 secs=107 guests_at_end=0 load=14.44 done=[[LP] done rc=0] 
+05:45:29 kglitch-s5 sigint #1 rc=0 secs=1369 guests_at_end=1 load=14.48 done=[[LP] done rc=0] 
+05:45:44 kglitch-s4 mmap_race #2 rc=0 secs=157 guests_at_end=0 load=19.32 done=[[LP] done rc=0] 
+05:47:54 kglitch-s5 tramp_sig #1 rc=0 secs=145 guests_at_end=1 load=14.08 done=[[LP] done rc=0] [KERNEL] pid=2 (PROBE.ELF) memory fault VA=0x0000000000000000 PC=0x00000010000021B3 rw=r  in=HOLE region=NONE rsp=0x00000017FFFFFDB0 live=1 inH=0 cr3frame=0x0000000200C06000 asroot=0x0000000200C06000 
+05:48:00 kglitch-s4 fdrace #2 rc=0 secs=136 guests_at_end=0 load=15.91 done=[[LP] done rc=0] 
+05:50:19 kglitch-s5 trapsig #1 rc=0 secs=145 guests_at_end=1 load=12.42 done=[[LP] done rc=0] [LP] PASS #PF (NULL read) -> SIGSEGV (11)|[LP] PASS #PF REG_TRAPNO 14 (14)|
+05:50:22 kglitch-s4 forkcow #2 rc=0 secs=142 guests_at_end=0 load=12.38 done=[[LP] done rc=0] 
+05:52:26 kglitch-s5 siginfo #1 rc=0 secs=127 guests_at_end=1 load=12.13 done=[[LP] done rc=0] [LP] PASS G1 #GP (hlt) sig=11 code=128 addr=0 (want sig=11 code=128 addr=0)|[KERNEL] pid=2 (PROBE.ELF) memory fault VA=0x0000001080001008 PC=0x0000001000001B4A rw=r  in=HOLE region=NONE near=0x000000
+05:52:33 kglitch-s4 futex_sig #2 rc=0 secs=131 guests_at_end=0 load=12.92 done=[[LP] done rc=0] 
+05:54:57 kglitch-s5 sigfd #1 rc=0 secs=150 guests_at_end=1 load=14.06 done=[[LP] done rc=0] 
+05:55:20 kglitch-s4 exitgroup #2 rc=0 secs=167 guests_at_end=0 load=16.04 done=[[LP] done rc=0] 
+05:57:10 kglitch-s5 timers #1 rc=0 secs=133 guests_at_end=0 load=14.85 done=[[LP] done rc=0] 
+05:57:31 kglitch-s4 manythr #2 rc=0 secs=131 guests_at_end=1 load=13.07 done=[[LP] done rc=0] 
+05:59:10 kglitch-s4 sysc #2 rc=0 secs=98 guests_at_end=1 load=15.80 done=[[LP] done rc=0] 
+06:01:18 kglitch-s4 ntsync #2 rc=0 secs=128 guests_at_end=2 load=16.51 done=[[LP] done rc=0] 
+06:03:57 kglitch-s4 execthr #2 rc=0 secs=159 guests_at_end=1 load=13.51 done=[[LP] done rc=0] 
+06:39:02 kglitch-s5 fpu_sig #1 rc=0 secs=413 guests_at_end=2 load=9.13 done=[[LP] done rc=0] [KERNEL] pid=3 (PROBE.ELF) memory fault VA=0x0000000000000008 PC=0x00000010000020E6 rw=w  in=HOLE region=NONE rsp=0x00000017FFFFFD40 live=1 inH=0 cr3frame=0x0000000200C58000 asroot=0x0000000200C58000 
+06:40:46 kglitch-s5 tramp_sig #1 rc=0 secs=104 guests_at_end=2 load=11.44 done=[[LP] done rc=0] [KERNEL] pid=2 (PROBE.ELF) memory fault VA=0x0000000000000000 PC=0x00000010000021B3 rw=r  in=HOLE region=NONE rsp=0x00000017FFFFFDB0 live=1 inH=0 cr3frame=0x0000000200C06000 asroot=0x0000000200C06000 
+06:41:52 kglitch-s5 trapsig #1 rc=0 secs=66 guests_at_end=2 load=10.90 done=[[LP] done rc=0] [LP] PASS #PF (NULL read) -> SIGSEGV (11)|[LP] PASS #PF REG_TRAPNO 14 (14)|
+06:43:26 kglitch-s5 siginfo #1 rc=0 secs=94 guests_at_end=1 load=11.74 done=[[LP] done rc=0] [LP] PASS G1 #GP (hlt) sig=11 code=128 addr=0 (want sig=11 code=128 addr=0)|[KERNEL] pid=2 (PROBE.ELF) memory fault VA=0x0000001080001008 PC=0x0000001000001B4A rw=r  in=HOLE region=NONE near=0x000000
+06:44:44 kglitch-s5 sigfd #1 rc=0 secs=78 guests_at_end=1 load=11.91 done=[[LP] done rc=0] 
+06:47:09 kglitch-s4 killgrp #1 rc=0 secs=155 guests_at_end=3 load=8.35 done=[[LP] done rc=0] 
+06:47:11 kglitch-s5 timers #1 rc=0 secs=147 guests_at_end=2 load=8.35 done=[[LP] done rc=0] 
+06:48:54 kglitch-s4 exitrace #1 rc=0 secs=105 guests_at_end=2 load=8.27 done=[[LP] done rc=0] 
+06:48:57 kglitch-s5 pipestorm #1 rc=0 secs=106 guests_at_end=1 load=8.33 done=[[LP] done rc=0] 
+06:50:24 kglitch-s4 exitgroup #1 rc=0 secs=90 guests_at_end=2 load=9.36 done=[[LP] done rc=0] 
+06:50:46 kglitch-s5 mmap_race #1 rc=0 secs=109 guests_at_end=0 load=11.87 done=[[LP] done rc=0] 
+06:53:09 kglitch-s5 fdrace #1 rc=0 secs=143 guests_at_end=0 load=9.49 done=[[LP] done rc=0] 
+06:54:40 kglitch-s5 forkcow #1 rc=0 secs=91 guests_at_end=1 load=13.89 done=[[LP] done rc=0] 
+06:55:46 kglitch-s5 futex_sig #1 rc=0 secs=66 guests_at_end=1 load=24.39 done=[[LP] done rc=0] 
+06:58:20 kglitch-s5 exitgroup #1 rc=0 secs=154 guests_at_end=1 load=25.24 done=[[LP] done rc=0] 
+07:01:12 kglitch-s5 manythr #1 rc=0 secs=172 guests_at_end=1 load=14.79 done=[[LP] done rc=0] 
+07:03:45 kglitch-s5 sysc #1 rc=0 secs=153 guests_at_end=2 load=12.31 done=[[LP] done rc=0] 
+07:04:57 kglitch-s5 ntsync #1 rc=0 secs=72 guests_at_end=1 load=15.30 done=[[LP] done rc=0] 
+07:06:56 kglitch-s5 execthr #1 rc=0 secs=119 guests_at_end=1 load=14.42 done=[[LP] done rc=0] 
