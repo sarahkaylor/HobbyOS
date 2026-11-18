@@ -1,0 +1,90 @@
+# pr10-lane2: tools/cp/present/hostprobe.sh output (strix; integ10 re-baseline, kernel in integ10-rebaseline-strix.txt)
+QEMU guests on the host before ours: 3
+## host-threads.txt
+# host-threads: 12 s window after phase world + 25 s; qemu 933222; render tree 933269 935625 936722 936745 936817 
+# pid tid comm  user% sys% vcsw/s nvcsw/s   (100% = one host CPU)
+ 933222  933236 CPU_1/KVM            41.5    8.5     1178      31
+ 933222  933237 CPU_2/KVM            40.5    8.5     1035      32
+ 933222  933238 CPU_3/KVM            40.0    8.0      969      33
+ 933222  933239 CPU_4/KVM            39.6    7.5      921      25
+ 933222  933240 CPU_5/KVM            37.5    8.0      908      26
+ 933222  933241 CPU_6/KVM            38.1    7.2      875      30
+ 933222  933243 CPU_7/KVM            36.1    7.5      874      29
+ 936817  936819 vkr-ring-11          28.5    5.3    19286      39
+ 933222  933222 qemu-system-x86       5.4    3.6     4832      21
+ 933222  933235 CPU_0/KVM             2.8    6.2     1489      11
+ 936817  936817 virgl-11-gpu_re       0.3    0.6      915       3
+ 936817  936826 vkr-queue-11          0.1    0.3      450       0
+ 936817  936828 vkr-queue-11          0.1    0.1      134       0
+# process 933222 total user 281.6% sys 65.2%
+# process 936817 total user 29.0% sys 6.2%
+# process 936745 total user 0.0% sys 0.0%
+# process 936722 total user 0.0% sys 0.0%
+# process 935625 total user 0.0% sys 0.0%
+# process 933269 total user 0.0% sys 0.0%
+## host-gpu.txt
+gpu_busy_percent samples=120 mean=22.9 p50=24 p90=30 max=60
+## host-kvm.txt (SVM exit codes: 0x400=NPF 0x60=INTR 0x7b=IOIO 0xa6=IDLE_HLT; mmio type 0=read-unsatisfied 1=read 2=write; gpa 0xfee00000=LAPIC, 0x380a00003000=virtio-gpu notify page)
+Attached 13 probes
+
+
+@exit[97]: 7
+@exit[119]: 651
+@exit[114]: 744
+@exit[123]: 52439
+@exit[100]: 73991
+@exit[166]: 134456
+@exit[96]: 932441
+@exit[1024]: 1131099
+@inj_virq[47]: 5
+@inj_virq[33]: 6
+@inj_virq[44]: 51
+@inj_virq[130]: 81
+@inj_virq[32]: 1379
+@inj_virq[42]: 12611
+@inj_virq[129]: 123948
+@inj_virq[132]: 128553
+@ioapic_set_irq[1]: 424
+@ioapic_set_irq[12]: 424
+@ioapic_set_irq[20]: 1048
+@ioapic_set_irq[21]: 23346
+@ioapic_set_irq[4]: 45516
+@ioapic_set_irq[10]: 48788
+@ipi: 115453
+@mmio[2, 2147487744]: 68
+@mmio[0, 2147483648]: 5066
+@mmio[1, 2147483648]: 5066
+@mmio[0, 61615600832512]: 11652
+@mmio[1, 61615600832512]: 11652
+@mmio[2, 61615600840704]: 90845
+@mmio[1, 4276092928]: 103529
+@mmio[2, 4276092928]: 592769
+@pic_set_irq[4, true]: 50
+@pic_set_irq[1, false]: 424
+@pic_set_irq[2, true]: 12322
+@pic_set_irq[2, false]: 35958
+@pic_set_irq[4, false]: 40074
+@pio[0, 96]: 106
+@pio[0, 1021]: 620
+@pio[1, 24688]: 1527
+@pio[0, 22104]: 3126
+@pio[0, 100]: 3132
+@pio[1, 1016]: 9925
+@pio[0, 24691]: 11630
+@pio[1, 160]: 11684
+@pio[1, 32]: 12946
+@set_irq[1, 1]: 12
+@set_irq[12, 1]: 200
+@set_irq[12, 0]: 224
+@set_irq[1, 0]: 412
+@set_irq[20, 0]: 524
+@set_irq[20, 1]: 524
+@set_irq[21, 0]: 11393
+@set_irq[21, 1]: 11393
+@set_irq[10, 0]: 23666
+@set_irq[10, 1]: 24002
+@set_irq[4, 0]: 39700
+@uexit[6]: 16540
+@uexit[2]: 27859
+@wakeup[false]: 53934
+@wakeup[true]: 94662
