@@ -45,7 +45,7 @@ if [ "${HUNT_AUDIO:-0}" = 1 ]; then
 fi
 
 sampler() {
-  echo "# run-hunt host sampler: S HH:MM:SS gpu_busy_percent(renderD129) loadavg1 serial_bytes dirty_kB writeback_kB; G lines = other QEMU guests"
+  echo "# run-hunt host sampler: S HH:MM:SS gpu_busy_percent(renderD129) loadavg1 serial_bytes dirty_kB writeback_kB io_full10 (PSI); G lines = other QEMU guests"
   local i=0
   while kill -0 "$1" 2>/dev/null; do
     if [ $((i % 60)) = 0 ]; then
@@ -57,7 +57,8 @@ sampler() {
     # stalled QEMU main loop) and the host's Dirty/Writeback kB (a QEMU
     # write() to serial.log throttled by dirty-page writeback stalls the guest)
     echo "S $(date +%T) $(cat /sys/class/drm/renderD129/device/gpu_busy_percent 2>/dev/null) $(cut -d' ' -f1 /proc/loadavg)" \
-      "$(stat -c %s "$2/serial.log" 2>/dev/null || echo -)" "$(awk '/^(Dirty|Writeback):/ {printf "%s ", $2}' /proc/meminfo)"
+      "$(stat -c %s "$2/serial.log" 2>/dev/null || echo -)" "$(awk '/^(Dirty|Writeback):/ {printf "%s ", $2}' /proc/meminfo)" \
+      "$(awk '/^full/ {sub("avg10=", "", $2); printf "io_full10=%s", $2}' /proc/pressure/io 2>/dev/null)"
     i=$((i + 1)); sleep 1
   done
 }
