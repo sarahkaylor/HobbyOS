@@ -35,13 +35,19 @@
 #include "linux_snd.h"
 #include "linux_snd_params.h"
 #include "virtio_snd.h"
+#ifdef LSND_HOST_TEST
+/* tools/cp/audio/host-alsa-test.sh: this TU on the host under an unmodified
+ * alsa-lib (src/host/lsnd_host.h supplies the kernel services it uses). */
+#include "lsnd_host.h"
+#else
 #include "errno.h"
 #include "lock.h"
 #include "kmem.h"
 #include "process.h"
-#include "pidmask.h"
 #include "timer.h"
 #include "vm.h"
+#endif
+#include "pidmask.h"
 #include "kline.h"
 
 #ifndef EBADFD
@@ -723,8 +729,34 @@ static int do_hw_params(struct process *p, uint64_t arg, int refine_only) {
     return cout(p, arg, &hp, sizeof hp);
   }
   if (S.state != ST_OPEN && S.state != ST_SETUP && S.state != ST_PREPARED) return -EBADFD;
+  struct lsnd_hw_params in = hp;
   r = lsnd_hw_choose(&hp, &caps);
-  if (r < 0) return r;
+  if (r < 0) {
+    /* one row per refused HW_PARAMS: what the caller asked for */
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[SND] HW_PARAMS refused r=");
+    kl_i(&kl, r);
+    kl_s(&kl, " fmt=");
+    kl_hex(&kl, in.masks[LSND_PARAM_FORMAT].bits[0]);
+    static const char *nm[12] = {"sbits", "fbits", "ch", "rate", "ptime", "psize",
+                                 "pbytes", "periods", "btime", "bsize", "bbytes", "tick"};
+    for (int k = 0; k < 12; k++) {
+      const struct lsnd_interval *v = &in.intervals[k];
+      if (v->min == 0 && v->max == 0xFFFFFFFFu && !v->flags) continue;
+      kl_c(&kl, ' ');
+      kl_s(&kl, nm[k]);
+      kl_c(&kl, (v->flags & LSND_IV_OPENMIN) ? '(' : '[');
+      kl_i(&kl, (long)v->min);
+      kl_c(&kl, ',');
+      kl_i(&kl, (long)v->max);
+      kl_c(&kl, (v->flags & LSND_IV_OPENMAX) ? ')' : ']');
+      if (v->flags & LSND_IV_INTEGER) kl_c(&kl, 'i');
+    }
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+    return r;
+  }
   uint32_t ch = lsnd_iv_value(lsnd_iv(&hp, LSND_PARAM_CHANNELS));
   uint32_t rate = lsnd_iv_value(lsnd_iv(&hp, LSND_PARAM_RATE));
   uint64_t period = lsnd_iv_value(lsnd_iv(&hp, LSND_PARAM_PERIOD_SIZE));
@@ -732,7 +764,19 @@ static int do_hw_params(struct process *p, uint64_t arg, int refine_only) {
   uint64_t buffer = lsnd_iv_value(lsnd_iv(&hp, LSND_PARAM_BUFFER_SIZE));
   uint32_t fb = ch * 2;
   int rc = lsnd_rate_code(rate);
-  if (rc < 0 || buffer != period * periods || buffer * fb > LSND_RING_BYTES) return -EINVAL;
+  if (rc < 0 || buffer != period * periods || buffer * fb > LSND_RING_BYTES) {
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[SND] HW_PARAMS inconsistent choice period=");
+    kl_i(&kl, (long)period);
+    kl_s(&kl, " periods=");
+    kl_i(&kl, (long)periods);
+    kl_s(&kl, " buffer=");
+    kl_i(&kl, (long)buffer);
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
+    return -EINVAL;
+  }
   dev_teardown();
   uint32_t st = 0;
   if (virtio_snd_set_params((uint32_t)(buffer * fb), (uint32_t)(period * fb), (uint8_t)ch,

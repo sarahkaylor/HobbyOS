@@ -2,7 +2,7 @@
  * C4-audio, docs/cp-audio.md): an ordinary glibc-2.31 Linux program linked
  * against the alsa-lib built by tools/cp/audio/build-alsa.sh.
  *
- *   alsatone [DEVICE [HZ [MS]]]     default: "default" 660 1500
+ *   alsatone [DEVICE [HZ [MS [s16|float [RATE]]]]]   default: "default" 660 1500 s16 48000
  *
  * Opens DEVICE for playback with snd_pcm_open (blocking), asks for S16_LE,
  * 2 channels, 48 kHz, 100 ms latency through snd_pcm_set_params (the plug
@@ -26,6 +26,8 @@ int main(int argc, char **argv) {
   const char *dev = argc > 1 ? argv[1] : "default";
   double hz = argc > 2 ? atof(argv[2]) : 660.0;
   int ms = argc > 3 ? atoi(argv[3]) : 1500;
+  int use_float = argc > 4 && argv[4][0] == 'f'; /* FLOAT_LE: the plug converts (Wine's mix format) */
+  unsigned rate = argc > 5 ? (unsigned)atoi(argv[5]) : 48000; /* != 48000: the plug resamples */
   printf("[ALSA] alsa-lib %s, device '%s', %.0f Hz, %d ms\n", snd_asoundlib_version(), dev, hz, ms);
   fflush(stdout);
   int card = -1, ncards = 0;
@@ -42,7 +44,8 @@ int main(int argc, char **argv) {
     printf("[ALSA] snd_pcm_open: %s\n[ALSA] done rc=1\n", snd_strerror(err));
     return 1;
   }
-  err = snd_pcm_set_params(pcm, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED, 2, 48000, 1, 100000);
+  err = snd_pcm_set_params(pcm, use_float ? SND_PCM_FORMAT_FLOAT_LE : SND_PCM_FORMAT_S16_LE,
+                           SND_PCM_ACCESS_RW_INTERLEAVED, 2, rate, 1, 100000);
   if (err < 0) {
     printf("[ALSA] snd_pcm_set_params: %s\n[ALSA] done rc=1\n", snd_strerror(err));
     return 1;
@@ -57,19 +60,22 @@ int main(int argc, char **argv) {
   printf("[ALSA] buffer %lu frames, period %lu frames\n", (unsigned long)bsz, (unsigned long)psz);
   enum { CH = 480 };
   static short buf[CH * 2];
+  static float fbuf[CH * 2];
   double ph = 0;
-  long total = 48 * ms, done = 0, recovers = 0;
+  long total = (long)rate * ms / 1000, done = 0, recovers = 0;
   double t0 = now_s();
   while (done < total) {
     for (int i = 0; i < CH; i++) {
       short v = (short)(16000 * sin(ph));
       buf[2 * i] = buf[2 * i + 1] = v;
-      ph += 2 * M_PI * hz / 48000.0;
+      fbuf[2 * i] = fbuf[2 * i + 1] = (float)(v / 32768.0);
+      ph += 2 * M_PI * hz / rate;
       if (ph > 2 * M_PI) ph -= 2 * M_PI;
     }
     int off = 0;
     while (off < CH) {
-      snd_pcm_sframes_t w = snd_pcm_writei(pcm, buf + 2 * off, CH - off);
+      snd_pcm_sframes_t w = use_float ? snd_pcm_writei(pcm, fbuf + 2 * off, CH - off)
+                                      : snd_pcm_writei(pcm, buf + 2 * off, CH - off);
       if (w < 0) {
         recovers++;
         if (snd_pcm_recover(pcm, (int)w, 1) < 0) {

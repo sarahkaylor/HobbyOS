@@ -10,10 +10,11 @@
 #                                                   compiled-in config dir)
 #   $WORK/alsatone                                 (tools/cp/audio/alsatone.c)
 #
-# alsa.conf gets four lines appended (the only change to upstream config):
-# card 0 is the virtio-snd card, and `default` is the plug plugin over hw:0,0
-# (alsa-lib's cards/ directory has no entry for the "virtio-snd" driver name,
-# and the guest has no /etc/asound.conf or ~/.asoundrc).
+# alsa.conf gets a block appended (the only change to upstream config):
+# `plughw` and `default` become plug over mmap_emul over hw (card 0, the
+# virtio-snd card), and ctl default is card 0.  alsa-lib's cards/ directory
+# has no entry for the "virtio-snd" driver name, and the guest has no
+# /etc/asound.conf or ~/.asoundrc.
 #
 # Env: CP_ALSA_TARBALL (default ~/cp/lanes/audio-dl/alsa-lib-1.2.14.tar.bz2)
 #      CP_ALSA_WORK    (default ~/cp/lanes/audio-alsa)
@@ -61,9 +62,21 @@ CONF="$DEST$PREFIX/share/alsa/alsa.conf"
 [ -f "$CONF" ] || die "no $CONF after install"
 cat >> "$CONF" <<'EOF'
 
-# HobbyOS (tools/cp/audio/build-alsa.sh, docs/cp-audio.md): card 0 is the
-# kernel's virtio-snd card; `default` is the plug plugin over hw:0,0.
-pcm.!default { type plug slave.pcm "hw:0,0" }
+# HobbyOS (tools/cp/audio/build-alsa.sh, docs/cp-audio.md §5): card 0 is the
+# kernel's virtio-snd card, which offers RW access only (no data mmap).
+# alsa-lib's converters (lfloat, rate, route) need an mmap-capable slave and
+# plug does not insert mmap_emul for a RW-only slave behind a converter
+# (measured: FLOAT_LE through plughw -> EINVAL), so plughw and default are plug
+# over mmap_emul over hw.
+pcm.!plughw {
+	@args [ CARD DEV SUBDEV ]
+	@args.CARD { type string default { @func getenv vars [ ALSA_PCM_CARD ALSA_CARD ] default { @func refer name defaults.pcm.card } } }
+	@args.DEV { type integer default { @func igetenv vars [ ALSA_PCM_DEVICE ] default { @func refer name defaults.pcm.device } } }
+	@args.SUBDEV { type integer default -1 }
+	type plug
+	slave.pcm { type mmap_emul slave.pcm { type hw card $CARD device $DEV subdevice $SUBDEV } }
+}
+pcm.!default { type plug slave.pcm { type mmap_emul slave.pcm "hw:0,0" } }
 ctl.!default { type hw card 0 }
 EOF
 LIB=$(readlink -f "$DEST$PREFIX/lib/libasound.so.2")

@@ -276,7 +276,9 @@ def grade_audio(ser, fails):
     """C4-audio (docs/cp-audio.md): alsatone (alsa-lib, Linux), then
     audiotone.exe wasapi and waveout (winealsa.drv) each end rc=0."""
     ok = True
-    for tag, done in (("alsatone", "[ALSA] done rc=0"), ("wasapi", "[AUD] wasapi done rc=0"),
+    if ser.count("[ALSA] done rc=0") < 2:
+        fails.append("audio: want two '[ALSA] done rc=0' (s16 + float)"); ok = False
+    for tag, done in (("alsatone", "[ALSA] done rc=0"), ("alsafloat", "[ALSA] done rc=0"), ("wasapi", "[AUD] wasapi done rc=0"),
                       ("waveout", "[AUD] waveout done rc=0")):
         e = [ln for ln in ser.splitlines() if ln.startswith(f"[P5] end {tag} ")]
         if not e or " status=0 " not in e[-1] + " ":

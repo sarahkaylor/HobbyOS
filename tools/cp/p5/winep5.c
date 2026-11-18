@@ -231,12 +231,16 @@ int main(int argc, char **argv) {
   }
 
   /* C4-audio (docs/cp-audio.md, opt-in "audio"): alsa-lib's own client, then
-     winealsa.drv through WASAPI and winmm.  Distinct tones (660 / 880 / 550 Hz)
+     winealsa.drv through WASAPI and winmm.  Distinct tones (660, 770 FLOAT_LE / 880 / 550 Hz)
      so the host's WAV check can tell the three apart. */
   for (int i = 1; i < argc; i++) {
     if (!streq(argv[i], "audio")) continue;
     char *a_al[] = { (char *)"alsatone", (char *)"default", (char *)"660", (char *)"1500", 0 };
     step("alsatone", MNT "/P5/AUD/alsatone", a_al, 120);
+    usleep(500000);
+    char *a_af[] = { (char *)"alsatone", (char *)"default", (char *)"770", (char *)"1000",
+                     (char *)"float", 0 };
+    step("alsafloat", MNT "/P5/AUD/alsatone", a_af, 120);
     usleep(500000);
     char *a_wa[] = { (char *)"wine", (char *)"Z:\\CP\\P5\\AUD\\audiotone.exe", (char *)"wasapi",
                      (char *)"2000", 0 };
