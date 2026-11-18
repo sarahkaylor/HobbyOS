@@ -60,6 +60,11 @@
 #                       instead of assembling $WORK/sysroot-glibc231
 #         CP_X11_WORK   (x variant; default $HOME/cp/x11-build)
 #         CP_VULKAN_LIB_DIR, CP_WINE_ALLOW_MISSING (x variant, above)
+#         CP_WINE_ALSA  (opt-in, lane C4-audio, docs/cp-audio.md §6): an alsa-lib
+#                       install prefix (tools/cp/audio/build-alsa.sh ->
+#                       .../destdir/CP/WINE).  Drops --without-alsa, passes
+#                       ALSA_CFLAGS/ALSA_LIBS, requires winealsa.drv, and stages
+#                       libasound.so.2 + share/alsa into the Wine stage.
 #         CP_RUNTIME    (default <repo>/third_party/cp-runtime)
 #         JOBS          (default 12)
 # Exit:   0 ok, 1 build/audit failure, 2 tooling error.
@@ -197,6 +202,15 @@ do_configure() {
     xargs=(--with-x --x-includes="$X11DEV/include" --x-libraries="$X11DEV/lib")
     say "configure: variant x: X11 + FreeType from $X11DEV, libvulkan for configure from $vkdir"
   fi
+  local alsaenv=()
+  if [ -n "${CP_WINE_ALSA:-}" ]; then # C4-audio: winealsa.drv against this alsa-lib
+    [ -f "$CP_WINE_ALSA/include/alsa/asoundlib.h" ] && [ -e "$CP_WINE_ALSA/lib/libasound.so" ] ||
+      die "CP_WINE_ALSA=$CP_WINE_ALSA has no include/alsa/asoundlib.h + lib/libasound.so" 2
+    local w2=(); for p in "${without[@]}"; do [ "$p" = alsa ] || w2+=("$p"); done; without=("${w2[@]}")
+    alsaenv=("ALSA_CFLAGS=-I$CP_WINE_ALSA/include" "ALSA_LIBS=-L$CP_WINE_ALSA/lib -lasound")
+    ldflags="${ldflags:+$ldflags }-L$CP_WINE_ALSA/lib" # configure's link test keeps only -lasound
+    say "configure: alsa ON from $CP_WINE_ALSA"
+  fi
   for p in "${without[@]}"; do wo+=("--without-$p"); done
   local pre=()
   # Force Wine's fixed-address fallback by failing configure's -static-pie probe.
@@ -207,11 +221,16 @@ do_configure() {
     CC="clang --sysroot=$SYS" \
     CFLAGS="-O2 -g" \
     x86_64_CC=clang \
-    env ${ldflags:+"LDFLAGS=$ldflags"} \
+    env ${ldflags:+"LDFLAGS=$ldflags"} "${alsaenv[@]}" \
     "$SRC/configure" --prefix="$PREFIX" --enable-archs=x86_64 --disable-tests \
       "${xargs[@]}" "${wo[@]}" "${pre[@]}" ) > "$WORK/configure.log" 2>&1 || {
     tail -30 "$WORK/configure.log"; die "configure failed (see $WORK/configure.log)"; }
   [ "$VARIANT" = x ] && check_x_features
+  if [ -n "${CP_WINE_ALSA:-}" ]; then
+    grep -q '^ALSA_LIBS = .*-lasound' "$BLD/Makefile" ||
+      die "CP_WINE_ALSA set but configure did not enable winealsa.drv (see $WORK/configure.log)"
+    say "configure: winealsa.drv ON ($(grep -E '^ALSA_LIBS = ' "$BLD/Makefile"))"
+  fi
   grep -E '^configure: (WARNING|error)|x86_64_CC|CROSSCC' "$WORK/configure.log" | head -40 || true
   say "configure: PE compiler = $(grep -E '^x86_64_CC=' "$BLD/config.log" | head -1)"
   say "configure: preloader LDFLAGS = $(grep -E '^WINEPRELOADER_LDFLAGS=' "$BLD/config.log" | head -1)"
@@ -250,6 +269,11 @@ do_install() {
   # install-lib = the runtime only (no widl/wrc/winegcc/headers/import libs).
   make -C "$BLD" install-lib DESTDIR="$STAGE" > "$WORK/install.log" 2>&1 || die "make install-lib failed"
   rm -rf "$STAGE$PREFIX/share/man" "$STAGE$PREFIX/share/applications"
+  if [ -n "${CP_WINE_ALSA:-}" ]; then # C4-audio: alsa-lib rides in the Wine stage (/CP/WINE/lib is on LD_LIBRARY_PATH)
+    cp -a "$CP_WINE_ALSA"/lib/libasound.so.2* "$STAGE$PREFIX/lib/"
+    cp -a "$CP_WINE_ALSA/share/alsa" "$STAGE$PREFIX/share/"
+    [ -f "$STAGE$PREFIX/lib/wine/x86_64-unix/winealsa.so" ] || die "CP_WINE_ALSA set but no winealsa.so was installed"
+  fi
   if [ "${CP_WINE_STRIP:-1}" = 1 ]; then
     # Debug info stays in $BLD (unstripped objects); the staged tree is what
     # HobbyOS has to hold, so strip DWARF from both halves.

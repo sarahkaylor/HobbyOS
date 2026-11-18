@@ -114,6 +114,15 @@ sudo -n cp "$OUT/pe/vkcube.exe" "$EXPORT/P5/VK/"
 sudo -n cp "$OUT/pe/d3d11tri.exe" "$PE/dxvk/d3d11.dll" "$PE/dxvk/dxgi.dll" "$PE/dxvk/d3d10core.dll" "$EXPORT/P5/D3D11/"
 sudo -n cp "$OUT/pe/d3d12tri.exe" "$PE/vkd3d/d3d12.dll" "$PE/vkd3d/d3d12core.dll" "$PE/dxvk/dxgi.dll" "$EXPORT/P5/D3D12/"
 sudo -n cp "$OUT/pe/fullscr.exe" "$EXPORT/P5/FS/"
+# C4-audio (docs/cp-audio.md, opt-in probe tag "audio"): alsa-lib's alsatone
+# (tools/cp/audio/build-alsa.sh) + audiotone.exe.  The Wine stage must be the
+# winealsa build (tools/cp/audio/build-wine-alsa.sh), the boot needs CP_AUDIO_WAV.
+case " $PROBES " in *" audio "*)
+  AT="${CP_ALSA_WORK:-$HOME/cp/lanes/audio-alsa}/alsatone"
+  [ -x "$AT" ] || die "probe audio: no $AT (tools/cp/audio/build-alsa.sh)"
+  [ -f "$WINE/lib/wine/x86_64-unix/winealsa.so" ] || die "probe audio: $WINE has no winealsa.so"
+  sudo -n mkdir -p "$EXPORT/P5/AUD" && sudo -n cp "$AT" "$OUT/pe/audiotone.exe" "$EXPORT/P5/AUD/" ;;
+esac
 sudo -n chmod -R a+rX "$EXPORT"
 ( cd "$EXPORT" && find P5 VK/lib VK/share -type f | sort | while read -r f; do
     printf '%s %10d %s\n' "$(sha256sum "$f" | cut -c1-16)" "$(stat -c %s "$f")" "$f"; done ) | tee "$OUT/export-manifest.txt"

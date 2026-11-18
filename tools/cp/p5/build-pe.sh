@@ -51,6 +51,7 @@ build vkcubex.c  vkcube.exe   -I"$VKH" -I"$ROOT/src/user/cp"
 build d3d11tri.c d3d11tri.exe
 build d3d12tri.c d3d12tri.exe
 build fullscr.c  fullscr.exe
-for e in vkcube d3d11tri d3d12tri fullscr; do
+build audiotone.c audiotone.exe   # C4-audio: WASAPI + waveOut tone (docs/cp-audio.md)
+for e in vkcube d3d11tri d3d12tri fullscr audiotone; do
   echo "build-pe: $e.exe imports: $(llvm-objdump -p "$OUT/$e.exe" 2>/dev/null | sed -n 's/^ *DLL Name: //p' | tr '\n' ' ')"
 done

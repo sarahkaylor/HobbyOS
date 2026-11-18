@@ -138,6 +138,7 @@ static struct {
   uint32_t user_pversion;
   /* stats */
   uint64_t xruns, chunks, frames_done;
+  uint64_t n_sync_ptr, n_writei, n_status, n_refine, n_parks;
 } S;
 
 static spinlock_t lsnd_lock;
@@ -279,6 +280,7 @@ static void lsnd_unpark(struct process *cur) {
 static int lsnd_park(uint32_t seen, uint64_t wait_us) {
   struct process *cur = current_process();
   if (!cur || cur->pid <= 0 || cur->pid >= MAX_PROCESSES) return -EAGAIN;
+  S.n_parks++;
   uint64_t pf = spinlock_acquire_irqsave(&proc_lock);
   if (__atomic_load_n(&lsnd_seq, __ATOMIC_SEQ_CST) == seen && process_park_ok_locked(cur)) {
     pid_mask_set(&lsnd_waiters, cur->pid);
@@ -394,6 +396,8 @@ int linux_snd_open(int minor, uint32_t flags) {
     S.inflight = 0;
     S.user_pversion = 0;
     S.tstamp_mode = S.tstamp_type = 0;
+    S.xruns = S.chunks = S.frames_done = 0;
+    S.n_sync_ptr = S.n_writei = S.n_status = S.n_refine = S.n_parks = 0;
     spinlock_release_irqrestore(&lsnd_lock, fl);
   }
   ylock_release(&lsnd_op);
@@ -427,6 +431,16 @@ void linux_snd_release(int minor) {
     kl_i(&kl, (long)S.frames_done);
     kl_s(&kl, " xruns=");
     kl_i(&kl, (long)S.xruns);
+    kl_s(&kl, " sync_ptr=");
+    kl_i(&kl, (long)S.n_sync_ptr);
+    kl_s(&kl, " writei=");
+    kl_i(&kl, (long)S.n_writei);
+    kl_s(&kl, " status=");
+    kl_i(&kl, (long)S.n_status);
+    kl_s(&kl, " refine=");
+    kl_i(&kl, (long)S.n_refine);
+    kl_s(&kl, " parks=");
+    kl_i(&kl, (long)S.n_parks);
     {
       struct vsnd_stats vs;
       virtio_snd_stats(&vs);
@@ -918,7 +932,7 @@ static int pcm_ioctl(struct process *p, uint32_t req, uint64_t arg, int nonblock
     }
     return 0;
   }
-  case PCM_HW_REFINE: return do_hw_params(p, arg, 1);
+  case PCM_HW_REFINE: S.n_refine++; return do_hw_params(p, arg, 1);
   case PCM_HW_PARAMS: return do_hw_params(p, arg, 0);
   case PCM_HW_FREE:
     if (S.state != ST_OPEN && S.state != ST_SETUP && S.state != ST_PREPARED) return -EBADFD;
@@ -933,6 +947,7 @@ static int pcm_ioctl(struct process *p, uint32_t req, uint64_t arg, int nonblock
   case PCM_STATUS:
   case PCM_STATUS_EXT: {
     uint8_t b[152];
+    S.n_status++;
     service();
     fl = spinlock_acquire_irqsave(&lsnd_lock);
     fill_status(b);
@@ -951,6 +966,7 @@ static int pcm_ioctl(struct process *p, uint32_t req, uint64_t arg, int nonblock
   }
   case PCM_SYNC_PTR: {
     uint8_t b[136];
+    S.n_sync_ptr++;
     int r = cin(p, arg, b, sizeof b);
     if (r) return r;
     uint32_t flags;
@@ -1077,7 +1093,7 @@ static int pcm_ioctl(struct process *p, uint32_t req, uint64_t arg, int nonblock
     if (e) return e;
     return cout(p, arg, &moved, 8); /* Linux: 0, the count written back */
   }
-  case PCM_WRITEI: return do_writei(p, arg, nonblock);
+  case PCM_WRITEI: S.n_writei++; return do_writei(p, arg, nonblock);
   case PCM_RESUME: return -ENOSYS;
   case PCM_CHANNEL_INFO:
   case PCM_LINK:
