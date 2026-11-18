@@ -139,9 +139,47 @@ struct l_thr_slot {
   uint32_t waits;           /* diagnostics: parks / wakes */
   uint32_t wakes;
   uint32_t park_seq;        /* L87: [CWV] sequence of the last park */
+  uint16_t fx_b;            /* C1-k7: l_fx_cnt bucket counted for uaddr */
+  uint8_t fx_on;            /*        ... 1 while counted */
 };
 
 static struct l_thr_slot l_thr[MAX_PROCESSES];
+
+/* ---- C1-k7 (docs/cp-k7.md §5): the no-waiter FUTEX_WAKE fast path ------
+ *
+ * A FUTEX_WAKE took proc_lock and scanned all 512 slots even when nobody
+ * waits on the word -- the common case for a lock or condvar release whose
+ * waiter count is not exact.  l_fx_cnt[b] counts the slots whose queue key
+ * (as, uaddr) hashes to bucket b, plus WAITs between their pre-count and the
+ * park.  A WAIT counts itself (a locked RMW: a full barrier) BEFORE it
+ * compares the word; a WAKE fences after the caller's store to the word and
+ * then reads the count.  So either the WAKE sees the count (and takes the
+ * locked path, which serialises with the WAIT on proc_lock) or the WAIT sees
+ * the new word value (and returns EAGAIN): no wake is lost.  The count may
+ * over-count (a stale key after a timeout, a hash collision): that only
+ * sends the WAKE down the locked path.  Every write of a slot's uaddr goes
+ * through l_fx_key_set. */
+#define L_FX_BUCKETS 256
+static uint64_t l_fx_fast_wakes; /* diagnostics: WAKEs answered by the fast path */
+static volatile uint32_t l_fx_cnt[L_FX_BUCKETS] __attribute__((aligned(64)));
+static inline uint32_t l_fx_hash(struct addr_space *as, uint64_t uaddr) {
+  uint64_t h = (uaddr >> 2) ^ ((uint64_t)(uintptr_t)as >> 4);
+  h *= 0x9E3779B97F4A7C15ULL;
+  return (uint32_t)(h >> 56); /* 0..255 */
+}
+static void l_fx_key_set(struct l_thr_slot *sl, struct addr_space *as, uint64_t uaddr) {
+  if (sl->fx_on) {
+    __atomic_sub_fetch(&l_fx_cnt[sl->fx_b], 1u, __ATOMIC_SEQ_CST);
+    sl->fx_on = 0;
+  }
+  sl->as = as;
+  sl->uaddr = uaddr;
+  if (uaddr) {
+    sl->fx_b = (uint16_t)l_fx_hash(as, uaddr);
+    __atomic_add_fetch(&l_fx_cnt[sl->fx_b], 1u, __ATOMIC_SEQ_CST);
+    sl->fx_on = 1;
+  }
+}
 
 static int l_thr_slot_of(struct process *p, int create) {
   if (!p || p->pid <= 0 || p->pid >= MAX_PROCESSES)
@@ -153,8 +191,7 @@ static int l_thr_slot_of(struct process *p, int create) {
       return -1;
     s->used = 1;
     s->owner = p;
-    s->as = 0;
-    s->uaddr = 0;
+    l_fx_key_set(s, 0, 0);
     s->bitset = 0;
     s->robust_head = 0;
     s->pi = 0;
@@ -184,8 +221,7 @@ void linux_compat_thr_slot_reset(struct process *p) {
   struct l_thr_slot *s = &l_thr[p->pid];
   s->used = 0;
   s->owner = 0;
-  s->as = 0;
-  s->uaddr = 0;
+  l_fx_key_set(s, 0, 0);
   s->bitset = 0;
   s->robust_head = 0;
   s->pi = 0;
@@ -418,9 +454,12 @@ void futex_trace_note(struct futex_ev *ev) {
   unsigned at = __atomic_fetch_add(&l_futex_ring_at, 1u, __ATOMIC_RELAXED);
   l_futex_ring[at % FUTEX_TRACE_RING] = *ev;
 #if FUTEX_TRACE_OPS > 0
-  unsigned pr = __atomic_fetch_add(&l_futex_printed, 1u, __ATOMIC_RELAXED);
-  if (pr < FUTEX_TRACE_OPS)
-    l_futex_emit(ev, (int)at, '#');
+  /* C1-k7: look before the atomic (a shared line every futex op wrote) */
+  if (__atomic_load_n(&l_futex_printed, __ATOMIC_RELAXED) < FUTEX_TRACE_OPS) {
+    unsigned pr = __atomic_fetch_add(&l_futex_printed, 1u, __ATOMIC_RELAXED);
+    if (pr < FUTEX_TRACE_OPS)
+      l_futex_emit(ev, (int)at, '#');
+  }
 #endif
   l76_keyc_note(ev);
   /* Every 2048 ops, and never twice inside 20 s (a burst must not flood the
@@ -1292,7 +1331,7 @@ static int l_futex_wake_locked(struct addr_space *as, uint64_t uaddr,
     if (s->pi)
       continue;
     struct process *p = s->owner;
-    s->uaddr = 0;
+    l_fx_key_set(s, s->as, 0);
     s->wakes++;
     p->futex_uaddr = 0;
     p->wake_ms = 0;
@@ -1324,7 +1363,7 @@ static int l_futex_requeue_locked(struct addr_space *as, uint64_t uaddr1,
   for (int i = 1; i < MAX_PROCESSES && (uint32_t)moved < nr; i++) {
     if (!l_futex_queued_locked(i, as, uaddr1))
       continue;
-    l_thr[i].uaddr = uaddr2;
+    l_fx_key_set(&l_thr[i], l_thr[i].as, uaddr2);
     l_thr[i].owner->futex_uaddr = uaddr2;
     moved++;
   }
@@ -1600,7 +1639,7 @@ static int l_pi_handoff_locked(struct addr_space *as, uint64_t uaddr,
   uint32_t cur = l_pi_cas(uaddr, expect, nw);
   if (cur != expect)
     return -2;
-  l_thr[w].uaddr = 0;
+  l_fx_key_set(&l_thr[w], l_thr[w].as, 0);
   l_thr[w].pi = 0;
   l_thr[w].wakes++;
   np->futex_uaddr = 0;
@@ -1731,8 +1770,7 @@ static int l_futex_lock_pi(struct process *p, struct trap_frame *tf,
     p->context[0] = 0;
     p->state = PROC_STATE_FUTEX;
     tf->regs[0] = 0; /* resume value if the scheduler switches back here */
-    l_thr[slot].as = as;
-    l_thr[slot].uaddr = uaddr;
+    l_fx_key_set(&l_thr[slot], as, uaddr);
     l_thr[slot].pi = 1;
     l_thr[slot].bitset = L_FUTEX_BITSET_MATCH_ANY;
     l_thr[slot].waits++;
@@ -2252,8 +2290,12 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
       return 1;
     }
     /* Compare under the lock: the waker cannot slip between the compare and
-       the park, so no wakeup is lost. */
+       the park, so no wakeup is lost.  C1-k7: count this waiter in its
+       bucket first (a full barrier), for the WAKE fast path above. */
+    uint32_t fxb = l_fx_hash(as, uaddr);
+    __atomic_add_fetch(&l_fx_cnt[fxb], 1u, __ATOMIC_SEQ_CST);
     if (*(volatile uint32_t *)uaddr != val) {
+      __atomic_sub_fetch(&l_fx_cnt[fxb], 1u, __ATOMIC_SEQ_CST);
       spinlock_release_irqrestore(&proc_lock, flags);
       tf->regs[0] = (uint64_t)(int64_t)-EAGAIN;
       return 1;
@@ -2268,6 +2310,7 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
     {
       int sig = linux_compat_sig_deliverable(p);
       if (sig) {
+        __atomic_sub_fetch(&l_fx_cnt[fxb], 1u, __ATOMIC_SEQ_CST);
         spinlock_release_irqrestore(&proc_lock, flags);
         {
           static int eintr_rows;
@@ -2294,6 +2337,7 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
       }
     }
     if (timeout_ms == 0) {
+      __atomic_sub_fetch(&l_fx_cnt[fxb], 1u, __ATOMIC_SEQ_CST);
       spinlock_release_irqrestore(&proc_lock, flags);
       {
         struct futex_ev ev = {0};
@@ -2354,8 +2398,8 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
     tf->regs[0] = 0;
     p->park_since_ms = timer_get_ms();
     p->state = PROC_STATE_FUTEX; /* save-set member: context is saved */
-    l_thr[slot].as = as;
-    l_thr[slot].uaddr = uaddr;
+    l_fx_key_set(&l_thr[slot], as, uaddr);
+    __atomic_sub_fetch(&l_fx_cnt[fxb], 1u, __ATOMIC_SEQ_CST); /* the pre-count */
     l_thr[slot].bitset = bitset;
     l_thr[slot].waits++;
 #ifdef RW_CWV
@@ -2402,6 +2446,28 @@ static int l_thr_futex(struct process *p, struct trap_frame *tf) {
       tf->regs[0] = (uint64_t)(int64_t)-EINVAL;
       return 1;
     }
+#if !defined(RW_FUTXW) && !defined(RW_CWV)
+    /* C1-k7: nobody counted on this word's bucket -> nobody to wake (see
+       l_fx_cnt).  The fence orders the caller's store to the word before
+       the count is read. */
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    if (__atomic_load_n(&l_fx_cnt[l_fx_hash(as, uaddr)], __ATOMIC_RELAXED) == 0) {
+      struct futex_ev ev = {0};
+      ev.op = FTR_WAKE;
+      ev.pid = p->pid;
+      ev.rip = tf->elr;
+      ev.as = (uint64_t)(uintptr_t)as;
+      ev.uaddr = uaddr;
+      ev.val = val;
+      ev.bitset = bitset;
+      ev.woke = 0;
+      ev.woke_pid = -1;
+      futex_trace_note(&ev);
+      l_fx_fast_wakes++;
+      tf->regs[0] = 0;
+      return 1;
+    }
+#endif
 #ifdef RW_FUTXW
     /* Snapshot the futex word OUTSIDE proc_lock: reading user memory takes the
        vm lock, which must never nest inside the scheduler lock. */
@@ -2712,7 +2778,7 @@ void linux_compat_thread_exit(struct process *p) {
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
   int was_queued = l_thr[slot].uaddr != 0;
   uint64_t was_key = l_thr[slot].uaddr;
-  l_thr[slot].uaddr = 0;
+  l_fx_key_set(&l_thr[slot], l_thr[slot].as, 0);
   l_thr[slot].pi = 0;
   p->futex_uaddr = 0;
   spinlock_release_irqrestore(&proc_lock, flags);
