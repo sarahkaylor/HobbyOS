@@ -58,10 +58,23 @@ struct cpu_local {
 } __attribute__((packed));
 
 extern struct cpu_local cpu_locals[];
+
 /* Number of cores that have actually run trap_init_core_with_id.  AP bring-up
  * is sequential, so ids 0..n-1 are exactly the initialized ones. */
 uint32_t smp_init_count(void);
 #endif
+
+/* C1-k7 (docs/cp-k7.md §3): per-CPU scheduler words touched on every trap
+   (the sync-wake nesting and deferral, process.c / trap.c), one cache line
+   per CPU. */
+struct sched_trap_pc {
+  volatile int trap_depth;     /* trap nesting depth on this CPU */
+  volatile int trap_sys;       /* the outermost trap is a user syscall */
+  volatile int defer_slot;     /* sync wake: woken slot + 1; 0 = none */
+  volatile uint8_t kick_pending;
+  volatile uint64_t defer_until;
+} __attribute__((aligned(64)));
+extern struct sched_trap_pc sched_tpc[];
 
 /* GB-021: the Linux clone(2) flag bits the x64 compat bridge accepts.  musl's
  * pthread_create passes exactly this set; anything else (namespaces, a new
@@ -733,6 +746,11 @@ struct process {
      ru_grp_sys_us / ru_ch_sys_us the system-time parts of ru_run_us /
      ru_grp_us / ru_ch_us.  ru_utime is the rest. */
   uint64_t ru_kin_us, ru_ksl_us, ru_sys_us, ru_grp_sys_us, ru_ch_sys_us;
+  /* C1-k7 (docs/cp-k7.md §4): 1 from a syscall's entry (x86_64 sync_lower)
+     until it returns to user mode, by the trap exit or by a resume after a
+     park (ru_resume_user).  [THRW] tells a thread's kernel time in a syscall
+     from a fault or an interrupt by it. */
+  volatile int in_sys;
   /* C1-k6 round 2 (docs/cp-k6.md §12): the 64-bit key filter of a parked
      poller -- the objects (pipes, eventfds) its scan found, one bit each
      (poll_key_bit).  A keyed poll_notify_obj() wakes only pollers whose

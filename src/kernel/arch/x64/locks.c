@@ -26,17 +26,21 @@ volatile uint64_t lock_wait_addr[MAX_CPUS];
  * Cost is two stores on acquire and two on release, both to per-CPU memory that
  * is already hot, and nothing here feeds a decision -- it is observation only. */
 #define HELD_LOCK_SLOTS 8
-volatile uint64_t held_locks[MAX_CPUS][HELD_LOCK_SLOTS];
-volatile uint64_t held_lock_pc[MAX_CPUS][HELD_LOCK_SLOTS];
-volatile uint64_t held_lock_pc2[MAX_CPUS][HELD_LOCK_SLOTS];
-static volatile uint8_t held_lock_depth[MAX_CPUS];
+/* C1-k7: a row is 64 bytes, so aligning the arrays gives each CPU its own
+   line (the layout the monitor probe reads is unchanged); the depth byte,
+   written on every acquire and release, gets a line per CPU too. */
+volatile uint64_t held_locks[MAX_CPUS][HELD_LOCK_SLOTS] __attribute__((aligned(64)));
+volatile uint64_t held_lock_pc[MAX_CPUS][HELD_LOCK_SLOTS] __attribute__((aligned(64)));
+volatile uint64_t held_lock_pc2[MAX_CPUS][HELD_LOCK_SLOTS] __attribute__((aligned(64)));
+static volatile uint8_t held_lock_depth_pc[MAX_CPUS][64] __attribute__((aligned(64)));
 /* Coarse "what is this CPU doing" marker, for the same probe: 0 = normal,
  * 1 = inside the scheduler switch, 2 = parked in enter_user_space. */
 volatile uint8_t sched_stage[MAX_CPUS];
 
 /* GB-229: proc_lock acquire/release sequence per CPU.  Observation only; a
    per-CPU counter written by the owning CPU needs no atomics. */
-static proclock_hold_t plh[MAX_CPUS];
+/* C1-k7: one aligned record per CPU (every proc_lock acquire/release writes it). */
+static struct { proclock_hold_t h; } __attribute__((aligned(64))) plh_pc[MAX_CPUS];
 /* GB-241: per-CPU "the next/current proc_lock acquisition is the [IDLESTUCK]
    dump's own" flag, set before the dump acquires and cleared after it
    releases.  Read by proclock_hold_note at the acquire so dump_self travels
@@ -55,18 +59,18 @@ void proclock_hold_note(int op, uint64_t site) {
   if (c >= MAX_CPUS)
     return;
   if (op == 1)
-    plh[c].acq++;
+    plh_pc[c].h.acq++;
   else if (op == 2)
-    plh[c].rel++;
+    plh_pc[c].h.rel++;
   else
     return;
   if (op == 1)
-    plh[c].dump_self = plh_dump_self_pending[c];
+    plh_pc[c].h.dump_self = plh_dump_self_pending[c];
   if (op == 2)
-    plh[c].rel_site = site;
-  plh[c].last_op = op;
-  plh[c].site = site;
-  plh[c].last_ms = timer_get_ms();
+    plh_pc[c].h.rel_site = site;
+  plh_pc[c].h.last_op = op;
+  plh_pc[c].h.site = site;
+  plh_pc[c].h.last_ms = timer_get_ms();
 }
 
 /* GB-230: sampled inside enter_user_space, immediately before the iretq frame
@@ -78,14 +82,14 @@ void proclock_iretq_note(void) {
   uint32_t c = get_cpuid();
   if (c >= MAX_CPUS)
     return;
-  plh[c].iretq_ms = timer_get_ms();
-  plh[c].locked_at_iretq = (&proc_lock != 0) ? (int)proc_lock.locked : -1;
+  plh_pc[c].h.iretq_ms = timer_get_ms();
+  plh_pc[c].h.locked_at_iretq = (&proc_lock != 0) ? (int)proc_lock.locked : -1;
 }
 
 int proclock_hold_snapshot(uint32_t cpu, proclock_hold_t *out) {
   if (cpu >= MAX_CPUS || !out)
     return 0;
-  *out = plh[cpu];
+  *out = plh_pc[cpu].h;
   return 1;
 }
 
@@ -98,14 +102,14 @@ void proclock_det_note(int op, int stage) {
   if (c >= MAX_CPUS)
     return;
   if (op == 1) {
-    plh[c].det_entry_ms = timer_get_ms();
-    plh[c].det_exit_ms = 0;
-    plh[c].det_stage = stage;
+    plh_pc[c].h.det_entry_ms = timer_get_ms();
+    plh_pc[c].h.det_exit_ms = 0;
+    plh_pc[c].h.det_stage = stage;
   } else if (op == 2) {
-    plh[c].det_stage = stage;
+    plh_pc[c].h.det_stage = stage;
   } else if (op == 3) {
-    plh[c].det_exit_ms = timer_get_ms();
-    plh[c].det_stage = stage;
+    plh_pc[c].h.det_exit_ms = timer_get_ms();
+    plh_pc[c].h.det_stage = stage;
   }
 }
 /* GB-060: a CPU that has taken a fatal fault and stopped.  Declared here (not in
@@ -201,7 +205,7 @@ volatile uint64_t lock_wait_caller2[MAX_CPUS];
 static uint64_t lock_owner_site(uint32_t cpu, uint64_t lock_addr) {
   if (cpu >= MAX_CPUS)
     return 0;
-  uint32_t d = held_lock_depth[cpu];
+  uint32_t d = held_lock_depth_pc[cpu][0];
   for (uint32_t i = 0; i < d && i < HELD_LOCK_SLOTS; i++) {
     if (held_locks[cpu][i] == lock_addr)
       return held_lock_pc[cpu][i];
@@ -212,7 +216,7 @@ static uint64_t lock_owner_site(uint32_t cpu, uint64_t lock_addr) {
 static uint64_t lock_owner_site2(uint32_t cpu, uint64_t lock_addr) {
   if (cpu >= MAX_CPUS)
     return 0;
-  uint32_t d = held_lock_depth[cpu];
+  uint32_t d = held_lock_depth_pc[cpu][0];
   for (uint32_t i = 0; i < d && i < HELD_LOCK_SLOTS; i++) {
     if (held_locks[cpu][i] == lock_addr)
       return held_lock_pc2[cpu][i];
@@ -327,7 +331,7 @@ static void spin_acquire_raw(spinlock_t *lock) {
           static int held_reports;
           if (own_cpu >= 1 && own_cpu - 1 < MAX_CPUS && held_reports < 3) {
             uint32_t oc = own_cpu - 1;
-            uint32_t d = held_lock_depth[oc];
+            uint32_t d = held_lock_depth_pc[oc][0];
             held_reports++;
             scream_dec(" held_n=", (int)d);
             for (uint32_t i = 0; i < d && i < HELD_LOCK_SLOTS; i++) {
@@ -454,19 +458,19 @@ static void spin_acquire_raw(spinlock_t *lock) {
     {
       uint32_t cc = get_cpuid();
       if (cc < MAX_CPUS)
-        plh[cc].site3 = (uint64_t)__builtin_return_address(1);
+        plh_pc[cc].h.site3 = (uint64_t)__builtin_return_address(1);
     }
   }
   /* GB-057: push onto this CPU's held-lock stack (observation only). */
   {
     uint32_t hcpu = get_cpuid();
     if (hcpu < MAX_CPUS) {
-      uint32_t d = held_lock_depth[hcpu];
+      uint32_t d = held_lock_depth_pc[hcpu][0];
       if (d < HELD_LOCK_SLOTS) {
         held_locks[hcpu][d] = (uint64_t)lock;
         held_lock_pc[hcpu][d] = (uint64_t)__builtin_return_address(0);
         held_lock_pc2[hcpu][d] = (uint64_t)__builtin_return_address(1);
-        held_lock_depth[hcpu] = (uint8_t)(d + 1);
+        held_lock_depth_pc[hcpu][0] = (uint8_t)(d + 1);
       }
     }
   }
@@ -523,14 +527,14 @@ static void spin_release_raw(spinlock_t *lock) {
   {
     uint32_t hcpu = get_cpuid();
     if (hcpu < MAX_CPUS) {
-      uint32_t d = held_lock_depth[hcpu];
+      uint32_t d = held_lock_depth_pc[hcpu][0];
       while (d > 0) {
         d--;
         if (held_locks[hcpu][d] == (uint64_t)lock) {
           held_locks[hcpu][d] = 0;
           held_lock_pc[hcpu][d] = 0;
           held_lock_pc2[hcpu][d] = 0;
-          held_lock_depth[hcpu] = (uint8_t)d;
+          held_lock_depth_pc[hcpu][0] = (uint8_t)d;
           break;
         }
       }

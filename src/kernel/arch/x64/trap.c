@@ -45,6 +45,7 @@
 #include "fb_mmap.h"
 #include "kmem.h"
 #include "pipe.h" /* C1-k4: struct pipe_seg for writev on a pipe */
+#include "trapprof.h" /* C1-k7: per-segment syscall cycles (test kernels) */
 #include <stdint.h>
 
 extern void uart_puts(const char *s);
@@ -2763,10 +2764,13 @@ static void compat_mkdirat(struct trap_frame *tf) {
 
 /* Last syscall each core entered; 0 = not in a syscall.  A core wedged
    inside a syscall leaves this set, which the stall watchdog prints. */
-static volatile int core_in_syscall[MAX_CPUS];
+/* C1-k7: one line per CPU (written on every syscall); cleared when the
+   syscall returns by either dispatch path (the table path used to leave the
+   number behind). */
+static struct { volatile int v; } __attribute__((aligned(64))) core_in_syscall_pc[MAX_CPUS];
 /* C6-present: [THRW] (process.c) tells a running thread's kernel time in a
  * syscall from a fault or an interrupt by its CPU's entry here. */
-int cp_core_in_syscall(uint32_t cpu) { return cpu < MAX_CPUS ? core_in_syscall[cpu] : 0; }
+int cp_core_in_syscall(uint32_t cpu) { return cpu < MAX_CPUS ? core_in_syscall_pc[cpu].v : 0; }
 
 /* L73: name the kernel path that dereferenced a user VA.
  *
@@ -2941,6 +2945,7 @@ static void kpf_user_report(struct trap_frame *tf, struct process *p,
 }
 
 void sync_lower_handler_c(struct trap_frame *tf) {
+  TP_MARK(TP_INNER_ROUTE);
   /* GB-014: latch the user PC on every trap from user mode so the exit report
      can name where a program actually got to. A silently-stopping program
      otherwise reports its entry point as its last PC, because the PCB context
@@ -3003,13 +3008,20 @@ void sync_lower_handler_c(struct trap_frame *tf) {
      Writes only; process.c owns the array. */
   extern volatile uint64_t cpu_heartbeat_ms[];
   extern uint64_t timer_get_ms(void);
-  cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
+  {
+    /* C1-k7: store only when the millisecond moved (a shared line). */
+    uint32_t hc = get_cpuid();
+    uint64_t hn = timer_get_ms();
+    if (hc < MAX_CPUS && cpu_heartbeat_ms[hc] != hn)
+      cpu_heartbeat_ms[hc] = hn;
+  }
 
   uint64_t syscall_num = tf->regs[0]; // rax
-  core_in_syscall[get_cpuid()] = (int)syscall_num;
+  core_in_syscall_pc[get_cpuid()].v = (int)syscall_num;
   {
     struct process *sc = current_process();
     if (sc) {
+      sc->in_sys = 1; /* C1-k7: cleared at the trap exit / ru_resume_user */
       sc->last_syscall = (int64_t)syscall_num;
       /* L73: the whole entry tuple, so a fault INSIDE this syscall can name
          the call and its arguments instead of guessing from a clobbered
@@ -3053,7 +3065,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
          with LINUX semantics and writes tf->regs[0] itself.  The switch below
          is the older number-translation path and stays as the fallback; a
          handler that returns 0 means "not mine", not "fail". */
-      if (linux_compat_dispatch(lp, tf, syscall_num)) {
+      TP_MARK(TP_SYS_PRE);
+      int disp_hit = linux_compat_dispatch(lp, tf, syscall_num);
+      TP_MARK(TP_DISP_POST);
+      if (disp_hit) {
         /* Linux delivers a signal raised BY a syscall at syscall exit, so the
            frame the handler sees carries the syscall's return value in rax.
            Returning straight to user mode skipped the leader's return-to-user
@@ -3062,6 +3077,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
            measured by the proc lane as handler entry up to one tick late.  The
            hook is a no-op unless a deliverable handler signal is pending. */
         process_signal_trap_exit(tf);
+        core_in_syscall_pc[get_cpuid()].v = 0;
+        TP_MARK(TP_SIG_EXIT);
         return;
       }
       switch (syscall_num) {
@@ -3520,7 +3537,7 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     if (sc)
       sc->last_ret = (int64_t)tf->regs[0];
   }
-  core_in_syscall[get_cpuid()] = 0;
+  core_in_syscall_pc[get_cpuid()].v = 0;
 }
 
 static void safe_print_int(int val) {
@@ -3558,22 +3575,25 @@ static void safe_print_hex(uint64_t val) {
 #define WATCHDOG_SILENCE_MS 20000
 #define WATCHDOG_COOLDOWN_MS 30000
 
-static volatile uint64_t wd_last_seen_ms[MAX_CPUS];
-static volatile uint64_t wd_last_seen_rip[MAX_CPUS];
-static volatile uint64_t wd_last_seen_rflags[MAX_CPUS];
-static volatile uint64_t wd_last_vector[MAX_CPUS];
-static volatile uint64_t wd_last_err[MAX_CPUS];
-static volatile uint64_t wd_last_cr2[MAX_CPUS];
-static volatile int wd_last_seen_pid[MAX_CPUS];
+/* C1-k7 (docs/cp-k7.md §3): every trap writes these, so each CPU's record
+   is its own cache lines.  They were ten [MAX_CPUS] arrays, i.e. ten lines
+   that all eight CPUs wrote on every syscall and interrupt: each write
+   pulled the line from the CPU that wrote it last. */
+struct wd_cpu {
+  volatile uint64_t seen_ms, seen_rip, rflags, vector, err, cr2, tfp, ticks;
+  volatile int pid;
+  struct trap_frame frame; /* the full last frame (see wd_dump) */
+} __attribute__((aligned(64)));
+static struct wd_cpu wd_pc[MAX_CPUS];
 
 /* GB-229: the owner CPU's last-seen context, read by the scheduler's
    [LOCKDIAG]/[PROCLOCK-HOLD] rows so "the owner is idle/user" is printed from
    the watchdog record rather than inferred from a missing pid. */
 uint64_t watchdog_cpu_rip(uint32_t cpu) {
-  return cpu < MAX_CPUS ? wd_last_seen_rip[cpu] : 0;
+  return cpu < MAX_CPUS ? wd_pc[cpu].seen_rip : 0;
 }
 int watchdog_cpu_pid(uint32_t cpu) {
-  return cpu < MAX_CPUS ? wd_last_seen_pid[cpu] : -1;
+  return cpu < MAX_CPUS ? wd_pc[cpu].pid : -1;
 }
 static volatile uint64_t wd_next_report_ms = 0;
 /* L41: served by the scheduler's idle loop (process.c), which can take
@@ -3586,9 +3606,8 @@ volatile int wd_dump_request = 0;
    interrupted RIP.  Key offsets (see save_context / the asm wrapper): the
    frame mirrors the push order of the interrupt wrapper — for x64 the
    generic layout is signed-off in trap.S; we record the whole struct. */
-static struct trap_frame wd_last_frame[MAX_CPUS];
-static volatile uint64_t wd_last_tfp[MAX_CPUS]; /* stack addr of that frame */
-static volatile uint64_t wd_ticks[MAX_CPUS];     /* interrupt count per core */
+/* (wd_pc[c].frame / .tfp: stack addr of that frame / .ticks: interrupt
+   count per core) */
 
 /* Is `top` a plausible kernel-stack address for the watchdog's caller-chain
    scans?  Cores that never powered on leave cpu_locals[c].kernel_stack == 0
@@ -3687,33 +3706,36 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
      running CPU passes through here on every timer interrupt, so a stale
      heartbeat means the CPU is either dead (triple-fault reset) or frozen
      in an IRQ-off spin for the grace period — both count as 'dead' for
-     reclaiming the RUNNING process it owns. */
-  cpu_heartbeat_ms[cpu] = now;
+     reclaiming the RUNNING process it owns.
+     C1-k7: one array line for all CPUs, so write it only when the
+     millisecond moved (a trap-rate store pulled the line every trap). */
+  if (cpu_heartbeat_ms[cpu] != now)
+    cpu_heartbeat_ms[cpu] = now;
 
-  wd_last_seen_ms[cpu] = now;
-  wd_last_seen_rip[cpu] = tf->elr;
+  wd_pc[cpu].seen_ms = now;
+  wd_pc[cpu].seen_rip = tf->elr;
   /* GB-057: RFLAGS at the last tick.  A core that stops taking timer interrupts
      while sitting in kernel asm cannot be diagnosed from RIP alone: if IF is
      clear here, the timer could not have preempted it and 'stuck in the frame
      copy' is a scheduling/masking defect, not a memory one.  Measured (intel,
      parked cores) the only way to tell the two apart without a monitor. */
-  wd_last_seen_rflags[cpu] = tf->spsr;
+  wd_pc[cpu].rflags = tf->spsr;
   /* GB-057: the fault that put this core where it is.  A parked core whose
      RFLAGS carries RF (0x10000) is being RE-RUN after a fault, and RIP alone
      cannot say which fault: measured rflags=0x10046 on three parked cores with
      IF clear, i.e. a retry loop with interrupts masked.  Vector/error/CR2 name
      the class without another hypothesis. */
-  wd_last_vector[cpu] = tf->vector;
-  wd_last_err[cpu] = tf->error_code;
+  wd_pc[cpu].vector = tf->vector;
+  wd_pc[cpu].err = tf->error_code;
   if (tf->vector == 14) {
     uint64_t cr2v;
     __asm__ volatile("mov %%cr2, %0" : "=r"(cr2v));
-    wd_last_cr2[cpu] = cr2v;
+    wd_pc[cpu].cr2 = cr2v;
   }
-  wd_last_seen_pid[cpu] = cur ? cur->pid : -1;
-  wd_last_frame[cpu] = *tf;
-  wd_last_tfp[cpu] = (uint64_t)tf;
-  wd_ticks[cpu]++;
+  wd_pc[cpu].pid = cur ? cur->pid : -1;
+  wd_pc[cpu].frame = *tf;
+  wd_pc[cpu].tfp = (uint64_t)tf;
+  wd_pc[cpu].ticks++;
 
   if (now < wd_next_report_ms) {
     return;
@@ -3757,21 +3779,21 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
     wd_puts("  CPU");
     wd_int((int)c);
     wd_puts(" rip=");
-    wd_hex(wd_last_seen_rip[c]);
+    wd_hex(wd_pc[c].seen_rip);
     wd_puts(" rflags=");
-    wd_hex(wd_last_seen_rflags[c]);
-    if (wd_last_seen_pid[c] >= 0 && wd_last_vector[c] != 0) {
+    wd_hex(wd_pc[c].rflags);
+    if (wd_pc[c].pid >= 0 && wd_pc[c].vector != 0) {
       wd_puts(" vec=");
-      wd_int((int)wd_last_vector[c]);
+      wd_int((int)wd_pc[c].vector);
       wd_puts(" err=");
-      wd_hex(wd_last_err[c]);
-      if (wd_last_cr2[c]) {
+      wd_hex(wd_pc[c].err);
+      if (wd_pc[c].cr2) {
         wd_puts(" cr2=");
-        wd_hex(wd_last_cr2[c]);
+        wd_hex(wd_pc[c].cr2);
       }
     }
     wd_puts(" pid=");
-    wd_int(wd_last_seen_pid[c]);
+    wd_int(wd_pc[c].pid);
     /* GB-057: the resume mark the CPU itself wrote immediately before
        enter_user_space.  If this names a different pid than the watchdog's
        `pid=`, the RIP above is a stale trap frame and every "parked in the
@@ -3783,10 +3805,10 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
       wd_hex(resume_mark_sp[c]);
     }
     wd_puts(" age_ms=");
-    wd_int((int)(now - wd_last_seen_ms[c]));
-    if (core_in_syscall[c] != 0) {
+    wd_int((int)(now - wd_pc[c].seen_ms));
+    if (core_in_syscall_pc[c].v != 0) {
       wd_puts(" syscall=");
-      wd_int(core_in_syscall[c]);
+      wd_int(core_in_syscall_pc[c].v);
     }
     if (lock_wait_addr[c] != 0) {
       wd_puts(" wait_lock=");
@@ -3813,19 +3835,19 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
     panic_puts2(" CPU");
     print_int_raw2((int)c);
     panic_puts2(" rip=");
-    panic_print_hex2(wd_last_seen_rip[c]);
+    panic_print_hex2(wd_pc[c].seen_rip);
     panic_puts2(" pid=");
-    print_int_raw2(wd_last_seen_pid[c]);
+    print_int_raw2(wd_pc[c].pid);
     panic_puts2(" tks=");
-    print_int_raw2((int)wd_ticks[c]);
+    print_int_raw2((int)wd_pc[c].ticks);
     panic_puts2(" cs=");
-    panic_print_hex2(wd_last_frame[c].cs);
+    panic_print_hex2(wd_pc[c].frame.cs);
     panic_puts2(" fl=");
-    panic_print_hex2(wd_last_frame[c].spsr);
+    panic_print_hex2(wd_pc[c].frame.spsr);
     panic_puts2(" age=");
-    print_int_raw2((int)(now - wd_last_seen_ms[c]));
+    print_int_raw2((int)(now - wd_pc[c].seen_ms));
     panic_puts2(" vec=");
-    print_int_raw2((int)wd_last_frame[c].vector);
+    print_int_raw2((int)wd_pc[c].frame.vector);
     if (lock_wait_addr[c] != 0) {
       panic_puts2(" wl=");
       panic_print_hex2(lock_wait_addr[c]);
@@ -3842,12 +3864,12 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
     panic_puts2("   fr:");
     for (int r = 0; r < 10; r++) {
       panic_puts2(" ");
-      panic_print_hex2(wd_last_frame[c].regs[r]);
+      panic_print_hex2(wd_pc[c].frame.regs[r]);
     }
     panic_puts2("\n");
     /* The last interrupt's kernel stack region (below the frame) — the
        caller chain of what the core was actually executing. */
-    uint64_t frp = wd_last_tfp[c];
+    uint64_t frp = wd_pc[c].tfp;
     panic_puts2("  deep:");
     if (frp >= 0x70000000ULL && frp < 0x75000000ULL) {
       for (uint64_t a = frp + 8; a < frp + 8 + 96; a += 8) {
@@ -3883,7 +3905,7 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
      return addresses into .text ([0x70000000,0x7001c000)).  The lowest hit
      approximates the deepest (newest) frame = where the core sits right now. */
   for (uint32_t c = 1; c < MAX_CPUS; c++) {
-    if (now - wd_last_seen_ms[c] < 60000) continue;
+    if (now - wd_pc[c].seen_ms < 60000) continue;
     uint64_t top = cpu_locals[c].kernel_stack;
     /* Same guard as the WD2 stall dump: a core that never powered on has
        kernel_stack == 0, and the scan below would read (top - 8) = -8. */
@@ -4523,7 +4545,7 @@ struct badvec_stamp {
   uint64_t vector;
   uint64_t cs;
   int64_t pid;
-};
+} __attribute__((aligned(64))); /* C1-k7: one line per CPU (every trap stamps it) */
 static struct badvec_stamp badvec_at_entry[MAX_CPUS];
 
 struct badvec_eu_note {
@@ -4531,7 +4553,7 @@ struct badvec_eu_note {
   uint64_t dst;
   uint64_t pc;
   int64_t pid;
-};
+} __attribute__((aligned(64))); /* C1-k7: one line per CPU */
 static struct badvec_eu_note badvec_eu[MAX_CPUS];
 
 /* GB-146-A (bounce 2026-11-08T17:56Z): the entry stamp can only say "the
@@ -4815,16 +4837,15 @@ void general_interrupt_handler(struct trap_frame *tf) {
      in between is charged by schedule() (ru_charge_locked). */
   extern void ru_trap_enter(void);
   extern void ru_trap_exit(void);
+  TP_BEGIN_TF(tf);
   int from_user = (tf->cs & 3) == 3;
   if (from_user) ru_trap_enter();
   /* C1-k6 round 2: trap nesting, for the sync wake (process.c
      sched_wake_sync defers a wake only inside a user thread's own syscall). */
-  extern volatile int sched_trap_depth[MAX_CPUS];
-  extern volatile int sched_trap_sys[MAX_CPUS];
   extern void sched_sync_flush(void);
   uint32_t tcpu = get_cpuid();
   if (tcpu < MAX_CPUS) {
-    if (sched_trap_depth[tcpu]++ == 0) sched_trap_sys[tcpu] = from_user && tf->vector == 0x80;
+    if (sched_tpc[tcpu].trap_depth++ == 0) sched_tpc[tcpu].trap_sys = from_user && tf->vector == 0x80;
   }
   /* Always-on lock audit: an IRQ handler must never try to park on a ylock_t,
    * and rank rules do not govern acquisitions from exception context (see
@@ -4841,13 +4862,21 @@ void general_interrupt_handler(struct trap_frame *tf) {
   /* C1-k6 round 2: back to the interrupted context on this CPU; a wake the
      syscall deferred and no park consumed gets its IPI now. */
   if (tcpu < MAX_CPUS && tcpu == get_cpuid()) {
-    if (--sched_trap_depth[tcpu] <= 0) {
-      sched_trap_depth[tcpu] = 0;
-      sched_trap_sys[tcpu] = 0;
+    if (--sched_tpc[tcpu].trap_depth <= 0) {
+      sched_tpc[tcpu].trap_depth = 0;
+      sched_tpc[tcpu].trap_sys = 0;
       sched_sync_flush();
     }
   }
-  if (from_user) ru_trap_exit();
+  TP_MARK(TP_UNWIND);
+  if (from_user) {
+    ru_trap_exit();
+    if (tf->vector == 0x80) {
+      struct process *xc = current_process();
+      if (xc) xc->in_sys = 0;
+    }
+  }
+  TP_MARK(TP_END);
 }
 
 /* GB-101/GB-243: the user-mode classifier decision, isolated so the kernel
@@ -4866,6 +4895,7 @@ static void general_interrupt_inner(struct trap_frame *tf) {
   extern int virtio_gpu_x64_irq_vector;      /* P6: -1 = polled */
   extern void virtio_gpu_x64_handle_irq(void);
 
+  TP_MARK(TP_TRAP_ENTER);
   uint32_t cpu = get_cpuid();
   if (cpu < MAX_CPUS && tf->vector != 1) {
     badvec_at_entry[cpu].frame = (uint64_t)tf;
@@ -5068,6 +5098,7 @@ static void general_interrupt_inner(struct trap_frame *tf) {
   }
   gic_set_current_vector(cpu, tf->vector);
   watchdog_tick(cpu, tf);
+  TP_MARK(TP_INNER_DIAG);
 
   /* RW-WATCH: DR0 data-write breakpoint.  Two hooks, both compiled out
      without -DRW_WATCH_ADDR:
@@ -5109,6 +5140,8 @@ static void general_interrupt_inner(struct trap_frame *tf) {
            busy group every 5 s (process.c, docs/cp-present.md). */
         {
           extern void cp_wait_sample(int emit);
+          extern volatile int cpw_tick_user;
+          cpw_tick_user = (tf->cs & 3) == 3;
           cp_wait_sample(thr_ticks + 1 >= 500);
         }
         if (++thr_ticks >= 500) {
@@ -6941,8 +6974,12 @@ int resume_preflight_c(struct trap_frame *tf) {
   struct process *p = current_process();
   if (!tf || !p)
     return 1;
-  if (vm_arch_resume_va_ok(p->as, tf->elr, tf->cs))
+  if (vm_arch_resume_va_ok(p->as, tf->elr, tf->cs)) {
+    /* C1-k7: the resumed thread leaves the kernel here (docs/cp-k7.md §4) */
+    extern void ru_resume_user(void);
+    if ((tf->cs & 3) == 3) ru_resume_user();
     return 1;
+  }
   {
     static int reported;
     if (reported < 8) {

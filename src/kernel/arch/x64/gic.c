@@ -115,7 +115,9 @@ void gic_enable_interrupt(uint32_t intid) {
  * Called by the assembly exception handler in trap.c.
  */
 void gic_set_current_vector(uint32_t cpu, uint32_t vector) {
-  if (cpu < MAX_CPUS) {
+  /* C1-k7: one line for all CPUs; store only on a change (a run of
+     syscalls on one CPU keeps 0x80). */
+  if (cpu < MAX_CPUS && current_vector[cpu] != vector) {
     current_vector[cpu] = vector;
   }
 }
