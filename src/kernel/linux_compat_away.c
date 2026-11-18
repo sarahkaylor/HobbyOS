@@ -7,7 +7,8 @@
  * answers its 10 ms event within ~5 ms.  This instrument names what the
  * thread is doing while it is away, without knowing its tid in advance:
  *
- *   1. A CLOCK is an ntsync event that is SET 50-200 times a second
+ *   1. A CLOCK is an ntsync event that is SET 50-200 times a second (a
+ *      64-entry table; the entry with the lowest set rate is replaced)
  *      (winealsa's timer thread sets the client's event every 10 ms period).
  *      away_clock_set() counts sets per event in a 1 s window.
  *   2. A thread that WAITS on a clock is a periodic waiter (the audio client).
@@ -36,7 +37,7 @@
 
 #define AWAY_MIN_MS 30
 #define AWAY_ROWS 400
-#define AWAY_CLOCKS 16
+#define AWAY_CLOCKS 64
 #define AWAY_NK 4
 #define AWAY_NPC 3
 
@@ -111,23 +112,32 @@ static int away_is_clock(const void *obj) {
 /* Called for every NTSYNC EVENT_SET / PULSE (racy counters: a diagnostic). */
 void away_clock_set(const void *obj) {
   uint64_t now = timer_get_ms();
-  int slot = -1, victim = 0;
+  int slot = -1, empty = -1, victim = -1;
+  uint64_t vrate = ~0ull;
   for (int i = 0; i < AWAY_CLOCKS; i++) {
-    if (away_clk[i].obj == obj) {
+    struct away_clock *c = &away_clk[i];
+    if (c->obj == obj) {
       slot = i;
       break;
     }
-    if (!away_clk[i].obj) {
-      if (slot < 0) slot = i;
-    } else if (!away_clk[i].is_clock && away_clk[i].sets < away_clk[victim].sets) {
+    if (!c->obj) {
+      if (empty < 0) empty = i;
+      continue;
+    }
+    if (c->is_clock)
+      continue;
+    /* the eviction candidate: the lowest set rate so far in its window (an
+       entry evicted for being young -- its count restarts with every 1 s
+       window -- would never become a clock while the game churns events) */
+    uint64_t rate = (uint64_t)c->sets * 1000u / (now - c->win_ms + 1);
+    if (rate < vrate) {
+      vrate = rate;
       victim = i;
     }
   }
-  if (slot < 0 || (away_clk[slot].obj && away_clk[slot].obj != obj)) {
-    slot = victim;
-    if (away_clk[slot].is_clock)
-      return; /* the table holds 16 clocks already */
-  }
+  if (slot < 0) slot = empty >= 0 ? empty : victim;
+  if (slot < 0)
+    return; /* 64 clocks already */
   struct away_clock *c = &away_clk[slot];
   if (c->obj != obj) {
     c->obj = obj;
