@@ -54,12 +54,12 @@ for j in runs:
         p9.append(row)
     else:
         p8.append(row)
-print("| boot | kind | verdict | launch s | launch→menu s | kernel faults | kernel stalls (rows) | EXITPC≠0 | new Wine err sigs | new DXVK/vkd3d sigs | REDEngineErrorReporter | 9070 XT busy med/p90 | other guests |")
+print("| boot | kind | verdict | launch s | launch→menu s | kernel faults | kernel stalls (rows) | EXITPC≠0 | new Wine err sigs | new DXVK/vkd3d sigs | REDEngineErrorReporter | 9070 XT busy med/p90 | other guests seen |")
 print("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
 for r in p8:
     print(f"| {r['run']} | {r['kind']} | {r['verdict']} | {r['launch']} | {r['l2m']} | {r['kf']} | {r['ks']} | {r['exitpc']} | {r['newerr']} | {r['newdx']} | {r['red']} | {r['gpu']} | {r['guests']} |")
 print()
-print("| boot | kind | verdict | world median | world p10 | world min row | rows | hitches (>1 s frame) | menu median | 9070 XT busy (world) med/p90 | game res MiB first→max | kernel stalls | other guests | script |")
+print("| boot | kind | verdict | world median | world p10 | world min row | rows | hitches (>1 s frame) | menu median | 9070 XT busy (world) med/p90 | game res MiB first→max | kernel stalls | other guests seen | script |")
 print("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
 for r in p9:
     w = r.get("world") or (None, None, 0)
@@ -78,7 +78,7 @@ for r in p9:
     print()
     print(f"Soak {r['run']}: per phase")
     print()
-    print("| phase | game s | fps rows | median | p10 | min | max gap s | game res MiB (last) | anon MiB (last) | threads (last) |")
+    print("| phase | game s | fps rows | median | p10 | min | longest fps-row gap s (host read time) | game res MiB (last) | anon MiB (last) | threads (last) |")
     print("|---|---|---|---|---|---|---|---|---|---|")
     for ph in ["world"] + [f"soak{i}" for i in range(1, 7)]:
         v = [x for x in rows if x["phase"] == ph]
