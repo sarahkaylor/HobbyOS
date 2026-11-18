@@ -809,6 +809,30 @@ static struct ipr_slot *ipr_add(struct ipv4_hdr *ip, const uint8_t *payload,
   return done;
 }
 
+/* H7-fault (docs/cp-fault.md §3): reassembly slots still collecting, and the
+   payload bytes / age of the fullest one -- read at an NFS stall to tell "a
+   reply arrived in part" from "nothing of it arrived".  A racy peek. */
+void net_ipr_peek(uint32_t *collecting, uint32_t *have, uint32_t *age_ms) {
+  uint32_t n = 0, h = 0, age = 0;
+  uint64_t now = timer_get_ms();
+  for (int i = 0; i < IPR_SLOTS; i++) {
+    if (ipr[i].state != 1) continue;
+    n++;
+    if (ipr[i].have >= h) {
+      h = ipr[i].have;
+      age = (uint32_t)(now - ipr[i].t_ms);
+    }
+  }
+  *collecting = n;
+  *have = h;
+  *age_ms = age;
+}
+
+/* H7-fault: the last frame net_rx_packet saw: ethertype, IP protocol,
+   fragment field, IP total length, and the uptime (ms). */
+volatile uint32_t net_rx_last_type, net_rx_last_frag, net_rx_last_len;
+volatile uint64_t net_rx_last_ms;
+
 static void ipr_release(struct ipr_slot *sl) {
   uint64_t fl = spinlock_acquire_irqsave(&ipr_lock);
   ipr_free_locked(sl);
@@ -818,6 +842,16 @@ static void ipr_release(struct ipr_slot *sl) {
 void net_rx_packet(uint8_t* packet, uint32_t len) {
   if (len < sizeof(struct eth_hdr)) return;
   struct eth_hdr* eth = (struct eth_hdr*)packet;
+  net_rx_last_type = (uint32_t)ntohs(eth->type) << 8;
+  net_rx_last_frag = 0;
+  net_rx_last_len = len;
+  net_rx_last_ms = timer_get_ms();
+  if (ntohs(eth->type) == ETH_TYPE_IPV4 && len >= sizeof(struct eth_hdr) + sizeof(struct ipv4_hdr)) {
+    const struct ipv4_hdr *lip = (const struct ipv4_hdr *)(packet + sizeof(struct eth_hdr));
+    net_rx_last_type |= lip->protocol;
+    net_rx_last_frag = ntohs(lip->frag_off);
+    net_rx_last_len = ntohs(lip->total_len);
+  }
 
   /*
   if (ntohs(eth->type) == ETH_TYPE_ARP) {

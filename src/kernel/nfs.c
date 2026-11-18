@@ -1751,13 +1751,17 @@ static int nfs_read_serial_into(const struct nfs_mount *m, const struct nfs_fh *
  * end of the pipeline, printed as
  *   [NFSRS] off= want= age_ms= inflight= sys_kib= resend_ms= late_ms=
  *           iters= gap_max_us= pend= rxpk= frags+= ipr_to+= stale= stalls=
+ *           ipr=collecting/have/age_ms last=type/frag/len/age_ms at=
  * age_ms: since the stalled READ's first send; resend_ms / late_ms: after
  * the timeout, when the re-sent READ's reply / the ORIGINAL reply arrived
  * (-1: not during this pipeline); iters, gap_max_us, pend, rxpk: the timed-
  * out wait (net_wait_st: looks at the socket, the longest stretch between
  * two looks, RX ring entries unprocessed at the timeout, RX frames processed
  * during the wait); frags+/ipr_to+: IP fragments in, and incomplete
- * datagrams given up, from the stall to the end of the pipeline. */
+ * datagrams given up, from the stall to the end of the pipeline; ipr: the
+ * reassembly slots still collecting at the timeout and the fullest one's
+ * bytes and age (a reply that arrived in part); last: the last RX frame
+ * (ethertype << 8 | IP protocol, IP fragment field, length, ms ago). */
 #define NFS_RS_ROWS 96
 static int nfs_rs_rows;
 struct nfs_rs {
@@ -1768,6 +1772,8 @@ struct nfs_rs {
   struct net_wait_st w;
   uint32_t frags0, ipr_to0, stale, stalls;
   uint32_t retired[NFS_READ_DEPTH]; /* first-send xids of re-sent slots */
+  uint32_t ipr_n, ipr_have, ipr_age;  /* reassembly at the timeout */
+  uint32_t last_type, last_frag, last_len, last_age;  /* last RX frame */
 };
 static void nfs_rs_emit(const struct nfs_rs *r) {
   extern volatile uint32_t ipr_frags, ipr_drop_timeout;
@@ -1805,6 +1811,20 @@ static void nfs_rs_emit(const struct nfs_rs *r) {
   kl_i(&kl, (long)r->stale);
   kl_s(&kl, " stalls=");
   kl_i(&kl, (long)r->stalls);
+  kl_s(&kl, " ipr=");
+  kl_i(&kl, (long)r->ipr_n);
+  kl_c(&kl, '/');
+  kl_i(&kl, (long)r->ipr_have);
+  kl_c(&kl, '/');
+  kl_i(&kl, (long)r->ipr_age);
+  kl_s(&kl, " last=");
+  kl_hex(&kl, (unsigned long)r->last_type);
+  kl_c(&kl, '/');
+  kl_hex(&kl, (unsigned long)r->last_frag);
+  kl_c(&kl, '/');
+  kl_i(&kl, (long)r->last_len);
+  kl_c(&kl, '/');
+  kl_i(&kl, (long)r->last_age);
   kl_s(&kl, " at=");
   kl_i(&kl, (long)(r->t_stall / 1000));
   kl_c(&kl, '\n');
@@ -1907,6 +1927,16 @@ static int nfs_read_pipe(const struct nfs_mount *m, const struct nfs_fh *fh,
         rsr.stale = 0;
         rsr.stalls = 1;
         for (int i = 0; i < NFS_READ_DEPTH; i++) rsr.retired[i] = 0;
+        {
+          extern void net_ipr_peek(uint32_t *, uint32_t *, uint32_t *);
+          extern volatile uint32_t net_rx_last_type, net_rx_last_frag, net_rx_last_len;
+          extern volatile uint64_t net_rx_last_ms;
+          net_ipr_peek(&rsr.ipr_n, &rsr.ipr_have, &rsr.ipr_age);
+          rsr.last_type = net_rx_last_type;
+          rsr.last_frag = net_rx_last_frag;
+          rsr.last_len = net_rx_last_len;
+          rsr.last_age = (uint32_t)(timer_get_ms() - net_rx_last_ms);
+        }
       }
       /* L41: a stall row, not a guess.  If the load freezes at a byte count,
          the question is whether an issued READ is still unanswered at that
