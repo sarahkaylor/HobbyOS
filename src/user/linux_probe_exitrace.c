@@ -14,6 +14,7 @@
  *   X1  one worker calls exit_group(7) after ~1 ms while the other spins in
  *       user mode: status = exited 7
  *   X2  the workers return (the last thread ends the group): status = exited 0
+ *   X3  as X1, but the second worker demand-faults fresh pages: status = 7
  *
  * The defect: the last-thread and exit_group paths set the anchor's
  * live_threads to 0 and released proc_lock before the anchor became EXITED.
@@ -28,6 +29,7 @@
 #include <pthread.h>
 #include <sched.h>
 #include <stdio.h>
+#include <sys/mman.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -43,6 +45,20 @@ static void sleep_us(long us) {
 }
 
 static void *worker(void *arg) {
+  if (mode == 3 && arg) {
+    /* X3: the second worker demand-faults fresh pages until the group dies.
+       A fault taken after the group's address space was released is a
+       kernel "memory fault ... in=V1 live=0" kill: status SIGSEGV, not 7 --
+       explorer/plugplay's teardown faults (H3-winefix log mine). */
+    for (;;) {
+      volatile char *m = mmap(0, 1 << 20, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+      if (m == MAP_FAILED)
+        continue;
+      for (int i = 0; i < (1 << 20); i += 4096)
+        m[i] = 1;
+      munmap((void *)m, 1 << 20);
+    }
+  }
   if (mode == 1 && arg) {
     /* X1's second worker runs in user mode until the group dies, so the
        exit_group owner's drain waits for its next tick: a window of up to
@@ -51,7 +67,7 @@ static void *worker(void *arg) {
       ;
   }
   sleep_us(1000);
-  if (mode == 1)
+  if (mode == 1 || mode == 3)
     syscall(SYS_exit_group, 7);
   return 0;
 }
@@ -96,11 +112,11 @@ static int race(int m, int want, int *err) {
 int main(void) {
   setvbuf(stdout, NULL, _IOLBF, 0);
   int fails = 0;
-  for (int m = 1; m <= 2; m++) {
+  for (int m = 1; m <= 3; m++) {
     int n[4] = {0, 0, 0, 0}, lasterr = 0;
     for (int r = 0; r < ROUNDS; r++) {
       int err = 0;
-      int v = race(m, m == 1 ? 7 : 0, &err);
+      int v = race(m, m == 2 ? 0 : 7, &err);
       n[v]++;
       if (v == 1)
         lasterr = err;
@@ -111,7 +127,9 @@ int main(void) {
     if (!ok)
       fails++;
     printf("[LP] X%d %-44s rounds=%d reaped=%d echild=%d (errno %d) wrong-status=%d timeout=%d -> %s\n", m,
-           m == 1 ? "a worker exit_group(7)s, leader gone" : "last worker returns, leader gone",
+           m == 1 ? "a worker exit_group(7)s, leader gone"
+           : m == 2 ? "last worker returns, leader gone"
+                    : "exit_group(7) while a worker faults pages",
            n[0] + n[1] + n[2] + n[3], n[0], n[1], lasterr, n[2], n[3], ok ? "PASS" : "FAIL");
   }
   printf("[LP] done rc=%d\n", fails);
