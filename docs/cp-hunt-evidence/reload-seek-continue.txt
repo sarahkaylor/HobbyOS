@@ -12,3 +12,12 @@
 # h-rl1 shots s021..s025 (numbers only, tools/cp/hunt checks on strix): the NEW GAME frame (rows 309-344 of the 1280x720 glass) is gone and no yellow frame appears anywhere on the screen; OCR still reads the full main menu (CONTINUE, LOAD GAME, SETTINGS, MODS, CREDITS, QUIT GAME). Four more Ups change nothing.
 # reading: the second Up moved two rows, past CONTINUE onto the frameless patch-notes button above it (docs/cp-p9.md gateA1 saw the same landing with an extra Up); i.e. one key event delivered twice, or a late key-up turned into an autorepeat.
 # all P9 run logs on strix (88, tools/cp/hunt/inputcheck.py): 274 one-row moves, 0 dropped, 3 two-row moves (2 in the pause menu, whose rows are not evenly spaced), plus this one: CONTINUE seeks 3 of 4 fine.
+# h-rl1b (same data disk, 06:17): the second Up shows a taller frame back at LOAD GAME, then nothing:
+[P9W] focus s017-t000145-menu-continue0: rows 526..561 centre 544 -> LOAD GAME
+[P9W] focus s018-t000147-menu-continue1: rows 489..524 centre 506 -> NEW GAME
+[P9W] focus s020-t000150-menu-continue2: rows 524..578 centre 551 -> LOAD GAME
+[P9W] focus s021-t000153-menu-continue3: no highlighted row
+[P9W] focus s022-t000156-menu-continue4: no highlighted row
+[P9W] focus s023-t000158-menu-continue5: no highlighted row
+[P9W] focus s024-t000161-menu-continue6: no highlighted row
+# so 2 of 2 reload boots on h-play1's data disk fail here, in two different ways: the menu after the save list behaves differently with this save set (h-play1 added QuickSave-0 + AutoSave-0/1); not one doubled key. The earlier reading above is withdrawn.
