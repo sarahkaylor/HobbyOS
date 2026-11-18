@@ -56,7 +56,10 @@ key spc
 wait 5
 phase menu2
 expect menu2 60 LOAD\s*GAME
-# cp-hunt H1-12: after a sub-menu the main menu's focus can hide until the pointer moves
+# h3-c02: a seek started 1 s after this menu appeared saw no focus for 8 taps
+# (H1-12's look); settle 10 s, then the pointer wiggle that H1 found restores it
+wait 10
+shot menu2-settled
 look 60 0 1 16
 look -60 0 1 16
 wait 1

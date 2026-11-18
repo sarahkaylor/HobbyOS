@@ -1,0 +1,313 @@
+# tools/cp/hunt/r3/soak60-map.p9 -- lane H6-hunt3 (docs/cp-hunt.md round 3, item 2):
+# a >= 60-minute in-world soak on ManualSave-86: 14 phases soak01..soak14 of
+# 17 x ~16 s (sprint / walk / turn / strafe / look), the map opened and closed once per phase, then QUIT GAME from
+# the pause menu (a clean exit after an hour).  The phases give summarize.py a
+# median per phase (fps drift); [THRS] / the launcher census give memory,
+# threads and fd headroom over time.
+phase menu
+shot menu
+seek menu-load main down 6 LOAD GAME
+key ret
+expect loadlist 30 LOAD\s*GAME|Expand\s*groups|Coll\w*\s*groups|Progression
+key 0
+wait 2
+listseek loadlist-focus down 8 509
+phase loading
+key ret
+expect loaded 400 PRESS\b.{0,24}\bTO\s+CONTINUE
+key spc
+wait 6
+phase world
+expect inworld 60 RIPPERDOC|Jackie
+shot world-start
+phase soak01
+repeat 17
+down shift
+hold w 6000
+up shift
+look 350 0 15 16
+hold w 4000
+look -300 0 10 16
+hold a 1500
+hold d 1500
+look 0 -30 5 16
+look 0 30 5 16
+wait 2
+end
+# the map, open and closed once per phase (UI churn on top of the walk)
+key m
+wait 5
+shot map01
+unwind map-close01 4 FILTER|Track\s*Waypoint|Zoom\s*out|SKIP\s*TIME|DATABASE|CYBERWARE|INVENTORY|JOURNAL|STREET\s*CRED|CHARACTER
+shot soak01-end
+phase soak02
+repeat 17
+down shift
+hold w 6000
+up shift
+look 350 0 15 16
+hold w 4000
+look -300 0 10 16
+hold a 1500
+hold d 1500
+look 0 -30 5 16
+look 0 30 5 16
+wait 2
+end
+# the map, open and closed once per phase (UI churn on top of the walk)
+key m
+wait 5
+shot map02
+unwind map-close02 4 FILTER|Track\s*Waypoint|Zoom\s*out|SKIP\s*TIME|DATABASE|CYBERWARE|INVENTORY|JOURNAL|STREET\s*CRED|CHARACTER
+shot soak02-end
+phase soak03
+repeat 17
+down shift
+hold w 6000
+up shift
+look 350 0 15 16
+hold w 4000
+look -300 0 10 16
+hold a 1500
+hold d 1500
+look 0 -30 5 16
+look 0 30 5 16
+wait 2
+end
+# the map, open and closed once per phase (UI churn on top of the walk)
+key m
+wait 5
+shot map03
+unwind map-close03 4 FILTER|Track\s*Waypoint|Zoom\s*out|SKIP\s*TIME|DATABASE|CYBERWARE|INVENTORY|JOURNAL|STREET\s*CRED|CHARACTER
+shot soak03-end
+phase soak04
+repeat 17
+down shift
+hold w 6000
+up shift
+look 350 0 15 16
+hold w 4000
+look -300 0 10 16
+hold a 1500
+hold d 1500
+look 0 -30 5 16
+look 0 30 5 16
+wait 2
+end
+# the map, open and closed once per phase (UI churn on top of the walk)
+key m
+wait 5
+shot map04
+unwind map-close04 4 FILTER|Track\s*Waypoint|Zoom\s*out|SKIP\s*TIME|DATABASE|CYBERWARE|INVENTORY|JOURNAL|STREET\s*CRED|CHARACTER
+shot soak04-end
+phase soak05
+repeat 17
+down shift
+hold w 6000
+up shift
+look 350 0 15 16
+hold w 4000
+look -300 0 10 16
+hold a 1500
+hold d 1500
+look 0 -30 5 16
+look 0 30 5 16
+wait 2
+end
+# the map, open and closed once per phase (UI churn on top of the walk)
+key m
+wait 5
+shot map05
+unwind map-close05 4 FILTER|Track\s*Waypoint|Zoom\s*out|SKIP\s*TIME|DATABASE|CYBERWARE|INVENTORY|JOURNAL|STREET\s*CRED|CHARACTER
+shot soak05-end
+phase soak06
+repeat 17
+down shift
+hold w 6000
+up shift
+look 350 0 15 16
+hold w 4000
+look -300 0 10 16
+hold a 1500
+hold d 1500
+look 0 -30 5 16
+look 0 30 5 16
+wait 2
+end
+# the map, open and closed once per phase (UI churn on top of the walk)
+key m
+wait 5
+shot map06
+unwind map-close06 4 FILTER|Track\s*Waypoint|Zoom\s*out|SKIP\s*TIME|DATABASE|CYBERWARE|INVENTORY|JOURNAL|STREET\s*CRED|CHARACTER
+shot soak06-end
+phase soak07
+repeat 17
+down shift
+hold w 6000
+up shift
+look 350 0 15 16
+hold w 4000
+look -300 0 10 16
+hold a 1500
+hold d 1500
+look 0 -30 5 16
+look 0 30 5 16
+wait 2
+end
+# the map, open and closed once per phase (UI churn on top of the walk)
+key m
+wait 5
+shot map07
+unwind map-close07 4 FILTER|Track\s*Waypoint|Zoom\s*out|SKIP\s*TIME|DATABASE|CYBERWARE|INVENTORY|JOURNAL|STREET\s*CRED|CHARACTER
+shot soak07-end
+phase soak08
+repeat 17
+down shift
+hold w 6000
+up shift
+look 350 0 15 16
+hold w 4000
+look -300 0 10 16
+hold a 1500
+hold d 1500
+look 0 -30 5 16
+look 0 30 5 16
+wait 2
+end
+# the map, open and closed once per phase (UI churn on top of the walk)
+key m
+wait 5
+shot map08
+unwind map-close08 4 FILTER|Track\s*Waypoint|Zoom\s*out|SKIP\s*TIME|DATABASE|CYBERWARE|INVENTORY|JOURNAL|STREET\s*CRED|CHARACTER
+shot soak08-end
+phase soak09
+repeat 17
+down shift
+hold w 6000
+up shift
+look 350 0 15 16
+hold w 4000
+look -300 0 10 16
+hold a 1500
+hold d 1500
+look 0 -30 5 16
+look 0 30 5 16
+wait 2
+end
+# the map, open and closed once per phase (UI churn on top of the walk)
+key m
+wait 5
+shot map09
+unwind map-close09 4 FILTER|Track\s*Waypoint|Zoom\s*out|SKIP\s*TIME|DATABASE|CYBERWARE|INVENTORY|JOURNAL|STREET\s*CRED|CHARACTER
+shot soak09-end
+phase soak10
+repeat 17
+down shift
+hold w 6000
+up shift
+look 350 0 15 16
+hold w 4000
+look -300 0 10 16
+hold a 1500
+hold d 1500
+look 0 -30 5 16
+look 0 30 5 16
+wait 2
+end
+# the map, open and closed once per phase (UI churn on top of the walk)
+key m
+wait 5
+shot map10
+unwind map-close10 4 FILTER|Track\s*Waypoint|Zoom\s*out|SKIP\s*TIME|DATABASE|CYBERWARE|INVENTORY|JOURNAL|STREET\s*CRED|CHARACTER
+shot soak10-end
+phase soak11
+repeat 17
+down shift
+hold w 6000
+up shift
+look 350 0 15 16
+hold w 4000
+look -300 0 10 16
+hold a 1500
+hold d 1500
+look 0 -30 5 16
+look 0 30 5 16
+wait 2
+end
+# the map, open and closed once per phase (UI churn on top of the walk)
+key m
+wait 5
+shot map11
+unwind map-close11 4 FILTER|Track\s*Waypoint|Zoom\s*out|SKIP\s*TIME|DATABASE|CYBERWARE|INVENTORY|JOURNAL|STREET\s*CRED|CHARACTER
+shot soak11-end
+phase soak12
+repeat 17
+down shift
+hold w 6000
+up shift
+look 350 0 15 16
+hold w 4000
+look -300 0 10 16
+hold a 1500
+hold d 1500
+look 0 -30 5 16
+look 0 30 5 16
+wait 2
+end
+# the map, open and closed once per phase (UI churn on top of the walk)
+key m
+wait 5
+shot map12
+unwind map-close12 4 FILTER|Track\s*Waypoint|Zoom\s*out|SKIP\s*TIME|DATABASE|CYBERWARE|INVENTORY|JOURNAL|STREET\s*CRED|CHARACTER
+shot soak12-end
+phase soak13
+repeat 17
+down shift
+hold w 6000
+up shift
+look 350 0 15 16
+hold w 4000
+look -300 0 10 16
+hold a 1500
+hold d 1500
+look 0 -30 5 16
+look 0 30 5 16
+wait 2
+end
+# the map, open and closed once per phase (UI churn on top of the walk)
+key m
+wait 5
+shot map13
+unwind map-close13 4 FILTER|Track\s*Waypoint|Zoom\s*out|SKIP\s*TIME|DATABASE|CYBERWARE|INVENTORY|JOURNAL|STREET\s*CRED|CHARACTER
+shot soak13-end
+phase soak14
+repeat 17
+down shift
+hold w 6000
+up shift
+look 350 0 15 16
+hold w 4000
+look -300 0 10 16
+hold a 1500
+hold d 1500
+look 0 -30 5 16
+look 0 30 5 16
+wait 2
+end
+# the map, open and closed once per phase (UI churn on top of the walk)
+key m
+wait 5
+shot map14
+unwind map-close14 4 FILTER|Track\s*Waypoint|Zoom\s*out|SKIP\s*TIME|DATABASE|CYBERWARE|INVENTORY|JOURNAL|STREET\s*CRED|CHARACTER
+shot soak14-end
+# ---- QUIT GAME from the in-world pause menu ----------------------------------
+phase quit
+key esc
+wait 4
+seek pause-quit pause down 9 QUIT GAME
+exit_ok
+key ret
+wait 3
+expect quit-confirm 10 sure.{0,20}quit
+key ret
+wait_exit 180

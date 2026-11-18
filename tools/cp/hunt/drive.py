@@ -4,6 +4,7 @@ tools/cp/hunt/settings.p9) from the host with feedback, for the sequences a
 fixed play script cannot do (lane H6-hunt3, docs/cp-hunt.md round 3):
 
     drive.py churn    RUN   [--loads 10] [--menu-loads 5] [--saves 10]
+    drive.py menuloads RUN  [--menu-loads 5]
     drive.py settings RUN   [--cycles 3]
     drive.py quit     RUN   [--from pause|main]
 
@@ -38,9 +39,22 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
 from PIL import Image, ImageStat  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "p9"))
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "p8"))
+import boot_p9 as B9  # noqa: E402  (focus_in / canon_image / MENUS: what boot_p9's seek sees)
+
+# the game picture's place: P9_XSCREEN and the game's own Resolution (the
+# settings boot changes the latter; Boot.view tracks it)
+VIEW = {"xscreen": os.environ.get("P9_XSCREEN", "1280x720") or "1920x1080", "game_res": "1280x720", "windowed": False}
 
 SAVE_RX = re.compile(r"\b((?:Quick|Auto|Manual|Point\w*|End\w*)\s*S[ao]ve-\d+)", re.I)
-WORLD_RX = r"RIPPERDOC|Jackie|STREETKID|Kirk|WELCOME\s+TO|First\s+time\s+in"
+# the HUD after a load: the tracked quest + its objective (h3-ctl1..3 OCR), or
+# the prologue's tutorial popup.  The save list itself says "The Ripperdoc" /
+# "The Streetkid", so a screen that still shows the list or a dialog never counts.
+HUD_RX = r"Jackie|Weapon|Crouch|Skip\s+Ahead|K\w?rk|second\s+floor|Move\s+with"
+WORLD_RX = (rf"RIPPERD[O0]C.{{0,120}}({HUD_RX})|({HUD_RX}).{{0,120}}RIPPERD[O0]C|"
+            rf"STREETKI[DO0].{{0,120}}({HUD_RX})|WELCOME\s+TO|First\s+time\s+in")
+NOT_WORLD_RX = r"LOAD\s*GAME|Latest\s+save|Play\s*time|sure\s+you\s+want|PRESS\b.{0,24}\bTO\s+CONTINUE"
 
 
 class Ended(Exception):
@@ -58,6 +72,9 @@ class Boot:
         self.ctl = os.path.join(self.out, "ctl.txt")
         self.log = os.path.join(logs or os.path.join(ROOT, "obj", "hunt-logs"), run + ".log")
         self.n = 0
+        # tags stay unique when a driver is restarted on the same boot (a tag
+        # whose shot already exists would be "found" at once: h3-churn1)
+        self.pre = "d" + format(int(time.time()) % 46656, "x")
         if not os.path.isdir(self.out):
             raise SystemExit(f"drive: no {self.out}")
 
@@ -70,7 +87,7 @@ class Boot:
     def shot(self, name, *lines, timeout=180):
         """append LINES + `shot TAG`; wait for the PNG; -> its path"""
         self.n += 1
-        tag = f"d{self.n:03d}{name}"
+        tag = f"{self.pre}{self.n:03d}{name}"
         with open(self.ctl, "a") as f:
             for ln in lines:
                 f.write(ln + "\n")
@@ -79,21 +96,24 @@ class Boot:
         pat = os.path.join(self.out, "shots", f"s*-t*-{tag}.png")
         while time.time() < end:
             g = glob.glob(pat)
-            if g:
-                time.sleep(0.3)
+            if g and (os.path.exists(g[0][:-4] + ".ocr.txt") or time.time() > end - timeout + 30):
+                time.sleep(0.2)
                 return g[0]
             if self.ended():
                 raise Ended(f"the boot ended (waiting for {tag})")
             time.sleep(0.5)
         raise Ended(f"no shot {tag} in {timeout} s")
 
-    def until(self, name, rx, timeout, *first, every=4):
-        """first lines, then shots `every` s apart until the OCR matches rx"""
+    def until(self, name, rx, timeout, *first, every=4, reject=None):
+        """first lines, then shots `every` s apart until the OCR matches rx
+        (and not REJECT)"""
         end = time.time() + timeout
         p = self.shot(name, *first)
         while True:
-            t = ocr(p)
-            if re.search(rx, t, re.I):
+            t = boot_ocr(p)
+            if not re.search(rx, t, re.I | re.S):
+                t = t + " " + ocr(p, scale=2)       # tesseract reads small HUD text better at 2x
+            if re.search(rx, t, re.I | re.S) and not (reject and re.search(reject, t, re.I | re.S)):
                 return p, t
             if time.time() >= end:
                 log(f"until {name}: /{rx}/ not seen in {timeout} s (last OCR {t[:80]!r})")
@@ -102,6 +122,17 @@ class Boot:
 
 
 # --- readings -------------------------------------------------------------------
+def boot_ocr(path):
+    """boot_p9's own OCR of the shot (psm 11, bare + in the 1920x1080 canon
+    layout), which it saves beside the PNG; the HUD reads there where a plain
+    psm 6 pass does not (h3-churn1)"""
+    try:
+        return " ".join(open(path[:-4] + ".ocr.txt", errors="replace").read().split())
+    except OSError:
+        return ocr(path, psm=11)
+
+
+
 def ocr(path, box=None, scale=1, psm=6, tsv=False):
     im = Image.open(path).convert("L")
     if box:
@@ -168,8 +199,19 @@ def column_boxes(words, labels):
 
 
 def menu_focus(path, labels):
-    """the highlighted (yellow) menu row among LABELS found by OCR: (label, score)"""
+    """the highlighted (yellow) menu row among LABELS: boot_p9's own focus_in()
+    on the canon view while the game picture's place is known, else the yellow
+    pixels next to each label tesseract found (h3-ctl3: a 1024x768 window at
+    x=128 made boot_p9's tables miss and its seek end the boot)"""
     im = Image.open(path).convert("RGB")
+    if not VIEW["windowed"]:
+        menu = "pause" if "RESUME" in labels else "main"
+        try:
+            lab, yc, rows = B9.focus_in(B9.canon_image(im, VIEW["xscreen"], VIEW["game_res"]), menu)
+        except Exception:  # noqa: BLE001
+            lab = None
+        if lab in labels:
+            return lab, 999
     words = ocr(path, scale=2, psm=11, tsv=True)
     px = im.load()
     best = (None, 0)
@@ -211,6 +253,50 @@ def list_name(path, fr):
 # VIDEO tab rows: label (x, top y) in a 1280x720 game picture at the origin (h3-ctl3)
 VIDEO_TABLE = {"Monitor": (332, 165), "VSync": (332, 205), "Maximum FPS": (332, 245),
                "Windowed Mode": (330, 281), "Resolution": (332, 323), "HDR Mode": (330, 360)}
+
+
+def table_fit(words, labels, table):
+    """scale + offset of a settings panel from the labels OCR found in their
+    column: (sc, ox, oy) or None"""
+    cb = column_boxes(words, labels)
+    fit = [(table[l], (b[0], b[1])) for l, b in cb.items() if l in table]
+    if len(fit) < 2:
+        return None
+    (X0, Y0), (x0, y0) = min(fit, key=lambda f: f[0][1])
+    (X1, Y1), (x1, y1) = max(fit, key=lambda f: f[0][1])
+    sc = (y1 - y0) / (Y1 - Y0) if Y1 != Y0 else 1.0
+    if not 0.5 < sc < 2.5:
+        return None
+    ox = sorted(x - sc * X for (X, Y), (x, y) in fit)[len(fit) // 2]
+    oy = sorted(y - sc * Y for (X, Y), (x, y) in fit)[len(fit) // 2]
+    return sc, ox, oy
+
+
+def row_value(path, row, labels=None, table=None):
+    """OCR of one VIDEO row's value (the "< 1280x720 >" part right of its label)"""
+    labels, table = labels or VIDEO_ROWS, table or VIDEO_TABLE
+    words = ocr(path, scale=2, psm=11, tsv=True)
+    f = table_fit(words, labels, table)
+    if not f:
+        return ""
+    sc, ox, oy = f
+    X, Y = table[row]
+    im = Image.open(path)
+    box = (int(ox + sc * 600), max(0, int(oy + sc * (Y - 8))), min(im.size[0], int(ox + sc * 960)), int(oy + sc * (Y + 22)))
+    # the focused row's text is dim on its tint: the green channel, contrast-
+    # stretched, reads it best (h3-ctl3: "1024x768" where L read "waases")
+    from PIL import ImageOps
+    out = [ocr(path, box=box, scale=3, psm=7)]
+    g = ImageOps.autocontrast(Image.open(path).convert("RGB").crop(box).getchannel("G"))
+    g = g.resize((g.size[0] * 4, g.size[1] * 4))
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
+        g.save(tf.name)
+    try:
+        out.append(" ".join(subprocess.run(["tesseract", tf.name, "-", "--psm", "7"], capture_output=True,
+                                           text=True, timeout=60).stdout.split()))
+    finally:
+        os.unlink(tf.name)
+    return " / ".join(out)
 
 
 def set_row(path, labels, table=None):
@@ -270,8 +356,10 @@ def set_row(path, labels, table=None):
 
 
 # --- sequences -------------------------------------------------------------------
-PAUSE = ["RESUME", "SAVE GAME", "LOAD GAME", "SETTINGS", "EXIT TO MAIN MENU", "QUIT GAME"]
-MAIN = ["CONTINUE", "NEW GAME", "LOAD GAME", "SETTINGS", "QUIT GAME"]
+# every row, in order (h3-churn1: without MODS / CREDITS a focus on MODS had no
+# index, so the seek never turned back up to LOAD GAME)
+PAUSE = [lab for lab, _ in B9.MENUS["pause"]]
+MAIN = [lab for lab, _ in B9.MENUS["main"]]
 
 
 def seek(b, labels, want, limit=10, name="sk"):
@@ -279,6 +367,7 @@ def seek(b, labels, want, limit=10, name="sk"):
     for i in range(limit + 1):
         p = b.shot(f"{name}{i}", "wait 0.6")
         lab, n = menu_focus(p, labels)
+        log(f"seek {want}: tap {i} focus {lab}")
         if lab == want:
             log(f"seek {want}: on it after {i} taps")
             return True
@@ -293,26 +382,27 @@ def seek(b, labels, want, limit=10, name="sk"):
 
 def pause_open(b):
     p = b.shot("po", "key esc", "wait 4")
-    if re.search(r"RESUME|EXIT\s+TO\s+MAIN", ocr(p), re.I):
+    if re.search(r"RESUME|EXIT\s+TO\s+MAIN", boot_ocr(p), re.I):
         return True
     p = b.shot("po2", "wait 2")          # once more: a popup may have eaten the Esc
-    if re.search(r"RESUME|EXIT\s+TO\s+MAIN", ocr(p), re.I):
+    if re.search(r"RESUME|EXIT\s+TO\s+MAIN", boot_ocr(p), re.I):
         return True
     p = b.shot("po3", "key esc", "wait 4")
-    return bool(re.search(r"RESUME|EXIT\s+TO\s+MAIN", ocr(p), re.I))
+    return bool(re.search(r"RESUME|EXIT\s+TO\s+MAIN", boot_ocr(p), re.I))
 
 
 def in_world(b, name, timeout):
     """wait for the HUD; close the prologue's tutorial popup with Esc if it shows"""
-    p, t = b.until(name, WORLD_RX, timeout)
+    p, t = b.until(name, WORLD_RX, timeout, reject=NOT_WORLD_RX)
     if not p:
         return None
     if re.search(r"WELCOME\s+TO|First\s+time\s+in", t, re.I):
-        p2, t2 = b.until(name + "e", r"STREETKID|Kirk|RIPPERDOC|Jackie", 30, "wait 3", "key esc", "wait 3")
+        p2, t2 = b.until(name + "e", WORLD_RX.replace(r"|WELCOME\s+TO|First\s+time\s+in", ""), 30,
+                         "wait 3", "key esc", "wait 3")
         if re.search(r"RESUME|EXIT\s+TO\s+MAIN", t2 or "", re.I):
             b.shot(name + "r", "key esc", "wait 3")
         return "STREETKID" if p2 else None
-    return "RIPPERDOC" if re.search(r"RIPPERDOC|Jackie", t, re.I) else "STREETKID"
+    return "RIPPERDOC" if re.search(r"RIPPERD[O0]C|Jackie", t, re.I) else "STREETKID"
 
 
 def open_list(b):
@@ -346,7 +436,7 @@ def make_saves(b, n):
         b.shot(f"mv{i}", "down shift", "hold w 3000", "up shift", "look 300 0 10 16", "hold w 2000",
                "look -150 0 5 16", "wait 1")
         p = b.shot(f"qs{i}", "key f5", "wait 4")
-        log(f"quick save {i + 1}/{n}: OCR {ocr(p)[:60]!r}")
+        log(f"quick save {i + 1}/{n}: OCR {boot_ocr(p)[:60]!r}")
 
 
 def load_in_world(b, avoid, k):
@@ -365,7 +455,7 @@ def load_in_world(b, avoid, k):
     t0 = time.time()
     p, t = b.until(f"cf{k}", r"sure.{0,30}load", 15, "key ret", "wait 2")
     if p:
-        b.shot(f"cfy{k}", "key ret", "wait 3")
+        b.shot(f"cfy{k}", "key ret", "wait 10")
     w = in_world(b, f"w{k}_", 400)
     log(f"LOAD {k} (pause menu -> {nm}): {'world ' + w if w else 'NO WORLD'} after {time.time() - t0:.0f} s")
     if w:
@@ -427,19 +517,28 @@ def quit_game(b, frm):
 def churn(b, a):
     """item 3: quick saves, then A.loads different saves loaded through the
     pause menu, then A.menu_loads x (EXIT TO MAIN MENU -> LOAD GAME)"""
-    w = in_world(b, "w0_", 30)
-    if not w:
-        # from the main menu: LOAD GAME -> ManualSave-86
-        if not load_from_main(b, 0, "ManualSave-86"):
-            raise Ended("no world at the start")
+    if not a.in_world:
+        w = in_world(b, "w0_", 30)
+        if not w:
+            # from the main menu: LOAD GAME -> ManualSave-86
+            if not load_from_main(b, 0, "ManualSave-86"):
+                raise Ended("no world at the start")
     make_saves(b, a.saves)
-    loaded, ok = [], 0
+    loaded, ok = list(a.avoid or []), 0
     for k in range(1, a.loads + 1):
         nm = load_in_world(b, set(loaded), k)
         if nm:
             ok += 1
             loaded.append(nm)
     log(f"CHURN pause-menu loads: {ok}/{a.loads} reached the world, {len(set(loaded))} different saves: {loaded}")
+    menu_loads(b, a)
+
+
+def menu_loads(b, a):
+    """A.menu_loads x (pause -> EXIT TO MAIN MENU -> title -> LOAD GAME ->
+    ManualSave-86 / AutoSave-16 alternately -> world), then QUIT GAME"""
+    if not in_world(b, "mw0_", 20) and not load_from_main(b, 0, "ManualSave-86"):
+        raise Ended("no world at the start")
     mok = 0
     prefs = ["ManualSave-86", "AutoSave-16"]
     for k in range(1, a.menu_loads + 1):
@@ -488,14 +587,19 @@ def video_set(b, row, value_rx, name, max_enter=12):
     else:
         log(f"settings: row {row} not focused ({sc})")
         return False
+    seen = []
     for j in range(max_enter):
-        t = ocr(p, scale=2, psm=11)
+        t = row_value(p, row)
+        if row == "Resolution":
+            t += " // " + " ".join(re.findall(r"\d{3,4}\s*x\s*\d{3,4}", ocr(p, scale=2, psm=11)))
+        seen.append(t)
         if re.search(value_rx, t, re.I):
             break
         p = b.shot(f"{name}e{j}", "key ret", "wait 1.5")
     else:
-        log(f"settings: {row} never showed /{value_rx}/")
+        log(f"settings: {row} never showed /{value_rx}/ (values seen: {seen})")
         return False
+    log(f"settings: {row} shows {t!r} after {j} x Enter (values seen: {seen})")
     t0 = time.time()
     p, t = b.until(f"{name}a", r"apply\s+these\s+changes", 10, "key esc", "wait 2")
     if not p:
@@ -503,7 +607,13 @@ def video_set(b, row, value_rx, name, max_enter=12):
         b.shot(f"{name}x", "wait 1")
         return True
     b.shot(f"{name}c", "key ret", "wait 4")
-    log(f"SET {row} -> /{value_rx}/ applied")
+    # where the game picture is now (menu_focus's canon view)
+    if row == "Resolution":
+        m = re.search(r"(\d{3,4})\D{0,3}x\D{0,3}(\d{3,4})", value_rx.replace("\\s*", ""))
+        VIEW["game_res"] = f"{m.group(1)}x{m.group(2)}" if m else VIEW["game_res"]
+    elif row == "Windowed Mode":
+        VIEW["windowed"] = not re.search(r"Borderless", value_rx)
+    log(f"SET {row} -> /{value_rx}/ applied (view now {VIEW})")
     return t0
 
 
@@ -557,30 +667,34 @@ def settings(b, a):
             # close Settings and the pause menu, then ~10 s in the world
             b.shot(f"c{c}{k}z", "key esc", "wait 3", "key esc", "wait 3")
             p = b.shot(f"c{c}{k}w", "hold w 3000", "look 300 0 10 16", "wait 3")
-            log(f"after {row} -> /{rx}/ ({'ok' if r else 'FAILED'}): world OCR {ocr(p)[:60]!r}")
+            log(f"after {row} -> /{rx}/ ({'ok' if r else 'FAILED'}): world OCR {boot_ocr(p)[:60]!r}")
         for k in range(2):
             g = graphics_preset(b, f"c{c}p{k}")
             b.shot(f"c{c}p{k}z", "key esc", "wait 3", "key esc", "wait 3")
             p = b.shot(f"c{c}p{k}w", "hold w 3000", "look 300 0 10 16", "wait 3")
-            log(f"after Quick Preset -> {g}: world OCR {ocr(p)[:60]!r}")
+            log(f"after Quick Preset -> {g}: world OCR {boot_ocr(p)[:60]!r}")
         log(f"SETTINGS cycle {c + 1}/{a.cycles} done")
     quit_game(b, "pause")
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("what", choices=["churn", "settings", "quit"])
+    ap.add_argument("what", choices=["churn", "menuloads", "settings", "quit"])
     ap.add_argument("run")
     ap.add_argument("--loads", type=int, default=10)
     ap.add_argument("--menu-loads", type=int, default=5)
     ap.add_argument("--saves", type=int, default=10)
     ap.add_argument("--cycles", type=int, default=2)
     ap.add_argument("--from", dest="frm", default="pause", choices=["pause", "main"])
+    ap.add_argument("--in-world", action="store_true", help="the boot is in the world already (a restarted driver)")
+    ap.add_argument("--avoid", nargs="*", help="saves already loaded (a restarted driver)")
     a = ap.parse_args()
     b = Boot(a.run)
     try:
         if a.what == "churn":
             churn(b, a)
+        elif a.what == "menuloads":
+            menu_loads(b, a)
         elif a.what == "settings":
             settings(b, a)
         else:

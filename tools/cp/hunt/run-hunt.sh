@@ -24,6 +24,11 @@
 #   soak      P9 tools/cp/hunt/soak.p9 (~28 min in the world)
 #   settings  P9 tools/cp/hunt/settings.p9 (Settings menu: change + apply a graphics option)
 #   script    P9 with HUNT_SCRIPT=<path>
+#   drive     P9 interactive boot (settings.p9's `ctl`) driven from the host by
+#             tools/cp/hunt/drive.py $HUNT_DRIVE (commas for spaces: "churn,--loads,10",
+#             "settings,--cycles,2") once the main menu is up -> RUN.drive.txt;
+#             if drive.py returns with the boot still up, `done` ends the script
+#             (round 3, H6-hunt3)
 #
 # Env: HUNT_AUDIO=1, HUNT_FROM (P9 run under obj/cp-p9 to start from),
 #      HUNT_BOOT (P9: another boot script in place of tools/cp/p9/boot_p9.py),
@@ -89,7 +94,7 @@ case "$KIND" in
         [ -f "$IMG" ] || bash tools/cp/hunt/prep-settings.sh "$ROOT/obj/cp-p8/pfx-seeded.img" "$IMG" WindowMode=Windowed:0 >&2 || exit 2
         set -- env P8_GPU=venus P8_RUN="$RUN" P8_EXPORT="$EXP-p8" P8_CPDATA_FROM="$IMG" TIMEOUT_S="${TIMEOUT_S:-3600}" \
           P8_STALL_S="${P8_STALL_S:-600}" P8_GAME_S="${P8_GAME_S:-3000}" bash tools/cp/p8/run-p8.sh ;;
-  fp720|fp1080|play|reload|reload2|soak|settings|script)
+  fp720|fp1080|play|reload|reload2|soak|settings|script|drive)
         P9=1
         case "$KIND" in
           fp720) S=tools/cp/p9/fpsprobe.p9 ;;
@@ -100,7 +105,7 @@ case "$KIND" in
           play) S=tools/cp/p9/play.p9 ;;
           reload) S=tools/cp/p9/reload.p9 ;;
           soak) S=tools/cp/hunt/soak.p9 ;;
-          settings) S=tools/cp/hunt/settings.p9 ;;
+          settings|drive) S=tools/cp/hunt/settings.p9 ;;
           script) S="${HUNT_SCRIPT:?HUNT_SCRIPT}" ;;
         esac
         X=(P9_SCRIPT="$S" P9_RUN="$RUN" P8_EXPORT="$EXP-p9")
@@ -129,13 +134,29 @@ case "$KIND" in
   *) echo "run-hunt: unknown kind $KIND" >&2; exit 2 ;;
 esac
 
+[ "$KIND" = drive ] && [ -z "${HUNT_DRIVE:-}" ] && { echo "run-hunt: drive needs HUNT_DRIVE" >&2; exit 2; }
 if [ "$P9" = 1 ]; then OUT="$ROOT/obj/cp-p9/$RUN"; else OUT="$ROOT/obj/cp-p8/$RUN"; fi
 echo "== run-hunt kind=$KIND run=$RUN audio=${WAV:-off} venus=$VENUS_BUILD wine=$CP_WINE_STAGE start=$(date -Is)" > "$L"
 "$@" >> "$L" 2>&1 &
 BP=$!
 sampler "$BP" "$OUT" > "$H" 2>&1 &
 SP=$!
+if [ "$KIND" = drive ]; then
+  # the host-side driver: wait for boot_p9's ctl prompt, drive, then end the script
+  (
+    D="$LOGS/$RUN.drive.txt"; : > "$D"
+    until grep -aq "interactive: append" "$L" 2>/dev/null; do
+      kill -0 "$BP" 2>/dev/null || exit 0; sleep 3
+    done
+    # shellcheck disable=SC2086
+    python3 -I tools/cp/hunt/drive.py ${HUNT_DRIVE//,/ } "$RUN" >> "$D" 2>&1
+    echo "drive.py rc=$? $(date +%T)" >> "$D"
+    kill -0 "$BP" 2>/dev/null && echo done >> "$OUT/ctl.txt"
+  ) &
+  DP=$!
+fi
 wait "$BP"; rc=$?
+[ -n "${DP:-}" ] && { kill "$DP" 2>/dev/null; wait "$DP" 2>/dev/null; }
 kill "$SP" 2>/dev/null; wait "$SP" 2>/dev/null
 echo "rc=$rc $(date +%T)" >> "$L"
 [ -n "${GEN:-}" ] && rm -f "$GEN"
