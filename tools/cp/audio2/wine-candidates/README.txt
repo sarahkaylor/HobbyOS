@@ -25,3 +25,10 @@ dlls/winealsa.drv/alsa.c).
 
 mkpatch.py regenerates both from a pristine alsa.c (/tmp/a2wp/a/... on
 strix): python3 mkpatch.py GATE_PERIODS.
+
+Round-2 result (docs/cp-audio2.md §9): neither is proposed.  0101 as built
+(v1, the Wine-side clock, gate 2 periods) gave 3 + 3 WAV dropouts against
+stock's 5 + 4 but 7 + 12 kernel xruns against 1 + 2; mkpatch.py's "delay"
+mode (v2, the queue figure from snd_pcm_delay()) gained nothing in the model.
+The silence comes from the game's audio thread being away 31-260 ms (H5-05),
+longer than the 40 ms buffer.

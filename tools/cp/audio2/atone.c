@@ -34,6 +34,9 @@
  *                    elapsed x rate, never below buffer - avail); the lead-in
  *                    is written only when that is under gate periods
  *                    (gateh=N: N half periods)
+ *     qsrc=clock|delay  where the gate's queue figure comes from: clock = the
+ *                    player's own play clock (0101 v1), delay = snd_pcm_delay()
+ *                    (0101 v2; the kernel's DELAY counts what QEMU holds)
  *     top=0          the top-up variant: lead-in only when the play clock says
  *                    fewer than top/2 periods are queued, and only enough
  *                    silence to bring the queue back to top/2 periods
@@ -86,6 +89,7 @@ static short *sil_s;
 static double ph, hz = 440.0;
 static int fill_periods, skip_n, acct_fix, gate_periods, top_half;
 static double q_est, q_est_t;
+static int qsrc_delay;
 static long n_gated;
 static unsigned rng = 12345;
 
@@ -156,6 +160,8 @@ static void write_data(double t_rel) {
     q_est_t = tn;
     double queued = avail < alsa_bufsize ? (double)(alsa_bufsize - avail) : 0;
     if (q_est < queued) q_est = queued;
+    snd_pcm_sframes_t d = 0;
+    if (qsrc_delay) q_est = snd_pcm_delay(pcm, &d) == 0 && d > 0 ? (double)d : 0;
   }
   if (snd_pcm_state(pcm) == SND_PCM_STATE_XRUN) {
     n_xrun_state++;
@@ -254,6 +260,7 @@ int main(int argc, char **argv) {
     else if (!strncmp(argv[i], "gate=", 5)) gate_periods = atoi(argv[i] + 5) * 2;
     else if (!strncmp(argv[i], "gateh=", 6)) gate_periods = atoi(argv[i] + 6);
     else if (!strncmp(argv[i], "top=", 4)) top_half = atoi(argv[i] + 4);
+    else if (!strncmp(argv[i], "qsrc=", 5)) qsrc_delay = argv[i][5] == 'd';
   }
   setvbuf(stdout, 0, _IOLBF, 0);
   printf("[AT] atone alsa-lib %s secs=%.0f hz=%.0f lbuf_ms=%d stall_ms=%d stall_every=%.1f fmt=%s fill=%d skip=%d acct=%s gate=%d top=%d\n",

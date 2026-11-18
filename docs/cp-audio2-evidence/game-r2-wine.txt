@@ -1,0 +1,95 @@
+# H5-audio2 round 2 game audio boots (strix, P9 fp720 Low, Venus, -m 32G; integ18 + cp-audio2 kernel 044b517e; run-hunt HUNT_AUDIO=1; WAVs measured then deleted)
+# stock = ~/cp/wine-cp2; cand = own build ~/cp/lanes/audio2-wine = wine-cp2 recipe + tools/cp/audio2/wine-candidates/0101 (v1: lead-in gate at 2 periods by a Wine-side play clock) + 0102 (diag rows)
+# gamecheck.sh: walsa[...] = sums of the [WALSA] stat rows (all streams of the boot)
+start r2-stock-fp1 wine=stock 10:54:17
+end r2-stock-fp1 rc=0 11:19:21 r2-stock-fp1 dropouts=5 dropout_ms=500.0 wav_s=332.25 alsa_underrun_rows=0 kernel_xruns=1 held=617 max100ms=10560 xrun_rows[wok/drt:1 ] stalls=42 stolen_ms=8672 zeros_rows=7
+start r2-stock-fp2 wine=stock 11:19:51
+end r2-stock-fp2 rc=0 11:27:12 r2-stock-fp2 dropouts=4 dropout_ms=460.0 wav_s=364.56 alsa_underrun_rows=0 kernel_xruns=2 held=743 max100ms=10560 xrun_rows[wlate/drt:2 ] stalls=57 stolen_ms=10485 zeros_rows=7
+start r2-cand-fp1 wine=cand 11:27:42
+end r2-cand-fp1 rc=0 11:40:33 r2-cand-fp1 dropouts=3 dropout_ms=320.0 wav_s=376.08 alsa_underrun_rows=1 kernel_xruns=7 held=313 max100ms=11040 xrun_rows[wlate/drt:4 wok/drt:3 ] stalls=48 stolen_ms=6470 zeros_rows=5 walsa[ticks=37020 events=37019 woke=36784 nowake=235 lat_max_us=10746 late5=96 late10=2 late20=0 empty_ticks=19712 leadins=55 leadin_nowake=55 leadin_woke=0 gated=39 silent_frames=994720 evcb=1]
+start r2-cand-fp2 wine=cand 11:41:03
+end r2-cand-fp2 rc=0 11:47:01 r2-cand-fp2 dropouts=3 dropout_ms=270.0 wav_s=315.93 alsa_underrun_rows=0 kernel_xruns=12 held=149 max100ms=9600 xrun_rows[wlate/drt:4 wok/drt:8 ] stalls=32 stolen_ms=2893 zeros_rows=4 walsa[ticks=31019 events=31018 woke=30833 nowake=185 lat_max_us=12132 late5=358 late10=1 late20=0 empty_ticks=16522 leadins=42 leadin_nowake=42 leadin_woke=0 gated=35 silent_frames=727456 evcb=1]
+R2GAMEDONE 11:47:31
+## r2-stock-fp1: wavgaps
+wavgaps: dropouts_first=[(22.43, 10.0, -26.0, -24.7), (124.15, 90.0, -22.3, -24.4), (126.91, 140.0, -21.2, -21.1), (134.9, 250.0, -27.2, -23.6), (209.5, 10.0, -32.0, -31.5)]
+wavgaps: dropouts_game_s=[34.7, 136.4, 139.2, 147.2, 221.8]
+## r2-stock-fp1: kernel rows
+[SND] xrun n=1 frames_done=6560 chunks=15 t_ms=141 wr_ago_us=29912 io_ago_us=0 done100ms=4640 done40ms=1760
+[SND] zeros n=1 t_ms=0 frames=924000 q_vis=0 q_hw=0 call_frames=1920 call_all_zero=1 calls=2131 gap_ms=70 since_gap_ms=-12173 since_prepare_ms=-142
+[SND] zeros n=2 t_ms=22421 frames=480 q_vis=1504 q_hw=0 call_frames=480 call_all_zero=1 calls=2 gap_ms=70 since_gap_ms=10247 since_prepare_ms=22278
+[SND] zeros n=3 t_ms=69271 frames=1381 q_vis=2438 q_hw=1147 call_frames=480 call_all_zero=0 calls=4 gap_ms=70 since_gap_ms=57097 since_prepare_ms=69128
+[SND] zeros n=4 t_ms=124141 frames=4320 q_vis=1330 q_hw=0 call_frames=480 call_all_zero=1 calls=12 gap_ms=367 since_gap_ms=26632 since_prepare_ms=123998
+[SND] zeros n=5 t_ms=126891 frames=6720 q_vis=1641 q_hw=160 call_frames=480 call_all_zero=1 calls=18 gap_ms=367 since_gap_ms=29383 since_prepare_ms=126748
+[SND] zeros n=6 t_ms=134881 frames=12000 q_vis=1627 q_hw=192 call_frames=480 call_all_zero=1 calls=32 gap_ms=367 since_gap_ms=37372 since_prepare_ms=134738
+[SND] zeros n=7 t_ms=209471 frames=480 q_vis=1558 q_hw=32 call_frames=480 call_all_zero=1 calls=2 gap_ms=322 since_gap_ms=34167 since_prepare_ms=209329
+## r2-stock-fp2: wavgaps
+wavgaps: dropouts_first=[(157.5, 90.0, -24.3, -22.3), (160.53, 130.0, -22.3, -23.9), (168.39, 200.0, -19.6, -23.6), (240.8, 40.0, -32.2, -30.6)]
+wavgaps: dropouts_game_s=[169.0, 172.1, 179.9, 252.3]
+## r2-stock-fp2: kernel rows
+[SND] zeros n=1 t_ms=0 frames=848800 q_vis=0 q_hw=0 call_frames=1920 call_all_zero=1 calls=1986 gap_ms=201 since_gap_ms=-8229 since_prepare_ms=0
+[SND] zeros n=2 t_ms=95841 frames=13526 q_vis=3087 q_hw=1310 call_frames=224 call_all_zero=0 calls=33 gap_ms=201 since_gap_ms=87611 since_prepare_ms=95841
+[SND] zeros n=3 t_ms=96831 frames=61745 q_vis=2561 q_hw=1263 call_frames=448 call_all_zero=0 calls=149 gap_ms=201 since_gap_ms=88601 since_prepare_ms=96831
+[SND] zeros n=4 t_ms=157481 frames=4320 q_vis=1403 q_hw=0 call_frames=480 call_all_zero=1 calls=12 gap_ms=348 since_gap_ms=10930 since_prepare_ms=157481
+[SND] zeros n=5 t_ms=160511 frames=6240 q_vis=1816 q_hw=160 call_frames=480 call_all_zero=1 calls=17 gap_ms=153 since_gap_ms=476 since_prepare_ms=160511
+[SND] zeros n=6 t_ms=168361 frames=9600 q_vis=1700 q_hw=288 call_frames=480 call_all_zero=1 calls=26 gap_ms=162 since_gap_ms=367 since_prepare_ms=168361
+[SND] xrun n=1 frames_done=10576800 chunks=22373 t_ms=220408 wr_ago_us=117324 io_ago_us=97144 done100ms=480 done40ms=480
+[SND] zeros n=7 t_ms=240771 frames=1920 q_vis=1437 q_hw=0 call_frames=480 call_all_zero=1 calls=6 gap_ms=103 since_gap_ms=20362 since_prepare_ms=20359
+[SND] xrun n=2 frames_done=14897280 chunks=31423 t_ms=310476 wr_ago_us=125271 io_ago_us=114580 done100ms=0 done40ms=0
+## r2-cand-fp1: wavgaps
+wavgaps: dropouts_first=[(171.95, 40.0, -22.7, -22.8), (173.89, 90.0, -26.0, -24.2), (181.49, 190.0, -26.8, -23.9)]
+wavgaps: dropouts_game_s=[185.0, 186.9, 194.5]
+## r2-cand-fp1: kernel rows
+[SND] xrun n=1 frames_done=229184 chunks=493 t_ms=4808 wr_ago_us=57588 io_ago_us=7726 done100ms=3104 done40ms=224
+[SND] zeros n=1 t_ms=0 frames=956736 q_vis=0 q_hw=0 call_frames=1920 call_all_zero=1 calls=2212 gap_ms=141 since_gap_ms=-962 since_prepare_ms=-4811
+[SND] zeros n=2 t_ms=98820 frames=49327 q_vis=2815 q_hw=1297 call_frames=480 call_all_zero=0 calls=118 gap_ms=111 since_gap_ms=-271 since_prepare_ms=94009
+[SND] xrun n=2 frames_done=8253632 chunks=17403 t_ms=171960 wr_ago_us=48857 io_ago_us=0 done100ms=3168 done40ms=288
+[SND] xrun n=3 frames_done=8254112 chunks=17404 t_ms=171971 wr_ago_us=10055 io_ago_us=1 done100ms=3168 done40ms=480
+[SND] zeros n=3 t_ms=171961 frames=1920 q_vis=0 q_hw=0 call_frames=480 call_all_zero=1 calls=5 gap_ms=278 since_gap_ms=8332 since_prepare_ms=-11
+[SND] xrun n=4 frames_done=8346688 chunks=17598 t_ms=173900 wr_ago_us=59979 io_ago_us=0 done100ms=3296 done40ms=416
+[SND] xrun n=5 frames_done=8347168 chunks=17599 t_ms=173912 wr_ago_us=10012 io_ago_us=0 done100ms=3296 done40ms=480
+[SND] zeros n=4 t_ms=173902 frames=4320 q_vis=0 q_hw=0 call_frames=480 call_all_zero=1 calls=10 gap_ms=278 since_gap_ms=10272 since_prepare_ms=-11
+[SND] xrun n=6 frames_done=8711456 chunks=18360 t_ms=181498 wr_ago_us=57146 io_ago_us=7186 done100ms=3808 done40ms=448
+[SND] xrun n=7 frames_done=8711936 chunks=18361 t_ms=181510 wr_ago_us=10012 io_ago_us=0 done100ms=3328 done40ms=480
+[SND] zeros n=5 t_ms=181500 frames=9120 q_vis=0 q_hw=0 call_frames=480 call_all_zero=1 calls=20 gap_ms=278 since_gap_ms=17871 since_prepare_ms=-11
+## r2-cand-fp2: wavgaps
+wavgaps: dropouts_first=[(93.43, 50.0, -22.1, -20.5), (95.25, 80.0, -21.9, -23.2), (102.77, 140.0, -23.1, -23.5)]
+wavgaps: dropouts_game_s=[102.4, 104.2, 111.7]
+## r2-cand-fp2: kernel rows
+[SND] xrun n=1 frames_done=115584 chunks=248 t_ms=2423 wr_ago_us=42046 io_ago_us=0 done100ms=4224 done40ms=1344
+[SND] xrun n=2 frames_done=122976 chunks=267 t_ms=2590 wr_ago_us=18202 io_ago_us=2 done100ms=3552 done40ms=1632
+[SND] zeros n=1 t_ms=0 frames=734784 q_vis=0 q_hw=0 call_frames=1920 call_all_zero=1 calls=1680 gap_ms=176 since_gap_ms=-11510 since_prepare_ms=-2592
+[SND] xrun n=3 frames_done=4484544 chunks=9384 t_ms=93451 wr_ago_us=59968 io_ago_us=1 done100ms=3168 done40ms=288
+[SND] xrun n=4 frames_done=4485024 chunks=9385 t_ms=93462 wr_ago_us=10020 io_ago_us=1 done100ms=3648 done40ms=480
+[SND] zeros n=2 t_ms=93452 frames=2400 q_vis=0 q_hw=0 call_frames=480 call_all_zero=1 calls=6 gap_ms=176 since_gap_ms=81942 since_prepare_ms=-11
+[SND] xrun n=5 frames_done=4571936 chunks=9571 t_ms=95271 wr_ago_us=59999 io_ago_us=0 done100ms=3392 done40ms=32
+[SND] xrun n=6 frames_done=4572416 chunks=9572 t_ms=95282 wr_ago_us=10009 io_ago_us=0 done100ms=3392 done40ms=480
+[SND] zeros n=3 t_ms=95272 frames=3840 q_vis=0 q_hw=0 call_frames=480 call_all_zero=1 calls=9 gap_ms=176 since_gap_ms=83762 since_prepare_ms=-11
+[SND] xrun n=7 frames_done=4933152 chunks=10332 t_ms=102801 wr_ago_us=59938 io_ago_us=1 done100ms=3136 done40ms=256
+[SND] xrun n=8 frames_done=4933632 chunks=10333 t_ms=102812 wr_ago_us=10311 io_ago_us=1 done100ms=2656 done40ms=480
+[SND] xrun n=9 frames_done=4934592 chunks=10335 t_ms=102841 wr_ago_us=18550 io_ago_us=1 done100ms=2656 done40ms=1440
+[SND] xrun n=10 frames_done=4935072 chunks=10336 t_ms=102852 wr_ago_us=10053 io_ago_us=1 done100ms=2656 done40ms=1440
+[SND] xrun n=11 frames_done=4936032 chunks=10338 t_ms=102881 wr_ago_us=18700 io_ago_us=1 done100ms=2880 done40ms=1440
+[SND] xrun n=12 frames_done=4936512 chunks=10339 t_ms=102892 wr_ago_us=10007 io_ago_us=0 done100ms=3360 done40ms=1440
+[SND] zeros n=4 t_ms=102802 frames=6720 q_vis=0 q_hw=0 call_frames=480 call_all_zero=1 calls=15 gap_ms=176 since_gap_ms=91292 since_prepare_ms=-91
+## r2-cand-fp1: [WALSA] lead-in rows (every 6th) and the stat windows with missed ticks
+[WALSA] leadin n=1 held=0 in_alsa=0 avail=1600 queued=810 woke=0 lat_us=-1 since_event_us=9982 rel_tick=0 since_rel_us=49700
+[WALSA] leadin n=7 held=0 in_alsa=0 avail=1280 queued=656 woke=0 lat_us=-1 since_event_us=9943 rel_tick=0 since_rel_us=89941
+[WALSA] leadin n=13 held=0 in_alsa=0 avail=1280 queued=642 woke=0 lat_us=-1 since_event_us=10297 rel_tick=0 since_rel_us=150266
+[WALSA] leadin n=19 held=0 in_alsa=0 avail=1280 queued=640 woke=0 lat_us=-1 since_event_us=11807 rel_tick=0 since_rel_us=211862
+[WALSA] leadin n=25 held=0 in_alsa=0 avail=1920 queued=0 woke=0 lat_us=-1 since_event_us=10037 rel_tick=0 since_rel_us=100711
+[WALSA] leadin n=31 held=0 in_alsa=0 avail=1440 queued=582 woke=0 lat_us=-1 since_event_us=7846 rel_tick=0 since_rel_us=117921
+[WALSA] leadin n=37 held=0 in_alsa=0 avail=1920 queued=0 woke=0 lat_us=-1 since_event_us=10000 rel_tick=0 since_rel_us=76714
+[WALSA] leadin n=43 held=0 in_alsa=0 avail=1440 queued=525 woke=0 lat_us=-1 since_event_us=10060 rel_tick=0 since_rel_us=137128
+[WALSA] leadin n=49 held=0 in_alsa=0 avail=1440 queued=544 woke=0 lat_us=-1 since_event_us=10000 rel_tick=0 since_rel_us=196762
+[WALSA] leadin n=55 held=0 in_alsa=0 avail=1440 queued=550 woke=0 lat_us=-1 since_event_us=9869 rel_tick=0 since_rel_us=256706
+[WALSA] stat ticks=1001 events=1000 woke=948 nowake=52 lat_max_us=10746 late5=26 late10=2 late20=0 empty_ticks=550 leadins=23 leadin_nowake=23 leadin_woke=0 gated=8 silent_frames=470432 evcb=1
+[WALSA] stat ticks=1000 events=1000 woke=970 nowake=30 lat_max_us=8895 late5=7 late10=0 late20=0 empty_ticks=540 leadins=13 leadin_nowake=13 leadin_woke=0 gated=5 silent_frames=0 evcb=1
+[WALSA] stat ticks=1001 events=1001 woke=965 nowake=36 lat_max_us=4200 late5=0 late10=0 late20=0 empty_ticks=541 leadins=19 leadin_nowake=19 leadin_woke=0 gated=3 silent_frames=0 evcb=1
+## r2-cand-fp2: lead-in rows (every 6th)
+[WALSA] leadin n=1 held=0 in_alsa=0 avail=1664 queued=755 woke=0 lat_us=-1 since_event_us=9977 rel_tick=0 since_rel_us=56220
+[WALSA] leadin n=7 held=0 in_alsa=0 avail=1728 queued=764 woke=0 lat_us=-1 since_event_us=9727 rel_tick=0 since_rel_us=31778
+[WALSA] leadin n=13 held=0 in_alsa=0 avail=1440 queued=702 woke=0 lat_us=-1 since_event_us=5058 rel_tick=0 since_rel_us=104851
+[WALSA] leadin n=19 held=0 in_alsa=0 avail=1440 queued=550 woke=0 lat_us=-1 since_event_us=8529 rel_tick=0 since_rel_us=116958
+[WALSA] leadin n=25 held=0 in_alsa=0 avail=1440 queued=531 woke=0 lat_us=-1 since_event_us=10007 rel_tick=0 since_rel_us=129030
+[WALSA] leadin n=31 held=0 in_alsa=0 avail=1440 queued=480 woke=0 lat_us=-1 since_event_us=8615 rel_tick=0 since_rel_us=120590
+[WALSA] leadin n=37 held=0 in_alsa=0 avail=1440 queued=480 woke=0 lat_us=-1 since_event_us=8793 rel_tick=0 since_rel_us=200344

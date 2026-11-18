@@ -5,6 +5,7 @@ for d in ("b", "c"):
     os.makedirs(f"{base}/{d}/dlls/winealsa.drv", exist_ok=True)
 s = open(a).read()
 GATE = int(sys.argv[1]) if len(sys.argv) > 1 else 2
+V2 = len(sys.argv) > 2 and sys.argv[2] == "delay"
 
 def rep(s, old, new):
     assert s.count(old) == 1, old[:80]
@@ -89,6 +90,56 @@ f = rep(f, """    /* Add a lead-in when starting with too few frames to ensure
     if(stream->data_in_alsa_frames == 0 && stream->held_frames < stream->alsa_period_frames &&
             stream->queued_frames < (INT64)(%d * stream->alsa_period_frames))
     {""" % GATE)
+if V2:
+    # v2: no Wine-side clock; the queued figure is snd_pcm_delay(), which
+    # HobbyOS's kernel reports as appl minus its play clock (what QEMU holds
+    # counts as delay, like Linux's runtime->delay)
+    f = rep(f, """    /* frames still queued for playback by a play clock: everything written,
+     * minus elapsed time x rate, never below what ALSA says it holds
+     * (buffer - avail).  On a device whose hw_ptr runs ahead of what has
+     * really played (QEMU's virtio-sound hands a period back as soon as its
+     * mixer has copied it), avail alone says "empty" while 20-36 ms are
+     * still playing. */""", """    /* frames still to be played (snd_pcm_delay() at this period, never below
+     * buffer - avail).  On a device whose hw_ptr runs ahead of what has
+     * really played (QEMU's virtio-sound hands a period back as soon as its
+     * mixer has copied it), avail alone says "empty" while 20-36 ms are
+     * still playing; the delay counts them. */""")
+    f = rep(f, """    if (written > 0){
+        stream->vol_adjusted_frames -= written;
+        stream->queued_frames += written;
+    }
+    return written;""", """    if (written > 0)
+        stream->vol_adjusted_frames -= written;
+    return written;""")
+    f = rep(f, """    ULONGLONG now = alsa_now_ns();
+    INT64 in_alsa;
+
+    if(stream->queued_ns)
+        stream->queued_frames -= (INT64)((now - stream->queued_ns) *
+                stream->fmt->nSamplesPerSec / 1000000000);
+    stream->queued_ns = now;
+    in_alsa = avail >= 0 && avail < stream->alsa_bufsize_frames ?
+        stream->alsa_bufsize_frames - avail : 0;
+    if(stream->queued_frames < in_alsa)
+        stream->queued_frames = in_alsa;""", """    snd_pcm_sframes_t delay;
+    INT64 in_alsa;
+
+    stream->queued_ns = alsa_now_ns();
+    if(snd_pcm_delay(stream->pcm_handle, &delay) < 0 || delay < 0)
+        delay = 0;
+    stream->queued_frames = delay;
+    in_alsa = avail >= 0 && avail < stream->alsa_bufsize_frames ?
+        stream->alsa_bufsize_frames - avail : 0;
+    if(stream->queued_frames < in_alsa)
+        stream->queued_frames = in_alsa;""")
+    f = rep(f, """    stream->data_in_alsa_frames = 0;
+    if(stream->queued_frames > (INT64)leave)
+        stream->queued_frames = leave;
+
+    return len;""", """    stream->data_in_alsa_frames = 0;
+
+    return len;""")
+    f = rep(f, "/* Age the play clock to now; avail is this period's snd_pcm_avail_update(). */", "/* What is still to be played; avail is this period's snd_pcm_avail_update(). */")
 open(f"{base}/b/dlls/winealsa.drv/alsa.c", "w").write(f)
 
 # ---------- 0002: H5 diagnostics (rate-limited stderr rows) ----------
