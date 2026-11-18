@@ -10,13 +10,20 @@
 phase menu
 shot menu
 expect menu-continue 10 CONTINUE
-# h2-rl2: the reading after the 2nd Up caught the highlight mid-move (one
-# 104 px frame over CONTINUE + NEW GAME, labelled NEW GAME), so seek tapped
-# again and overshot onto the frameless button above CONTINUE.  A longer gap
-# after each tap lets the highlight settle before boot_p9 reads it.
-keytiming 200 1600
-seek menu-continue main up 6 CONTINUE
-keytiming 200 800
+# No `seek` here: in h2-rl2 the reading after the 2nd Up was one 104 px
+# frame over CONTINUE + NEW GAME (the CONTINUE highlight drawn taller, or
+# caught moving), labelled NEW GAME by its centre, so seek tapped once more and
+# overshot onto the frameless button above CONTINUE.  Every fresh main menu so
+# far (h2-rl1, h2-rl2, round 1's reloads) answered the 1st Up with NEW GAME and
+# the 2nd with CONTINUE, so: two Ups with a settle gap, a shot for the record,
+# and the `expect loaded` below is the check (Enter on anything but CONTINUE
+# does not reach the loading screen's PRESS ... TO CONTINUE).
+key up
+wait 1.6
+shot menu-continue-a
+key up
+wait 1.6
+shot menu-continue-b
 phase loading
 key ret
 expect loaded 400 PRESS\b.{0,24}\bTO\s+CONTINUE
