@@ -1,0 +1,12 @@
+run     kernel         world median (p10) rows  menu       verdict                9070XT busy med/p90 other guests (cwd -m)
+k7b-1   integ11 13dc693b 27.9 (19.6) 59           173.0      script-stop            n/a              
+k7l-1   lane           -                        -          game-exited-before-menu n/a              
+k7l-2   lane           25.5 (22.0) 60           79.6       script-stop            n/a              
+k7b-2   integ11 13dc693b 28.8 (15.3) 67           190.5      script-stop            27/33            cp/integ12288M 
+k7l-3   lane           19.2 (16.5) 61           218.4      script-stop            71/78            cp/armchk12288M 
+k7b-3   integ11 13dc693b 34.0 (16.3) 62           164.5      script-stop            33/39            cp/lanes/p7c12288M 
+k7l-4   lane           29.5 (20.8) 60           179.8      script-stop            31/36            cp/lanes/ntsync-g12288M cp/lanes/regress8192M 
+k7b-4   integ11 13dc693b 24.6 (10.9) 65           125.8      script-stop            30/34            cp/lanes/regress-ref8192M 
+k7l-5   lane           25.7 (18.0) 63           77.9       script-stop            32/36            cp/lanes/regress12288M 
+k7l-6   lane           24.0 (14.7) 68           181.7      script-stop            27/33            cp/lanes/ntsync-g12288M 
+k7b-5   integ11 13dc693b 25.6 (18.5) 61           191.8      script-stop            33/79            cp/lanes/audio-g12288M cp/lanes/ntsync-g12288M 
