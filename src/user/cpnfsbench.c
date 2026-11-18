@@ -42,6 +42,8 @@
  *               sha256sum; fstat and lseek(SEEK_END) must give the 64-bit
  *               size, and a 4 KiB page past 4 GiB re-read after an lseek must
  *               match the bytes the pass saw there.
+ *   rxpress     H7-fault (test kernels): six 8 MiB readers while every 32nd
+ *               RX frame's reader is stalled 2 ms after re-queuing it
  *   inject.*    cp/nfs2 (test kernels): with every 5th NFS reply dropped,
  *               and with every reply dropped for 8 s, fresh 4 MiB files are
  *               read page by page (and one mapped) and every page compared
@@ -813,6 +815,76 @@ static int phase_inject(void) {
   return fails;
 }
 
+/* ---- H7-fault round 2: RX readers stalled mid-frame --------------------- */
+/* docs/cp-fault.md §3 (H7-05).  virtio_net.c hands an RX descriptor back to
+ * the device before it reads the frame in it.  A reader that stalls there
+ * (the host deschedules its vCPU) while the device fills every other posted
+ * buffer has its frame overwritten.  The test kernel stalls every 32nd RX
+ * reader for 2 ms on request (".cp-nfs-inject.rxstall.2000") while six
+ * processes read six fresh 8 MiB files with 1 MiB read()s (many 32 KiB
+ * replies in flight).  Every byte is compared with the host's stream: a torn
+ * frame is either a reply that never completes (a pipeline stall: the
+ * [NFSNET] dumps before and after give stalls=, [NFSRTH] rxq_reuse=) or,
+ * worse, wrong bytes (bad=). */
+#define RXP_READERS 6
+#define RXP_BYTES (8u * 1024u * 1024u)
+#define RXP_CHUNK (1024u * 1024u)
+static int rxp_reader(int k) {
+  char path[24] = "/NFS/px0.bin";
+  path[7] = (char)('0' + k);
+  uint8_t *ref = (uint8_t *)malloc(RXP_BYTES), *buf = (uint8_t *)malloc(RXP_CHUNK);
+  if (!ref || !buf) { phase_row("rxpress", ".child malloc", (unsigned long)k, 0, 1, -1, 0); return 1; }
+  stream_fill(ref, RXP_BYTES, multi_seed(20 + k));
+  int fd = open(path, O_RDONLY);
+  if (fd < 0) { phase_row("rxpress", ".child open", (unsigned long)k, 0, 1, -1, 0); return 1; }
+  uint32_t bad = 0, shorts = 0;
+  long first = -1;
+  for (uint32_t off = 0; off < RXP_BYTES; off += RXP_CHUNK) {
+    int r = read(fd, buf, RXP_CHUNK);
+    if (r != (int)RXP_CHUNK) { shorts++; if (first < 0) first = (long)off; continue; }
+    for (uint32_t j = 0; j < RXP_CHUNK; j++)
+      if (buf[j] != ref[off + j]) { bad++; if (first < 0) first = (long)(off + j); break; }
+  }
+  close(fd);
+  phase_row("rxpress", ".child", (unsigned long)k, RXP_BYTES / RXP_CHUNK, bad + shorts, first,
+            bad + shorts == 0);
+  return (bad || shorts) ? 1 : 0;
+}
+static int phase_rxpress(void) {
+  pc("[NB] rxpress mark0\n");
+  inj_ctl("dump");
+  inj_ctl("rxstall.2000");
+  uint64_t t0 = now_us();
+  int pid[RXP_READERS], bad = 0, err = 0;
+  for (int k = 0; k < RXP_READERS; k++) {
+    pid[k] = fork();
+    if (pid[k] == 0) exit(rxp_reader(k));
+    if (pid[k] < 0) err++;
+  }
+  for (int k = 0; k < RXP_READERS; k++) {
+    int st = 0;
+    if (pid[k] < 0) continue;
+    if (waitpid(pid[k], &st, 0) != pid[k]) err++;
+    else if (st != 0) bad++;
+  }
+  uint64_t us = now_us() - t0;
+  inj_ctl("off");
+  pc("[NB] rxpress mark1\n");
+  inj_ctl("dump");
+  char line[160];
+  int n = 0;
+  kv(line, &n, "[NB] rxpress readers=", RXP_READERS);
+  kv(line, &n, " kib=", (unsigned long)(RXP_READERS * (RXP_BYTES >> 10)));
+  kv(line, &n, " bad_files=", (unsigned long)bad);
+  kv(line, &n, " err=", (unsigned long)err);
+  kv(line, &n, " ms=", (unsigned long)(us / 1000));
+  const char *p = (bad || err) ? " FAIL\n" : " ok\n";
+  while (*p) line[n++] = *p++;
+  line[n] = 0;
+  pc(line);
+  return (bad || err) ? 1 : 0;
+}
+
 /* ---- cp/nfs2b: LOOKUP storm, sockets per RPC ----------------------------- */
 /* Four processes stat() paths on the export 1500 times each (several LOOKUPs
  * per stat, symlinked directories included).  The test kernel prints its
@@ -949,6 +1021,7 @@ int main(void) {
   fails += phase_one();
   fails += phase_big();
   fails += phase_inject();
+  fails += phase_rxpress();
   fails += phase_lookstorm();
   char d[40];
   int m = 0;

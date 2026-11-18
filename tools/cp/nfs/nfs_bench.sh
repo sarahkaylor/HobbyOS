@@ -56,6 +56,12 @@ for k in 0 1 2 3 4; do
   seed=$(python3 -I -c "print(hex(0x9e3779b97f4a7c15 ^ ((10 + $k + 1) * 0xbf58476d1ce4e5b9 % 2**64)))")
   "$OUT/fnv64" "$OUT/inj$k.bin" $((4 * 1024 * 1024)) "$seed" > /dev/null || die "data inj$k"
 done
+# H7-fault round 2: six fresh 8 MiB files for the RX-stall phase (rxpress;
+# seed multi_seed(20 + k))
+for k in 0 1 2 3 4 5; do
+  seed=$(python3 -I -c "print(hex(0x9e3779b97f4a7c15 ^ ((20 + $k + 1) * 0xbf58476d1ce4e5b9 % 2**64)))")
+  "$OUT/fnv64" "$OUT/px$k.bin" $((8 * 1024 * 1024)) "$seed" > /dev/null || die "data px$k"
+done
 BIG=""
 if [ "${NB_BIG:-0}" = 1 ]; then
   BIG_BYTES=$((5 * 1024 * 1024 * 1024 + 12345))
@@ -84,7 +90,7 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT TERM HUP
-sudo -n mkdir -p "$EXPORT" && sudo -n cp "$OUT/big64m.bin" "$OUT"/m?.bin "$OUT"/inj?.bin "$OUT/big176m.bin" "$EXPORT/" || die "export dir"
+sudo -n mkdir -p "$EXPORT" && sudo -n cp "$OUT/big64m.bin" "$OUT"/m?.bin "$OUT"/inj?.bin "$OUT"/px?.bin "$OUT/big176m.bin" "$EXPORT/" || die "export dir"
 if [ -n "$BIG" ]; then sudo -n mv "$BIG" "$EXPORT/" || die "big5g into the export"; fi
 # cp/nfs2: symlinked directories (dlink -> sub, d2 -> dlink, sub/up -> ..)
 sudo -n mkdir "$EXPORT/sub" && sudo -n cp "$OUT/m1.bin" "$EXPORT/sub/data.bin" &&

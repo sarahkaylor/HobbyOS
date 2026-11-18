@@ -10,6 +10,7 @@
 volatile uint32_t virtio_net_rx_backlog_max, virtio_net_rx_ring_full;
 volatile uint32_t virtio_net_tx_waits, virtio_net_tx_drops, virtio_net_tx_wait_max_us;
 volatile uint32_t virtio_net_rx_reuse_risk;
+volatile uint32_t virtio_net_inj_rxstall_us;
 
 #ifdef __x86_64__
 #define NUM_RX_BUFFERS 512
@@ -465,6 +466,18 @@ static void virtio_net_rx_note_reuse(uint16_t used_at_requeue) {
   uint16_t adv = (uint16_t)(*rx_used_idx - used_at_requeue);
   if (adv + 1u >= posted) virtio_net_rx_reuse_risk++;
 }
+#ifdef KERNEL_MODE_TEST
+static void virtio_net_inj_stall(void) {
+  static volatile uint32_t n;
+  uint32_t us = virtio_net_inj_rxstall_us;
+  if (!us || (__sync_add_and_fetch(&n, 1) & 31u)) return;
+  extern uint64_t timer_get_us(void);
+  uint64_t t0 = timer_get_us();
+  while (timer_get_us() - t0 < us) __asm__ volatile("pause");
+}
+#else
+static inline void virtio_net_inj_stall(void) {}
+#endif
 static void virtio_net_rx_note_backlog(void) {
   uint32_t pend = (uint16_t)(*rx_used_idx - rx_ack_used_idx);
   if (pend > virtio_net_rx_backlog_max) virtio_net_rx_backlog_max = pend;
@@ -548,6 +561,7 @@ void virtio_net_handle_irq(void) {
 
       uint16_t used_at = *rx_used_idx;
       spinlock_release_irqrestore(&net_lock, flags);
+      virtio_net_inj_stall();
       net_rx_packet(rx_buffers[buffer_idx], packet_len);
       virtio_net_rx_note_reuse(used_at);
       flags = spinlock_acquire_irqsave(&net_lock);
@@ -625,6 +639,7 @@ void virtio_net_poll_rx(void) {
       uint32_t packet_len = len - sizeof(struct virtio_net_hdr);
       uint16_t used_at = *rx_used_idx;
       spinlock_release_irqrestore(&net_lock, flags);
+      virtio_net_inj_stall();
       net_rx_packet(rx_buffers[buffer_idx], packet_len);
       virtio_net_rx_note_reuse(used_at);
       flags = spinlock_acquire_irqsave(&net_lock);

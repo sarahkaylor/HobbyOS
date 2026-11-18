@@ -597,6 +597,8 @@ volatile uint32_t nfs_read_retries;
  * answers ENOENT):
  *   .cp-nfs-inject.every.<N>      drop every Nth NFS reply
  *   .cp-nfs-inject.blackout.<ms>  drop every NFS reply for <ms> from now
+ *   .cp-nfs-inject.rxstall.<us>   H7-fault: every 32nd RX frame's reader spins
+ *                                 <us> between re-queuing and reading it
  *   .cp-nfs-inject.off
  * Mount-time calls (portmap, MOUNT) are never dropped. */
 extern uint64_t timer_get_ms(void);
@@ -635,8 +637,15 @@ static int nfs_inj_trigger(const char *rel) {
     nfs_perf_dump("inject");           /* cp/nfs2b: counters on request */
     return 1;
   } else if (q[0] == 'o' && q[1] == 'f' && q[2] == 'f') {
+    extern volatile uint32_t virtio_net_inj_rxstall_us;
     nfs_inj_every = 0;
     nfs_inj_until_ms = 0;
+    virtio_net_inj_rxstall_us = 0;
+  } else if (q[0] == 'r' && q[1] == 'x' && q[2] == 's' && q[3] == 't' && q[4] == 'a' &&
+             q[5] == 'l' && q[6] == 'l' && q[7] == '.') {
+    /* H7-fault round 2: an RX reader stalled after re-queuing (virtio_net.c) */
+    extern volatile uint32_t virtio_net_inj_rxstall_us;
+    virtio_net_inj_rxstall_us = (uint32_t)nfs_inj_num(q + 8);
   } else if (q[0] == 'e' && q[1] == 'v' && q[2] == 'e' && q[3] == 'r' && q[4] == 'y' && q[5] == '.') {
     nfs_inj_seen = 0;
     nfs_inj_every = (uint32_t)nfs_inj_num(q + 6);
