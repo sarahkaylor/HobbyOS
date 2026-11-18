@@ -197,7 +197,7 @@ then an A/B of boot→launcher time on a busy host:
 -           "-drive", f"file={cpdata},format=raw,id=cpdata,if=none",
 +           "-drive", f"file={cpdata},format=raw,id=cpdata,if=none,cache=unsafe",
 ```
-(and the same three in `host-venus.sh` lines 112/118 and its cpdata line).
+(and the same in `host-venus.sh` lines 112 and 118, and the Venus cpdata drive in `boot_p8.py:111`'s `extra`).
 `cache=unsafe` still writes everything back when QEMU exits normally, so a
 P9 play boot's data disk keeps its save for the reload; only a host crash
 mid-boot loses it, and these copies are throwaway.
