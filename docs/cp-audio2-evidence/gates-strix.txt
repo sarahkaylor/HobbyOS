@@ -82,3 +82,21 @@ gate_p5 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullsc
 gate_p8_venus rc=0    +   207.5 s  10:09:22  main menu OCR at s011-t000145: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   213.0 s  10:09:27  main menu OCR at s012-t000151: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   215.2 s  10:09:30  verdict: main-menu; QEMU stopped, sl 10:09:30
 ALLDONE 10:09:30
 # host_tests: no [host-tests] done row: t4_compat_selftest fails on the tree, not the code -- src/host/t4_parity.sh runs git status, and this strix tree s .git is a stale worktree link (wave-8 brief: ignore it): "self-test: FAIL — the flip modified src/host/compat.c in the tree"
+# H5-audio2 final-code rows (044b517e) in ~/cp/lanes/audio2-f (fresh obj/, no .git so t4_compat_selftest sees an untouched tree), strix, ~/cp/lanes/audio2-final.sh
+# the delta 044b517e vs a213a9c1 (full batch above) is linux_snd.c only (runtime paths with the device present; P2/P5/P8 boots have no sound device: /dev/snd is ENOENT there) plus host-side tools
+tree audio2-f (044b517e) start 10:15:19
+build rc=0 10:16:53
+snd rc=0 [LP] done rc=0
+sysc rc=0 [LP] done rc=0
+console rc=0 [LP] done rc=0
+snd_probe_device rc=0 run-probe-snd: probe rc=0 run-probe-snd: wavcheck rc=0 run-probe-snd: PASS  
+unit rc=0 Tests run:    463 Tests failed: 0  
+host [host-tests] done: 40/42 passed kconsole=kconsole_test: PASS (0 failures) errors=1
+linux_snd_params_test rc=0 linux_snd_params_test: 24 checks, 0 failed
+pace_host_test rc=0 pace-host-test: calm PASS -- 0 xruns after the first second (1 in all), 0 stalls pace-host-test: stall PASS -- 0 xruns after the first second (1 in all), 5 stalls pace-host-test: lowpad PASS -- 5 xruns after the first second (8 in all), 0 stalls pace-host-test: PASS 
+xrun_host_test rc=0 xrun-host-test: PASS -- the xrun was reported while the PCM was open
+host_alsa_test rc=0 host-alsa-test: PASS
+castscan rc=0 castscan: 373 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+FINALDONE 10:25:16
+# host_tests reds: [host_tests] FAILED: python3 tools/t5/run_t5_tests.py (exit 2) -- continuing -- the known t5 gaming.md pair (integ16: 39/41)

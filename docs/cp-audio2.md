@@ -33,7 +33,7 @@ time within `[hw − buffer, hw + period]`.  A device at real time or slower is
 unchanged (`vis == hw`: a late writer still underruns); a device that runs
 ahead cannot drain the writer faster than the music plays.  avail, hw_ptr,
 DELAY, poll and drain stay on hw.  Kernel xruns: idle repro 363 → 1 per
-150 s, game boot 534 → 7–15 per 5.5 min (§4).
+150 s, game boot 534 → 2–15 per 5.5 min (final kernel: 2, 2) (§4).
 
 **B. The audible zeros are winealsa's lead-in (not fixed; Wine side).**  The
 kernel xruns were not what put the zeros in the WAV: with A fixed the game's
@@ -46,8 +46,8 @@ game's padding fell below 10 ms at a winealsa tick.  Two kinds:
 
 - *starvation* (q≈0, 2–29 consecutive lead-ins, 50–220 ms): the game did not
   render for several ticks; densest in the save's loading, as H1 saw;
-- *into a non-empty buffer* (`q_vis`/`q_hw` 450–1412 frames still queued,
-  one lead-in): winealsa's played-frames estimate `min(data_in_alsa, avail)`
+- *into a non-empty buffer* (450–1741 frames still queued by the play clock
+  when the run began): winealsa's played-frames estimate `min(data_in_alsa, avail)`
   counts the whole free space as played, which is only right when the last
   tick filled the buffer.  A candidate patch is in
   `docs/cp-audio2-evidence/winealsa-accounting.txt` — mixed results in the
@@ -189,41 +189,61 @@ another lane's P9 boots the whole time).
 | a2-lane-fp4 | 62f90f9a | — | — | — | — | game exited 2.5 s after launch (REDEngineErrorReporter, H2 class; the PCM never opened) |
 | a2-lane-fp5 | 3633a1df (+ zeros rows) | 12 (534) | 0 | 15 | 1009 | 92 / 24.6 s |
 | a2-lane-fp6 | 644dcde2 | 11 (550) | 0 | 7 | 495 | 57 / 10.0 s |
-| a2-lane-fp7 | final 044b517e | FP7 |
-| a2-lane-fp8 | final 044b517e | FP8 |
+| a2-lane-fp7 | final 044b517e | 6 (470) | 0 | **2** | 922 | 92 / 18.4 s |
+| a2-lane-fp8 | final 044b517e | 5 (430) | 0 | **2** | 73 | 26 / 2.5 s; no 50 ms service gap in the stream at all |
 
-Kernel xruns: 534 → 7–15 in every lane boot (k = 0/7 lane boots with more
-than 15, vs 1/1 base).  WAV dropouts: H1 2/2, base 1/1, lane 7/7 — unchanged
-in count (5–15 per boot), because they are winealsa's lead-in (§1 B), which
-a kernel xrun is only one trigger of.  The first xrun rows of the base boot
+Kernel xruns: 534 → 2–15 in every lane boot (final kernel: 2 and 2).
+alsa-lib's printed underruns: H1 7 and 49, base 3, lane 0–1.  WAV dropouts:
+H1 2/2, base 1/1, lane 7/7 boots with audio — unchanged in count (5–15 per
+boot; final kernel 6 and 5), because they are winealsa's lead-in (§1 B), not
+kernel xruns; fp8 had almost no host stalls (2.5 s, no 50 ms gap in the
+stream) and still 5.  The first xrun rows of the base boot
 are the grab-ahead pattern (writer on time, `wr_ago_us≈3800`, device at real
-time over 40 ms, one xrun per tick); every lane xruns row left is a writer
-more than 70 ms late.
+time over 40 ms, one xrun per tick); in the step-1 boots (fp1, fp2) every
+xrun row left is a writer more than 70 ms late.
+
+Every WAV dropout is one `[SND] zeros` run (fp6: 11 dropouts, 11 game-stream
+zero rows), and every zero run is winealsa writing only zeros.  With hw
+reported (fp7) the runs begin with `q_hw≈0` but `q_vis` 1298–1741: QEMU had
+taken everything, while by the play clock 27–36 ms were still playing — and
+winealsa, told the buffer was empty and holding under a period of the game's
+audio, wrote silence.  With vis reported (fp5, fp6) they begin with 450–1412
+frames queued by both measures: winealsa's estimate over-counts either way
+(H5-04).
 
 ## 5. Findings (wave-8 format)
 
 | ID | symptom | rate | first evidence | signature | layer | severity | status |
 |---|---|---|---|---|---|---|---|
-| **H1-01** | exact-zero 10–290 ms runs in loud game audio; alsa-lib underruns | H1 2/2 (h-fp2, h-soak1); base 1/1 (a2-base-fp1); lane 7/7 | `cp-audio2-evidence/game-audio-ab.txt` | `[SND] zeros n=4 t_ms=20791 frames=480 q_vis=1056 q_hw=1056 call_frames=384 call_all_zero=1` (a2-lane-fp5) | two layers: the kernel's xrun cascades (A) and winealsa's lead-in (B, H5-04/H5-05) | wrong output (audible) | A fixed in 44b83122 + a213a9c1 + 044b517e (kernel xruns 534 → 7–15 per boot); B open |
+| **H1-01** | exact-zero 10–290 ms runs in loud game audio; alsa-lib underruns | H1 2/2 (h-fp2, h-soak1); base 1/1 (a2-base-fp1); lane 7/7 | `cp-audio2-evidence/game-audio-ab.txt` | `[SND] zeros n=4 t_ms=20791 frames=480 q_vis=1056 q_hw=1056 call_frames=384 call_all_zero=1` (a2-lane-fp5) | two layers: the kernel's xrun cascades (A) and winealsa's lead-in (B, H5-04/H5-05) | wrong output (audible) | A fixed in 44b83122 + a213a9c1 + 044b517e (kernel xruns 534 → 2–15 per boot, final 2 and 2); B open |
 | **H5-01** | the kernel counted QEMU's copy-ahead as played; after every host stall QEMU's rate control pays the stalled time back at 2.2× real time: one xrun per 10 ms writer tick | every base boot with a host stall: repro 4/4 rows, game 1/1 | `repro-ab-strix.txt` (idle1, base1-*), `game-audio-ab.txt` | `[SND] xrun n=7 … wr_ago_us=4273 … done40ms=2880` (writer on time); `[SND] stat … max100ms=10560`; `Resetting rate control (65752 frames)` | kernel (`linux_snd.c` xrun rule) × QEMU 10.2 audio | wrong output | fixed in 44b83122, a213a9c1, 044b517e |
 | **H5-02** | a genuinely late writer still underruns under full guest load: the 10 ms writer tick > 40 ms late 150× in 150 s | lane1-load 1/1 (8 busy threads on 8 vCPUs + 22 s of host stalls) | `repro-ab-strix.txt` | `[AT] total … late40=150 xrun_state=43` | kernel scheduling under guest load (not audio) | wrong output | open (the game's guest is ~60 % idle, C1-k7) |
 | **H5-03** | QEMU's `wav` file is not a timeline: catch-up writes stalled time back-to-back, so WAV length vs wall time only shows debt past 65536 frames | all audio boots | `game-audio-ab.txt` | `wavgaps: wav_over_wall=0.9513` | harness (QEMU wav) | cosmetic (measurement) | open (documented) |
-| **H5-04** | winealsa writes a period of silence into a buffer that still holds 9–29 ms: its played estimate `min(data_in_alsa, avail)` counts all free space as played | 4/4 lane boots with zeros rows (fp5, fp6; 3–6 of 10–12 runs each) | `game-audio-ab.txt` (fp5, fp6 zeros rows) | `[SND] zeros … q_vis=1258 q_hw=1258 call_frames=182 call_all_zero=1 calls=3` | Wine (`winealsa.drv` `alsa_write_data`) | wrong output | open; candidate patch `winealsa-accounting.txt` (not built; mixed in the model) |
+| **H5-04** | winealsa writes a period of silence into a buffer that still holds 9–29 ms: its played estimate `min(data_in_alsa, avail)` counts all free space as played | every lane boot with zeros rows (fp5, fp6, fp7, fp8) | `game-audio-ab.txt` (fp5, fp6 zeros rows) | `[SND] zeros … q_vis=1258 q_hw=1258 call_frames=182 call_all_zero=1 calls=3` | Wine (`winealsa.drv` `alsa_write_data`) | wrong output | open; candidate patch `winealsa-accounting.txt` (not built; mixed in the model) |
 | **H5-05** | the game leaves its WASAPI padding under one period for 2–29 ticks in a row (winealsa then writes only silence: 50–220 ms zero runs), densest in the save's loading | fp5, fp6 (and every lane boot's loading phase) | `game-audio-ab.txt` | `[SND] zeros n=6 t_ms=123631 frames=10560 q_vis=48 q_hw=0 call_frames=380 call_all_zero=1 calls=29` | game audio thread × (its loading work, or its event-wait wake latency in Wine/kernel): not separated | wrong output | open |
 | **H5-06** | the game exits 2.5 s after launch right after REDEngineErrorReporter starts | 1/7 lane P9 boots (a2-lane-fp4) | `game-audio-ab.txt` | `[P8] end game status=0 ms=2473` | game / H2-early | crash (no menu) | not ours (H2-early's row) |
 
 ## 6. Not done / open
 
+- **The audible dropouts (H1-01 B) are not fixed.**  They are winealsa's
+  silence lead-in; the next steps are Wine-side or game-side:
+  - H5-04: winealsa's played-frames estimate.  Candidate patch, not built
+    (needs approval): `docs/cp-audio2-evidence/winealsa-accounting.txt`.  In
+    the model it removes the lead-ins for one client shape and adds real
+    xruns for another, so it is not recommended as is.  A better-founded
+    version would take `snd_pcm_delay()` as the frames still queued.
+  - H5-05: why the game's audio thread lets its padding fall under 10 ms for
+    up to 29 ticks in a row (its event-wait wake latency under Wine's ntsync
+    path, or its own loading work).  Needs a per-thread wake-latency row in
+    the futex/ntsync path (not this lane's files).
 - H5-02: a writer that really is late (full guest CPU load) still underruns;
   that is the scheduler's business, not the driver's.
-- The host stalls themselves (H1-15 class: 26–96 `[CONS] stalls` per boot on a
-  loaded strix, up to 1.1 s each) are host-side and not ours.
-- Smaller TX messages after step 2 (avail moves with time, not in periods).
-  Measured cost not separated from boot-to-boot noise; a period-aligned
-  room (round the WRITEI room down to a period when the writer asks for
-  more) would restore 480-frame messages if it ever matters.
+- The host stalls themselves (H1-15 class: 26–107 `[CONS] stalls` per boot on
+  a shared strix, up to 1.1 s each) are host-side and not ours.
 - One P9 boot kind (fpsprobe 1280×720) only; no 28-minute soak with the
   final kernel.
+- Repro round 2 on the final kernel: lane only (§4.1 note); the base row is
+  round 1.
 
 ## 7. Commands
 
@@ -240,3 +260,23 @@ bash tools/cp/audio2/pace-host-test.sh
 CP_WINE_STAGE=$HOME/cp/wine-cp2/stage/CP/WINE WINE_BUILD=$HOME/cp/wine-cp2 HUNT_AUDIO=1 \
   HUNT_LOGS=$HOME/cp/lanes/audio2-logs HUNT_EXPORT=/srv/nfs/cp-audio2 bash tools/cp/hunt/run-hunt.sh fp720 a2-lane-fp1
 ```
+
+## 8. Gates (strix; `docs/cp-audio2-evidence/gates-strix.txt`)
+
+| gate | integ16 batch | lane |
+|---|---|---|
+| build | ok | ok (a213a9c1, 044b517e) |
+| all probes (64 rows, gate 2) | green | 64/64 rc=0 (a213a9c1); snd, sysc, console rc=0 again on 044b517e |
+| `snd` probe with the device (`run-probe-snd.sh`) | — | PASS on both (43 rows, WAV 1000 Hz tone) |
+| unit | 463 / 0 | 463 / 0 (both) |
+| host_tests | 39/41 | 40/42 (044b517e, the two t5 `gaming.md` reds); a213a9c1's run lost its summary to t4_compat_selftest seeing the strix tree's stale `.git` |
+| linux_snd_params / xrun-host / host-alsa / pace-host | — | pass / pass / pass / pass |
+| castscan | 373, 0 new | 373, 0 new |
+| ARM build | ok | ok (both) |
+| P2 | G1 G2 G3 PASS | G1 G2 G3 PASS (a213a9c1) |
+| P5 (vkcube d3d11 d3d12 fullscr) | PASS | PASS (a213a9c1) |
+| P8 Venus | menu | menu at +215 s (a213a9c1) |
+
+P2/P5/P8 were not rerun on 044b517e: the delta is `linux_snd.c` paths that
+only run with the opt-in sound device, which those boots do not have.
+

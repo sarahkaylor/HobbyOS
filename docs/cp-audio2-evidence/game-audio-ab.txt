@@ -72,3 +72,30 @@ a2-lane-fp6 dropouts=11 dropout_ms=550.0 wav_s=310.54 alsa_underrun_rows=0 kerne
 [SND] zeros n=10 t_ms=198131 frames=1440 q_vis=85 q_hw=85 call_frames=480 call_all_zero=1 calls=5 gap_ms=71 since_gap_ms=20752 since_prepare_ms=103741
 [SND] zeros n=11 t_ms=235461 frames=960 q_vis=580 q_hw=580 call_frames=380 call_all_zero=1 calls=4 gap_ms=71 since_gap_ms=58082 since_prepare_ms=141071
 [SND] zeros n=12 t_ms=242801 frames=480 q_vis=1412 q_hw=1412 call_frames=480 call_all_zero=1 calls=2 gap_ms=71 since_gap_ms=65422 since_prepare_ms=148411
+
+# final 044b517e (clock in the xrun rule only; hw reported; zeros rows):
+a2-lane-fp7 dropouts=6 dropout_ms=470.0 wav_s=376.07 alsa_underrun_rows=0 kernel_xruns=2 held=922 max100ms=10560 xrun_rows[wok/drt:2 ] stalls=92 stolen_ms=18370
+wavgaps: dropouts_game_s=[176.6, 178.8, 181.2, 187.1, 212.8, 266.4]
+# a2-lane-fp7 xrun and zeros rows (q_hw ~ 0: QEMU had taken everything; q_vis 1298-1741: by the play clock 27-36 ms were still playing when winealsa started writing silence)
+[SND] xrun n=1 frames_done=231712 chunks=490 t_ms=4831 wr_ago_us=29950 io_ago_us=1 done100ms=4672 done40ms=1792
+[SND] xrun n=2 frames_done=232192 chunks=491 t_ms=4842 wr_ago_us=10008 io_ago_us=0 done100ms=4672 done40ms=1792
+[SND] zeros n=1 t_ms=0 frames=888544 q_vis=0 q_hw=0 call_frames=1920 call_all_zero=1 calls=2065 gap_ms=117 since_gap_ms=-13261 since_prepare_ms=-4852
+[SND] zeros n=2 t_ms=18521 frames=7200 q_vis=1733 q_hw=128 call_frames=480 call_all_zero=1 calls=20 gap_ms=117 since_gap_ms=5259 since_prepare_ms=13668
+[SND] zeros n=3 t_ms=162821 frames=3840 q_vis=1345 q_hw=0 call_frames=384 call_all_zero=1 calls=11 gap_ms=190 since_gap_ms=859 since_prepare_ms=157968
+[SND] zeros n=4 t_ms=165001 frames=5280 q_vis=1535 q_hw=192 call_frames=480 call_all_zero=1 calls=15 gap_ms=190 since_gap_ms=3040 since_prepare_ms=160148
+[SND] zeros n=5 t_ms=167411 frames=480 q_vis=1722 q_hw=0 call_frames=96 call_all_zero=1 calls=3 gap_ms=190 since_gap_ms=5449 since_prepare_ms=162558
+[SND] zeros n=6 t_ms=173381 frames=10080 q_vis=1298 q_hw=0 call_frames=480 call_all_zero=1 calls=22 gap_ms=101 since_gap_ms=1088 since_prepare_ms=168528
+[SND] zeros n=7 t_ms=199051 frames=480 q_vis=1741 q_hw=96 call_frames=480 call_all_zero=1 calls=2 gap_ms=237 since_gap_ms=8201 since_prepare_ms=194198
+[SND] zeros n=8 t_ms=252632 frames=2400 q_vis=1341 q_hw=0 call_frames=480 call_all_zero=1 calls=6 gap_ms=86 since_gap_ms=16064 since_prepare_ms=247780
+
+a2-lane-fp8 dropouts=5 dropout_ms=430.0 wav_s=289.6 alsa_underrun_rows=0 kernel_xruns=2 held=73 max100ms=9120 xrun_rows[wok/drt:2 ] stalls=26 stolen_ms=2482
+wavgaps: dropouts_game_s=[103.8, 106.4, 114.9, 162.5, 180.1]
+# a2-lane-fp8 rows (few host stalls: 26 / 2.5 s; still 5 dropouts = 5 winealsa zero runs after the start one)
+[SND] xrun n=1 frames_done=118336 chunks=261 t_ms=2468 wr_ago_us=27422 io_ago_us=7434 done100ms=4576 done40ms=1696
+[SND] xrun n=2 frames_done=118816 chunks=262 t_ms=2481 wr_ago_us=10012 io_ago_us=10010 done100ms=4576 done40ms=1696
+[SND] zeros n=1 t_ms=0 frames=804768 q_vis=0 q_hw=0 call_frames=1920 call_all_zero=1 calls=1858 gap_ms=0 since_gap_ms=-1 since_prepare_ms=-2483
+[SND] zeros n=2 t_ms=94330 frames=2880 q_vis=939 q_hw=0 call_frames=480 call_all_zero=1 calls=8 gap_ms=0 since_gap_ms=-1 since_prepare_ms=91847
+[SND] zeros n=3 t_ms=96920 frames=4800 q_vis=1334 q_hw=224 call_frames=480 call_all_zero=1 calls=13 gap_ms=0 since_gap_ms=-1 since_prepare_ms=94437
+[SND] zeros n=4 t_ms=105400 frames=11040 q_vis=1491 q_hw=0 call_frames=480 call_all_zero=1 calls=30 gap_ms=0 since_gap_ms=-1 since_prepare_ms=102917
+[SND] zeros n=5 t_ms=153000 frames=960 q_vis=1790 q_hw=0 call_frames=480 call_all_zero=1 calls=3 gap_ms=0 since_gap_ms=-1 since_prepare_ms=150517
+[SND] zeros n=6 t_ms=170540 frames=960 q_vis=1439 q_hw=224 call_frames=480 call_all_zero=1 calls=3 gap_ms=0 since_gap_ms=-1 since_prepare_ms=168057
