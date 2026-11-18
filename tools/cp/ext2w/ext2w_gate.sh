@@ -129,13 +129,19 @@ if [[ " $WHAT " == *" crash "* ]]; then
     SOCK="$D/qmp-crash$run.sock"; rm -f "$SOCK"
     tag="crash$run"
     say "=== crash run $run: quit after SYNCED n=$K + ${DLY} ms ==="
+    con="$D/$tag.raw.log"; rm -f "$con"
     ( export T3_QEMU_ARGS="-qmp unix:$SOCK,server=on,wait=off"; boot_probe "$tag" "$IMG" "PROBE.ELF /EXT crashw" ) &
     bpid=$!
-    con="$D/$tag.raw.log"; t0=$(date +%s); hit=0
+    # The deadline counts from the first console byte, not from launch: the
+    # build, the stage and a qemu-slot wait (all 4 slots busy) come first and
+    # can take longer than LP_TIMEOUT on a loaded host.
+    t0=$(date +%s); hit=0; seen=0; qfail=0
     while kill -0 "$bpid" 2>/dev/null; do
+      if [ ! -s "$con" ]; then t0=$(date +%s); sleep 0.2; continue; fi
       if grep -aqE "\[LP\] SYNCED n=$K([^0-9]|\$)" "$con" 2>/dev/null; then
+        seen=1
         [ "$DLY" != 0 ] && sleep "$(awk "BEGIN{print $DLY/1000}")"
-        qmp_quit "$SOCK" && hit=1
+        if qmp_quit "$SOCK"; then hit=1; else qfail=1; fi
         break
       fi
       [ $(( $(date +%s) - t0 )) -gt "${LP_TIMEOUT:-900}" ] && break
@@ -143,7 +149,12 @@ if [[ " $WHAT " == *" crash "* ]]; then
     done
     wait "$bpid" 2>/dev/null
     cp "$con" "$D/$tag.console.log" 2>/dev/null
-    if [ "$hit" != 1 ]; then bad "run $run: never saw SYNCED n=$K (or QMP quit failed)"; continue; fi
+    if [ "$hit" != 1 ]; then
+      if [ "$qfail" = 1 ]; then bad "run $run: saw SYNCED n=$K but QMP quit failed"
+      elif [ "$seen" = 0 ] && [ -s "$con" ]; then bad "run $run: never saw SYNCED n=$K within ${LP_TIMEOUT:-900}s of the first console byte"
+      else bad "run $run: the guest never started (no console output)"; fi
+      continue
+    fi
     last=$(grep -ao '\[LP\] SYNCED n=[0-9]*' "$D/$tag.console.log" | tail -1 | tr -dc '0-9')
     wi=$(grep -ao '\[LP\] info crashw i=[0-9]*' "$D/$tag.console.log" | tail -1 | tr -dc '0-9')
     say "[HOST] info run $run: last SYNCED n=$last on the console, crashw reached i>=${wi:-?}"
