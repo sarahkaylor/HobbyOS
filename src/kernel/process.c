@@ -2701,6 +2701,14 @@ void schedule(struct trap_frame *tf, int is_yield) {
            with a budget is worse than no instrument. */
         int implausible = (elr < 0x1000u) ||
                           (elr >= 0x70000000u && elr < USER_VA_BASE);
+        /* H4-kglitch: a compat (Linux-ABI) process maps below USER_VA_BASE
+           too -- the game's PE image runs at 0x140000000 -- so the band
+           alone flagged every busy PE thread and spent the 20-row budget on
+           healthy resumes.  An elr inside one of the slot's own AS regions is
+           a legal resume (linux_probe_badelr). */
+        if (implausible && elr >= 0x1000u && proc_table[idx].as &&
+            vm_region_find(proc_table[idx].as, elr))
+          implausible = 0;
         if (!proc_table[idx].is_kernel_process && implausible) {
           if (sched_badelr_seen < 20) {
             sched_badelr_seen++;
