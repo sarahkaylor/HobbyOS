@@ -90,6 +90,85 @@ static inline __attribute__((always_inline)) void vm_lock_rel(uint64_t fl) {
   pfstat_lock_releasing();
   spinlock_release_irqrestore(&vm_lock, fl);
 }
+
+/* H7-fault (docs/cp-fault.md §4): ZEROED FRAMES ARE MADE BEFORE vm_lock.
+ *
+ * The fault paths took a frame and zeroed it while holding vm_lock -- the one
+ * irqsave lock every fault of every address space takes.  A zero is ~0.2 us
+ * on guest RAM the host has already backed, but the frame allocator walks
+ * the pool forwards, so a streaming game keeps touching guest RAM the host
+ * has never backed: that first store faults on the HOST (a THP allocation
+ * and zero of 2 MiB, or a compaction stall, docs/cp-fork.md §2), measured
+ * at 80 us to milliseconds, and every other faulting CPU spins behind it
+ * with interrupts off.  Each CPU now keeps VM_ZSTASH zeroed frames, topped
+ * up at the start of a fault or a touch with no lock held; the locked paths
+ * take one from the stash and fall back to frame_alloc_zeroed() only when it
+ * is empty (a thread that migrated, a burst deeper than the stash).  x86_64
+ * only (the Linux ABI); ARM keeps the inline zero. */
+#if defined(__x86_64__)
+#define VM_ZSTASH 4
+struct vm_zstash {
+  uint64_t fr[VM_ZSTASH];
+  int n;
+} __attribute__((aligned(64)));
+static struct vm_zstash vm_zs[MAX_CPUS];
+static inline uint64_t vm_zs_irqoff(void) {
+  uint64_t f;
+  __asm__ volatile("pushfq\n\tpop %0\n\tcli" : "=r"(f) : : "memory");
+  return f;
+}
+static inline void vm_zs_irqrestore(uint64_t f) {
+  __asm__ volatile("push %0\n\tpopfq" : : "r"(f) : "memory", "cc");
+}
+/* No lock held: fill this CPU's stash (bounded: VM_ZSTASH frames). */
+static void vm_zstash_fill(void) {
+  for (int k = 0; k < VM_ZSTASH; k++) {
+    uint64_t f = vm_zs_irqoff();
+    uint32_t c = get_cpuid();
+    int full = c >= MAX_CPUS || vm_zs[c].n >= VM_ZSTASH;
+    vm_zs_irqrestore(f);
+    if (full)
+      return;
+    uint64_t fr = frame_alloc_zeroed();
+    if (!fr)
+      return;
+    f = vm_zs_irqoff();
+    c = get_cpuid();
+    if (c < MAX_CPUS && vm_zs[c].n < VM_ZSTASH) {
+      vm_zs[c].fr[vm_zs[c].n++] = fr;
+      frame_parked_add(1);
+      fr = 0;
+    }
+    vm_zs_irqrestore(f);
+    if (fr) {
+      frame_free(fr); /* migrated onto a full stash */
+      return;
+    }
+  }
+}
+/* Interrupts off (under vm_lock): a zeroed frame, from the stash if it can. */
+static uint64_t vm_zframe(void) {
+  uint64_t f = vm_zs_irqoff();
+  uint32_t c = get_cpuid();
+  uint64_t fr = 0;
+  if (c < MAX_CPUS && vm_zs[c].n > 0)
+    fr = vm_zs[c].fr[--vm_zs[c].n];
+  vm_zs_irqrestore(f);
+  if (fr)
+    frame_parked_add(-1);
+  return fr ? fr : frame_alloc_zeroed();
+}
+uint32_t vm_zstash_frames(void) { /* unit tests: frames parked in stashes */
+  uint32_t n = 0;
+  for (int c = 0; c < MAX_CPUS; c++)
+    n += (uint32_t)vm_zs[c].n;
+  return n;
+}
+#else
+static inline void vm_zstash_fill(void) {}
+static inline uint64_t vm_zframe(void) { return frame_alloc_zeroed(); }
+uint32_t vm_zstash_frames(void) { return 0; }
+#endif
 static struct addr_space vm_as_pool[MAX_PROCESSES];
 static int vm_lock_ready;
 
@@ -508,7 +587,7 @@ uint64_t vm_object_page_locked(struct vm_object *o, uint64_t off) {
   if (idx >= (uint64_t)o->nr_frames)
     return 0; /* past the capacity */
   if (!o->frames[idx]) {
-    uint64_t fr = frame_alloc_zeroed();
+    uint64_t fr = vm_zframe(); /* H7-fault: zeroed before vm_lock */
     if (!fr)
       return 0;
     o->frames[idx] = fr;
@@ -1277,7 +1356,7 @@ static int vm_cow_page_locked(struct addr_space *as, struct vm_region *r,
   uint64_t leaf = 0;
   if (vm_arch_walk(as, a, &leaf) != 0)
     return 0; /* absent: the fill path makes the private copy */
-  uint64_t fr = frame_alloc_zeroed();
+  uint64_t fr = vm_zframe(); /* H7-fault: a frame touched before vm_lock */
   if (!fr)
     return -ENOMEM;
   vm_frame_copy(fr, vm_arch_leaf_phys(leaf), FRAME_SIZE);
@@ -1346,7 +1425,7 @@ static int vm_obj_private_fill_locked(struct addr_space *as,
   int src = VM_PUB_ZERO;
   if (write) {
     uint64_t objfr = vm_object_peek_locked(o, off);
-    fr = frame_alloc_zeroed();
+    fr = vm_zframe(); /* H7-fault */
     if (!fr)
       return -ENOMEM;
     if (objfr) {
@@ -2405,7 +2484,7 @@ static int vm_cow_share_break_locked(struct addr_space *as, struct vm_region *r,
     vm_arch_cow_clear(as, a, r->prot);
     return 0;
   }
-  uint64_t fr = frame_alloc();
+  uint64_t fr = vm_zframe(); /* H7-fault: a frame touched before vm_lock */
   if (!fr)
     return -ENOMEM;
   vm_frame_copy(fr, ph, FRAME_SIZE);
@@ -2478,6 +2557,7 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
   uint64_t end = va + len - 1;
   int retouch = 0;
   for (uint64_t a = va & ~0xFFFULL; a <= end; a += FRAME_SIZE) {
+    vm_zstash_fill(); /* H7-fault: no lock held */
     uint64_t fl = vm_lock_acq(__LINE__);
     struct vm_region *r = vm_region_find(as, a);
     if (!r || a + FRAME_SIZE > r->base + r->len) {
@@ -2553,7 +2633,7 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
           return -2; /* -ENOMEM */
         }
       } else {
-        fr = frame_alloc_zeroed();
+        fr = vm_zframe(); /* H7-fault: zeroed before vm_lock */
         if (!fr) {
           vm_lock_rel(fl);
           return -2; /* -ENOMEM */
@@ -3337,6 +3417,7 @@ int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
                     const char **why) {
   struct process *pcp = current_process();
   pfstat_begin(pcp && pcp->in_sys, va);
+  vm_zstash_fill(); /* H7-fault: no lock held yet */
   int rc = vm_handle_fault_body(grp, va, write, exec, why);
   if (rc != 0)
     pfstat_kind(PFK_ERR);
@@ -3763,7 +3844,7 @@ static int vm_handle_fault_body(struct process *grp, uint64_t va, int write,
       return 1;
     }
   } else {
-    fr = frame_alloc_zeroed();
+    fr = vm_zframe(); /* H7-fault: zeroed before vm_lock (vm_zstash_fill) */
     if (!fr) {
       vm_lock_rel(fl);
       if (why)

@@ -552,9 +552,16 @@ uint64_t frame_alloc_contig(int n) {
 
 int frame_total_count(void) { return (int)FRAME_TOTAL_FRAMES; }
 
+/* H7-fault: frames vm.c holds zeroed in its per-CPU fault stashes.  They
+   are spare memory, not use: the counts below report them as free, so a
+   caller's before/after frame balance (the unit tier's) is the same whether
+   or not a fault topped a stash up in between. */
+static volatile int frame_parked;
+void frame_parked_add(int delta) { __atomic_fetch_add(&frame_parked, delta, __ATOMIC_RELAXED); }
+
 int frame_used_count(void) {
   uint64_t flags = spinlock_acquire_irqsave(&frame_lock);
-  int u = frame_used;
+  int u = frame_used - frame_parked;
   spinlock_release_irqrestore(&frame_lock, flags);
   return u;
 }
@@ -741,7 +748,9 @@ void frame_test_pretend_full(void) {
   uint64_t flags = spinlock_acquire_irqsave(&frame_lock);
   for (int i = 0; i < FRAME_WORDS; i++)
     frame_bits[i] = ~(uint64_t)0;
-  frame_used = (int)FRAME_TOTAL_FRAMES;
+  /* H7-fault: frames parked in vm.c's stashes count as free; "full" means
+     none is free at all */
+  frame_used = (int)FRAME_TOTAL_FRAMES + frame_parked;
   spinlock_release_irqrestore(&frame_lock, flags);
 }
 
