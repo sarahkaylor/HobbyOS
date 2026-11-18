@@ -92,6 +92,8 @@ def check_run(run):
             rows.append({"n": n, "t": t, "tag": tag, "err": str(e)})
             continue
         m.update({"n": n, "t": t, "tag": tag})
+        if (m["w"], m["h"]) not in ((1280, 720), (1920, 1080)):
+            continue                     # OCR crops (prompt band, menu column), not screens
         rows.append(m)
     good = [r for r in rows if "err" not in r]
     if not good:
@@ -109,6 +111,10 @@ def check_run(run):
     flags = []
     for r in good:
         f = []
+        if r["tag"].startswith("pre"):   # P9's watch shots before the menu: logos, fades, loading
+            r["flags"] = []
+            prev = r
+            continue
         if r["black"] >= 0.97:
             f.append("black")
         elif r["win_black"] >= 0.97 and r["w"] == 1920:
@@ -119,7 +125,7 @@ def check_run(run):
             f.append(f"tear?@{r['tear_row']}")
         if r["noise"] >= 4 * nmed:
             f.append("garbage?")
-        if prev and prev["sha"] == r["sha"] and re.search(r"loop|soak|world|w\d|map|fp|rl", r["tag"] or "play"):
+        if prev and prev["sha"] == r["sha"] and re.search(r"loop|soak|world|w\d|map|fp|rl|rec", r["tag"] or "play"):
             f.append("same-as-prev")
         r["flags"] = f
         if f:
