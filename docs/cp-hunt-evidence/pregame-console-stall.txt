@@ -17,3 +17,8 @@
 # the vCPUs were 72 % idle and, in the kernel, in the console TX path (cons_hw_tx, uart_puts) - i.e. the guest was printing but the bytes did not reach the host file; the loader's own clocks for the images in that window are normal (ICEWM.BIN elap=496 ms).
 # host at that time (run-hunt sampler): loadavg 36 -> 17 (other lanes' builds/batches); 93 GB RAM, ~79 GB page cache.
 # same shape in 2 earlier boots on strix: lanes/kglitch-s2 kg-stack1 (today 03:14, 'no launcher/Wine row' at +120.4 s, game launched +150.1 s) and lanes/play r2-fps-scan5 (wave 6, then verdict timeout).
+# h-p8v5 (06:05, P8 Venus 12 GiB), with run-hunt's new per-second serial-size column: slot at 06:05:03, the serial file stays
+# at the firmware's 113 bytes of screen codes until 06:06:22 (78 s; 16-27 s in fast boots), then the kernel prints and the
+# launcher mounts NFS at +84.3 s. Host at that minute: Dirty 3.3 GB falling to 1.0 GB (writeback), and /proc/pressure/io
+# "full avg10=20 avg60=24 avg300=47" (about half of the last 5 minutes with every non-idle host task stalled on I/O).
+# So at least this occurrence is the host's I/O, before the guest kernel runs; the sampler logs io_full10 from h-p8l4 on.
