@@ -25,4 +25,4 @@ QuickSave-1      name=QuickSave-1 time=14:33:37, 18.11.2026 playTime=4731.1 pos=
 [P9W] +   186.7 s  09:43:38  SEEK FAILED menu-continue: main menu row 'CONTINUE' not focused after 6 x up
 # the reading after the 2nd Up is one 104 px frame (rows 451..555: CONTINUE and NEW GAME together; a normal frame is 35-37 px) -> the highlight was caught moving; focus_in() labels it NEW GAME by its centre, seek taps Up again and the focus overshoots CONTINUE onto the frameless button above it; the further Ups find nothing.
 # round 1 h-rl1b had the same shape (rows 524..578, 54 px, then nothing); h2-rl1 (pass) read a normal 37 px CONTINUE frame. So H1-12's reload failures are a focus read during the highlight's move plus a tap too many, not lost keys.
-# workaround in reload2.p9 (from h2-rl2b on): keytiming 200 1600 around the seek (1.6 s settle after each tap instead of 0.8 s).
+# workaround in reload2.p9 (from h2-rl2b on): no seek; two Ups with 1.6 s settle (every fresh menu answered Up -> NEW GAME, Up -> CONTINUE), guarded by the expect on the loading screen.
