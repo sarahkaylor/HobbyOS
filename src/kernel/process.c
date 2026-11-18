@@ -2276,6 +2276,97 @@ void sched_hrt_cover_ext(uint64_t deadline_us) {
   spinlock_release_irqrestore(&proc_lock, flags);
 }
 
+/* C1-k6 (docs/cp-k6.md §14, C3-fat's P9-8): a bounded halt.
+ *
+ * A kernel wait that halts in safe_wfi() (blk_token_acquire, the virtio /
+ * NVMe polls, net) has been relying on the next interrupt to look again, and
+ * an AP's only periodic interrupt is CPU 0's broadcast 0x81.  CPU 0 inside a
+ * syscall runs with IF=0 (SFMASK), so a CPU 0 that spins there -- on a ylock
+ * this halted CPU holds -- stops the tick for every AP, and the holder never
+ * wakes to see its token: P9-8.  So a halt on behalf of a task (this CPU
+ * claims a slot) first makes sure this CPU's own one-shot fires within
+ * SCHED_WFI_BOUND_US; the idle loop (no claim) is left alone, it is woken by
+ * the IPIs that hand it work.  Called by safe_wfi() with IF=0, just before
+ * its `sti; hlt`.  An earlier armed deadline is kept; a later one is pulled
+ * in, and the fire re-covers it (sched_hrt_fire rescans).  hrt_armed_us is
+ * this CPU's own entry, and this CPU cannot hold proc_lock while it halts. */
+#define SCHED_WFI_BOUND_US 1000ULL
+static uint64_t hrt_wfi_arms;
+void sched_wfi_bound(void) {
+  if (!scheduler_started_peek()) return;
+  uint32_t cpu = get_cpuid();
+  if (cpu >= MAX_CPUS || cpu_current_pids[cpu] < 0) return;
+  uint64_t now = timer_get_us();
+  uint64_t a = hrt_armed_us[cpu];
+  if (a > now && a <= now + SCHED_WFI_BOUND_US) return;
+  if (hrt_arch_arm_us(now + SCHED_WFI_BOUND_US, now)) {
+    hrt_armed_us[cpu] = now + SCHED_WFI_BOUND_US;
+    hrt_wfi_arms++;
+  }
+}
+
+#if defined(KERNEL_MODE_TEST) && defined(__x86_64__)
+/* C1-k6: the wfibound probe's kernel half (test kernels only; private
+ * syscall 0x4845 in linux_compat.c, src/user/linux_probe_wfibound.c).
+ *   op 1: `a` halts in safe_wfi() from this syscall; returns the longest, us.
+ *   op 2: the P9-8 waiter -- announce, then halt until op 3's flag is set (no
+ *         wakeup is sent), at most 1 s; returns this CPU + 1 in the high
+ *         half and the us it took after the flag in the low half (-ETIMEDOUT
+ *         if never seen).
+ *   op 3: the P9-8 spinner -- on CPU 0 only (else -EAGAIN), and only while
+ *         op 2 waits on another CPU: IF=0, set the flag, spin (as CPU 0 does
+ *         on a ylock inside a syscall: no tick for anyone) until op 2 saw
+ *         it or 500 ms; returns the us it spun.
+ *   op 4: hrt_wfi_arms. */
+static volatile int wfib_waiting, wfib_flag, wfib_seen, wfib_cpu;
+static volatile uint64_t wfib_flag_us;
+int64_t sched_wfi_test_op(int op, int64_t a) {
+  extern void safe_wfi(void);
+  switch (op) {
+  case 1: {
+    uint64_t worst = 0;
+    int n = (a < 1) ? 1 : (a > 2000 ? 2000 : (int)a);
+    for (int i = 0; i < n; i++) {
+      uint64_t t0 = timer_get_us();
+      safe_wfi();
+      uint64_t dt = timer_get_us() - t0;
+      if (dt > worst) worst = dt;
+    }
+    return (int64_t)worst;
+  }
+  case 2: {
+    wfib_flag = 0;
+    wfib_seen = 0;
+    wfib_cpu = (int)get_cpuid();
+    __atomic_store_n(&wfib_waiting, 1, __ATOMIC_SEQ_CST);
+    uint64_t t_end = timer_get_us() + 1000000;
+    while (!__atomic_load_n(&wfib_flag, __ATOMIC_SEQ_CST) && timer_get_us() < t_end)
+      safe_wfi();
+    uint64_t now = timer_get_us();
+    int saw = __atomic_load_n(&wfib_flag, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&wfib_seen, 1, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&wfib_waiting, 0, __ATOMIC_SEQ_CST);
+    if (!saw) return -ETIMEDOUT;
+    return ((int64_t)(wfib_cpu + 1) << 32) | (int64_t)(uint32_t)(now - wfib_flag_us);
+  }
+  case 3: {
+    if (get_cpuid() != 0) return -EAGAIN;
+    if (!__atomic_load_n(&wfib_waiting, __ATOMIC_SEQ_CST) || wfib_cpu == 0) return -EAGAIN;
+    __asm__ volatile("cli" ::: "memory");
+    uint64_t t0 = timer_get_us();
+    wfib_flag_us = t0;
+    __atomic_store_n(&wfib_flag, 1, __ATOMIC_SEQ_CST);
+    while (!__atomic_load_n(&wfib_seen, __ATOMIC_SEQ_CST) && timer_get_us() - t0 < 500000)
+      __asm__ volatile("pause" ::: "memory");
+    uint64_t dt = timer_get_us() - t0;
+    return (int64_t)dt; /* IF stays 0: the syscall exit restores the user's */
+  }
+  case 4: return (int64_t)hrt_wfi_arms;
+  default: return -EINVAL;
+  }
+}
+#endif
+
 /* C1-k6: send the reschedule IPI to up to n idle CPUs other than this one.
  * Returns how many were poked. */
 int sched_kick_idle_cpus(int n) {

@@ -58,6 +58,12 @@ uint32_t get_cpuid(void) {
  * Safely executes standard wait for interrupt (sti; hlt) in a thread-safe manner.
  */
 void safe_wfi(void) {
+  /* C1-k6: a halt on behalf of a task wakes within 1 ms even when CPU 0's
+     broadcast tick has stopped (process.c sched_wfi_bound).  IF=0 from the
+     arm to the hlt, so the one-shot cannot fire before this CPU halts. */
+  extern void sched_wfi_bound(void);
+  __asm__ volatile("cli" ::: "memory");
+  sched_wfi_bound();
   __asm__ volatile("sti; hlt" ::: "memory");
 }
 
