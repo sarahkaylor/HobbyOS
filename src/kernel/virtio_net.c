@@ -9,6 +9,7 @@
    x86_64 PCI driver below. */
 volatile uint32_t virtio_net_rx_backlog_max, virtio_net_rx_ring_full;
 volatile uint32_t virtio_net_tx_waits, virtio_net_tx_drops, virtio_net_tx_wait_max_us;
+volatile uint32_t virtio_net_rx_reuse_risk;
 
 #ifdef __x86_64__
 #define NUM_RX_BUFFERS 512
@@ -453,6 +454,17 @@ volatile int virtio_net_provider_active = 0;
 /* H7-fault: the deepest RX backlog a processing pass found (entries filled
    by the device and not yet processed), and how often it reached every
    posted buffer (the device had nowhere to put the next frame). */
+/* H7-fault: a frame's descriptor is handed back to the device BEFORE
+   net_rx_packet reads its buffer (see the comment in the loops).  If the
+   device filled every other posted buffer meanwhile, it may already be
+   writing the next frame into this one: count those reads (a torn frame is a
+   lost IP fragment, an NFS reply that never completes). */
+static void virtio_net_rx_note_reuse(uint16_t used_at_requeue) {
+  uint32_t posted = rx_qsize / 2;
+  if (posted > NUM_RX_BUFFERS) posted = NUM_RX_BUFFERS;
+  uint16_t adv = (uint16_t)(*rx_used_idx - used_at_requeue);
+  if (adv + 1u >= posted) virtio_net_rx_reuse_risk++;
+}
 static void virtio_net_rx_note_backlog(void) {
   uint32_t pend = (uint16_t)(*rx_used_idx - rx_ack_used_idx);
   if (pend > virtio_net_rx_backlog_max) virtio_net_rx_backlog_max = pend;
@@ -534,8 +546,10 @@ void virtio_net_handle_irq(void) {
         rdma_log_count++;
       }
 
+      uint16_t used_at = *rx_used_idx;
       spinlock_release_irqrestore(&net_lock, flags);
       net_rx_packet(rx_buffers[buffer_idx], packet_len);
+      virtio_net_rx_note_reuse(used_at);
       flags = spinlock_acquire_irqsave(&net_lock);
     }
   }
@@ -609,8 +623,10 @@ void virtio_net_poll_rx(void) {
 
     if (len > sizeof(struct virtio_net_hdr)) {
       uint32_t packet_len = len - sizeof(struct virtio_net_hdr);
+      uint16_t used_at = *rx_used_idx;
       spinlock_release_irqrestore(&net_lock, flags);
       net_rx_packet(rx_buffers[buffer_idx], packet_len);
+      virtio_net_rx_note_reuse(used_at);
       flags = spinlock_acquire_irqsave(&net_lock);
     }
   }

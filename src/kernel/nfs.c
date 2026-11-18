@@ -301,6 +301,7 @@ void nfs_perf_dump(const char *why) {
        counters (docs/cp-fault.md §3) */
     extern volatile uint32_t virtio_net_rx_backlog_max, virtio_net_rx_ring_full;
     extern volatile uint32_t virtio_net_tx_waits, virtio_net_tx_drops, virtio_net_tx_wait_max_us;
+    extern volatile uint32_t virtio_net_rx_reuse_risk;
     struct kline kl;
     kl_init(&kl);
     kl_s(&kl, "[NFSRTH] rtt=");
@@ -331,6 +332,8 @@ void nfs_perf_dump(const char *why) {
     kl_i(&kl, (long)virtio_net_tx_drops);
     kl_s(&kl, " txq_wmax_us=");
     kl_i(&kl, (long)virtio_net_tx_wait_max_us);
+    kl_s(&kl, " rxq_reuse=");
+    kl_i(&kl, (long)virtio_net_rx_reuse_risk);
     kl_c(&kl, '\n');
     kl_emit(&kl);
   }
