@@ -26,8 +26,8 @@ H3-winefix, H4-kglitch, the integ16 gate batch); the host sampler lists them.
   logs have 6, in two populations (2.5–2.9 s and 20–24 s after launch).
 * **Audio: underruns are real** (H1-01): 2 of 2 audio boots, 10 and 22
   dropouts (exact-zero 10 ms periods inside loud audio) and 7 / 49
-  `snd_pcm_recover) underrun` rows from alsa-lib in the guest, clustered in
-  the save's loading; WAV length / wall time 0.962–0.967 (the stream starts
+  `snd_pcm_recover) underrun` rows from alsa-lib in the guest, densest in
+  the save's loading, ~1 per 2 minutes in the world; WAV length / wall time 0.962–0.967 (the stream starts
   after the launch; no long gaps).
 * **One ~8 s freeze in 28 minutes of play** (H1-15): Venus fences unretired
   7.7 s while the host's own sampler stalled 8 s; host side.
@@ -67,7 +67,7 @@ something recurs.
 
 | ID | symptom | rate | first-seen evidence | signature | layer | severity | status |
 |---|---|---|---|---|---|---|---|
-| **H1-01** | audio dropouts: exact-zero runs of 10–290 ms (whole 10 ms periods) inside loud audio, most while the save loads, some in the world; alsa-lib in the guest reports each underrun | 2/2 audio boots (h-fp2, h-soak1) | `cp-hunt-evidence/audio-dropouts-fp2.txt` | `ALSA lib …/pcm.c:8772:(snd_pcm_recover) underrun occurred` (h-fp2 7 rows / 10 dropouts; h-soak1 49 / 22) | game audio thread starved under guest load + winealsa's 40 ms buffer (Wine / kernel scheduling) | wrong output (audible glitch) | open |
+| **H1-01** | audio dropouts: exact-zero runs of 10–290 ms (whole 10 ms periods) inside loud audio; in h-fp2 all in or near the save's loading, in the soak 7 during loading and 15 over 28 minutes in the world (~1 per 2 min); alsa-lib in the guest reports the underruns | 2/2 audio boots (h-fp2, h-soak1) | `cp-hunt-evidence/audio-dropouts-fp2.txt` | `ALSA lib …/pcm.c:8772:(snd_pcm_recover) underrun occurred` (h-fp2 7 rows / 10 dropouts; h-soak1 49 / 22) | game audio thread starved under guest load + winealsa's 40 ms buffer (Wine / kernel scheduling) | wrong output (audible glitch) | open |
 | **H1-15** | ~8 s freeze in the world: Venus ring-1 fences unretired for 7.7 s, fps rows of 1.7 and 4.3, audio dropouts; the host's own 1 Hz sampler stalled 8 s twice at the same moment | 1 in 28 min of soak (h-soak1); none in the other P9 world phases (≤ 1 hitch each) | `cp-hunt-evidence/soak-venus-freeze.txt` | `[VENUS] stall pid=110 tid=185 waits_ms=7754 ctx=12 ring=1` | host (amdgpu / virglrenderer under host load), not the guest | hang (recovers) | open (not ours, most likely) |
 | **H1-02** | the game exits 2–3 s (or ~20 s) after launch, right after REDEngineErrorReporter starts; graded rc=0 "launcher-done" | 0/22 here; old run logs: 6 (integ10-venus, k6-venus, console-lvp1, integ13-lvp1, k7l-1, integ15-lvp2) | `cp-hunt-evidence/mine-census.txt` (run-log section) | `[P8] end game status=0 ms=2886` + REDEngineErrorR exits twice + services.exe/explorer.exe `code=0x1` | H2-early's (Wine session teardown) | crash | open (H2-early); grader diff below |
 | **H1-03** | 1–2.5 minute stall before the launcher starts: twice in the firmware stage (serial stuck at the firmware's 113 bytes for 78 / 85 s), once after the X session (console bytes not reaching the host for ~145 s, vCPUs waiting in the UART TX path) | 11/22: QEMU start → launcher NFS mount 64–142 s (fast boots 6–58 s); stage identified in h-soak1 (console), h-p8v5 and h-p8v6 (firmware, host I/O) | `cp-hunt-evidence/pregame-console-stall.txt` | `no launcher/Wine row for 120 s before the game: sampling the vCPUs (prof-prestall)`; host `/proc/pressure/io` full avg10 50–55 % during the stall | host I/O pressure (QEMU's flushes / file writes wait behind other lanes' dirty data) | hang (recovers) | open: QEMU `cache=unsafe` A/B proposed below |

@@ -19,3 +19,16 @@ wavcheck: file=/home/sarah/cp/lanes/hunt-wav/h-fp2.wav rate=48000 channels=2 dur
 [SND] pcm closed: chunks=0 frames=0 xruns=0 sync_ptr=1 writei=0 status=0 refine=0 parks=0 irqs=92813 tx=0 ctl=1 ctl_timeouts=0
 [SND] pcm closed: chunks=0 frames=0 xruns=0 sync_ptr=1 writei=0 status=0 refine=3 parks=0 irqs=92833 tx=0 ctl=1 ctl_timeouts=0
 # WAV t=0 = game s 13.8 (wall 363.8 - 350.0): the dropouts at WAV 132.9-143.9 s are game s 146.7-157.7 (the save's loading, phase loading 141-238), 219 s -> 233 (end of loading), 316.7 -> 330.5 (world). Every run is a whole number of 10 ms periods with -20..-36 dBFS on both sides: an underrun, not the game's own silence. The kernel's xrun counter is printed only at PCM close, which never happens before QEMU stops (no in-guest confirmation).
+# h-soak1 (28-minute soak, same setup):
+wavgaps: duration_s=1923.33
+wavgaps: dropouts=22
+wavgaps: dropout_ms_total=1086.0
+wavgaps: gaps_ge_500ms=0
+wavgaps: wall_s=1989.6
+wavgaps: wav_over_wall=0.9667
+wavgaps: wav_t0_game_s=66.3
+wavgaps: dropouts_game_s=[93.7, 156.2, 219.4, 221.7, 229.9, 266.5, 274.3, 283.4, 320.6, 426.8, 427.8, 474.8, 529.5, 975.5, 987.1, 1100.4, 1433.1, 1527.8, 1590.8, 1827.0, 1859.5, 1912.4]
+wavcheck: file=/home/sarah/cp/lanes/hunt-wav/h-soak1.wav rate=48000 channels=2 duration_s=1923.334 rms_dbfs=-24.4 active_rms_dbfs=-24.3 active_s=1902.6 first_active_s=20.3 peak_hz_median=90.0 tone_hz=None tone_s=None active_peak_dbfs=-2.0 verdict=PASS
+alsa-lib underrun rows in the serial: 49 (h-fp2: 7)
+[X] ALSA lib /home/sarah/cp/lanes/audio-alsa/src/alsa-lib-1.2.14/src/pcm/pcm.c:8772:(snd_pcm_recover) underrun occurred
+# game s of the soak phases: loading 66-274 (approx), soak1 281-558, soak2 562-837, soak3 840-1129, soak4 1135-1410, soak5 1412-1685, soak6 1687-1964
