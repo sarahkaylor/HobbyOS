@@ -118,7 +118,9 @@ With it (`bash tools/cp/qemu-slot.sh bash tools/cp/audio/run-probe-snd.sh`):
 Host side: `wavcheck.py --freq 1000 --min-tone-s 2.0` on the WAV: duration
 2.515 s, 2.5 s of 1000.0 Hz, active RMS −9.2 dBFS, peak −6.2 dBFS (the
 probe's 16000/32767 sine), verdict PASS.  Kernel close row: 256 chunks,
-120 960 frames, 1 xrun (the deliberate one).  Evidence:
+120 960 frames, 1 xrun (the deliberate one), 238 TX interrupts for 256
+completions (a few batched), 234 parks of a blocking WRITEI/DRAIN, 6 control
+commands, 0 control timeouts.  Evidence:
 `docs/cp-audio-evidence/probe-snd-device.txt`.
 
 ## 5. alsa-lib
@@ -259,7 +261,47 @@ The boot→launch time (both of this lane's boots ~140 s vs integ14's 50 s)
 is host load (four slots busy, this lane's gate batch beside it).  The ON
 boot's extra minute is after the first Space (the intro sequence with sound
 plays out at its real length; without an endpoint it is skipped faster —
-plausible, not proven with n = 1).  FILL-FPS
+plausible, not proven with n = 1).
+
+**P9 fpsprobe A/B (audio on/off): not run.**  `tools/cp/audio/run-fps-ab.sh`
+(3 boots per arm, alternating, 32 GiB under `/tmp/cp-bigguest.lock`) was
+started once and stopped by this lane while its first boot still waited for
+a QEMU slot (all four busy with five lanes' batches); it needs an idle strix.
+What is known about the audio thread's cost: winealsa writes one 480-frame
+period per 10 ms (≈100 WRITEI/SYNC_PTR pairs per second, see the WASAPI row
+in §6), the kernel submits ≈100 chunks/s and takes ≈100 TX interrupts/s.
+
+## 9. Open items
+
+- P9 fps A/B with audio on/off (§7).
+- No data mmap (MMAP access): it would let alsa-lib drop `mmap_emul` and save
+  a copy; it needs the PCM ring mapped into user space (vm.c / the compat
+  mmap path, not this lane's files).  Status/control mmap stays refused
+  either way (SYNC_PTR is cheap).
+- No capture stream, no `/dev/snd/timer`, no `/dev/snd/seq` (Wine's MIDI
+  enumeration finds no sequencer and goes on), one PCM, one card.
+- S16_LE / 2 ch / 48 kHz only on the hw side (the plug converts); a FLOAT
+  hw format would save winealsa's float→s16 conversion.
+- `/dev/dsp` stays the GB-029 ENODEV stub (`src/kernel/audio_stub.c`
+  unchanged).
+
+## 10. Commands
+
+```
+# probe, device ON (strix, one slot):
+bash tools/cp/qemu-slot.sh bash tools/cp/audio/run-probe-snd.sh
+# probe, device OFF (gate 2 row):
+LP_TIMEOUT=300 bash tools/cp/qemu-slot.sh bash tools/gate/t3_linux_probe.sh snd
+# alsa-lib + Wine:
+bash tools/cp/audio/build-alsa.sh            # ~/cp/lanes/audio-alsa
+bash tools/cp/audio/host-alsa-test.sh        # no boot
+bash tools/cp/audio/build-wine-alsa.sh all   # ~/cp/lanes/audio-wine
+bash tools/cp/audio/run-wine-audio.sh        # P5 harness, tag audio, one slot
+# the game:
+bash tools/cp/audio/run-game-audio.sh audio-venus-on
+# any harness: CP_AUDIO_WAV=/abs/out.wav (Makefile run, host-venus.sh,
+# p5lib.qemu_cmd, boot_p8.qemu_cmd); grade with tools/cp/audio/wavcheck.py
+```
 
 ## 8. Facts for other lanes
 

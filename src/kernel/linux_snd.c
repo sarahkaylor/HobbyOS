@@ -120,7 +120,11 @@
 
 enum { ST_OPEN, ST_SETUP, ST_PREPARED, ST_RUNNING, ST_XRUN, ST_DRAINING, ST_PAUSED };
 
+#if defined(__x86_64__) || defined(LSND_HOST_TEST)
 #define LSND_RING_BYTES (512u * 1024u)
+#else
+#define LSND_RING_BYTES 4096u /* ARM: no virtio-sound driver, never used (AD-11) */
+#endif
 static uint8_t lsnd_ring[LSND_RING_BYTES] __attribute__((aligned(4096)));
 
 #define SLOTS 64
