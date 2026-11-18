@@ -29,7 +29,7 @@ the big-guest lock.
 * **The fixes hold.**
   - Early exits 0 of 18 launches.
   - 0 kernel-fault rows.
-  - QEMU start → launcher: median **5.5 s** (integ15: 61.1 s; 11/22 boots over 60 s → 0/18), H2's `cache=unsafe`.
+  - QEMU start → launcher: median **5.3 s** (integ15: 61.1 s; 11/22 boots over 60 s → 0/18), H2's `cache=unsafe`.
   - `[BADELR]` and `[VENUS] fence_wait2 timeout` rows: 0 (integ15: 22/22 and 18/18 boots).
   - The `[WATCHDOG]` row is down to 2 of 18 boots. Each one now comes with a ≥ 19 s silence that the host saw too (the boot's end).
   - The H1-04 wineboot reinstall is gone: 0 `InstallHinfSection` rows. However, H2's new warning about it fires falsely on every boot (H1-16).
