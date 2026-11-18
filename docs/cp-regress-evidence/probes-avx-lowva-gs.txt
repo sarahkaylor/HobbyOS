@@ -1,0 +1,37 @@
+# integ11 batch (strix:~/cp/integ-gates14.txt, logs ~/cp/integ14/*.gate): tails of the three P1 probes, all rc=0
+
+--- ~/cp/integ14/avx.gate (tail)
+[LP] C0 PASS OSXSAVE=1, XCR0&6==6; ymm variants (XCR0 beyond AVX: 0x0)
+[LP] C1 auxv AT_HWCAP=0x178bfbff (cpuid1.edx=0x178bfbff) AT_HWCAP2=0x0 AT_MINSIGSTKSZ=1536 MINSIGSTKSZ=2048
+[LP] C1 PASS
+[LP] C2 PASS threads=16 ncpu=8 iters=40 reg=ymm tsc/us=2994 interrupted_holds=145 max_cpus_per_thread=8 wall_ms=341
+[LP] C3 frame uc_flags=0x1 fpregs%64=0 magic1=0x46505853 ext=836 xfeatures=0x7 xstate_size=832 magic2=0x46505845 xstate_bv=0x6 saved_state_ok=1
+[LP] C3 PASS handler clobber isolated (ymm0..15)
+[LP] C4 frame uc_flags=0x1 fpregs%64=0 magic1=0x46505853 ext=836 xfeatures=0x7 xstate_size=832 magic2=0x46505845 xstate_bv=0x6 saved_state_ok=1
+[LP] C4 PASS frame edits applied at rt_sigreturn (16 ymm upper halves via XSAVE area + xmm2 lower)
+[LP] C5 frame uc_flags=0x1 fpregs%64=0 magic1=0x46505853 ext=836 xfeatures=0x7 xstate_size=832 magic2=0x46505845 xstate_bv=0x6 saved_state_ok=1
+[LP] C5 PASS altstack of 2048 bytes carries the frame (on_altstack=1)
+[LP] done rc=0
+t3_linux_probe: PASS — avx reached its done marker
+--- ~/cp/integ14/lowva.gate (tail)
+[LP] memfd 0x7ffe0000 coherent parent<->child ok detail=0
+[LP] reserve  64 GiB at 0x7feff7fff000
+[LP] reserve  64 GiB at 0x7fdff7fef000
+[LP] reserve  16 GiB at 0x1080001000
+[LP] reserve 64+64+16 GiB PROT_NONE           ok detail=144
+[LP] reserved total >= 141 GiB                ok detail=144
+[LP] mprotect+touch 3 pages of 64 GiB         ok detail=0
+[LP] munmap 8 GiB inside, tail intact         ok detail=0
+[LP] writev from untouched file pages         ok detail=128
+[LP] readv into untouched file pages (COW)    ok detail=96
+[LP] done rc=0
+t3_linux_probe: PASS — lowva reached its done marker
+--- ~/cp/integ14/gs.gate (tail)
+[LP] gs: start pid=2
+[LP] G0 set=0 get=0 got=match gs:0=self gs:8=99 noncanon_rc=-1 errno=1 base_after=unchanged gs:8_after=99
+[LP] G0 PASS
+[LP] G1 PASS threads=8 spinners=4 gs_reads=45605104 bad=0 max_cpus_per_thread=8
+[LP] G2 PASS fork child inherits the base (pid=15 status=0x0)
+[LP] G3 PASS SIG_DFL default-ignore signals survived: 17,18,23,28
+[LP] done rc=0
+t3_linux_probe: PASS — gs reached its done marker

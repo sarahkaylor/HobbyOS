@@ -1,0 +1,97 @@
+# results.txt rows (rc / seconds) of every boot, both trees
+# L = cp-regress on integ11 13dc693b (strix:~/cp/lanes/regress); R = main 3c1cb61f (strix:~/cp/lanes/regress-ref)
+# host: strix (Ryzen Zen 5, KVM for x86_64, TCG for aarch64), QEMU 10.2.1, guest <= 12 GiB
+
+
+=== L
+doom_gen rc=0 secs=159 end=21:26:50
+arm_unit rc=1 secs=270 end=21:36:27
+arm_unit_fix rc=0 secs=350 end=21:43:38
+unit_intel_fix rc=0 secs=36 end=21:44:14
+CHAIN DONE 21:44:14
+doom_q64 rc=1 secs=13 end=21:44:52
+icewm_intel rc=0 secs=123 end=21:46:55
+desktop_test_intel rc=0 secs=90 end=21:48:25
+xcalc_intel rc=1 secs=96 end=21:50:01
+nano_intel rc=0 secs=145 end=21:52:26
+apps_intel rc=1 secs=51 end=21:53:17
+filedialog_intel rc=1 secs=61 end=21:54:18
+pong_intel rc=0 secs=47 end=21:55:05
+desktop_test_arm rc=0 secs=101 end=21:56:46
+xeyes_arm rc=1 secs=141 end=21:59:07
+antfarm_arm rc=0 secs=95 end=22:00:42
+desktop_apps_arm rc=1 secs=63 end=22:01:46
+files_nav_arm rc=1 secs=113 end=22:03:39
+games_arm rc=0 secs=66 end=22:04:45
+console_arm rc=0 secs=69 end=22:05:54
+xcalc_arm rc=1 secs=70 end=22:07:04
+nano_arm rc=1 secs=205 end=22:10:29
+xcalc_intel2 prebuild rc=0
+xcalc_intel2 rc=1 secs=707 end=22:27:27
+apps_intel2 prebuild rc=0
+apps_intel2 rc=1 secs=127 end=22:31:01
+filedialog_intel2 prebuild rc=0
+filedialog_intel2 rc=1 secs=126 end=22:35:09
+pong_intel2 prebuild rc=0
+pong_intel2 rc=1 secs=90 end=22:38:29
+xeyes_arm2 prebuild rc=0
+xeyes_arm2 rc=1 secs=546 end=22:49:43
+desktop_apps_arm2 prebuild rc=0
+desktop_apps_arm2 rc=0 secs=985 end=23:07:54
+CHAIN DONE 23:07:54
+doom_gen2 rc=0 secs=276 end=23:12:30
+doom_q64 rc=0 secs=155 end=23:15:05
+CHAIN DONE 23:15:05
+MAINPROBES DONE 23:24:52
+host2 
+rw_gl1 prebuild rc=0
+rw_gl1 rc=124 secs=671 end=23:39:10
+rw_gl1 done 23:39:11
+ORCH DONE 23:39:11
+rw_gl2 prebuild rc=0
+rw_gl2 rc=0 secs=308 end=23:46:36
+rw_gl2 done 23:46:39
+
+=== R
+doom_gen rc=0 secs=128 end=21:29:12
+doom_q64 rc=0 secs=315 end=21:38:02
+icewm_intel rc=0 secs=125 end=21:40:07
+desktop_test_intel rc=0 secs=32 end=21:40:39
+CHAIN DONE 21:40:39
+arm_unit_win rc=1 secs=124 end=21:44:16
+unit_intel rc=1 secs=274 end=21:48:50
+xcalc_intel rc=1 secs=81 end=21:50:11
+nano_intel rc=0 secs=162 end=21:52:53
+apps_intel rc=1 secs=44 end=21:53:37
+filedialog_intel rc=1 secs=61 end=21:54:38
+pong_intel rc=1 secs=63 end=21:55:41
+CHAIN DONE 21:55:41
+arm_unit_win2 rc=124 secs=1580 end=22:22:08
+xcalc_intel2 prebuild rc=0
+xcalc_intel2 rc=1 secs=392 end=22:47:40
+apps_intel2 prebuild rc=0
+desktop_test_arm rc=0 secs=1763 end=23:29:05
+xeyes_arm rc=1 secs=97 end=23:30:42
+antfarm_arm rc=1 secs=102 end=23:32:24
+games_arm rc=0 secs=108 end=23:34:12
+console_arm rc=1 secs=82 end=23:35:34
+xeyes_arm2 prebuild rc=0
+xeyes_arm2 rc=1 secs=194 end=23:40:47
+desktop_apps_arm2 prebuild rc=0
+desktop_apps_arm2 rc=1 secs=345 end=23:48:07
+CHAIN DONE 23:48:07
+MAINPROBES DONE 00:01:19
+rw_gl1 prebuild rc=0
+rw_gl1 rc=0 secs=880 end=00:17:22
+rw_gl1 done 00:17:24
+ORCH DONE 00:17:24
+
+=== gate checks on cp-regress (L tree)
+castscan: 371 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm default rc=0
+arm unit link rc=0
+000000004558cda0 B __bss_end
+000000004560cda0 B __stack_top
+intel MODE=test rc=0
+check-no-game-files (tools/cp and tools/rw): OK
+clang -E of src/kernel/{unix_test,virtio_gpu_test,gpu_abi_m2_test}.c without KERNEL_MODE_UNIT_TEST: 0 non-blank lines each

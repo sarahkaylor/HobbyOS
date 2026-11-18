@@ -1,0 +1,457 @@
+# Native desktop / GUI harnesses (each in a private PID+mount namespace; QEMU -m clamped to 12 GiB, -display gtk -> none by the qshim)
+# L = cp-regress on integ11 13dc693b (strix:~/cp/lanes/regress); R = main 3c1cb61f (strix:~/cp/lanes/regress-ref)
+# host: strix (Ryzen Zen 5, KVM for x86_64, TCG for aarch64), QEMU 10.2.1, guest <= 12 GiB
+
+
+=== L antfarm_arm
+== antfarm_arm start 21:59:07 tree=/home/sarah/cp/lanes/regress cmd=bash -c python3 run_antfarm_test.py
+=== XANTFARM acceptance PASSED ===
+== antfarm_arm rc=0
+
+=== L apps_intel2
+== apps_intel2 start 22:28:54 tree=/home/sarah/cp/lanes/regress cmd=bash -c ARCH=intel python3 run_apps_test.py
+[TEST] APPS TEST FAILED - last serial output:
+[APPS_T] PASS 3/10 CLOCK.BIN: window+title+content+fb; time string HH:MM:SS is rendered; closed
+[APPS_T] PASS 4/10 SYSMON.BIN: window+title+content+fb; closed
+[APPS_T] PASS 5/10 HEX.BIN: window+title+content+fb; closed
+[APPS_T] PASS 6/10 TASKS.BIN: window+title+content+fb; 'd' on the empty list shows the status line; closed
+[APPS_T] FAIL FIND.BIN: interact - typing "unit" + Enter finds UNIT.BIN
+APPS TEST FAILED (FIND.BIN: interact)
+== apps_intel2 rc=1
+
+=== L apps_intel2.prebuild
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_APPS_TEST -c src/kernel/abi_t2_test.c -o obj/intel/abi_t2_test.o
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+
+=== L apps_intel
+== apps_intel start 21:52:26 tree=/home/sarah/cp/lanes/regress cmd=bash -c ARCH=intel python3 run_apps_test.py
+[TEST] APPS TEST FAILED - last serial output:
+[APPS_T] PASS 3/10 CLOCK.BIN: window+title+content+fb; time string HH:MM:SS is rendered; closed
+[APPS_T] PASS 4/10 SYSMON.BIN: window+title+content+fb; closed
+[APPS_T] PASS 5/10 HEX.BIN: window+title+content+fb; closed
+[APPS_T] PASS 6/10 TASKS.BIN: window+title+content+fb; 'd' on the empty list shows the status line; closed
+[APPS_T] FAIL FIND.BIN: interact - typing "unit" + Enter finds UNIT.BIN
+APPS TEST FAILED (FIND.BIN: interact)
+== apps_intel rc=1
+
+=== L console_arm
+== console_arm start 22:04:45 tree=/home/sarah/cp/lanes/regress cmd=bash -c python3 run_console_test.py
+[TEST] PASS: console window opened and is visible (diff=2015953)
+[TEST] PASS: typed 'ls' output rendered in the console (diff=24442)
+[TEST] PASS: console window idle (no flicker/close) (diff=0)
+[TEST] PASS: console window still present after 3s (diff=2015953)
+[TEST] PASS: closing the window ends the session (diff=96)
+[TEST] PASS: right-click launch opens the same console window (diff=2015953)
+[TEST] PASS: right-click session closes cleanly (diff=192)
+[TEST] CONSOLE TEST PASSED (window persists, shell interactive, both menu paths)
+== console_arm rc=0
+
+=== L desktop_apps_arm2
+== desktop_apps_arm2 start 22:51:29 tree=/home/sarah/cp/lanes/regress cmd=bash -c python3 run_desktop_apps_test.py
+=== Desktop apps acceptance: 13/13 passed ===
+ALL DESKTOP APP TESTS PASSED
+== desktop_apps_arm2 rc=0
+
+=== L desktop_apps_arm2.prebuild
+[fetch] tree present + anchors verified; re-syncing config overlay
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+
+=== L desktop_apps_arm
+== desktop_apps_arm start 22:00:42 tree=/home/sarah/cp/lanes/regress cmd=bash -c python3 run_desktop_apps_test.py
+    raise RuntimeError("QMP socket never appeared")
+RuntimeError: QMP socket never appeared
+== desktop_apps_arm rc=1
+
+=== L desktop_test_arm
+== desktop_test_arm start 21:55:05 tree=/home/sarah/cp/lanes/regress cmd=bash -c ARCH=arm DESKTOP_TEST_TIMEOUT=600 python3 run_desktop_test.py; rc=$?; mkdir -p /tmp/dt && cp src/user/actual_qemu.ppm /tmp/dt/ 2>/dev/null; exit $rc
+[PUB] who= va=0x1000023000 off=0x23000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who= va=0x17FFFFF000 off=0x7FF000 prot=RW priv=1 src=zero zero=4096 ver=0
+[PUB] who= va=0x1000024000 off=0x24000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who= va=0x100000A000 off=0xA000 prot=RWX priv=1 src=file zero=2596 ver=1
+[PUB] who= va=0x1000028000 off=0x28000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who= va=0x100002A000 off=0x2A000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who= va=0x1000001000 off=0x1000 prot=RWX priv=1 src=file zero=665 ver=1
+[PUB] who= va=0x1000009000 off=0x9000 prot=RWX priv=1 src=file zero=647 ver=1
+[PUB] who= va=0x1000004000 off=0x4000 prot=RWX priv=1 src=file zero=594 ver=1
+[PUB] who= va=0x100000B000 off=0xB000 prot=RWX priv=1 src=file zero=4095 ver=1
+[PUB] who= va=0x1000000000 off=0x0 prot=RWX priv=1 src=file zero=612 ver=1
+[PUB] who= va=0x17FFFFF000 off=0x7FF000 prot=RW priv=1 src=zero zero=4096 ver=0
+[PUB] who= va=0x1000007000 off=0x7000 prot=RWX priv=1 src=file zero=613 ver=1
+[PUB] who= va=0x100000D000 off=0xD000 prot=RWX priv=1 src=file zero=725 ver=1
+[PUB] who= va=0x1000003000 off=0x3000 prot=RWX priv=1 src=file zero=557 ver=1
+[PUB] who= va=0x100000E000 off=0xE000 prot=RWX priv=1 src=file zero=4042 ver=1
+[PUB] who= va=0x1000004000 off=0x4000 prot=RWX priv=1 src=file zero=663 ver=1
+[PUB] who= va=0x100000F000 off=0xF000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who= va=0x1000010000 off=0x10000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who= va=0x1000011000 off=0x11000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who= va=0x1000012000 off=0x12000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who= va=0x1000001000 off=0x1000 prot=RWX priv=1 src=file zero=567 ver=1
+[PUB] who= va=0x1000022000 off=0x22000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who= va=0x100000C000 off=0xC000 prot=RWX priv=1 src=file zero=668 ver=1
+== desktop_test_arm rc=0
+
+=== L desktop_test_intel
+== desktop_test_intel start 21:46:55 tree=/home/sarah/cp/lanes/regress cmd=bash -c ARCH=intel DESKTOP_TEST_TIMEOUT=180 python3 run_desktop_test.py; rc=$?; mkdir -p /tmp/dt && cp src/user/actual_qemu.ppm /tmp/dt/ 2>/dev/null; exit $rc
+== desktop_test_intel start 21:46:55 tree=/home/sarah/cp/lanes/regress cmd=bash -c ARCH=intel DESKTOP_TEST_TIMEOUT=180 python3 run_desktop_test.py; rc=$?; mkdir -p /tmp/dt && cp src/user/actual_qemu.ppm /tmp/dt/ 2>/dev/null; exit $rc
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+[MEMMAP] src=multiboot multiboot_rc=0 entries=21 e820_rc=0 e820_entries=3 e820_ram_in_map=0
+== desktop_test_intel rc=0
+
+=== L filedialog_intel2
+== filedialog_intel2 start 22:33:03 tree=/home/sarah/cp/lanes/regress cmd=bash -c ARCH=intel python3 run_filedialog_test.py
+[TEST] Timeout waiting for test result (reached 60s)
+== filedialog_intel2 rc=1
+
+=== L filedialog_intel2.prebuild
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FILEDIALOG_TEST -c src/kernel/abi_t2_test.c -o obj/intel/abi_t2_test.o
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+
+=== L filedialog_intel
+== filedialog_intel start 21:53:17 tree=/home/sarah/cp/lanes/regress cmd=bash -c ARCH=intel python3 run_filedialog_test.py
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+[MEMMAP] src=multiboot multiboot_rc=0 entries=21 e820_rc=0 e820_entries=3 e820_ram_in_map=0
+[TEST] Timeout waiting for test result (reached 60s)
+== filedialog_intel rc=1
+
+=== L files_nav_arm
+== files_nav_arm start 22:01:46 tree=/home/sarah/cp/lanes/regress cmd=bash -c python3 run_files_nav_test.py
+== files_nav_arm rc=1
+
+=== L games_arm
+== games_arm start 22:03:39 tree=/home/sarah/cp/lanes/regress cmd=bash -c python3 run_games_test.py
+[TEST] PASS: PONG.BIN and MILLIPED.BIN are pinned adjacently (16/17)
+[TEST] PASS: the games start immediately below the pinned apps (idx=16 apps=16)
+[TEST] PASS: PONG took over the screen (black field) (black=99.84%)
+[TEST] PASS: PONG drew its paddles/line/score (bright=2140)
+[TEST] PASS: paddle detected in left strip (top_y=500)
+[TEST] PASS: PONG paddle moves on forwarded arrow keys (moved=64px for 8 keys (8px each))
+[TEST] PASS: PONG exits on q (q x1)
+[TEST] PASS: desktop fully restored after PONG exits (diff=96)
+[TEST] PASS: MILLIPED took over the screen (black field) (black=97.08%)
+[TEST] PASS: MILLIPED drew its ship/HUD (green=1256)
+[TEST] PASS: ship detected in bottom third (x=960)
+[TEST] PASS: MILLIPED ship moves on forwarded arrow keys (moved=120px for 6 keys (20px each))
+[TEST] PASS: MILLIPED exits on q (q x1)
+[TEST] PASS: desktop fully restored after MILLIPED exits (diff=96)
+[TEST] GAMES TEST PASSED (menu pinning, full-screen launch, key input, quit, desktop restore — both games)
+== games_arm rc=0
+
+=== L icewm_intel
+== icewm_intel start 21:44:52 tree=/home/sarah/cp/lanes/regress cmd=bash -c python3 run_icewm_test.py --arch intel --out /tmp/icewm
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+[TEST] ok   kernel built with DESKTOP=icewm  (+20.6s)
+[TEST] ok   XSESSION.BIN started  (+20.6s)
+[TEST] ok   X server spawned  (+21.0s)
+[TEST] ok   X server accepted on /tmp/.X11-unix/X0  (+21.0s)
+[TEST] ok   IceWM session running  (+22.2s)
+[TEST] ok   IceWM taskbar visible
+[TEST] ok   start menu opened (1632 sampled pixels changed)
+[TEST] ok   CONSOLE.BIN launched from the start menu through HBHOST.BIN
+[TEST] ok   typed command rendered in the CONSOLE window (76 px)
+[TEST] ok   CONSOLE.BIN closed (F4)
+[TEST] ok   XCALC.BIN launched from the start menu through HBHOST.BIN
+[TEST] ok   XCALC display changed after clicks (11 px)
+[TEST] ok   XCALC.BIN closed (the IceWM close button)
+[TEST] RESULT: PASS
+== icewm_intel rc=0
+
+=== L nano_arm
+== nano_arm start 22:07:04 tree=/home/sarah/cp/lanes/regress cmd=bash -c ARCH=arm python3 run_nano_test.py
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+  FAIL: the desktop booted (serial: 'Desktop starting')
+== nano_arm rc=1
+
+=== L nano_intel
+== nano_intel start 21:50:01 tree=/home/sarah/cp/lanes/regress cmd=bash -c ARCH=intel python3 run_nano_test.py
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+  PASS: the desktop booted (serial: 'Desktop starting')
+  PASS: the desktop is up and painted (screenshot not blank)
+  PASS: NANO.BIN is listed in the Apps menu
+  PASS: the desktop launched NANO.BIN (serial: '[LAUNCH] NANO.BIN')
+  PASS: the typed lines are visible in the edit area (pixel delta 787)
+  PASS: fast-typed characters paint too (pixel delta 846)
+  PASS: the Write-Out prompt row appears after ^O (pixel delta 4664)
+  PASS: HELLO.TXT exists on the FAT image
+  PASS: the saved bytes start with what was typed (b'hello from nano\nsecond line')
+  PASS: HELLO.TXT shows up in the root directory listing
+ALL NANO E2E CHECKS PASSED (intel)
+== nano_intel rc=0
+
+=== L pong_intel2
+== pong_intel2 start 22:36:59 tree=/home/sarah/cp/lanes/regress cmd=bash -c ARCH=intel python3 run_pong_test.py
+[PONG_TEST] Timeout waiting for PONG_TEST_PASS (reached 60s)
+== pong_intel2 rc=1
+
+=== L pong_intel2.prebuild
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_PONG_TEST -c src/kernel/abi_t2_test.c -o obj/intel/abi_t2_test.o
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+
+=== L pong_intel
+== pong_intel start 21:54:18 tree=/home/sarah/cp/lanes/regress cmd=bash -c ARCH=intel python3 run_pong_test.py
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+[MEMMAP] src=multiboot multiboot_rc=0 entries=21 e820_rc=0 e820_entries=3 e820_ram_in_map=0
+[PONG_TEST] PONG_TEST_PASS: All visual checks passed!
+[PONG_TEST] FOUND PONG_TEST_PASS IN BUFFER!
+== pong_intel rc=0
+
+=== L xcalc_arm
+== xcalc_arm start 22:05:54 tree=/home/sarah/cp/lanes/regress cmd=bash -c ARCH=arm python3 run_xcalc_test.py
+    raise RuntimeError("QMP socket never appeared")
+RuntimeError: QMP socket never appeared
+== xcalc_arm rc=1
+
+=== L xcalc_intel2
+== xcalc_intel2 start 22:15:40 tree=/home/sarah/cp/lanes/regress cmd=bash -c ARCH=intel python3 run_xcalc_test.py
+[FAIL] XCALC never started (no serial marker)
+== xcalc_intel2 rc=1
+
+=== L xcalc_intel2.prebuild
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/abi_t2_test.c -o obj/intel/abi_t2_test.o
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+
+=== L xcalc_intel
+== xcalc_intel start 21:48:25 tree=/home/sarah/cp/lanes/regress cmd=bash -c ARCH=intel python3 run_xcalc_test.py; rc=$?; cp -r /tmp/hobbyos_xcalc* /tmp/xcalc_out 2>/dev/null; exit $rc
+== xcalc_intel start 21:48:25 tree=/home/sarah/cp/lanes/regress cmd=bash -c ARCH=intel python3 run_xcalc_test.py; rc=$?; cp -r /tmp/hobbyos_xcalc* /tmp/xcalc_out 2>/dev/null; exit $rc
+[FAIL] XCALC never started (no serial marker)
+== xcalc_intel rc=1
+
+=== L xeyes_arm2
+== xeyes_arm2 start 22:40:37 tree=/home/sarah/cp/lanes/regress cmd=bash -c python3 run_xeyes_test.py
+    raise RuntimeError("QMP socket never appeared")
+RuntimeError: QMP socket never appeared
+== xeyes_arm2 rc=1
+
+=== L xeyes_arm2.prebuild
+[fetch] tree present + anchors verified; re-syncing config overlay
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+
+=== L xeyes_arm
+== xeyes_arm start 21:56:46 tree=/home/sarah/cp/lanes/regress cmd=bash -c python3 run_xeyes_test.py
+[FAIL] menu: the Apps menu is covered with XEYES up (panel pixels=0)
+=== XEYES acceptance FAILED (1 problems) ===
+== xeyes_arm rc=1
+
+=== R antfarm_arm
+== antfarm_arm start 23:30:42 tree=/home/sarah/cp/lanes/regress-ref cmd=bash -c python3 run_antfarm_test.py
+    raise RuntimeError("QMP socket never appeared")
+RuntimeError: QMP socket never appeared
+== antfarm_arm rc=1
+
+=== R apps_intel2
+== apps_intel2 start 22:50:12 tree=/home/sarah/cp/lanes/regress-ref cmd=bash -c ARCH=intel python3 run_apps_test.py
+
+=== R apps_intel2.prebuild
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_APPS_TEST -c src/kernel/abi_t2_test.c -o obj/intel/abi_t2_test.o
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+
+=== R apps_intel
+== apps_intel start 21:52:53 tree=/home/sarah/cp/lanes/regress-ref cmd=bash -c ARCH=intel python3 run_apps_test.py
+[TEST] APPS TEST FAILED - last serial output:
+[PUB] who=img va=0x1000000000 off=0x0 prot=RWX priv=1 src=file zero=777 ver=1
+[PUB] who=img va=0x100000D000 off=0xD000 prot=RWX priv=1 src=file zero=419 ver=1
+[PUB] who=img va=0x1000001000 off=0x1000 prot=RWX priv=1 src=file zero=887 ver=1
+[PUB] who=img va=0x1000011000 off=0x11000 prot=RWX priv=1 src=file zero=2718 ver=1
+[PUB] who=img va=0x1000007000 off=0x7000 prot=RWX priv=1 src=file zero=888 ver=1
+[PUB] who=img va=0x1000010000 off=0x10000 prot=RWX priv=1 src=file zero=1018 ver=1
+[PUB] who=img va=0x1000014000 off=0x14000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who=img va=0x1000002000 off=0x2000 prot=RWX priv=1 src=file zero=663 ver=1
+[PUB] who=img va=0x1000013000 off=0x13000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who=img va=0x100000F000 off=0xF000 prot=RWX priv=1 src=file zero=494 ver=1
+[PUB] who=img va=0x1000015000 off=0x15000 prot=RWX priv=1 src=file zero=4095 ver=1
+[PUB] who=img va=0x1000004000 off=0x4000 prot=RWX priv=1 src=file zero=917 ver=1
+[PUB] who=img va=0x1000003000 off=0x3000 prot=RWX priv=1 src=file zero=917 ver=1
+[PUB] who=img va=0x1000008000 off=0x8000 prot=RWX priv=1 src=file zero=886 ver=1
+[PUB] who=img va=0x100000E000 off=0xE000 prot=RWX priv=1 src=file zero=385 ver=1
+[APPS_T] FAIL FIND.BIN: interact - typing "unit" + Enter finds UNIT.BIN
+APPS TEST FAILED (FIND.BIN: interact)
+== apps_intel rc=1
+
+=== R console_arm
+== console_arm start 23:34:12 tree=/home/sarah/cp/lanes/regress-ref cmd=bash -c python3 run_console_test.py
+== console_arm rc=1
+
+=== R desktop_apps_arm2
+== desktop_apps_arm2 start 23:42:22 tree=/home/sarah/cp/lanes/regress-ref cmd=bash -c python3 run_desktop_apps_test.py
+    raise RuntimeError("QMP socket never appeared")
+RuntimeError: QMP socket never appeared
+== desktop_apps_arm2 rc=1
+
+=== R desktop_apps_arm2.prebuild
+[fetch] tree present + anchors verified; re-syncing config overlay
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+
+=== R desktop_test_arm
+== desktop_test_arm start 22:59:42 tree=/home/sarah/cp/lanes/regress-ref cmd=bash -c ARCH=arm DESKTOP_TEST_TIMEOUT=600 python3 run_desktop_test.py; rc=$?; mkdir -p /tmp/dt && cp src/user/actual_qemu.ppm /tmp/dt/ 2>/dev/null; exit $rc
+[PUB] who= va=0x17FFFFF000 off=0x7FF000 prot=RW priv=1 src=zero zero=4096 ver=0
+[PUB] who= va=0x1000023000 off=0x23000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who= va=0x100000A000 off=0xA000 prot=RWX priv=1 src=file zero=2596 ver=1
+[PUB] who= va=0x1000024000 off=0x24000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who= va=0x1000028000 off=0x28000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who= va=0x100002A000 off=0x2A000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who= va=0x1000001000 off=0x1000 prot=RWX priv=1 src=file zero=665 ver=1
+[PUB] who= va=0x1000009000 off=0x9000 prot=RWX priv=1 src=file zero=647 ver=1
+[PUB] who= va=0x1000004000 off=0x4000 prot=RWX priv=1 src=file zero=594 ver=1
+[PUB] who= va=0x100000B000 off=0xB000 prot=RWX priv=1 src=file zero=4095 ver=1
+[PUB] who= va=0x1000000000 off=0x0 prot=RWX priv=1 src=file zero=612 ver=1
+[PUB] who= va=0x17FFFFF000 off=0x7FF000 prot=RW priv=1 src=zero zero=4096 ver=0
+[PUB] who= va=0x1000007000 off=0x7000 prot=RWX priv=1 src=file zero=613 ver=1
+[PUB] who= va=0x100000D000 off=0xD000 prot=RWX priv=1 src=file zero=725 ver=1
+[PUB] who= va=0x1000003000 off=0x3000 prot=RWX priv=1 src=file zero=557 ver=1
+[PUB] who= va=0x100000E000 off=0xE000 prot=RWX priv=1 src=file zero=4042 ver=1
+[PUB] who= va=0x1000004000 off=0x4000 prot=RWX priv=1 src=file zero=663 ver=1
+[PUB] who= va=0x100000F000 off=0xF000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who= va=0x1000010000 off=0x10000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who= va=0x1000011000 off=0x11000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who= va=0x1000012000 off=0x12000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who= va=0x1000001000 off=0x1000 prot=RWX priv=1 src=file zero=567 ver=1
+[PUB] who= va=0x1000022000 off=0x22000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who= va=0x100000C000 off=0xC000 prot=RWX priv=1 src=file zero=668 ver=1
+== desktop_test_arm rc=0
+
+=== R desktop_test_intel
+== desktop_test_intel start 21:40:07 tree=/home/sarah/cp/lanes/regress-ref cmd=bash -c ARCH=intel DESKTOP_TEST_TIMEOUT=180 python3 run_desktop_test.py; rc=$?; mkdir -p /tmp/dt && cp src/user/actual_qemu.ppm /tmp/dt/ 2>/dev/null; exit $rc
+[PUB] who=img va=0x1000024000 off=0x24000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who=img va=0x1000029000 off=0x29000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who=img va=0x100002B000 off=0x2B000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who=img va=0x100000C000 off=0xC000 prot=RWX priv=1 src=file zero=543 ver=1
+[PUB] who=img va=0x100000D000 off=0xD000 prot=RWX priv=1 src=file zero=3927 ver=1
+[PUB] who=img va=0x1000002000 off=0x2000 prot=RWX priv=1 src=file zero=1002 ver=1
+[PUB] who=img va=0x100000C000 off=0xC000 prot=RWX priv=1 src=file zero=925 ver=1
+[PUB] who=img va=0x1000001000 off=0x1000 prot=RWX priv=1 src=file zero=859 ver=1
+[PUB] who=img va=0x1000005000 off=0x5000 prot=RWX priv=1 src=file zero=1006 ver=1
+[PUB] who=img va=0x100000E000 off=0xE000 prot=RWX priv=1 src=file zero=4095 ver=1
+[PUB] who=img va=0x1000000000 off=0x0 prot=RWX priv=1 src=file zero=1074 ver=1
+[PUB] who=img va=0x1000009000 off=0x9000 prot=RWX priv=1 src=file zero=901 ver=1
+[PUB] who=img va=0x1000010000 off=0x10000 prot=RWX priv=1 src=file zero=1137 ver=1
+[PUB] who=img va=0x1000011000 off=0x11000 prot=RWX priv=1 src=file zero=3521 ver=1
+[PUB] who=img va=0x1000003000 off=0x3000 prot=RWX priv=1 src=file zero=857 ver=1
+[PUB] who=img va=0x1000008000 off=0x8000 prot=RWX priv=1 src=file zero=913 ver=1
+[PUB] who=img va=0x1000004000 off=0x4000 prot=RWX priv=1 src=file zero=733 ver=1
+[PUB] who=img va=0x1000012000 off=0x12000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who=img va=0x1000013000 off=0x13000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who=img va=0x1000014000 off=0x14000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who=img va=0x1000015000 off=0x15000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who=img va=0x1000001000 off=0x1000 prot=RWX priv=1 src=file zero=789 ver=1
+[PUB] who=img va=0x1000002000 off=0x2000 prot=RWX priv=1 src=file zero=622 ver=1
+[PUB] who=img va=0x100000F000 off=0xF000 prot=RWX priv=1 src=file zero=571 ver=1
+== desktop_test_intel rc=0
+
+=== R filedialog_intel
+== filedialog_intel start 21:53:37 tree=/home/sarah/cp/lanes/regress-ref cmd=bash -c ARCH=intel python3 run_filedialog_test.py
+[PUB] who=img va=0x100000F000 off=0xF000 prot=RWX priv=1 src=file zero=901 ver=1
+[PUB] who=img va=0x1000019000 off=0x19000 prot=RWX priv=1 src=file zero=572 ver=1
+[PUB] who=img va=0x1000021000 off=0x21000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who=img va=0x100008B000 off=0x8B000 prot=RWX priv=1 src=file zero=4095 ver=1
+[PUB] who=img va=0x1000004000 off=0x4000 prot=RWX priv=1 src=file zero=683 ver=1
+[PUB] who=img va=0x1000020000 off=0x20000 prot=RWX priv=1 src=file zero=4096 ver=1
+[PUB] who=img va=0x1000003000 off=0x3000 prot=RWX priv=1 src=file zero=636 ver=1
+[PUB] who=img va=0x1000009000 off=0x9000 prot=RWX priv=1 src=file zero=552 ver=1
+[PUB] who=img va=0x100001D000 off=0x1D000 prot=RWX priv=1 src=file zero=379 ver=1
+[PUB] who=img va=0x1000011000 off=0x11000 prot=RWX priv=1 src=file zero=881 ver=1
+[PUB] who=img va=0x1000010000 off=0x10000 prot=RWX priv=1 src=file zero=891 ver=1
+[PUB] who=img va=0x1000007000 off=0x7000 prot=RWX priv=1 src=file zero=1077 ver=1
+[PUB] who=img va=0x1000001000 off=0x1000 prot=RWX priv=1 src=file zero=500 ver=1
+[PUB] who=img va=0x1000002000 off=0x2000 prot=RWX priv=1 src=file zero=807 ver=1
+[PUB] who=img va=0x1000008000 off=0x8000 prot=RWX priv=1 src=file zero=836 ver=1
+[PUB] who=img va=0x1000018000 off=0x18000 prot=RWX priv=1 src=file zero=541 ver=1
+[PUB] who=img va=0x100001A000 off=0x1A000 prot=RWX priv=1 src=file zero=615 ver=1
+[PUB] who=img va=0x100001B000 off=0x1B000 prot=RWX priv=1 src=file zero=663 ver=1
+[PUB] who=img va=0x1000017000 off=0x17000 prot=RWX priv=1 src=file zero=628 ver=1
+[PUB] who=img va=0x100001C000 off=0x1C000 prot=RWX priv=1 src=file zero=705 ver=1
+[PUB] who=img va=0x1000015000 off=0x15000 prot=RWX priv=1 src=file zero=414 ver=1
+[PUB] who=img va=0x1000006000 off=0x6000 prot=RWX priv=1 src=file zero=802 ver=1
+[PUB] who=img va=0x100000C000 off=0xC000 prot=RWX priv=1 src=file zero=924 ver=1
+[TEST] Timeout waiting for test result (reached 60s)
+== filedialog_intel rc=1
+
+=== R games_arm
+== games_arm start 23:32:24 tree=/home/sarah/cp/lanes/regress-ref cmd=bash -c python3 run_games_test.py
+[TEST] PASS: PONG.BIN and MILLIPED.BIN are pinned adjacently (16/17)
+[TEST] PASS: the games start immediately below the pinned apps (idx=16 apps=16)
+[TEST] PASS: PONG took over the screen (black field) (black=99.84%)
+[TEST] PASS: PONG drew its paddles/line/score (bright=2120)
+[TEST] PASS: paddle detected in left strip (top_y=500)
+[TEST] PASS: PONG paddle moves on forwarded arrow keys (moved=64px for 8 keys (8px each))
+[TEST] PASS: PONG exits on q (q x1)
+[TEST] PASS: desktop fully restored after PONG exits (diff=96)
+[TEST] PASS: MILLIPED took over the screen (black field) (black=97.06%)
+[TEST] PASS: MILLIPED drew its ship/HUD (green=1624)
+[TEST] PASS: ship detected in bottom third (x=960)
+[TEST] PASS: MILLIPED ship moves on forwarded arrow keys (moved=120px for 6 keys (20px each))
+[TEST] PASS: MILLIPED exits on q (q x1)
+[TEST] PASS: desktop fully restored after MILLIPED exits (diff=96)
+[TEST] GAMES TEST PASSED (menu pinning, full-screen launch, key input, quit, desktop restore — both games)
+== games_arm rc=0
+
+=== R icewm_intel
+== icewm_intel start 21:38:02 tree=/home/sarah/cp/lanes/regress-ref cmd=bash -c python3 run_icewm_test.py --arch intel --out /tmp/icewm
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+[TEST] ok   kernel built with DESKTOP=icewm  (+32.0s)
+[TEST] ok   XSESSION.BIN started  (+32.3s)
+[TEST] ok   X server spawned  (+32.9s)
+[TEST] ok   X server accepted on /tmp/.X11-unix/X0  (+33.1s)
+[TEST] ok   IceWM session running  (+36.9s)
+[TEST] ok   IceWM taskbar visible
+[TEST] ok   start menu opened (1632 sampled pixels changed)
+[TEST] ok   CONSOLE.BIN launched from the start menu through HBHOST.BIN
+[TEST] ok   typed command rendered in the CONSOLE window (76 px)
+[TEST] ok   CONSOLE.BIN closed (F4)
+[TEST] ok   XCALC.BIN launched from the start menu through HBHOST.BIN
+[TEST] ok   XCALC display changed after clicks (11 px)
+[TEST] ok   XCALC.BIN closed (the IceWM close button)
+[TEST] RESULT: PASS
+== icewm_intel rc=0
+
+=== R nano_intel
+== nano_intel start 21:50:11 tree=/home/sarah/cp/lanes/regress-ref cmd=bash -c ARCH=intel python3 run_nano_test.py
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+  PASS: the desktop booted (serial: 'Desktop starting')
+  PASS: the desktop is up and painted (screenshot not blank)
+  PASS: NANO.BIN is listed in the Apps menu
+  PASS: the desktop launched NANO.BIN (serial: '[LAUNCH] NANO.BIN')
+  PASS: the typed lines are visible in the edit area (pixel delta 787)
+  PASS: fast-typed characters paint too (pixel delta 846)
+  PASS: the Write-Out prompt row appears after ^O (pixel delta 4664)
+  PASS: HELLO.TXT exists on the FAT image
+  PASS: the saved bytes start with what was typed (b'hello from nano\nsecond line')
+  PASS: HELLO.TXT shows up in the root directory listing
+ALL NANO E2E CHECKS PASSED (intel)
+== nano_intel rc=0
+
+=== R pong_intel
+== pong_intel start 21:54:38 tree=/home/sarah/cp/lanes/regress-ref cmd=bash -c ARCH=intel python3 run_pong_test.py
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001H[PONG_TEST] Timeout waiting for PONG_TEST_PASS (reached 60s)
+== pong_intel rc=1
+
+=== R xcalc_intel2
+== xcalc_intel2 start 22:41:08 tree=/home/sarah/cp/lanes/regress-ref cmd=bash -c ARCH=intel python3 run_xcalc_test.py
+    raise RuntimeError("QMP socket never appeared")
+RuntimeError: QMP socket never appeared
+== xcalc_intel2 rc=1
+
+=== R xcalc_intel2.prebuild
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_DESKTOP -c src/kernel/abi_t2_test.c -o obj/intel/abi_t2_test.o
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+
+=== R xcalc_intel
+== xcalc_intel start 21:48:50 tree=/home/sarah/cp/lanes/regress-ref cmd=bash -c ARCH=intel python3 run_xcalc_test.py; rc=$?; cp -r /tmp/hobbyos_xcalc* /tmp/xcalc_out 2>/dev/null; exit $rc
+== xcalc_intel start 21:48:50 tree=/home/sarah/cp/lanes/regress-ref cmd=bash -c ARCH=intel python3 run_xcalc_test.py; rc=$?; cp -r /tmp/hobbyos_xcalc* /tmp/xcalc_out 2>/dev/null; exit $rc
+[FAIL] XCALC never started (no serial marker)
+== xcalc_intel rc=1
+
+=== R xeyes_arm2
+== xeyes_arm2 start 23:37:33 tree=/home/sarah/cp/lanes/regress-ref cmd=bash -c python3 run_xeyes_test.py
+    raise RuntimeError("QMP socket never appeared")
+RuntimeError: QMP socket never appeared
+== xeyes_arm2 rc=1
+
+=== R xeyes_arm2.prebuild
+[fetch] tree present + anchors verified; re-syncing config overlay
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+
+=== R xeyes_arm
+== xeyes_arm start 23:29:05 tree=/home/sarah/cp/lanes/regress-ref cmd=bash -c python3 run_xeyes_test.py
+    raise RuntimeError("QMP socket never appeared")
+RuntimeError: QMP socket never appeared
+== xeyes_arm rc=1

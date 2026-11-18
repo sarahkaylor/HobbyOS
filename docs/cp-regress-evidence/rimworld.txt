@@ -1,0 +1,114 @@
+# RimWorld to the main menu, virgl on renderD129, RW_L86=1 front-end driver (tools/rw/rw_l86_input.py of each tree)
+# strix, KVM -cpu host -smp 8 -m 12288M, egl-headless,rendernode=/dev/dri/renderD129, glfix QEMU behind the qshim with tools/cp/host-venus.sh env
+# export /srv/nfs/cp-regress-rw (copy of /srv/nfs/rimworld, Version.txt 1.6.4871 rev598) via tools/cp/exports.sh, removed on EXIT; copy deleted at the end
+# OCR text of game screens is elided (..); no game screenshot is in git
+
+=== L rw_gl2 (integ11 13dc693b+cp-regress)
+== rw_gl2 start 23:41:28 tree=/home/sarah/cp/lanes/regress cmd=env RW_EXPORT_OVERRIDE=/srv/nfs/cp-regress-rw RW_SKIP_EXPORT=1 GLIBC231=/home/sarah/cp/sysroot-glibc231 GLIBC231_DEV=/home/sarah/cp/sysroot-glibc231 RW_WAIT_SECS=2600 RW_L86=1 RW_QEMU_GL=1 RW_GLMODE=virgl RW_SCREEN=1280x720 RW_WM_HONOUR=1 RW_QEMU_DISPLAY=egl-headless,rendernode=/dev/dri/renderD129 QEMU_GLFIX_DIR=/home/sarah/cp/regress-
+  installed: 202184 bytes -> /srv/nfs/cp-regress-rw/RimWorldLinux (lane regress)
+[drive] launch via icewm-menu
+[drive] shot 00_desktop: /home/sarah/cp/lanes/regress/obj/rw-desktop/shots/00_desktop.png (1920x1080, nonblack=129537, colors=97)
+[drive] shot 01_taskbar: /home/sarah/cp/lanes/regress/obj/rw-desktop/shots/01_taskbar.png (1920x1080, nonblack=129537, colors=93)
+[drive] shot 02_start_menu: /home/sarah/cp/lanes/regress/obj/rw-desktop/shots/02_start_menu.png (1920x1080, nonblack=129331, colors=248)
+[drive] shot 03_apps_menu: /home/sarah/cp/lanes/regress/obj/rw-desktop/shots/03_apps_menu.png (1920x1080, nonblack=129264, colors=274)
+[drive] shot 04_launched: /home/sarah/cp/lanes/regress/obj/rw-desktop/shots/04_launched.png (1920x1080, nonblack=129477, colors=146)
+[L86] {"ev": "geometry", "stage": "geom", "note": "client=0,0 800x560 xsw gx=None gy=None w=None h=None", "screen": [0, 16], "content": [0, 0], "elapsed": 0.0}
+[L86] {"ev": "modal_seen", "stage": "menu", "text": "..", "note": "dismissing", "elapsed": 57.6}
+[L86] {"ev": "modal", "stage": "modal", "ok": true, "screen": [813, 594], "bbox": [339, 562, 1584, 760], "text": "..", "note": "Ignore located", "elapsed": 58.3}
+[L86] {"ev": "click", "stage": "modal", "label": "Ignore", "screen": [813, 594], "content": [481, 554], "hold": 0.3, "pixels": 415609, "bbox": [98, 6, 1914, 1071], "shot": "l86_006_modal_after_Ignore.png", "elapsed": 65.3}
+[L86] {"ev": "modal_gone", "stage": "modal", "ok": true, "bbox": [98, 6, 1914, 1071], "pixels": 415609, "text": "..", "shot": "l86_006_modal_after_Ignore.png", "elapsed": 66.4}
+[L86] {"ev": "stage", "stage": "menu", "text": "..", "shot": "l86_007_menu_wait.png", "elapsed": 69.7}
+[L86] {"ev": "measure", "stage": "menu", "ok": true, "n": [2870, 5860], "elapsed": 89.7}
+[L86] {"ev": "no_target", "stage": "menu", "label": "New colony", "text": "..", "elapsed": 117.4}
+[L86] {"ev": "done", "stage": "end", "note": "reached_site=False reached_colony=False", "elapsed": 118.5}
+[L86] loading: n=None opens=0 quiet=0s
+--- export
+exports.sh: add /srv/nfs/cp-regress-rw ok (non-cp lines unchanged)
+exports.sh: remove /srv/nfs/cp-regress-rw ok (non-cp lines unchanged)
+--- rwmon (first/last rows)
+rwmon start 23:41:27 tree=/home/sarah/cp/lanes/regress
+23:43:28 pid=3368804 dri:       7 /dev/dri/renderD129 
+23:43:33 pid=3368804 dri:       7 /dev/dri/renderD129 
+23:46:34 pid=3368804 dri:       7 /dev/dri/renderD129 
+rwmon: qemu gone 23:46:39
+VIOLATION rows: 0
+--- serial
+
+=== R rw_gl1 (main 3c1cb61f)
+== rw_gl1 start 00:02:42 tree=/home/sarah/cp/lanes/regress-ref cmd=env RW_EXPORT_OVERRIDE=/srv/nfs/cp-regress-rw RW_SKIP_EXPORT=1 GLIBC231=/home/sarah/cp/sysroot-glibc231 GLIBC231_DEV=/home/sarah/cp/sysroot-glibc231 RW_WAIT_SECS=2600 RW_L86=1 RW_QEMU_GL=1 RW_GLMODE=virgl RW_SCREEN=1280x720 RW_WM_HONOUR=1 RW_QEMU_DISPLAY=egl-headless,rendernode=/dev/dri/renderD129 QEMU_GLFIX_DIR=/home/sarah/cp/regr
+  installed: 202184 bytes -> /srv/nfs/cp-regress-rw/RimWorldLinux (lane regress-ref)
+[drive] launch via icewm-menu
+[drive] shot 00_desktop: /home/sarah/cp/lanes/regress-ref/obj/rw-desktop/shots/00_desktop.png (1920x1080, nonblack=129595, colors=5)
+[drive] shot 01_taskbar: /home/sarah/cp/lanes/regress-ref/obj/rw-desktop/shots/01_taskbar.png (1920x1080, nonblack=129595, colors=5)
+[drive] shot 01_taskbar: /home/sarah/cp/lanes/regress-ref/obj/rw-desktop/shots/01_taskbar.png (1920x1080, nonblack=129595, colors=5)
+[drive] shot 01_taskbar: /home/sarah/cp/lanes/regress-ref/obj/rw-desktop/shots/01_taskbar.png (1920x1080, nonblack=129440, colors=63)
+[drive] shot 02_start_menu: /home/sarah/cp/lanes/regress-ref/obj/rw-desktop/shots/02_start_menu.png (1920x1080, nonblack=129539, colors=101)
+[drive] shot 02_start_menu: /home/sarah/cp/lanes/regress-ref/obj/rw-desktop/shots/02_start_menu.png (1920x1080, nonblack=129331, colors=253)
+[drive] shot 03_apps_menu: /home/sarah/cp/lanes/regress-ref/obj/rw-desktop/shots/03_apps_menu.png (1920x1080, nonblack=129264, colors=276)
+[drive] shot 04_launched: /home/sarah/cp/lanes/regress-ref/obj/rw-desktop/shots/04_launched.png (1920x1080, nonblack=129541, colors=101)
+[L86] {"ev": "geometry", "stage": "geom", "note": "client=0,0 800x560 xsw gx=None gy=None w=None h=None", "screen": [0, 16], "content": [0, 0], "elapsed": 0.0}
+[L86] {"ev": "modal_seen", "stage": "menu", "text": "..", "note": "dismissing", "elapsed": 637.5}
+[L86] {"ev": "modal", "stage": "modal", "ok": true, "screen": [813, 594], "bbox": [354, 324, 1485, 660], "text": ".."as administrator\"). E 4 : om = : Ge / In mo", "note": "Ignore located", "elapsed": 638.3}
+[L86] {"ev": "click", "stage": "modal", "label": "Ignore", "screen": [813, 594], "content": [481, 554], "hold": 0.3, "pixels": 415543, "bbox": [98, 6, 1914, 1071], "shot": "l86_039_modal_after_Ignore.png", "elapsed": 646.8}
+[L86] {"ev": "modal_gone", "stage": "modal", "ok": true, "bbox": [98, 6, 1914, 1071], "pixels": 415543, "text": "..", "shot": "l86_039_modal_after_Ignore.png", "elapsed": 648.8}
+[L86] {"ev": "stage", "stage": "menu", "text": "..", "shot": "l86_040_menu_wait.png", "elapsed": 652.2}
+[L86] {"ev": "measure", "stage": "menu", "ok": true, "n": [7850, 9220], "elapsed": 672.4}
+[L86] {"ev": "no_target", "stage": "menu", "label": "New colony", "text": "..", "elapsed": 696.2}
+[L86] {"ev": "done", "stage": "end", "note": "reached_site=False reached_colony=False", "elapsed": 697.3}
+[L86] loading: n=6010 opens=414 quiet=156s
+--- export
+exports.sh: add /srv/nfs/cp-regress-rw ok (non-cp lines unchanged)
+exports.sh: remove /srv/nfs/cp-regress-rw ok (non-cp lines unchanged)
+--- rwmon (first/last rows)
+rwmon start 00:02:42 tree=/home/sarah/cp/lanes/regress-ref
+00:04:27 pid=3430221 dri:       7 /dev/dri/renderD129 
+00:04:32 pid=3430221 dri:       7 /dev/dri/renderD129 
+00:17:19 pid=3430221 dri:       7 /dev/dri/renderD129 
+rwmon: qemu gone 00:17:24
+VIOLATION rows: 0
+--- serial
+  [ALIVE-SET] slot=31 pid=31 st=8 parent=-1 claimed_by=-1 pc=0x108011895d mod=0x1080000000+0x11895d UnityGfxDeviceW
+  [ALIVE-SET] slot=31 pid=31 st=8 parent=-1 claimed_by=-1 pc=0x108011895d mod=0x1080000000+0x11895d UnityGfxDeviceW
+  [ALIVE-SET] slot=31 pid=31 st=8 parent=-1 claimed_by=-1 pc=0x108011895d mod=0x1080000000+0x11895d UnityGfxDeviceW
+  [ALIVE-SET] slot=31 pid=31 st=8 parent=-1 claimed_by=-1 pc=0x108011895d mod=0x1080000000+0x11895d UnityGfxDeviceW
+
+=== manual fd/env check during the integ11 boot (integrator condition)
+manual check 23:43:33 pid 3368804 cwd /home/sarah/cp/lanes/regress
+/home/sarah/.local/share/hobbyos-tools/qemu-glfix/prefix/bin/qemu-system-x86_64 -M q35,vmport=on -cpu host -smp 8 -m 12288M -pflash /home/sarah/cp/lanes/regress/obj/rw-desktop/OVMF_CODE_4M.fd -display
+
+lrwx------+ 1 sarah sarah 64 Nov 17 23:43 10 -> /dev/dri/renderD129
+lrwx------+ 1 sarah sarah 64 Nov 17 23:43 11 -> /dev/dri/renderD129
+lrwx------+ 1 sarah sarah 64 Nov 17 23:43 12 -> /dev/dri/renderD129
+lrwx------+ 1 sarah sarah 64 Nov 17 23:43 39 -> /dev/dri/renderD129
+lrwx------+ 1 sarah sarah 64 Nov 17 23:43 40 -> /dev/dri/renderD129
+lrwx------+ 1 sarah sarah 64 Nov 17 23:43 41 -> /dev/dri/renderD129
+lrwx------+ 1 sarah sarah 64 Nov 17 23:43 9 -> /dev/dri/renderD129
+CP_SHIM_DENY=/dev/dri/card1:/dev/dri/renderD128
+LD_PRELOAD=/home/sarah/cp/regress-work/venus/shim/venus-host-shim.so
+render /dev/dri/renderD129 = 1002:7550 driver=amdgpu pci=0000:65:00.0
+[qshim] env CP_SHIM_DENY=/dev/dri/card1:/dev/dri/renderD128
+[qshim] env LD_PRELOAD=/home/sarah/cp/regress-work/venus/shim/venus-host-shim.so
+[qshim] env VK_DRIVER_FILES=/usr/share/vulkan/icd.d/radeon_icd.json
+[qshim] env VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.json
+[qshim] env MESA_VK_DEVICE_SELECT=1002:7550
+[qshim] 23:43:27 GL qemu-system-x86_64 -M q35,vmport=on -cpu host -smp 8 -m 12288M -pflash /home/sarah/cp/lanes/regress/obj/rw-desktop/OVMF_CODE_4M.fd -display 
+
+=== first integ11 attempt rw_gl1 (23:38): the Makefile picked QEMU_GLFIX_X64 directly, bypassing the qshim, so no LD_PRELOAD/CP_SHIM_DENY. fds at 23:38:01 showed only renderD129 (7 fds); the QEMU was killed at once (~1 min of guest time) and rerun as rw_gl2 with QEMU_GLFIX_DIR=~/cp/regress-work/qshim-glfix, and rwmon2.sh now kills a GL QEMU whose environ lacks the shim.
+rwmon start 23:27:58 tree=/home/sarah/cp/lanes/regress
+23:38:01 pid=3351186 dri:       7 /dev/dri/renderD129 
+23:38:06 pid=3351186 dri:       7 /dev/dri/renderD129 
+
+=== Player.log GL rows
+-- L (573482 bytes)
+Initialize engine version: 2022.3.35f1 (011206c7a712)
+Forcing GfxDevice: OpenGL Core
+GfxDevice: creating device client; threaded=1; jobified=0
+Renderer: virgl
+Vendor:   Mesa
+-- R (610213 bytes)
+Initialize engine version: 2022.3.35f1 (011206c7a712)
+Forcing GfxDevice: OpenGL Core
+GfxDevice: creating device client; threaded=1; jobified=0
+Renderer: virgl
+Vendor:   Mesa
+deleted /srv/nfs/cp-regress-rw 00:17:58; /etc/exports lines for it: 0
