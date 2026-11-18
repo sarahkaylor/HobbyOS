@@ -26,7 +26,7 @@
 -- DXVK / vkd3d-proton err+warn: 3 rows, 3 signatures
        1  L9       err:vkd3d-proton:d3d12_device_create Something went wrong 0x#.  [new]
        1  L10      err: DXGI: Failed to parse display metadata + colorimetry info, using blank.  [benign: DXVK: no EDID / HDR metadata]
-       1  L11      warn: DXGI: MakeWindowAssociation: Ignoring flags  [new]
+       1  L11      warn: DXGI: MakeWindowAssociation: Ignoring flags  [benign: DXVK: flags it does not implement]
 -- REDEngineErrorReporter: 2 rows, 2 signatures
        1  L12      REDEngineErrorReporter.exe loaded
        1  L15      REDEngineErrorReporter exited
