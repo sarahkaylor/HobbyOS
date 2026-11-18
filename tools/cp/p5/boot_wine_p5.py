@@ -254,7 +254,11 @@ def grade(args, probes, serial, shots):
         log("VERDICT: VOID (NFS failure rows; not evidence either way)")
         return 3
     if not fails:
-        log("PASS: " + ", ".join(probes) + " each ran >= 60 s under Wine with two distinct, recognisable screendumps")
+        shot = [p for p in probes if p not in NOSHOT]
+        if shot:
+            log("PASS: " + ", ".join(shot) + " each ran >= 60 s under Wine with two distinct, recognisable screendumps")
+        if "audio" in probes:
+            log("PASS: audio rows (alsatone s16 + float, wasapi, waveout); grade the tones in the host WAV")
     return 1 if fails else 0
 
 

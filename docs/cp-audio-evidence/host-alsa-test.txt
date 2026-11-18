@@ -1,0 +1,37 @@
+# tools/cp/audio/host-alsa-test.sh on strix (host, no boot), cp-audio 2b81ad0b, alsa-lib 1.2.14
+  s16: [SND] hw_params rate=48000 ch=2 period=1200 periods=4 buffer=4800
+  s16: [SND] pcm closed: chunks=40 frames=48000 xruns=0 sync_ptr=244 writei=971 status=0 refine=42 parks=948 irqs=0 tx=40 ctl=5 ctl_timeouts=0
+  s16: [ALSA] buffer 4800 frames, period 1200 frames
+  s16: [ALSA] wrote 48000 frames in 0.900 s, delay 4800, drain ok in 0.100 s, recovers 0
+  s16: [ALSA] done rc=0
+  s16: wavcheck: file=/home/sarah/cp/lanes/audio/obj/cp-audio/host/s16.wav rate=48000 channels=2 duration_s=1.0 rms_dbfs=-9.2 active_rms_dbfs=-9.2 active_s=1.0 first_active_s=0.0 peak_hz_median=660.0 tone_hz=660.0 tone_s=1.0 active_peak_dbfs=-6.2 verdict=PASS
+host-alsa-test: s16 (plughw:0,0 660 1000 s16) alsatone rc=0 wavcheck rc=0
+  float: [SND] hw_params rate=48000 ch=2 period=1200 periods=4 buffer=4800
+  float: [SND] pcm closed: chunks=40 frames=48000 xruns=0 sync_ptr=685 writei=100 status=0 refine=48 parks=94 irqs=0 tx=40 ctl=5 ctl_timeouts=0
+  float: [ALSA] buffer 4800 frames, period 1200 frames
+  float: [ALSA] wrote 48000 frames in 0.901 s, delay 4800, drain ok in 0.099 s, recovers 0
+  float: [ALSA] done rc=0
+  float: wavcheck: file=/home/sarah/cp/lanes/audio/obj/cp-audio/host/float.wav rate=48000 channels=2 duration_s=1.0 rms_dbfs=-9.2 active_rms_dbfs=-9.2 active_s=1.0 first_active_s=0.0 peak_hz_median=770.0 tone_hz=770.0 tone_s=1.0 active_peak_dbfs=-6.2 verdict=PASS
+host-alsa-test: float (plughw:0,0 770 1000 float) alsatone rc=0 wavcheck rc=0
+  hw: [SND] hw_params rate=48000 ch=2 period=1200 periods=4 buffer=4800
+  hw: [SND] pcm closed: chunks=41 frames=48000 xruns=0 sync_ptr=120 writei=899 status=0 refine=8 parks=877 irqs=0 tx=41 ctl=5 ctl_timeouts=0
+  hw: [ALSA] buffer 4800 frames, period 1200 frames
+  hw: [ALSA] wrote 48000 frames in 0.998 s, delay 4800, drain ok in 0.100 s, recovers 0
+  hw: [ALSA] done rc=0
+  hw: wavcheck: file=/home/sarah/cp/lanes/audio/obj/cp-audio/host/hw.wav rate=48000 channels=2 duration_s=1.0 rms_dbfs=-9.2 active_rms_dbfs=-9.2 active_s=1.0 first_active_s=0.0 peak_hz_median=440.0 tone_hz=440.0 tone_s=1.0 active_peak_dbfs=-6.2 verdict=PASS
+host-alsa-test: hw (hw:0,0 440 1000 s16) alsatone rc=0 wavcheck rc=0
+  default: [SND] hw_params rate=48000 ch=2 period=1200 periods=4 buffer=4800
+  default: [SND] pcm closed: chunks=40 frames=48000 xruns=0 sync_ptr=685 writei=100 status=0 refine=48 parks=95 irqs=0 tx=40 ctl=5 ctl_timeouts=0
+  default: [ALSA] buffer 4800 frames, period 1200 frames
+  default: [ALSA] wrote 48000 frames in 0.901 s, delay 4800, drain ok in 0.100 s, recovers 0
+  default: [ALSA] done rc=0
+  default: wavcheck: file=/home/sarah/cp/lanes/audio/obj/cp-audio/host/default.wav rate=48000 channels=2 duration_s=1.0 rms_dbfs=-9.2 active_rms_dbfs=-9.2 active_s=1.0 first_active_s=0.0 peak_hz_median=550.0 tone_hz=550.0 tone_s=1.0 active_peak_dbfs=-6.2 verdict=PASS
+host-alsa-test: default (default 550 1000 float) alsatone rc=0 wavcheck rc=0
+  resample: [SND] hw_params rate=48000 ch=2 period=1200 periods=4 buffer=4800
+  resample: [SND] pcm closed: chunks=41 frames=48087 xruns=0 sync_ptr=603 writei=41 status=0 refine=48 parks=73 irqs=0 tx=41 ctl=5 ctl_timeouts=0
+  resample: [ALSA] buffer 4410 frames, period 1102 frames
+  resample: [ALSA] wrote 44160 frames in 0.926 s, delay 3386, drain ok in 0.077 s, recovers 0
+  resample: [ALSA] done rc=0
+  resample: wavcheck: file=/home/sarah/cp/lanes/audio/obj/cp-audio/host/resample.wav rate=48000 channels=2 duration_s=1.002 rms_dbfs=-9.2 active_rms_dbfs=-9.2 active_s=1.0 first_active_s=0.0 peak_hz_median=880.0 tone_hz=880.0 tone_s=1.0 active_peak_dbfs=-6.2 verdict=PASS
+host-alsa-test: resample (default 880 1000 s16 44100) alsatone rc=0 wavcheck rc=0
+host-alsa-test: PASS

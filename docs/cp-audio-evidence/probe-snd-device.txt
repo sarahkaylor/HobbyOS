@@ -1,0 +1,62 @@
+# tools/cp/audio/run-probe-snd.sh on strix, tree cp-audio cbefd9b5 (kernel) -- probe rows + [SND] rows from obj/t3_intel.log
+qemu-system-x86_64 -M q35,vmport=on -cpu host -smp 8 -m 12288M -pflash /home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd -display gtk -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -device virtio-tablet-pci  -action shutdown=poweroff  -display none -enable-kvm -audiodev wav,id=cpsnd0,path=/home/sarah/cp/lanes/audio/obj/cp-audio/probe-snd.wav,out.frequency=48000,out.channels=2,out.format=s16 -device virtio-sound-pci,audiodev=cpsnd0,streams=1
+[SND] virtio-sound 1af4:1059 bar=0x0000380800008000 jacks=0 streams=1 chmaps=0 ctlq=64 txq=64
+[SND] stream 0 out formats=0x00000000000E0078 rates=0x0000000000003FFF ch=1..2
+[SND] irq line=11 vector=43 (TX completions by INTx)
+[SND] ALSA nodes: /dev/snd/controlC0 /dev/snd/pcmC0D0p
+[LP] snd probe start
+[LP] ok   open controlC0 fd=3 errno=0
+[LP] ok   ctl PVERSION 0x20007
+[LP] ok   CARD_INFO driver='virtio-snd' name='VirtIO SoundCard'
+[LP] ok   PCM_NEXT_DEVICE -1 -> 0 -> -1
+[LP] ok   ctl PCM_INFO(0,0,playback) id='virtio-snd' name='VirtIO PCM 0' subdevices=1
+[LP] ok   ctl PCM_INFO capture -> ENOENT (r=-1 errno=2)
+[LP] ok   PCM_PREFER_SUBDEVICE
+[LP] ok   ELEM_LIST used=2 count=2 [Master Playback Volume] [Master Playback Switch]
+[LP] ok   ELEM_INFO by name: numid=1 type=2 count=2 max=100
+[LP] ok   ELEM_WRITE 50 / READ -> 50
+[LP] ok   ELEM_WRITE 100 (restore)
+[LP] ok   open pcmC0D0p fd=4
+[LP] ok   second open -> EBUSY (fd=-1 errno=16)
+[LP] ok   pcm PVERSION 0x2000e
+[LP] ok   pcm INFO stream=0 card=0 name='VirtIO PCM 0'
+[LP] ok   TTSTAMP monotonic
+[LP] ok   USER_PVERSION
+[LP] ok   mmap(status page) refused (errno=95) -> SYNC_PTR path
+[LP] ok   HW_REFINE(any): rate 48000..48000 ch 2..2 fmt 0x4 access 0x8 period 256..16384 buffer 512..131072
+[SND] hw_params rate=48000 ch=2 period=480 periods=4 buffer=1920
+[LP] ok   HW_PARAMS 480x4 -> buffer 1920 period_time 10000
+[LP] ok   SW_PARAMS boundary=0x7800000000000000
+[LP] ok   PREPARE -> state 2 avail 1920
+[LP] ok   START with an empty buffer -> EPIPE (r=-1 errno=32)
+[LP] ok   auto-start at start_threshold: state 3 hw 10080
+[LP] ok   poll(POLLOUT) woke after 9.5 ms (revents 0x4)
+[LP] ok   blocking WRITEI wrote 2.0 s total (96000)
+[LP] ok   hw_ptr monotonic during playback (last 94080)
+[LP] ok   SYNC_PTR state 3 appl 96000 hw 94080 (status appl 96000)
+[LP] ok   DELAY 1920 frames
+[LP] ok   DRAIN -> state 1 hw 96000 appl 96000
+[LP] ok   real-time pacing: 2.0 s of frames took 1.992 s (write 1.953 s, drain 0.040 s)
+[LP] ok   PREPARE after drain
+[LP] ok   stop writing -> XRUN (state 4, hw 960 appl 960)
+[LP] ok   WRITEI in XRUN -> EPIPE (-32)
+[LP] ok   PREPARE recovers (state 2)
+[LP] ok   0.5 s more tone after recovery, drained
+[LP] ok   PREPARE
+[LP] ok   O_NONBLOCK: 1920 frames then EAGAIN (state 3)
+[LP] ok   PAUSE(1) -> state 6
+[LP] ok   PAUSE(0) -> state 3
+[LP] ok   DROP -> state 1
+[LP] ok   HW_FREE -> state 0
+[SND] pcm closed: chunks=256 frames=120960 xruns=1
+[LP] ok   re-open after close (not EBUSY)
+[SND] pcm closed: chunks=256 frames=120960 xruns=1
+[LP] tone: 1000 Hz, 2.0 s + 0.5 s at -6.2 dBFS (16000/32767) -> tools/cp/audio/wavcheck.py
+[LP] done rc=0
+
+# run-probe-snd.sh tail
+t3_linux_probe: PASS — snd reached its done marker
+run-probe-snd: probe rc=0
+wavcheck: file=/home/sarah/cp/lanes/audio/obj/cp-audio/probe-snd.wav rate=48000 channels=2 duration_s=2.515 rms_dbfs=-9.2 active_rms_dbfs=-9.2 active_s=2.5 first_active_s=0.0 peak_hz_median=1000.0 tone_hz=1000.0 tone_s=2.5 active_peak_dbfs=-6.2 verdict=PASS
+run-probe-snd: wavcheck rc=0
+run-probe-snd: PASS
