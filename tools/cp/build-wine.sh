@@ -71,6 +71,17 @@
 #                       HAVE_LINUX_NTSYNC_H unset; this vendors the header into
 #                       $WORK/ntsync-inc/linux/, adds it to CPPFLAGS and requires
 #                       the define in config.h.  Wine needs no source patch.
+#         CP_WINE_PATCHES (opt-in, lane H3-winefix, docs/cp-winefix.md): a directory
+#                       of Wine source patches (tools/cp/wine-patches/).  Every
+#                       *.patch in it is applied in LC_ALL=C name order with
+#                       `patch -p1` right after the tarball is extracted.  The
+#                       applied set (name + sha256) is kept in $SRC/.cp-patches;
+#                       a cached source whose set differs from the requested one
+#                       (patches added, edited, removed, or CP_WINE_PATCHES
+#                       unset) is re-extracted, so the source always equals
+#                       tarball + exactly this set.  The set is staged as
+#                       share/wine/cp-wine-patches.txt, so it is in
+#                       stage-manifest.sha256 and travels with the stage.
 #         CP_RUNTIME    (default <repo>/third_party/cp-runtime)
 #         JOBS          (default 12)
 # Exit:   0 ok, 1 build/audit failure, 2 tooling error.
@@ -139,12 +150,41 @@ make_sysroot() {
 }
 
 # --- 2. source ----------------------------------------------------------------------
+# The requested patch set, one "<sha256>  <name>" line per *.patch (empty = none).
+patch_set() {
+  [ -n "${CP_WINE_PATCHES:-}" ] || return 0
+  [ -d "$CP_WINE_PATCHES" ] || die "CP_WINE_PATCHES=$CP_WINE_PATCHES is not a directory" 2
+  local f
+  while IFS= read -r f; do
+    printf '%s  %s\n' "$(sha256sum "$f" | cut -d' ' -f1)" "$(basename "$f")"
+  done < <(find "$CP_WINE_PATCHES" -maxdepth 1 -type f -name '*.patch' | LC_ALL=C sort)
+}
+
+SRC_FRESH=""
 extract_src() {
-  [ -f "$SRC/.ok" ] && { say "source: $SRC (cached)"; return; }
+  local want have=""
+  want=$(patch_set)
+  [ -n "${CP_WINE_PATCHES:-}" ] && [ -z "$want" ] && die "CP_WINE_PATCHES=$CP_WINE_PATCHES has no *.patch" 2
+  [ -f "$SRC/.cp-patches" ] && have=$(cat "$SRC/.cp-patches")
+  if [ -f "$SRC/.ok" ] && [ "$want" = "$have" ]; then
+    say "source: $SRC (cached; patches: $( [ -n "$want" ] && printf '%s\n' "$want" | awk '{printf "%s ", $2}' || echo none))"
+    return
+  fi
+  [ -f "$SRC/.ok" ] && say "source: cached patch set differs from the requested one: re-extracting"
   rm -rf "$SRC"; mkdir -p "$WORK/src"
   tar -C "$WORK/src" -xf "$DL/wine-$WINE_VER.tar.xz"
-  touch "$SRC/.ok"
   say "source: extracted wine-$WINE_VER"
+  local name
+  while read -r _ name; do
+    [ -n "$name" ] || continue
+    patch -d "$SRC" -p1 --forward --batch --no-backup-if-mismatch < "$CP_WINE_PATCHES/$name" \
+      > "$WORK/patch-$name.log" 2>&1 || { cat "$WORK/patch-$name.log"; die "patch $name does not apply to wine-$WINE_VER"; }
+    say "source: applied $name ($(grep -c '^patching file' "$WORK/patch-$name.log") files)"
+  done <<<"$want"
+  printf '%s' "$want" > "$SRC/.cp-patches"
+  [ -n "$want" ] && printf '%s\n' "$want" > "$SRC/.cp-patches.txt"
+  touch "$SRC/.ok"
+  SRC_FRESH=1
 }
 
 # --- 3. configure ------------------------------------------------------------------
@@ -256,6 +296,7 @@ do_configure() {
   say "configure: PE compiler = $(grep -E '^x86_64_CC=' "$BLD/config.log" | head -1)"
   say "configure: preloader LDFLAGS = $(grep -E '^WINEPRELOADER_LDFLAGS=' "$BLD/config.log" | head -1)"
   say "configure: loader LDFLAGS    = $(grep -E '^WINELOADER_LDFLAGS=' "$BLD/config.log" | head -1)"
+  SRC_FRESH="" # $BLD now matches the source (and its patch set)
 }
 
 # Feature-by-feature proof from config.h (raw #define lines), plus the
@@ -277,7 +318,10 @@ check_x_features() {
 }
 
 do_build() {
-  [ -f "$BLD/Makefile" ] || do_configure
+  # A re-extracted (re-patched) source needs a fresh configure: every
+  # timestamp moved and $BLD may describe another patch set.
+  extract_src
+  { [ -f "$BLD/Makefile" ] && [ -z "$SRC_FRESH" ]; } || do_configure
   say "build: make -j$JOBS (log $WORK/build.log)"
   local t0=$SECONDS
   make -C "$BLD" -j"$JOBS" > "$WORK/build.log" 2>&1 || {
@@ -290,6 +334,13 @@ do_install() {
   # install-lib = the runtime only (no widl/wrc/winegcc/headers/import libs).
   make -C "$BLD" install-lib DESTDIR="$STAGE" > "$WORK/install.log" 2>&1 || die "make install-lib failed"
   rm -rf "$STAGE$PREFIX/share/man" "$STAGE$PREFIX/share/applications"
+  # H3-winefix: the source patch set travels with the stage (and so is in the manifest).
+  local pset; pset=$(cat "$SRC/.cp-patches" 2>/dev/null || true)
+  [ "$pset" = "$(patch_set)" ] || die "install: $BLD was built from patch set [${pset:-none}], not the requested one (run all)"
+  if [ -n "$pset" ]; then
+    printf '%s\n' "$pset" > "$STAGE$PREFIX/share/wine/cp-wine-patches.txt"
+    say "install: patches staged in share/wine/cp-wine-patches.txt: $(printf '%s\n' "$pset" | awk '{printf "%s ", $2}')"
+  fi
   if [ -n "${CP_WINE_ALSA:-}" ]; then # C4-audio: alsa-lib rides in the Wine stage (/CP/WINE/lib is on LD_LIBRARY_PATH)
     cp -a "$CP_WINE_ALSA"/lib/libasound.so.2* "$STAGE$PREFIX/lib/"
     cp -a "$CP_WINE_ALSA/share/alsa" "$STAGE$PREFIX/share/"
