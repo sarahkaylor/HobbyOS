@@ -10,6 +10,10 @@
 volatile uint32_t virtio_net_rx_backlog_max, virtio_net_rx_ring_full;
 volatile uint32_t virtio_net_tx_waits, virtio_net_tx_drops, virtio_net_tx_wait_max_us;
 volatile uint32_t virtio_net_rx_reuse_risk;
+/* H7-fault round 2: test kernels can stall an RX reader on purpose (nfs.c's
+   ".cp-nfs-inject.rxstall.<us>"): every 32nd frame, the CPU that took it
+   spins <us> after handing its descriptor back and before reading it -- the
+   shape of a vCPU the host deschedules mid-copy. */
 volatile uint32_t virtio_net_inj_rxstall_us;
 
 #ifdef __x86_64__
@@ -486,6 +490,44 @@ static void virtio_net_rx_note_backlog(void) {
   if (pend >= posted) virtio_net_rx_ring_full++;
 }
 
+/* H7-fault round 2 (docs/cp-fault.md §3, H7-05): A FRAME IS COPIED OUT
+ * BEFORE ITS DESCRIPTOR GOES BACK.
+ *
+ * Both loops re-queue a descriptor before releasing net_lock (so two
+ * processors never race on an avail slot) and then read the frame from the
+ * buffer they just handed back.  If the reader stalls there -- a vCPU the
+ * host deschedules -- while the device fills every other posted buffer, the
+ * device writes the next frame into the one being read.  Measured with the
+ * test kernels' rxstall injection (cpnfsbench rxpress): 30+ pipeline stalls
+ * with one fragment missing (`ipr=6/31424`, the game boots' lost-stall
+ * signature) and a file read back with WRONG bytes -- the stack checks no
+ * IP or UDP checksum.  The frame is now copied into a per-CPU buffer under
+ * net_lock, before the re-queue; a nested pass (an IRQ arriving while the
+ * poll path reads) takes the next of three buffers. */
+#define VN_BOUNCE_DEPTH 3
+struct vn_bounce {
+  int depth;
+  uint8_t buf[VN_BOUNCE_DEPTH][RX_BUFFER_SIZE];
+} __attribute__((aligned(64)));
+static struct vn_bounce vn_bounce_pc[MAX_CPUS];
+/* net_lock held: copy frame `bi` out, or 0 (no CPU record / too deep: the
+   caller reads the ring buffer as before) */
+static uint8_t *vn_bounce_take(uint32_t bi, uint32_t len) {
+  uint32_t c = get_cpuid();
+  if (c >= MAX_CPUS || len > RX_BUFFER_SIZE) return 0;
+  struct vn_bounce *b = &vn_bounce_pc[c];
+  if (b->depth >= VN_BOUNCE_DEPTH) return 0;
+  uint8_t *dst = b->buf[b->depth++];
+  const volatile uint8_t *src = rx_buffers[bi];
+  for (uint32_t i = 0; i < len; i++) dst[i] = src[i];
+  return dst;
+}
+static void vn_bounce_put(uint8_t *p) {
+  if (!p) return;
+  uint32_t c = get_cpuid();
+  if (c < MAX_CPUS && vn_bounce_pc[c].depth > 0) vn_bounce_pc[c].depth--;
+}
+
 void virtio_net_handle_irq(void) {
   if (io_base == 0 || !net_rx_ready) return;
   dbg_handle_irq_calls++;
@@ -531,6 +573,10 @@ void virtio_net_handle_irq(void) {
       continue;
     }
 
+    // H7-fault: take the frame out of the buffer before handing it back
+    uint8_t *frame = len > sizeof(struct virtio_net_hdr)
+        ? vn_bounce_take(buffer_idx, len - sizeof(struct virtio_net_hdr)) : 0;
+
     // Re-queue the descriptor BEFORE releasing the lock to call net_rx_packet.
     // If we refill AFTER, a concurrent poll or re-entrant IRQ could race on the
     // same avail slot when the lock is temporarily dropped, corrupting the ring.
@@ -562,9 +608,12 @@ void virtio_net_handle_irq(void) {
       uint16_t used_at = *rx_used_idx;
       spinlock_release_irqrestore(&net_lock, flags);
       virtio_net_inj_stall();
-      net_rx_packet(rx_buffers[buffer_idx], packet_len);
-      virtio_net_rx_note_reuse(used_at);
+      net_rx_packet(frame ? frame : rx_buffers[buffer_idx], packet_len);
+      if (!frame) virtio_net_rx_note_reuse(used_at); /* read from the ring */
       flags = spinlock_acquire_irqsave(&net_lock);
+      vn_bounce_put(frame);
+    } else {
+      vn_bounce_put(frame);
     }
   }
 
@@ -622,6 +671,10 @@ void virtio_net_poll_rx(void) {
 
     uint32_t buffer_idx = id / 2;
 
+    // H7-fault: take the frame out of the buffer before handing it back
+    uint8_t *frame = len > sizeof(struct virtio_net_hdr)
+        ? vn_bounce_take(buffer_idx, len - sizeof(struct virtio_net_hdr)) : 0;
+
     // Re-queue the descriptor BEFORE releasing lock to call net_rx_packet.
     // Avoids race with IRQ handler which could refill the same slot while lock is dropped.
     uint16_t avail_idx = (*rx_avail_idx) % rx_qsize;
@@ -640,9 +693,12 @@ void virtio_net_poll_rx(void) {
       uint16_t used_at = *rx_used_idx;
       spinlock_release_irqrestore(&net_lock, flags);
       virtio_net_inj_stall();
-      net_rx_packet(rx_buffers[buffer_idx], packet_len);
-      virtio_net_rx_note_reuse(used_at);
+      net_rx_packet(frame ? frame : rx_buffers[buffer_idx], packet_len);
+      if (!frame) virtio_net_rx_note_reuse(used_at); /* read from the ring */
       flags = spinlock_acquire_irqsave(&net_lock);
+      vn_bounce_put(frame);
+    } else {
+      vn_bounce_put(frame);
     }
   }
 
