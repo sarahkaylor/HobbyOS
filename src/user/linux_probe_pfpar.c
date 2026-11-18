@@ -14,10 +14,13 @@
  *   R1  six rounds of map / first-touch / unmap of 32 MiB: rounds 1-5 can be
  *       served from the frames the previous round freed (row R1V: their
  *       total ms and worst single fault; reported, not graded).
- * Verdict (PASS/FAIL row
- * P4V): P4's p99.9 single-fault latency must stay under PFPAR_P999_US
- * (default 100 us) -- a fault that waits behind another CPU's zeroing of
- * guest RAM the host has never backed is the shape this lane removes.
+ * The latencies are reported, not graded here: they are mostly the HOST's
+ * first touch of guest RAM, which this kernel cannot change.  What the
+ * kernel owns is whether one thread's fault waits for another's: the
+ * console check tools/gate/lp_check_pfpar.py fails when any [PFX] fault row
+ * of the run shows lw >= 1000 us (a fault that spun >= 1 ms for vm_lock).
+ * Before H7-fault's zeroed-frame stash, three threads waited lw=38 ms while
+ * one zeroed a fresh frame under the lock.
  */
 #define _GNU_SOURCE
 #include <pthread.h>
@@ -31,9 +34,6 @@
 
 #define PG 4096
 #define NPG (64u * 1024u * 1024u / PG)
-#ifndef PFPAR_P999_US
-#define PFPAR_P999_US 100
-#endif
 
 static inline uint64_t rdtsc(void) {
   uint32_t lo, hi;
@@ -145,9 +145,8 @@ int main(void) {
     printf("[LP] P4V a phase failed -> FAIL\n");
     fails++;
   } else {
-    printf("[LP] P4V scaling=%.2f (4 x S1 / P4) p999_us=%.1f bound=%d -> %s\n",
-           4.0 * s1 / p4, p999, PFPAR_P999_US, p999 < PFPAR_P999_US ? "PASS" : "FAIL");
-    if (p999 >= PFPAR_P999_US) fails++;
+    printf("[LP] P4V scaling=%.2f (4 x S1 / P4) p999_us=%.1f (reported; the console check grades lw)\n",
+           4.0 * s1 / p4, p999);
   }
   printf("[LP] done rc=%d\n", fails);
   return fails;
