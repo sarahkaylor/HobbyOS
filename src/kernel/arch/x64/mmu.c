@@ -1006,6 +1006,30 @@ int vm_arch_walk(struct addr_space *as, uint64_t va, uint64_t *leaf) {
   return 0;
 }
 
+/* C1-k7: see vm.h.  Table pages of a live AS are freed only at teardown,
+   which cannot run while one of its threads is in a syscall on this CPU,
+   so the unlocked walk reads stable tables; the leaf itself is re-read
+   by nothing after this (the caller copies through the direct map). */
+int vm_arch_fast_leaf(struct addr_space *as, uint64_t va, int write, uint64_t *pa) {
+  uint32_t c = get_cpuid();
+  if (c >= MAX_CPUS || !as || !as->root_phys ||
+      __atomic_load_n(&v2_active_root[c], __ATOMIC_RELAXED) != as->root_phys)
+    return -1;
+  uint64_t *pte = x64_v2_walk_alloc(as, va, 0);
+  if (!pte)
+    return -1;
+  uint64_t leaf = __atomic_load_n(pte, __ATOMIC_RELAXED);
+  if ((leaf & (X64_PTE_P | X64_PTE_US)) != (X64_PTE_P | X64_PTE_US))
+    return -1;
+  if (write && (!(leaf & X64_PTE_RW) || (leaf & X64_PTE_COW)))
+    return -1;
+  uint64_t a = (leaf & X64_OA_MASK) + (va & 0xFFFULL);
+  if (a >= DMAP_RAM_MAX)
+    return -1;
+  *pa = a;
+  return 0;
+}
+
 /* P5 (D5.7) / S4 (fork clone): OA bits of a leaf returned by
  * vm_arch_walk -- cross-context writes (vm_kwrite) and the v2 fork clone. */
 uint64_t vm_arch_leaf_phys(uint64_t leaf) { return leaf & X64_OA_MASK; }

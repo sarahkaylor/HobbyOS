@@ -741,6 +741,19 @@ uint64_t vm_arch_leaf_phys(uint64_t leaf);
  * test wants to prove the copy it installed is writable. */
 int vm_arch_leaf_writable(uint64_t leaf);
 void vm_arch_teardown(uint64_t root_phys, uint16_t asid);
+/* C1-k7 (x86_64): the copy fast path's leaf lookup (vm_user_read/vm_kwrite).
+ * Lock-free, and only for the address space THIS CPU is running (its root
+ * in CR3): the caller holds IF=0 across the lookup and the copy, so a
+ * munmap/mprotect that drops or downgrades the leaf cannot finish (its
+ * shootdown waits for this CPU) before the copy is done.  0 + the physical
+ * address of `va` when the leaf is present, user, (for a write) writable and
+ * not copy-on-write, and in the direct map; -1 otherwise (take the locked
+ * path, which materializes, breaks COW, or refuses). */
+int vm_arch_fast_leaf(struct addr_space *as, uint64_t va, int write, uint64_t *pa);
+/* C1-k7: copy `len` bytes to (write=1) or from user `va` of p's address
+ * space without vm_lock, when every page is already mapped with the access
+ * (vm.c).  0 = done; -1 = not done, use the locked path. */
+int vm_copy_fast(struct process *p, uint64_t va, void *buf, int len, int write);
 void vm_arch_switch(struct addr_space *as);
 /* L85: which CPU still has `root_phys` loaded as its USER translation, or -1
    when none does.  This is GROUND TRUTH, unlike cpu_current_pids: the claim is
