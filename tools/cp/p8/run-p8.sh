@@ -304,7 +304,7 @@ else
   # or every game boot re-runs wineboot's prefix update (~10 s, writes the
   # prefix, opens H1-05's find_gpu race).  Wine compares the prefix's
   # .update-timestamp with wine.inf's mtime (rsync -a keeps it in the export).
-  PSTAMP="$(debugfs -R 'cat /pfx/.update-timestamp' "$CPD" 2>/dev/null | head -1 | cut -d' ' -f1)"
+  PSTAMP="$(debugfs -R 'cat /pfx/.update-timestamp' "$CPD" 2>/dev/null | head -1 | tr -d '\r' | cut -d' ' -f1)"
   WSTAMP="$(stat -c %Y "$WINE/share/wine/wine.inf" 2>/dev/null)"
   if [ -n "$WSTAMP" ] && [ "$PSTAMP" != "$WSTAMP" ]; then
     echo "== WARNING: prefix stamp ${PSTAMP:-none} != $WINE/share/wine/wine.inf mtime $WSTAMP:" \

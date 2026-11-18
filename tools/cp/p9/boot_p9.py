@@ -104,7 +104,8 @@ def game_view(im, xscreen, game_res="1280x720"):
     if game_res != "1280x720":
         gw, gh = (int(v) for v in game_res.split("x"))
         g = im if im.size == (gw, gh) else im.crop((0, 0, gw, gh))
-        return g.resize((1280, 720))
+        from PIL import Image
+        return g.resize((1280, 720), Image.NEAREST)   # keep the 1-2 px focus frames (cp-hunt H1-17)
     if im.size == (1920, 1080) and xscreen == "1920x1080":
         return im.crop((320, 180, 1600, 900))
     return im if im.size == (1280, 720) else im.crop((0, 0, 1280, 720))
@@ -140,6 +141,10 @@ def focus_in(im, menu):
         return None, None, None
     y0, y1 = max(cl, key=lambda c: c[1] - c[0])
     yc = (y0 + y1) / 2
+    if y1 - y0 > 50:
+        # cp-hunt H1-12: a focused row can be drawn taller (CONTINUE with its save
+        # line under it, rows 451..555): its frame starts at the row, so label by the top
+        yc = y0 + 18
     label = None
     for lab, ry in MENUS[menu]:
         if abs(ry - yc) <= 12:
