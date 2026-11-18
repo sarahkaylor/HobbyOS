@@ -345,7 +345,8 @@ static uint64_t avail_locked(void) {
  * front of the music (cp-hunt H1-01).
  *
  * So the xrun rule uses `vis`: hw, but never more than real time ahead of
- * where it was -- vis = min(hw, vis + elapsed x rate).  A device that plays
+ * where it was -- vis = min(hw, vis + elapsed x rate), and never more than a
+ * buffer behind hw.  A device that plays
  * at real time or slower is unchanged (vis == hw, so a writer that really is
  * late still underruns); a device that runs ahead of the clock cannot drain
  * the writer's buffer faster than the music plays.  Everything else (avail,
@@ -368,6 +369,10 @@ static void vis_update_locked(uint64_t now) {
   S.vis_rem = x % 1000000u;
   uint64_t v = S.vis + x / 1000000u;
   S.vis = v < S.hw ? v : S.hw;
+  /* never more than one buffer behind the device: a writer that stops after
+     a long catch-up still underruns within one buffer time (the bound can
+     never cause an xrun itself: appl >= hw > hw - buffer) */
+  if (S.hw > S.buffer && S.vis < S.hw - S.buffer) S.vis = S.hw - S.buffer;
   if (S.hw - S.vis > S.st_maxahead) S.st_maxahead = S.hw - S.vis;
 }
 
