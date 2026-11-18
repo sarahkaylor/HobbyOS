@@ -27,7 +27,7 @@
 #
 # Env: HUNT_AUDIO=1, HUNT_FROM (P9 run under obj/cp-p9 to start from),
 #      HUNT_LOGS (default ~/cp/lanes/hunt-logs), anything run-p8/run-p9 take.
-# One boot of this lane at a time (flock /tmp/cp-hunt-lane.lock); the QEMU
+# One boot of this tree at a time (flock /tmp/cp-hunt-lane.<tree>.lock); the QEMU
 # slot and the big-guest lock are taken inside the harnesses, for the boot only.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -39,7 +39,11 @@ export PATH="$HOME/.local/bin:$PATH" MAKEFLAGS=-j16 TOOLS_SKIP=1
 # wave 8b: the patched Wine stage (cp-winefix) is the default
 export CP_WINE_STAGE="${CP_WINE_STAGE:-$HOME/cp/wine-cp2/stage/CP/WINE}" WINE_BUILD="${WINE_BUILD:-$HOME/cp/wine-cp2}"
 export VENUS_BUILD="${VENUS_BUILD:-$HOME/cp/lanes/hunt-venus}" VENUS_VNC=1
-exec 196>>/tmp/cp-hunt-lane.lock
+# one boot per TREE (a lane), not per host: other lanes copy this script into
+# their trees, and a shared /tmp/cp-hunt-lane.lock made their boots and this
+# lane's wait for each other (round 2, 2026-11-18).  HUNT_LOCK overrides.
+LOCK="${HUNT_LOCK:-/tmp/cp-hunt-lane.$(basename "$ROOT").lock}"
+exec 196>>"$LOCK"
 flock 196
 
 WAV=""
