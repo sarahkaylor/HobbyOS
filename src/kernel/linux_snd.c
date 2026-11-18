@@ -358,18 +358,13 @@ static uint64_t avail_locked(void) {
  * late still underruns); a device that runs ahead of the clock cannot drain
  * the writer's buffer faster than the music plays.
  *
- * The position user space sees (SYNC_PTR/STATUS hw_ptr, avail, DELAY, the
- * WRITEI room) is vis too: winealsa counts what avail says was played and
- * puts a period of silence in front of the music whenever that is all of it
- * (alsa_write_data's lead-in), so a hw-based avail made the same zeros
- * without any xrun (game boot a2-lane-fp1 with only the xrun rule: 534 -> 8
- * kernel xruns, 5 -> 6 WAV dropouts).  The ring is safe either way (the
- * device has consumed everything below hw >= vis).  Drain still ends on hw.
- * Liveness: vis moves with time, not with interrupts, so SYNC_PTR always
- * services the stream, a parked WRITEI has its deadline, and poll also says
- * POLLOUT when the device is dry (no completion interrupt will come) and hw
- * has room -- the caller re-polls until the clock catches up, at most one
- * buffer time. */
+ * Only the xrun rule uses vis.  avail, hw_ptr, DELAY, poll and drain stay on
+ * hw (no waiter depends on the clock, nothing needs a timer).  Reporting vis
+ * to user space as well was tried (62f90f9a) and reverted: it did not reduce
+ * the game's WAV dropouts (those are winealsa's lead-in, whose accounting
+ * over-counts either way, docs/cp-audio2.md §1) and it cost smaller TX
+ * messages.  SYNC_PTR services the stream on every call, so the clock is
+ * fresh when the writer looks. */
 static void vis_start_locked(void) {
   S.vis = S.clk = S.hw;
   S.vis_us = timer_get_us();
@@ -574,7 +569,7 @@ static int service_locked(void) {
   }
   vis_update_locked(now);
   if (n > 0) {
-    uint64_t av = avail_vis_locked();
+    uint64_t av = avail_locked();
     if (av > S.avail_max) S.avail_max = av;
   }
   if (n > 0) {
@@ -724,7 +719,7 @@ void linux_snd_poll_probe(int minor, int *r, int *w, int *e) {
   case ST_PREPARED:
   case ST_RUNNING:
   case ST_PAUSED:
-    if (avail_vis_locked() >= S.avail_min || (S.inflight == 0 && avail_locked() >= S.avail_min)) *w = 1;
+    if (avail_locked() >= S.avail_min) *w = 1;
     break;
   case ST_DRAINING:
     break;
@@ -909,9 +904,9 @@ static void fill_status(uint8_t *b) { /* 152 bytes, lsnd_lock held */
   put_ts(b + 8, S.trigger_us);
   put_ts(b + 24, timer_get_us());
   uint64_t bd = S.boundary ? S.boundary : ~0ull;
-  uint64_t appl = S.appl % bd, hw = S.vis % bd, av = avail_vis_locked();
+  uint64_t appl = S.appl % bd, hw = S.hw % bd, av = avail_locked();
   int64_t delay = (S.state == ST_RUNNING || S.state == ST_DRAINING || S.state == ST_PAUSED)
-                      ? (int64_t)(S.appl - S.vis) : 0;
+                      ? (int64_t)(S.appl - S.hw) : 0;
   cpy(b + 40, &appl, 8);
   cpy(b + 48, &hw, 8);
   cpy(b + 56, &delay, 8);
@@ -1194,7 +1189,7 @@ static int do_writei(struct process *p, uint64_t arg, int nonblock) {
     spinlock_release_irqrestore(&lsnd_lock, fl);
     return -EBADFD;
   }
-  uint64_t av = avail_vis_locked();
+  uint64_t av = avail_locked();
   uint32_t seen = __atomic_load_n(&lsnd_seq, __ATOMIC_SEQ_CST);
   uint64_t appl = S.appl;
   uint64_t fb = S.frame_bytes, bufsz = S.buffer;
@@ -1331,7 +1326,7 @@ static int pcm_ioctl(struct process *p, uint32_t req, uint64_t arg, int nonblock
     service();
     fl = spinlock_acquire_irqsave(&lsnd_lock);
     int e = hwsync_state_err();
-    int64_t d = (int64_t)(S.appl - S.vis);
+    int64_t d = (int64_t)(S.appl - S.hw);
     spinlock_release_irqrestore(&lsnd_lock, fl);
     if (e) return e;
     return req == PCM_DELAY ? cout(p, arg, &d, 8) : 0;
@@ -1364,7 +1359,7 @@ static int pcm_ioctl(struct process *p, uint32_t req, uint64_t arg, int nonblock
     z(b + 8, 64);
     int32_t st = S.state;
     cpy(b + 8, &st, 4);
-    uint64_t hw = S.vis % bd, appl = S.appl % bd;
+    uint64_t hw = S.hw % bd, appl = S.appl % bd;
     cpy(b + 16, &hw, 8);
     put_ts(b + 24, timer_get_us());
     cpy(b + 72, &appl, 8);
@@ -1462,7 +1457,7 @@ static int pcm_ioctl(struct process *p, uint32_t req, uint64_t arg, int nonblock
         moved = fr < can ? fr : can;
         S.appl -= moved;
       } else {
-        uint64_t can = avail_vis_locked();
+        uint64_t can = avail_locked();
         moved = fr < can ? fr : can;
         S.appl += moved; /* forwarded frames play whatever the ring held */
         submit_locked();

@@ -27,6 +27,11 @@
  *     stall_ms=0     inject one stall of the timer thread of this many ms ...
  *     stall_every=10 ... every this many seconds (first at stall_every)
  *     fmt=float|s16  client format
+ *     skip=0         the game renders nothing on 1 event in N (random; a late
+ *                    audio thread)
+ *     acct=orig|fix  winealsa's played-frames accounting: orig = Wine 11.0
+ *                    (min(data_in_alsa, avail)), fix = the proposed patch
+ *                    (data_in_alsa minus what ALSA still holds), docs/cp-audio2.md §6
  *     fill=0         periods the game renders per event (0 = fill the local
  *                    buffer; 1 = one period, an engine that keeps little
  *                    padding, so winealsa's lead-in after an xrun is silence)
@@ -71,7 +76,8 @@ static short *local_s;
 static float *sil_f;
 static short *sil_s;
 static double ph, hz = 440.0;
-static int fill_periods;
+static int fill_periods, skip_n, acct_fix;
+static unsigned rng = 12345;
 
 /* counters */
 static long n_xrun_state, n_epipe, n_leadin, n_ticks, n_late15, n_late25, n_late40;
@@ -150,7 +156,13 @@ static void write_data(double t_rel) {
   }
   if (held_frames < period_frames) n_starved_fill++;
   unsigned max_copy = data_not_in_alsa();
-  unsigned played = data_in_alsa < avail ? data_in_alsa : (unsigned)avail;
+  unsigned played;
+  if (acct_fix) {
+    unsigned queued = avail < alsa_bufsize ? (unsigned)(alsa_bufsize - avail) : 0;
+    played = data_in_alsa > queued ? data_in_alsa - queued : 0;
+  } else {
+    played = data_in_alsa < avail ? data_in_alsa : (unsigned)avail;
+  }
   data_in_alsa -= played;
   if (held_frames > played) held_frames -= played;
   else held_frames = 0;
@@ -176,6 +188,10 @@ static void *game_thread(void *arg) {
     while (!ev_set && !quit) pthread_cond_wait(&ev, &lk);
     ev_set = 0;
     unsigned room = bufsize_frames - held_frames;
+    if (skip_n > 0) {
+      rng = rng * 1103515245u + 12345u;
+      if ((rng >> 16) % (unsigned)skip_n == 0) room = 0;
+    }
     if (fill_periods > 0 && room > (unsigned)fill_periods * period_frames) room = (unsigned)fill_periods * period_frames;
     for (unsigned i = 0; i < room; i++) {
       float v = (float)(0.5 * sin(ph));
@@ -209,10 +225,13 @@ int main(int argc, char **argv) {
     else if (!strncmp(argv[i], "stall_every=", 12)) stall_every = atof(argv[i] + 12);
     else if (!strncmp(argv[i], "fmt=", 4)) use_float = argv[i][4] == 'f';
     else if (!strncmp(argv[i], "fill=", 5)) fill_periods = atoi(argv[i] + 5);
+    else if (!strncmp(argv[i], "skip=", 5)) skip_n = atoi(argv[i] + 5);
+    else if (!strncmp(argv[i], "acct=", 5)) acct_fix = argv[i][5] == 'f';
   }
   setvbuf(stdout, 0, _IOLBF, 0);
-  printf("[AT] atone alsa-lib %s secs=%.0f hz=%.0f lbuf_ms=%d stall_ms=%d stall_every=%.1f fmt=%s fill=%d\n",
-         snd_asoundlib_version(), secs, hz, lbuf_ms, stall_ms, stall_every, use_float ? "float" : "s16", fill_periods);
+  printf("[AT] atone alsa-lib %s secs=%.0f hz=%.0f lbuf_ms=%d stall_ms=%d stall_every=%.1f fmt=%s fill=%d skip=%d acct=%s\n",
+         snd_asoundlib_version(), secs, hz, lbuf_ms, stall_ms, stall_every, use_float ? "float" : "s16", fill_periods, skip_n,
+         acct_fix ? "fix" : "orig");
   snd_lib_error_set_handler(lib_err);
   snd_config_t *top = 0;
   snd_input_t *in = 0;
