@@ -16,7 +16,40 @@ H3-winefix, H4-kglitch, the integ16 gate batch); the host sampler lists them.
 
 ## Result
 
-<!-- SUMMARY -->
+{BOOTCOUNT}  Headline:
+
+* **No kernel fault in any boot of this lane** (0 `User process fault`,
+  `FATAL`, `#PF in user space`, `[LCOMPAT] fault`, panic, `[TLBTIMEOUT]`,
+  `[STALLBREAK]` rows).  Every such class in the census of 128 older game
+  boots was last seen on 2026-11-17 by 12:36 (wave 5 / early wave 6 trees).
+* **No early exit (H1-02) in this lane's boots** ({EARLYK}); the old run
+  logs have 6, in two populations (2.5–2.9 s and 20–24 s after launch).
+* **Audio: underruns are real** (H1-01): 2 of 2 audio boots, 10 and 22
+  dropouts (exact-zero 10 ms periods inside loud audio) and 7 / 49
+  `snd_pcm_recover) underrun` rows from alsa-lib in the guest, clustered in
+  the save's loading; WAV length / wall time 0.962–0.967 (the stream starts
+  after the launch; no long gaps).
+* **One ~8 s freeze in 28 minutes of play** (H1-15): Venus fences unretired
+  7.7 s while the host's own sampler stalled 8 s; host side.
+* **A 1–2 minute pre-launch stall in 5 of the first 13 boots** (H1-03); the
+  one with a vCPU sample was waiting on the console UART.
+* **Instruments that mislead**: the stall watchdog's "console silent >
+  20 s" is a false positive in every boot (H1-14, root cause: an unsigned
+  wrap; one-line diff), `[BADELR]` fires on the game's PE image (H1-06),
+  the Venus fence-timeout rows are spent in the first 6 s (H1-07).
+* **P9 fps verdict (≥ 30 fps world median at 1280×720 Low):** {FPSVERDICT}
+* **Soak (28 min in the world):** no fps decay (phase medians 34.5 → 43.0,
+  scene-dependent), the game's resident memory 4309 → 4473 MiB (+5.9
+  MiB/min, flat over the last two phases), virtual anon +33 MiB, threads 48
+  throughout: no leak.
+* **Visual review** ({SHOTS} screendumps, numbers only): no black, torn,
+  garbage or stuck frame after the menu; Venus and lavapipe main menus have
+  the same mean colour (63.2 / 59.8 / 81.8 both).  **Input**: across 88 P9
+  run logs, 274 menu taps moved the focus exactly one row, 0 were dropped;
+  one CONTINUE seek lost the focus (H1-12).
+* **Harness gaps found and worked around**: P9 menus at 1920×1080 (H1-08,
+  `fpsprobe-blind.p9`), a stale seeded prefix that makes every boot re-run
+  wineboot's update (H1-04).
 
 ## The catalog (sorted by severity × rate)
 
@@ -252,7 +285,27 @@ sampler running) are left out: the sampler itself costs frames.
 
 <!-- FPSTABLE -->
 
-<!-- MATRIX -->
+## The matrix: what ran (strix, one boot of this lane at a time)
+
+| item | asked | ran | notes |
+|---|---|---|---|
+| 1. P8 to the menu | Venus ×6, lavapipe ×4 | {P8RAN} | P8 table below |
+| 2. P9 fpsprobe | ≥3 × 1280×720 Low, 2 × 1920×1080 Low | h-fp1, h-fp2, h-fp3; h-fq1 (harness fail, H1-08), h-fq1b, h-fq2 | 1080p via `prep-settings.sh Resolution=1920x1080` + `P9_XSCREEN=1920x1080` + `fpsprobe-blind.p9` |
+| 3. play / save / reload | ×2 | {PLAYRAN} | play1: 11.5 min, F5 quick save, QUIT GAME, `QuickSave-0` on the data disk (playTime 4699.4, pos −1408.62, 1223.81, 23.07) |
+| 4. long soak | 1 × 25–30 min | h-soak1 (28.0 min in six phases, + audio) | soak table below |
+| 5. audio | 2 boots with `CP_AUDIO_WAV` | h-fp2, h-soak1 | WAVs measured, then deleted |
+| 6. window modes / settings | 1 windowed, 1 settings change | {WINRAN} | |
+| 7. visual review | all screendumps | `shotcheck.py` over every boot | numbers only; shots stay on strix |
+| 8. input | menus | `inputcheck.py` over this lane's and 88 older P9 run logs | |
+
+Slots: from ~05:00 three of the four QEMU slots were held back to back by
+other lanes' probe batches, and a boot of this lane waited up to 17 minutes
+for one; {DROPPED}
+
+### P8 boots
+
+{P8TABLE}
+
 
 ## Old logs on strix: the census (`classify.py --mine`, `mine_report.py`)
 
