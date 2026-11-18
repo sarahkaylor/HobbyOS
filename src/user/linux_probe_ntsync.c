@@ -940,6 +940,18 @@ static void *g_sigw_fn(void *a) {
   __atomic_store_n(&x->done, 1, __ATOMIC_SEQ_CST);
   return 0;
 }
+/* G5: a thread spinning in user mode; how long until its handler runs */
+static volatile int g5_stop;
+static volatile uint64_t g5_hit_ns;
+static void g5_handler(int sig) {
+  (void)sig;
+  g5_hit_ns = now_ns(CLOCK_MONOTONIC);
+}
+static void *g5_spin(void *a) {
+  (void)a;
+  while (!g5_stop) __asm__ volatile("" ::: "memory");
+  return 0;
+}
 static void t_signals(void) {
   int ev = create_event(dev, 1, 0);
   struct sigaction sa;
@@ -1034,6 +1046,40 @@ static void t_signals(void) {
             "p50=%lluus p90=%lluus max=%lluus (pipe read: %llu/%llu/%lluus) bad=%d",
             (unsigned long long)lat[0][N / 2], (unsigned long long)lat[0][N * 9 / 10], (unsigned long long)lat[0][N - 1],
             (unsigned long long)lat[1][N / 2], (unsigned long long)lat[1][N * 9 / 10], (unsigned long long)lat[1][N - 1], bad);
+  }
+  {
+    /* G5 (informational): the cost of Wine 11 + ntsync's SIGUSR1 for a
+       system APC when the target thread is RUNNING in user mode, not
+       parked: Linux kicks its CPU at once (kick_process). */
+    struct sigaction s5;
+    memset(&s5, 0, sizeof s5);
+    s5.sa_handler = g5_handler;
+    sigaction(SIGUSR2, &s5, 0);
+    enum { N = 40 };
+    uint64_t lat[N];
+    g5_stop = 0;
+    pthread_t th;
+    pthread_create(&th, 0, g5_spin, 0);
+    usleep(20000);
+    for (int i = 0; i < N; i++) {
+      g5_hit_ns = 0;
+      uint64_t t0 = now_ns(CLOCK_MONOTONIC);
+      pthread_kill(th, SIGUSR2);
+      for (int k = 0; k < 2000 && !g5_hit_ns; k++) usleep(100);
+      lat[i] = g5_hit_ns > t0 ? (g5_hit_ns - t0) / 1000 : 999999;
+      usleep(3000);
+    }
+    g5_stop = 1;
+    pthread_join(th, 0);
+    signal(SIGUSR2, SIG_DFL);
+    for (int i = 1; i < N; i++)
+      for (int j = i; j > 0 && lat[j - 1] > lat[j]; j--) {
+        uint64_t t = lat[j];
+        lat[j] = lat[j - 1];
+        lat[j - 1] = t;
+      }
+    row("G5 info: signal -> handler of a thread running in user mode: p50=%lluus p90=%lluus max=%lluus",
+        (unsigned long long)lat[N / 2], (unsigned long long)lat[N * 9 / 10], (unsigned long long)lat[N - 1]);
   }
   signal(SIGUSR1, SIG_DFL);
   close(ev);
