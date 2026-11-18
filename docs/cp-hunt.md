@@ -44,6 +44,25 @@ the big-guest lock.
   through the save list (the evidence that the save is boot A's is the
   position: an immediate F5 after loading writes a quick save whose
   `playerPosition` equals boot A's).  {R12RATE}
+* Why the reload's seek fails (h2-rl2, and round 1's h-rl1b): with some
+  save sets the focused CONTINUE row is drawn **104 px tall** (rows
+  451..555, its save line under it; still there 1.6 s later), and
+  `focus_in()` labels a frame by its centre (503 → NEW GAME).  `seek` then
+  taps Up once more and overshoots onto the frameless button above.
+  `reload2.p9` now takes CONTINUE with two settled Ups (every fresh menu
+  answered Up → NEW GAME, Up → CONTINUE) and lets the loading screen's
+  `expect` check it.  Proposed for `focus_in()` (H2-early; checked offline on
+  the h2-rl1 / h2-rl2 / h2-rl2b shots: only the tall frame's label changes,
+  to CONTINUE):
+
+  ```diff
+       y0, y1 = max(cl, key=lambda c: c[1] - c[0])
+       yc = (y0 + y1) / 2
+  +    if y1 - y0 > 50:
+  +        # cp-hunt H1-12: a focused row can be drawn taller (CONTINUE with its save
+  +        # line under it, rows 451..555): its frame starts at the row, so label by the top
+  +        yc = y0 + 18
+  ```
 * By hand in h2-ctl1: after Esc from Settings the menu showed no focus for
   two Up taps; a relative mouse move of +60 then −60 (QMP `rel` events) and
   the next Up gave NEW GAME, Down gave LOAD GAME (`r2-ctl-preset-focus.txt`).

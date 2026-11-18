@@ -38,3 +38,11 @@ h2-play2: QuickSave-0      name=QuickSave-0 time=15:38:09, 18.11.2026 playTime=4
 h2-rl2b:  QuickSave-0      name=QuickSave-0 time=15:38:09, 18.11.2026 playTime=4701.3 pos=(-1413.00, 1268.48, 23.07)
 h2-rl2b:  QuickSave-1      name=QuickSave-1 time=16:09:08, 18.11.2026 playTime=4721.5 pos=(-1413.00, 1268.48, 23.07)
 # the 104 px frame is still there 1.6 s after the 2nd Up: it is how the focused CONTINUE row is drawn with this save set (taller, with the save's line under it), not a move. focus_in() labels a frame by its centre (503 -> NEW GAME 506), so seek believes it is still on NEW GAME and taps once more. Enter on it loads the newest save (QuickSave-0); the immediate F5 lands on the same playerPosition.
+
+## offline: boot_p9.focus_in() on these shots, and with a top-anchored label for frames taller than 50 px (label by y0 + 18):
+h2-rl2 s015-t000153-menu-continue1.png (489, 524) now: NEW GAME | top-anchored: NEW GAME
+h2-rl2 s016-t000155-menu-continue2.png (451, 555) now: NEW GAME | top-anchored: CONTINUE
+h2-rl2b s013-t000134-menu-continue-a.png (489, 524) now: NEW GAME | top-anchored: NEW GAME
+h2-rl2b s014-t000138-menu-continue-b.png (451, 555) now: NEW GAME | top-anchored: CONTINUE
+h2-rl1 s015-t000154-menu-continue1.png (489, 524) now: NEW GAME | top-anchored: NEW GAME
+h2-rl1 s016-t000156-menu-continue2.png (451, 488) now: CONTINUE | top-anchored: CONTINUE
