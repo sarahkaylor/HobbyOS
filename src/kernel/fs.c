@@ -1,4 +1,5 @@
 #include "fs.h"
+#include "ntsync.h" /* C2-ntsync */
 #include "kline.h"
 #include "process.h"
 #include "pipe.h"
@@ -843,7 +844,20 @@ int file_open_mode(struct process *cur, const char *filename, int flags,
        half releases the client's context/resources. */
     int isgpu = (rest[0] == '/' && rest[1] == 'g' && rest[2] == 'p' &&
                  rest[3] == 'u' && rest[4] == '\0');
-    if (isnull) {
+    /* C2-ntsync: /dev/ntsync (linux_compat_ntsync.c, docs/cp-ntsync.md). */
+    int isntsync = (rest[0] == '/' && rest[1] == 'n' && rest[2] == 't' &&
+                    rest[3] == 's' && rest[4] == 'y' && rest[5] == 'n' &&
+                    rest[6] == 'c' && rest[7] == '\0');
+    if (isntsync) {
+      int nr = ntsync_dev_open(f);
+      if (nr < 0) {
+        f->type = FILE_TYPE_EMPTY;
+        f->ref_count = 0;
+        return nr;
+      }
+      f->type = FILE_TYPE_NTSYNC;
+      f->open_flags = (uint32_t)flags;
+    } else if (isnull) {
       f->type = FILE_TYPE_DEVNULL;
       f->open_flags = (uint32_t)flags;
     } else if (isurand) {
@@ -875,6 +889,7 @@ int file_open_mode(struct process *cur, const char *filename, int flags,
     int dfd = -1;
     dfd = fd_install(cur, f);
     if (dfd == -1) {
+      if (f->type == FILE_TYPE_NTSYNC) ntsync_file_release(f); /* C2-ntsync */
       f->type = FILE_TYPE_EMPTY;
       f->ref_count = 0;
       return -EMFILE;
@@ -2485,6 +2500,7 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
     return 0;
   case FILE_TYPE_EVENTFD:
   case FILE_TYPE_SIGNALFD: /* C1-k6: an anon inode, like eventfd */
+  case FILE_TYPE_NTSYNC:   /* C2-ntsync: objects are anon inodes on Linux */
     k_stat_fill(st, K_DEV_DEVFS, (unsigned long)g_fd + 0x200000, 0600, 0);
     return 0;
   default:
@@ -3081,6 +3097,8 @@ int file_close(struct process *cur, int fd) {
     } else if (f->type == FILE_TYPE_SIGNALFD) {
       extern void l_signalfd_count(int delta);
       l_signalfd_count(-1); /* C1-k6 */
+    } else if (f->type == FILE_TYPE_NTSYNC) {
+      ntsync_file_release(f); /* C2-ntsync: takes only the driver's lock */
     } else if (f->type == FILE_TYPE_SOCKET) {
       net_socket_close(f->socket.pcb);
     }
@@ -3236,6 +3254,8 @@ void fs_close_global(int g_fd) {
     } else if (f->type == FILE_TYPE_SIGNALFD) {
       extern void l_signalfd_count(int delta);
       l_signalfd_count(-1); /* C1-k6 */
+    } else if (f->type == FILE_TYPE_NTSYNC) {
+      ntsync_file_release(f); /* C2-ntsync: takes only the driver's lock */
     } else if (f->type == FILE_TYPE_SOCKET) {
       net_socket_close(f->socket.pcb);
     }
@@ -4728,6 +4748,53 @@ int file_is_devgpu(struct process *p, int fd) {
   if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
     return 0;
   return gfile(gfd)->type == FILE_TYPE_DEVGPU;
+}
+
+/* ---- C2-ntsync (docs/cp-ntsync.md): the driver's view of its fds ------- */
+int file_is_ntsync(struct process *p, int fd) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS)
+    return 0;
+  int gfd = p->open_fds[fd];
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
+    return 0;
+  return gfile(gfd)->type == FILE_TYPE_NTSYNC;
+}
+
+/* Lock-free on purpose: the driver calls this under its own lock, and
+   ntsync_file_release() clears f->ntsync.obj under that same lock before the
+   object can go, so a non-zero answer is a live, referenced object. */
+void *file_ntsync_obj(struct process *p, int fd) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS)
+    return 0;
+  int gfd = p->open_fds[fd];
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
+    return 0;
+  struct file *f = gfile(gfd);
+  if (__atomic_load_n(&f->type, __ATOMIC_ACQUIRE) != FILE_TYPE_NTSYNC)
+    return 0;
+  return __atomic_load_n(&f->ntsync.obj, __ATOMIC_ACQUIRE);
+}
+
+/* Linux: anon_inode_getfile(.., O_RDWR) + get_unused_fd_flags(O_CLOEXEC). */
+int file_ntsync_install(struct process *cur, void *obj) {
+  cur = process_group(cur);
+  if (!cur || cur->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
+  struct file *f = file_alloc();
+  if (!f) return -ENFILE;
+  f->ntsync.obj = obj;
+  f->open_flags = 0x2; /* O_RDWR */
+  f->path[0] = '\0';
+  __atomic_store_n(&f->type, FILE_TYPE_NTSYNC, __ATOMIC_RELEASE);
+  int ufd = fd_install_cloexec(cur, f, 1);
+  if (ufd < 0) {
+    f->ntsync.obj = 0;
+    f->type = FILE_TYPE_EMPTY;
+    f->ref_count = 0;
+    return -EMFILE;
+  }
+  return ufd;
 }
 
 /* fcntl(F_ADD_SEALS/F_GET_SEALS) for memfd (design 4.3, OQ7 minimal set:

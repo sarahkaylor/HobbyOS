@@ -1,0 +1,42 @@
+# P8 on Venus with the ntsync Wine stage, lane kernel d6174e3f with the long-waiter list on, strix; 12 GiB, ntsync-venus Mesa
+# CP_WINE_STAGE=~/cp/lanes/ntsync-wine/stage/CP/WINE P8_GPU=venus VENUS_WORK=VENUS_BUILD=~/cp/lanes/ntsync-venus VENUS_VNC=1 P8_EXPORT=/srv/nfs/cp-ntsync-p8 P8_RUN=ns-dbg1 TIMEOUT_S=2400 P8_STALL_S=600 P8_GAME_S=700 bash tools/cp/p8/run-p8.sh
+[P8W] +     0.0 s  20:31:49  slot 4 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 2
+[P8W] +     6.3 s  20:31:56  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
+[P8W] +    22.3 s  20:32:12  warm-up result: [P8] warm-up: display driver loaded
+[P8W] +    25.3 s  20:32:15  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8W] +    25.4 s  20:32:15  baseline screendump 1920x1080 (desktop before the game's window)
+[P8W] +    40.7 s  20:32:30  first screen change after launch (99.9% of the screen differs from the baseline): s002-t000015
+[P8W] +   103.2 s  20:33:33  title prompt 'PRESS ... TO CONTINUE' at s006-t000077: sent one Space (#1)
+[P8W] +   149.7 s  20:34:19  title prompt 'PRESS ... TO CONTINUE' at s009-t000123: sent one Space (#2)
+[P8W] +   164.7 s  20:34:34  main menu OCR at s010-t000139: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   170.7 s  20:34:40  main menu OCR at s011-t000145: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   176.7 s  20:34:46  main menu OCR at s012-t000151: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   179.5 s  20:34:49  verdict: main-menu; QEMU stopped, slot released; guests on the host now: 3
+
+# reference, integ10 batch (integ-gates13, stock Wine): title prompt +155.5 s, main menu +216.5 s
+
+# kernel [NTSYNC] rows of that boot (stats every 30 s from the ioctl path; LOSTWAKE would name a satisfiable queued wait: none)
+[NTSYNC] open /dev/ntsync pid=19 name=wineserver n=1
+[NTSYNC] stats opens=1 sem/mutex/event=6/30/2830 live=650 max=652 any/all=748/0 imm=260 parks=471 tmo=21 eintr=202 alert=0 dead=0 wakes=489 set/rel/unl/kill=3902/1/40/189 skip=0 stale=0
+[NTSYNC] waiters long=28 satisfiable=0
+[NTSYNC] stats opens=1 sem/mutex/event=9/30/6618 live=841 max=895 any/all=14289/0 imm=4969 parks=9139 tmo=2117 eintr=207 alert=0 dead=0 wakes=11920 set/rel/unl/kill=26349/3481/66/569 skip=0 stale=0
+[NTSYNC] waiters long=40 satisfiable=0
+[NTSYNC] stats opens=1 sem/mutex/event=11/31/12037 live=849 max=895 any/all=33907/0 imm=12292 parks=21315 tmo=4787 eintr=207 alert=0 dead=0 wakes=28868 set/rel/unl/kill=69917/8144/67/569 skip=0 stale=0
+[NTSYNC] waiters long=39 satisfiable=0
+[NTSYNC] stats opens=1 sem/mutex/event=11/31/18763 live=851 max=895 any/all=64819/0 imm=25305 parks=38981 tmo=7813 eintr=207 alert=0 dead=0 wakes=56755 set/rel/unl/kill=127647/18267/67/569 skip=0 stale=0
+[NTSYNC] waiters long=38 satisfiable=0
+[NTSYNC] stats opens=1 sem/mutex/event=11/31/26011 live=851 max=895 any/all=101715/0 imm=42332 parks=58539 tmo=10929 eintr=207 alert=0 dead=0 wakes=90535 set/rel/unl/kill=189029/31314/67/569 skip=0 stale=0
+[NTSYNC] waiters long=37 satisfiable=0
+# [THRW] at the main menu: wineserver / Cyberpunk2077.e (last 6 rows)
+[THRW] pid=19 ticks=500 run=0.15 ready=0.07 futex=0.00 blk 232:0.77 kern=0.14 trap=0.02 wineserver
+[THRW] pid=19 ticks=500 run=0.13 ready=0.02 futex=0.00 blk 232:0.84 kern=0.11 trap=0.03 wineserver
+[THRW] pid=19 ticks=500 run=0.13 ready=0.06 futex=0.00 blk 232:0.80 kern=0.12 trap=0.02 wineserver
+[THRW] pid=19 ticks=500 run=0.10 ready=0.06 futex=0.00 blk 232:0.83 kern=0.09 trap=0.03 wineserver
+[THRW] pid=19 ticks=500 run=0.11 ready=0.05 futex=0.00 blk 232:0.83 kern=0.10 trap=0.02 wineserver
+[THRW] pid=19 ticks=500 run=0.10 ready=0.04 futex=0.00 blk 232:0.85 kern=0.09 trap=0.01 wineserver
+[THRW] pid=92 ticks=500 run=2.79 ready=0.50 futex=24.11 blk 16:13.38 23:5.72 0:0.07 230:0.40 7:0.00 kern=1.93 trap=0.16 Cyberpunk2077.e
+[THRWK] pid=92 ksys 16:1.32 1:0.00 228:0.20 202:0.09 186:0.01 23:0.03 47:0.01 24:0.01 98:0.04 20:0.01
+[THRWT] pid=92 top 92:70/2/29/9(1=0,228=12,16=1,24=0) 121:57/4/56/0(16=56,202=0) 165:42/11/41/0(16=40,202=0)
+[THRW] pid=92 ticks=500 run=2.91 ready=0.44 futex=24.04 blk 16:13.36 23:5.78 0:0.04 230:0.40 1:0.00 kern=2.04 trap=0.15 Cyberpunk2077.e
+[THRWK] pid=92 ksys 228:0.21 16:1.39 0:0.01 14:0.02 202:0.08 1:0.01 186:0.01 24:0.01 23:0.03 98:0.06
+[THRWT] pid=92 top 92:71/0/33/9(228=15,14=0,16=1,186=0) 121:61/4/60/0(16=60) 165:39/12/37/0(16=37,202=0)

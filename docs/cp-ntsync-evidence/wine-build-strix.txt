@@ -1,0 +1,43 @@
+# tools/cp/ntsync/build-ntsync-wine.sh on strix (SRC=~/cp/wine-build-x untouched, OUT=~/cp/lanes/ntsync-wine)
+006437ee52a3e04f921df77081eb5c21c44c71f598b10ac534c6ef9e78296262  /usr/include/linux/ntsync.h
+006437ee52a3e04f921df77081eb5c21c44c71f598b10ac534c6ef9e78296262  /home/sarah/cp/lanes/ntsync-wine/build-x86_64/include/linux/ntsync.h
+[ntsync-wine] configure line: /home/sarah/cp/wine-build-x/src/wine-11.0/configure --prefix=/CP/WINE --enable-archs=x86_64 --disable-tests --with-x --x-includes=/home/sarah/cp/x11-build-x2/destdir/CP/X11/include --x-libraries=/home/sarah/cp/x11-build-x2/destdir/CP/X11/lib --without-alsa --without-capi --without-coreaudio --without-cups --without-dbus --without-ffmpeg --without-fontconfig --without-
+[ntsync-wine] scratch configure: CC='clang --sysroot=/home/sarah/cp/sysroot-glibc231' LDFLAGS='-Wl,-rpath-link,/home/sarah/cp/x11-build-x2/destdir/CP/X11/lib -L/home/sarah/cp/wine-build-x/vkstub' PKG_CONFIG_LIBDIR=/home/sarah/cp/sysroot-glibc231/usr/lib/x86_64-linux-gnu/pkgconfig:/home/sarah/cp/x11-build-x2/pc
+[ntsync-wine] config.h diff (original vs configure with the header):
+200c200
+< /* #undef HAVE_LINUX_NTSYNC_H */
+---
+> #define HAVE_LINUX_NTSYNC_H 1
+200:#define HAVE_LINUX_NTSYNC_H 1
+[ntsync-wine] make (MAKEFLAGS=-j16)
+clang --sysroot=/home/sarah/cp/sysroot-glibc231 -m64 -c -o dlls/ntdll/unix/sync.o /home/sarah/cp/wine-build-x/src/wine-11.0/dlls/ntdll/unix/sync.c -Idlls/ntdll 
+clang --sysroot=/home/sarah/cp/sysroot-glibc231 -m64 -c -o server/inproc_sync.o /home/sarah/cp/wine-build-x/src/wine-11.0/server/inproc_sync.c -Iserver \
+clang --sysroot=/home/sarah/cp/sysroot-glibc231 -m64 -o server/wineserver server/async.o server/atom.o server/change.o server/class.o server/clipboard.o \
+  server/inproc_sync.o server/mach.o server/mailslot.o server/main.o server/mapping.o server/mutex.o \
+clang --sysroot=/home/sarah/cp/sysroot-glibc231 -m64 -o dlls/ntdll/ntdll.so -shared -Wl,-Bsymbolic -Wl,-soname,ntdll.so -Wl,-z,defs dlls/ntdll/unix/cdrom.o \
+[ntsync-wine] strip method reproduces the original stage byte-for-byte
+bin/wineserver                           orig 1d4bbc62590a08b0  ntsync 30e0097442dec1fb
+lib/wine/x86_64-unix/ntdll.so            orig 4b335d8d61963851  ntsync 7edb00d18f675486
+wineserver mentions /dev/ntsync: 1
+[ntsync-wine] done: stage /home/sarah/cp/lanes/ntsync-wine/stage/CP/WINE
+
+# stage files that differ from ~/cp/wine-build-x/stage (all others byte-identical):
+  differs: CP/WINE/bin/wineserver
+  differs: CP/WINE/lib/wine/x86_64-unix/ntdll.so
+# wineserver strings: /dev/ntsync
+# original wineserver mentions /dev/ntsync: 0
+
+# final state of ~/cp/lanes/ntsync-wine after the lane (the 1.3 GiB build copy removed; config.h kept as config-ntsync.h):
+drwxrwxr-x  3 sarah sarah   4096 Nov 17 22:23 .
+drwxrwxr-x 84 sarah sarah  20480 Nov 17 22:25 ..
+-rw-rw-r--  1 sarah sarah      0 Nov 16 09:47 .config-h-mtime
+lrwxrwxrwx  1 sarah sarah     40 Nov 17 22:23 build-x86_64 -> /home/sarah/cp/wine-build-x/build-x86_64
+-rw-rw-r--  1 sarah sarah     79 Nov 17 20:06 config-h.diff
+-rw-rw-r--  1 sarah sarah  26500 Nov 17 22:23 config-ntsync.h
+-rw-rw-r--  1 sarah sarah  12906 Nov 17 20:06 make.log
+-rw-rw-r--  1 sarah sarah    229 Nov 17 20:06 ntsync-header.sha256
+lrwxrwxrwx  1 sarah sarah     31 Nov 17 21:20 src -> /home/sarah/cp/wine-build-x/src
+drwxr-xr-x  3 sarah sarah   4096 Nov 16 09:49 stage
+-rw-rw-r--  1 sarah sarah 102020 Nov 17 20:06 stage-manifest.sha256
+200:#define HAVE_LINUX_NTSYNC_H 1
+204M	/home/sarah/cp/lanes/ntsync-wine/stage

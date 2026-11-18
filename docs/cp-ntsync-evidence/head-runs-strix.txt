@@ -1,0 +1,166 @@
+# Lane HEAD e779730a (strix tree ~/cp/lanes/ntsync-dev), one boot each, same kernel, ntsync Wine vs stock X Wine
+# driver: ~/cp/lanes/ntsync-head.sh (probe; run-wine-p2.sh; run-thrstorm.sh; run-wine-p5.sh with the integ batch env)
+tree e779730a linux_probe_ntsync: X4/X5 CREATE_EVENT + close cost (the wineserver's per-object price) start 21:14:02
+probe rc=0 [LP] done rc=0 116 PASS rows
+p2-ntsync rc=0 [P2] end wineboot status=0 ms=16524 G1 wine cmd /c echo hello prints hello : PASS ([P2] end echo status=0 |G2 winprobe.exe every marker + exit 0 : PASS ([P2] end winprobe status|G3 wineserver -k leaves no processes : PASS ([P2] end kill status=0 ms|
+p2-stock rc=0 [P2] end wineboot status=0 ms=29506 G1 wine cmd /c echo hello prints hello : PASS ([P2] end echo status=0 |G2 winprobe.exe every marker + exit 0 : PASS ([P2] end winprobe status|G3 wineserver -k leaves no processes : PASS ([P2] end kill status=0 ms|
+thrstorm-ntsync rc=0 [K5] end wineboot status=0 ms=11222 [TS] PASS T1 create (threads=256 why=0) [TS] PASS T1 start (started=256 toolhelp=257) [TS] PASS T2 storm (rounds=973 ms=60059) [TS] PASS T3 stop (bad=0 first=0) 
+thrstorm-stock rc=0 [K5] end wineboot status=0 ms=15551 [TS] PASS T1 create (threads=256 why=0) [TS] PASS T1 start (started=256 toolhelp=257) [TS] PASS T2 storm (rounds=781 ms=60048) [TS] PASS T3 stop (bad=0 first=0) 
+p5-ntsync rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12, fullscr each ran >= 60 s under Wine with two distinct, recognisable screendumps 
+p5-stock rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12, fullscr each ran >= 60 s under Wine with two distinct, recognisable screendumps 
+ALLDONE 21:46:52
+
+## probe on HEAD (every row)
+[LP] linux_probe_ntsync: /dev/ntsync (UAPI restated; no <linux/ntsync.h> at build)
+[LP] N0 open(/dev/ntsync, O_RDONLY|O_CLOEXEC)          fd=3  -> PASS
+[LP] N1 object fds are O_RDWR | O_CLOEXEC              fd=4 fd_flags=1 fl=0x2 -> PASS
+[LP] S1 create count 3 > max 2                         -1 EINVAL -> PASS
+[LP] S2 create sem 2/2 -> fd                           fd=4 -> PASS
+[LP] S3 SEM_READ                                       0 2/2 -> PASS
+[LP] S4 release 0 (fits)                               0 prev=2 count=2 -> PASS
+[LP] S5 release 1 past max -> EOVERFLOW, unchanged     EOVERFLOW count=2 -> PASS
+[LP] S6 wait takes one                                 0 idx=0 count=1 -> PASS
+[LP] S7 wait takes the last                            0 idx=0 count=0 -> PASS
+[LP] S8 empty -> ETIMEDOUT                             ETIMEDOUT -> PASS
+[LP] S9 release 3 > max -> EOVERFLOW                   EOVERFLOW count=0 -> PASS
+[LP] S10 release 2 -> prev 0, count 2                   0 prev=0 count=2 -> PASS
+[LP] S11 release 1 at max -> EOVERFLOW                  EOVERFLOW -> PASS
+[LP] S12 drain, release 1 -> prev 0, count 1            0 prev=0 count=1 -> PASS
+[LP] S13 release UINT_MAX (u32 overflow) -> EOVERFLOW   EOVERFLOW count=1 -> PASS
+[LP] S14 mutex/event ops on a sem -> EINVAL             EINVAL EINVAL EINVAL -> PASS
+[LP] S15 SEM_RELEASE(NULL) -> EFAULT                    EFAULT -> PASS
+[LP] M1 create owner!=0,count 0 / owner 0,count 2      EINVAL EINVAL -> PASS
+[LP] M2 create 123/2, MUTEX_READ                       0 count=2 owner=123 -> PASS
+[LP] M3 other owner waits -> ETIMEDOUT                 ETIMEDOUT -> PASS
+[LP] M4 owner re-acquires (recursive)                  0 count=3 -> PASS
+[LP] M5 unlock owner 0 -> EINVAL, 456 -> EPERM         EINVAL EPERM count=3 -> PASS
+[LP] M6 unlock x3 -> prev 3,2,1; unowned               prev=3,2,1 count=0 owner=0 -> PASS
+[LP] M7 unlock unowned -> EPERM                        EPERM -> PASS
+[LP] M8 456 acquires the free mutex                    0 count=1 owner=456 -> PASS
+[LP] M9 kill 0 -> EINVAL, 123 -> EPERM, 456 -> 0       EINVAL EPERM 0 -> PASS
+[LP] M10 MUTEX_READ of abandoned -> EOWNERDEAD          EOWNERDEAD count=0 owner=0 -> PASS
+[LP] M11 wait on abandoned -> EOWNERDEAD idx 0, owned   EOWNERDEAD idx=0 read=0 count=1 owner=123 -> PASS
+[LP] M12 unlock, then kill unowned -> EPERM             0 prev=1 EPERM -> PASS
+[LP] M13 kill by owner, re-acquire -> EOWNERDEAD        0 EOWNERDEAD count=1 owner=123 -> PASS
+[LP] M14 create unowned 0/0, acquire                    0 0 count=1 owner=123 -> PASS
+[LP] M15 count UINT_MAX: owner cannot recurse           ETIMEDOUT count=4294967295 -> PASS
+[LP] E1 manual event create, EVENT_READ                0 sig=0 manual=1 -> PASS
+[LP] E2 set -> prev 0, signaled                        0 prev=0 sig=1 -> PASS
+[LP] E3 set again -> prev 1                            0 prev=1 -> PASS
+[LP] E4 wait on manual keeps it signaled               0 sig=1 -> PASS
+[LP] E5 reset -> prev 1; again -> prev 0               prev=1,0 sig=0 -> PASS
+[LP] E6 wait on reset event -> ETIMEDOUT               ETIMEDOUT -> PASS
+[LP] E7 pulse a set manual event -> prev 1, reset      0 prev=1 sig=0 -> PASS
+[LP] E8 pulse with no waiter -> prev 0, stays reset    0 prev=0 sig=0 -> PASS
+[LP] E9 auto event create signaled                     0 sig=1 manual=0 -> PASS
+[LP] E10 wait on auto resets it                         0 sig=0 -> PASS
+[LP] E11 again -> ETIMEDOUT                             ETIMEDOUT -> PASS
+[LP] E12 auto set -> prev 0 sig 1; reset -> prev 1      prev=0 sig=1 prev=1 sig=0 -> PASS
+[LP] E13 auto pulse, no waiter -> prev 0, reset         0 prev=0 sig=0 -> PASS
+[LP] E14 create {manual 7, signaled 9} reads as booleans sig=1 manual=1 -> PASS
+[LP] A1 [sem 2, mutex free] -> sem first               0 idx=0 sem=1 -> PASS
+[LP] A2 again -> sem                                   0 idx=0 sem=0 -> PASS
+[LP] A3 sem empty -> mutex                             0 idx=1 mutex=1/123 -> PASS
+[LP] A4 owner again -> mutex (count 2)                 0 idx=1 count=2 -> PASS
+[LP] A5 456: sem empty, mutex owned -> ETIMEDOUT       ETIMEDOUT -> PASS
+[LP] A6 456 after release -> sem                       0 idx=0 -> PASS
+[LP] A7 456 again -> ETIMEDOUT                         ETIMEDOUT -> PASS
+[LP] A8 duplicate fds are allowed in WAIT_ANY          ETIMEDOUT 0 idx=0 sem=0 -> PASS
+[LP] A9 count 0 -> ETIMEDOUT                           ETIMEDOUT -> PASS
+[LP] A10 abandoned mutex at index 1 -> EOWNERDEAD idx 1 EOWNERDEAD idx=1 mutex=1/456 -> PASS
+[LP] L1 [sem 2, mutex free] -> both taken              0 idx=0 sem=1 mutex=1/123 -> PASS
+[LP] L2 again -> sem 0, mutex 2                        0 sem=0 mutex=2 -> PASS
+[LP] L3 sem empty -> ETIMEDOUT, mutex untouched        ETIMEDOUT sem=0 mutex=2 -> PASS
+[LP] L4 456: mutex owned -> ETIMEDOUT, sem NOT taken   ETIMEDOUT sem=1 -> PASS
+[LP] L5 [sem, manual set] -> sem taken, event stays    0 sem=0 ev=1 -> PASS
+[LP] L6 [sem, auto set] -> both consumed               0 sem=0 ev=0 -> PASS
+[LP] L7 duplicate fds in WAIT_ALL -> EINVAL            EINVAL -> PASS
+[LP] L8 abandoned mutex in a set -> EOWNERDEAD, taken  EOWNERDEAD idx=0 mutex=1/456 -> PASS
+[LP] I1 the device fd as an object -> EINVAL           EINVAL EINVAL -> PASS
+[LP] I2 a pipe fd as an object -> EINVAL               EINVAL -> PASS
+[LP] I3 fd -1 -> EINVAL                                EINVAL -> PASS
+[LP] I4 pad != 0 / flags 2 / count 65 -> EINVAL        EINVAL EINVAL EINVAL -> PASS
+[LP] I5 objs NULL / args NULL -> EFAULT                EFAULT EFAULT -> PASS
+[LP] I6 object ioctl on device / create on object -> ENOTTY ENOTTY ENOTTY -> PASS
+[LP] I7 an object of another device -> EINVAL          EINVAL EINVAL own=0 -> PASS
+[LP] I8 a dup keeps the object after close             0 prev=1 0 -> PASS
+[LP] W1 sem release wakes the waiter (takes it)        early=0 err=0 idx=0 sem=0 -> PASS
+[LP] W2 mutex unlock hands it to the waiter            early=0 err=0 idx=1 mutex=1/456 -> PASS
+[LP] W3 MUTEX_KILL wakes the waiter with EOWNERDEAD    early=0 kill=0 err=EOWNERDEAD idx=1 -> PASS
+[LP] W4 manual set wakes, stays set                    early=0 err=0 sig=1 -> PASS
+[LP] W5 manual pulse wakes the queued waiter, ends reset early=0 err=0 sig=0 -> PASS
+[LP] W6 auto set wakes and is consumed                 early=0 err=0 sig=0 -> PASS
+[LP] W7 auto pulse wakes the queued waiter             early=0 err=0 -> PASS
+[LP] W8 monotonic 100 ms timeout                       err=ETIMEDOUT elapsed=99998us -> PASS
+[LP] W9 REALTIME absolute 100 ms timeout               err=ETIMEDOUT elapsed=99991us -> PASS
+[LP] W10 a past REALTIME deadline returns at once       ETIMEDOUT 3us -> PASS
+[LP] W11 close while waited on: wait still times out    early=0 err=ETIMEDOUT -> PASS
+[LP] W12 manual set wakes all 3 waiters                 woken=3 -> PASS
+[LP] W13 manual pulse wakes all 3, ends reset           woken=3 sig=0 -> PASS
+[LP] W14 auto set wakes exactly one at a time           after1=1 after2=2 timedout=1 -> PASS
+[LP] W15 release 2 with 3 waiters: 2 woken, 1 times out woken=2 timedout=1 sem=0 -> PASS
+[LP] W16 FIFO: the earlier waiter gets the first release first=1 second=0 -> PASS
+[LP] W17 EVENT_SET -> parked waiter returns (latency)   p50=12us p90=18us max=24us bad=0 -> PASS
+[LP] B1 1 of 4 signaled: still waiting, sem not taken  early=0 done=0 sem=1 -> PASS
+[LP] B2 3 of 4: still waiting, mutex free              d2=0 d3=0 mutex=0/0 -> PASS
+[LP] B3 4th signal: all taken at once                  err=0 idx=0 sem=0 mutex=1/456 man=1 auto=0 -> PASS
+[LP] B4 a satisfiable WAIT_ALL is served before WAIT_ANY all=0 any=ETIMEDOUT -> PASS
+[LP] B5 an unsatisfiable WAIT_ALL leaves the sem to WAIT_ANY all=ETIMEDOUT any=0 -> PASS
+[LP] R1 ANY: signaled alert -> index count, consumed   0 idx=1 alert=0 -> PASS
+[LP] R2 ANY: object and alert -> the object wins       0 idx=0 alert=1 -> PASS
+[LP] R3 ANY count 0 + alert -> index 0 (== count)      0 idx=0 -> PASS
+[LP] R4 nothing signaled -> ETIMEDOUT                  ETIMEDOUT -> PASS
+[LP] R5 ALL: sem empty + alert -> index count          0 idx=2 -> PASS
+[LP] R6 ALL: all signaled + alert -> the set wins      0 idx=0 alert=1 -> PASS
+[LP] R7 a parked ANY is ended by the alert (index count) early=0 err=0 idx=1 -> PASS
+[LP] R8 a parked ALL is ended by the alert (index count) early=0 err=0 idx=2 -> PASS
+[LP] R9 ALL: the alert repeating an object -> EINVAL   EINVAL -> PASS
+[LP] G1 a handled signal (no SA_RESTART) -> EINTR      done=1 err=EINTR hits=1 -> PASS
+[LP] G2 SA_RESTART handler: restarted (Linux) or EINTR hits=1 EINTR-before-set -> PASS
+[LP] G3 pulse + signal races: only 0 or EINTR          ok=20/20 -> PASS
+[LP] G4 signal -> EINTR latency, ntsync wait           p50=44us p90=57us max=69us (pipe read: 46/55/56us) bad=0 -> PASS
+[LP] G5 info: signal -> handler of a thread running in user mode: p50=44us p90=48us max=63us
+[LP] F1 fds over SCM_RIGHTS: child waits, parent signals send=0 wait=0 child=0 -> PASS
+[LP] F2 a forked child acquires the shared mutex       child=0 mutex=1/99 -> PASS
+[LP] F3 server abandons the dead client's mutex        kill=0 wait=EOWNERDEAD -> PASS
+[LP] F4 SIGKILLed waiter: the release is not lost      sem=1 wait=0 -> PASS
+[LP] X1 stress_wait_any: 8 threads x 20000, one mutex  counter=160000/160000 568ms (3.55 us/op) -> PASS
+[LP] X2 stress_wait_all: 8 threads x 20000, one mutex  counter=160000/160000 539ms (3.37 us/op) -> PASS
+[LP] X3 event ping-pong round trip (2 threads)         5000 trips, 7.10 us/trip -> PASS
+[LP] X4 CREATE_EVENT + close                           1.08 us per pair (kept 0, failed 0) -> PASS
+[LP] X5 CREATE_EVENT + close, 1500 objects open        1.44 us per pair (kept 1500, failed 0) -> PASS
+[LP] done rc=0
+[NTSYNC] device-closed calls=425 ns/call=1134 opens=3 sem/mutex/event=13/10/12 live=1 max=6 any/all=236/16 imm=35 parks=196 tmo=20 eintr=42 alert=5 dead=6 wakes=181 set/rel/unl/kill=197/24/12/8 skip=1 stale=1
+[NTSYNC] device-closed calls=348643 ns/call=422 opens=3 sem/mutex/event=13/12/11514 live=0 max=1502 any/all=170236/160016 imm=6707 parks=323520 tmo=20 eintr=42 alert=5 dead=6 wakes=330181 set/rel/unl/kill=10197/24/320012/8 skip=1 stale=1
+
+## P2 ntsync
+[P2] end wineboot status=0 ms=16524
+G1 wine cmd /c echo hello prints hello : PASS   ([P2] end echo status=0 ms=6693)
+G2 winprobe.exe every marker + exit 0  : PASS   ([P2] end winprobe status=0 ms=6137; 41 markers, 0 missing/failed)
+G3 wineserver -k leaves no processes   : PASS   ([P2] end kill status=0 ms=438; [P2] ps-extra count=0)
+extra: winprobe from C:\ (the prefix) : [WP] done rc=0 ([P2] end winprobe-c status=0 ms=543)
+[NTSYNC] device-closed calls=22598 ns/call=1637 opens=2 sem/mutex/event=8/58/9469 live=4 max=506 any/all=1667/0 imm=764 parks=903 tmo=1 eintr=710 alert=0 dead=0 wakes=955 set/rel/unl/kill=11395/4/50/783 skip=0 stale=0
+
+## P2 stock
+[P2] end wineboot status=0 ms=29506
+G1 wine cmd /c echo hello prints hello : PASS   ([P2] end echo status=0 ms=3313)
+G2 winprobe.exe every marker + exit 0  : PASS   ([P2] end winprobe status=0 ms=5038; 41 markers, 0 missing/failed)
+G3 wineserver -k leaves no processes   : PASS   ([P2] end kill status=0 ms=525; [P2] ps-extra count=0)
+extra: winprobe from C:\ (the prefix) : [WP] done rc=0 ([P2] end winprobe-c status=0 ms=341)
+
+## P5 ntsync
+[P5W] boot finished after 288 s; lock released
+[P5W] vkcube: PASS
+[P5W] d3d11: PASS
+[P5W] d3d12: PASS
+[P5W] fullscr: PASS
+[P5W] PASS: vkcube, d3d11, d3d12, fullscr each ran >= 60 s under Wine with two distinct, recognisable screendumps
+[NTSYNC] stats calls=132829 ns/call=3655 opens=2 sem/mutex/event=6/85/9280 live=469 max=525 any/all=74384/0 imm=36825 parks=37558 tmo=470 eintr=695 alert=0 dead=0 wakes=73187 set/rel/unl/kill=49544/36015/115/864 skip=0 stale=0
+
+## P5 stock
+[P5W] boot finished after 300 s; lock released
+[P5W] vkcube: PASS
+[P5W] d3d11: PASS
+[P5W] d3d12: PASS
+[P5W] fullscr: PASS
+[P5W] PASS: vkcube, d3d11, d3d12, fullscr each ran >= 60 s under Wine with two distinct, recognisable screendumps

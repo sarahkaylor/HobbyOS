@@ -98,7 +98,10 @@ typedef enum {
   FILE_TYPE_EVENTFD,
   /* C1-k6: a signalfd (linux_compat_fd.c reads it: the reader's pending
      signals in the fd's mask, dequeued as signalfd_siginfo records). */
-  FILE_TYPE_SIGNALFD
+  FILE_TYPE_SIGNALFD,
+  /* C2-ntsync: /dev/ntsync or one of its objects (sem / mutex / event);
+     linux_compat_ntsync.c owns the object (f->ntsync.obj). */
+  FILE_TYPE_NTSYNC
 } file_type_t;
 
 struct vm_object;
@@ -196,6 +199,10 @@ struct file {
       uint64_t mask;               /**< C1-k6: signals this signalfd reads
                                         (bit sig-1; never SIGKILL/SIGSTOP) */
     } sigfd;
+    struct {
+      void *obj;                   /**< C2-ntsync: struct ns_obj (device or
+                                        object); one reference per slot */
+    } ntsync;
   };
   int gidx;                        /**< C1-k5: this slot's global index (the
                                         table is chunked, fs.c gfile) */

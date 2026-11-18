@@ -48,6 +48,7 @@
 #include "errno.h"
 #include "fb_mmap.h" /* GB-025 / M3: FBIOGET_* on /dev/fb0 */
 #include "file_obj.h" /* GB-025 / M3: file_is_devfb(); M1: file_is_devgpu() */
+#include "ntsync.h"  /* C2-ntsync: /dev/ntsync ioctls */
 #include "gpu_abi.h" /* M1: /dev/gpu GPU_IOC_* surface */
 #include "fs.h"
 #include "kline.h"
@@ -852,6 +853,9 @@ static int l_fd_ioctl(struct process *p, struct trap_frame *tf) {
   }
   if (req == L_TCGETS || req == L_TCSETS || req == L_TIOCGWINSZ)
     return l_ret(tf, -ENOTTY);
+  /* C2-ntsync (docs/cp-ntsync.md): /dev/ntsync and its objects.  The driver
+     answers (tf->regs[0]) or parks a wait with the -2 convention itself. */
+  if (file_is_ntsync(p, fd)) return ntsync_ioctl(p, tf, fd, req, arg);
   /* GB-025 / M3: the /dev/fb0 ioctl surface (docs/linux-abi.md §9).  A
    * compat X11 client reads its geometry with FBIOGET_VSCREENINFO before
    * mmap, and SDL's fbcon driver reads both structs.  The node answers the

@@ -1,0 +1,8 @@
+# the same probe source built on the strix HOST with gcc against /usr/include/linux/ntsync.h
+# (the _Static_asserts compare every ioctl number and struct offset with the real UAPI: they compiled)
+# host kernel 7.0.0-43-generic; /dev/ntsync: ls: cannot access '/dev/ntsync': No such file or directory; module: /lib/modules/7.0.0-43-generic/kernel/drivers/misc/ntsync.ko.zst (not loaded; loading it is a host change this lane did not make)
+gcc: OK (static asserts pass)
+[LP] linux_probe_ntsync: /dev/ntsync (UAPI checked against <linux/ntsync.h>)
+[LP] N0 open(/dev/ntsync, O_RDONLY|O_CLOEXEC)          fd=-1 ENOENT -> FAIL
+[LP] done rc=101
+exit=1
