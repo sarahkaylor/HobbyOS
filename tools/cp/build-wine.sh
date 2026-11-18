@@ -65,6 +65,12 @@
 #                       .../destdir/CP/WINE).  Drops --without-alsa, passes
 #                       ALSA_CFLAGS/ALSA_LIBS, requires winealsa.drv, and stages
 #                       libasound.so.2 + share/alsa into the Wine stage.
+#         CP_WINE_NTSYNC (opt-in, lane C2-ntsync, docs/cp-ntsync.md §4): path to a
+#                       Linux UAPI <linux/ntsync.h> (strix: /usr/include/linux/ntsync.h).
+#                       The glibc 2.31 sysroot has none, so configure leaves
+#                       HAVE_LINUX_NTSYNC_H unset; this vendors the header into
+#                       $WORK/ntsync-inc/linux/, adds it to CPPFLAGS and requires
+#                       the define in config.h.  Wine needs no source patch.
 #         CP_RUNTIME    (default <repo>/third_party/cp-runtime)
 #         JOBS          (default 12)
 # Exit:   0 ok, 1 build/audit failure, 2 tooling error.
@@ -211,6 +217,16 @@ do_configure() {
     ldflags="${ldflags:+$ldflags }-L$CP_WINE_ALSA/lib" # configure's link test keeps only -lasound
     say "configure: alsa ON from $CP_WINE_ALSA"
   fi
+  local cppflags=""
+  if [ -n "${CP_WINE_NTSYNC:-}" ]; then # C2-ntsync: Wine's own ntsync client/server
+    grep -q NTSYNC_IOC_EVENT_READ "$CP_WINE_NTSYNC" 2>/dev/null ||
+      die "CP_WINE_NTSYNC=$CP_WINE_NTSYNC is not a Linux ntsync.h with NTSYNC_IOC_EVENT_READ" 2
+    mkdir -p "$WORK/ntsync-inc/linux"
+    cp "$CP_WINE_NTSYNC" "$WORK/ntsync-inc/linux/ntsync.h"
+    sha256sum "$WORK/ntsync-inc/linux/ntsync.h" > "$WORK/ntsync-inc/ntsync.h.sha256"
+    cppflags="-I$WORK/ntsync-inc"
+    say "configure: ntsync ON (header $CP_WINE_NTSYNC, sha256 $(cut -c1-16 "$WORK/ntsync-inc/ntsync.h.sha256"))"
+  fi
   for p in "${without[@]}"; do wo+=("--without-$p"); done
   local pre=()
   # Force Wine's fixed-address fallback by failing configure's -static-pie probe.
@@ -221,7 +237,7 @@ do_configure() {
     CC="clang --sysroot=$SYS" \
     CFLAGS="-O2 -g" \
     x86_64_CC=clang \
-    env ${ldflags:+"LDFLAGS=$ldflags"} "${alsaenv[@]}" \
+    env ${ldflags:+"LDFLAGS=$ldflags"} ${cppflags:+"CPPFLAGS=$cppflags"} "${alsaenv[@]}" \
     "$SRC/configure" --prefix="$PREFIX" --enable-archs=x86_64 --disable-tests \
       "${xargs[@]}" "${wo[@]}" "${pre[@]}" ) > "$WORK/configure.log" 2>&1 || {
     tail -30 "$WORK/configure.log"; die "configure failed (see $WORK/configure.log)"; }
@@ -230,6 +246,11 @@ do_configure() {
     grep -q '^ALSA_LIBS = .*-lasound' "$BLD/Makefile" ||
       die "CP_WINE_ALSA set but configure did not enable winealsa.drv (see $WORK/configure.log)"
     say "configure: winealsa.drv ON ($(grep -E '^ALSA_LIBS = ' "$BLD/Makefile"))"
+  fi
+  if [ -n "${CP_WINE_NTSYNC:-}" ]; then
+    grep -q '^#define HAVE_LINUX_NTSYNC_H 1' "$BLD/include/config.h" ||
+      die "CP_WINE_NTSYNC set but config.h has no HAVE_LINUX_NTSYNC_H (see $WORK/configure.log)"
+    say "configure: HAVE_LINUX_NTSYNC_H 1"
   fi
   grep -E '^configure: (WARNING|error)|x86_64_CC|CROSSCC' "$WORK/configure.log" | head -40 || true
   say "configure: PE compiler = $(grep -E '^x86_64_CC=' "$BLD/config.log" | head -1)"
