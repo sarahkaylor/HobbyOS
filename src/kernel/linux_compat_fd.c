@@ -58,6 +58,11 @@
 #include "linux_fb.h"
 #include "linux_syscall.h"
 #include "process.h"
+
+/* H4-kglitch: a park sentinel that equals a Linux errno turns that errno into
+   an endless restart (C4-audio's -2 == -ENOENT).  Unit test: gpu_abi_m2_test.c. */
+_Static_assert(GPU_ABI_PARKED < -4095 && LSND_PARKED < -4095 && GPU_ABI_PARKED != LSND_PARKED,
+               "ioctl park sentinels must not be errno values");
 #include "vfs.h"
 #include "frame.h"  /* GB-308: FRAME_SIZE for fsync write-back */
 #include "vm.h"      /* GB-308: struct vm_object, vm_object_unref */
@@ -884,13 +889,13 @@ static int l_fd_ioctl(struct process *p, struct trap_frame *tf) {
    * pointer and does every access through vm_user_read/vm_kwrite. */
   if (file_is_devgpu(p, fd)) {
     int gr = gpu_abi_ioctl(p, fd, (unsigned long)req, arg);
-    /* P6 (docs/gpu-abi.md §10.5): FENCE_WAIT2 parks with the native -2
-       convention; the ioctl restarts on wake and re-checks its fence. */
+    /* P6 (docs/gpu-abi.md §10.5): FENCE_WAIT2 parks (GPU_ABI_PARKED, never
+       an errno); the ioctl restarts on wake and re-checks its fence. */
     if (gr == GPU_ABI_PARKED) return l_park(p, tf);
     return l_ret(tf, gr);
   }
   /* C4-audio (docs/cp-audio.md): the ALSA control/PCM request set.  A blocking
-     WRITEI/DRAIN parks with the native -2 convention and restarts on the TX
+     WRITEI/DRAIN parks (LSND_PARKED, never an errno) and restarts on the TX
      completion wake. */
   {
     int sminor = file_devsnd_minor(p, fd);
