@@ -31,11 +31,14 @@ H3-winefix, H4-kglitch, the integ16 gate batch); the host sampler lists them.
   after the launch; no long gaps).
 * **One ~8 s freeze in 28 minutes of play** (H1-15): Venus fences unretired
   7.7 s while the host's own sampler stalled 8 s; host side.
-* **A 1–2 minute pre-launch stall in 5 of the first 13 boots** (H1-03); the
-  one with a vCPU sample was waiting on the console UART.
+* **A 1–2.5 minute pre-launch stall in 11 of 22 boots** (H1-03): QEMU start →
+  launcher 64–142 s instead of 6–58 s.  The three with the stage on record
+  sat in the firmware (twice) or behind a console that did not reach the
+  host (once), each while the host's I/O pressure was 50 % "full"; a
+  `cache=unsafe` A/B is proposed.
 * **Instruments that mislead**: the stall watchdog's "console silent >
-  20 s" is a false positive in every boot (H1-14, root cause: an unsigned
-  wrap; one-line diff), `[BADELR]` fires on the game's PE image (H1-06),
+  20 s" (15 of 22 boots, 101 of 128 old ones) is a false positive every time
+  it was checked (H1-14, root cause: an unsigned wrap; one-line diff), `[BADELR]` fires on the game's PE image (H1-06),
   the Venus fence-timeout rows are spent in the first 6 s (H1-07).
 * **P9 fps verdict (≥ 30 fps world median at 1280×720 Low):** **met at the median, not with margin**: the three 1280×720
   fpsprobe boots give world medians 29.0, 33.4 and 30.0 (median of medians
@@ -52,7 +55,9 @@ H3-winefix, H4-kglitch, the integ16 gate batch); the host sampler lists them.
   garbage or stuck frame after the menu; Venus and lavapipe main menus have
   the same mean colour (63.2 / 59.8 / 81.8 both).  **Input**: across 88 P9
   run logs, 274 menu taps moved the focus exactly one row, 0 were dropped;
-  one CONTINUE seek lost the focus (H1-12).
+  but after Esc back from a sub-menu (save list, Settings) the main menu's
+  focus could not be followed in 3 of 3 boots (H1-12), which blocked both
+  reloads.
 * **Harness gaps found and worked around**: P9 menus at 1920×1080 (H1-08,
   `fpsprobe-blind.p9`), a stale seeded prefix that makes every boot re-run
   wineboot's update (H1-04).
@@ -89,9 +94,10 @@ something recurs.
 **H1-01 (audio dropouts).**  Each dropout is a run of exact digital zero
 on both channels, 10–200 ms long, always a whole number of winealsa's 10 ms
 periods, with audio at −20…−36 dBFS on both sides — music does not cut to
-true zero and back for one period; a starved device does.  They cluster in
-the save's loading (game s 147–158 in h-fp2: the phase where the 8 vCPUs are
-busiest) and are rare in the world.  The ALSA buffer winealsa asks for is 4 ×
+true zero and back for one period; a starved device does.  They are densest
+in the save's loading (game s 147–158 in h-fp2, 7 of the soak's 22: the
+phase where the 8 vCPUs are busiest) and keep coming at ~1 per 2 minutes in
+the world (15 in the soak's 28 minutes).  The ALSA buffer winealsa asks for is 4 ×
 10 ms = 40 ms (`[SND] hw_params … period=480 periods=4`, docs/cp-audio.md
 §7), so any 40 ms stall of the game's audio thread (or of the compat
 `WRITEI` path behind it) is audible.  The guest confirms it: alsa-lib, in
@@ -424,14 +430,16 @@ crash classes above are all wave 5 / early wave 6 and gone on today's code.
 
 | file | what |
 |---|---|
-| `run-hunt.sh KIND RUN` | one matrix boot through the unchanged P8/P9 harnesses (`p8v`, `p8l`, `win`, `fp720`, `fp1080`, `play`, `reload`, `soak`, `settings`, `script`), plus a 1 Hz host sampler (9070 XT `gpu_busy_percent`, loadavg, the other QEMU guests every 60 s: C1-k7's `k7-p9.sh` sampler for the whole boot), the classifier, the audio checks (`HUNT_AUDIO=1`: `CP_AUDIO_WAV`, then the WAV is deleted), and the evidence copies into `~/cp/lanes/hunt-logs/` |
+| `run-hunt.sh KIND RUN` | one matrix boot through the unchanged P8/P9 harnesses (`p8v`, `p8l`, `win`, `fp720`, `fp1080`, `play`, `reload`, `soak`, `settings`, `script`), plus a 1 Hz host sampler (9070 XT `gpu_busy_percent`, loadavg, and from h-p8v4 on the boot's serial.log size, host Dirty/Writeback and `/proc/pressure/io`; the other QEMU guests every 60 s: C1-k7's `k7-p9.sh` sampler, for the whole boot), the classifier, the audio checks (`HUNT_AUDIO=1`: `CP_AUDIO_WAV`, then the WAV is deleted), and the evidence copies into `~/cp/lanes/hunt-logs/` |
 | `batch.sh QUEUE` | the matrix runner: one boot at a time from a queue file that is re-read before every boot (editable while it runs), `QUEUE.done` per boot |
-| `classify.py` | per-boot signatures: kernel faults, kernel stalls, kernel instrument rows, `[EXITPC]` codes (NTSTATUS names), process exits, Wine `err:` lines (each tagged benign-with-reason or `new`), DXVK / vkd3d-proton `err`/`warn`, REDEngineErrorReporter, the early-exit flag, fps-row gaps, `[THRS]` memory per process, GPU busy; `--aggregate` = k/n per signature over boots; `--mine` = every old serial log, deduplicated by content hash |
+| `classify.py` | per-boot signatures: kernel faults, kernel stalls, kernel instrument rows, `[EXITPC]` codes (NTSTATUS names), process exits, Wine `err:` lines (each tagged benign-with-reason or `new`), DXVK / vkd3d-proton `err`/`warn`, REDEngineErrorReporter, alsa-lib underruns, the `[WATCHDOG]` / `[BADELR]` instrument rows, the early-exit flag, guest-time fps hitches, `[THRS]` memory per process, GPU busy, the longest silent-serial stretch; `--aggregate` = k/n per signature over boots; `--mine` = every old serial log, deduplicated by content hash |
 | `mine_report.py` | the old-log census by signature with last-seen times |
 | `wavgaps.py` | dropouts (exact-zero runs of 5–500 ms between loud audio), gaps (≥ 500 ms silent), edge clicks, WAV length vs wall time |
 | `shotcheck.py` | numbers-only screen of the screendumps: black / window-black / partial-black bands, full-width seams (tearing) off static edges, high-frequency "garbage", identical consecutive play shots, mean RGB; `--compare` Venus vs lavapipe menus |
 | `inputcheck.py` | menu taps from `seek` / `listseek`: did each tap move the focus exactly one row |
 | `prep-settings.sh` | a copy of a seeded data image with UserSettings.json options changed by debugfs (generalises `strix:~/cp/shot/prep.sh`) |
 | `soak.p9` | the 28-minute in-world soak (six phases `soak1..soak6`) |
+| `fpsprobe-blind.p9` | fpsprobe.p9 with the two menu seeks replaced by fixed tap counts, for game resolutions whose layout boot_p9's row tables do not know (H1-08) |
+| `settings.p9` | main menu, then interactive (`ctl`): the hand-driven Settings / reload boot |
 | `tables.py` | the P8 / P9 tables below from the per-boot files |
 | `test_hunt.py` + `golden/` | golden tests: classifier output, early-exit flag, aggregation, wavgaps on a synthetic WAV with a planted 20 ms dropout and 1 s gap |
