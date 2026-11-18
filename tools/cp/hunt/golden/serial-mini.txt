@@ -25,3 +25,5 @@
 [X] wine: failed to start L"C:\windows\syswow64\rundll32.exe": c0000135
 [WATCHDOG] console silent for more than 20s
 [X] ALSA lib /x/alsa-lib-1.2.14/src/pcm/pcm.c:8772:(snd_pcm_recover) underrun occurred
+[SND] xrun n=1 frames_done=14400 chunks=12
+[CONS] takeover cpu=3 holder=1 why=stall watched_us=9000 wall_us=12000
