@@ -10,7 +10,13 @@
 phase menu
 shot menu
 expect menu-continue 10 CONTINUE
+# h2-rl2: the reading after the 2nd Up caught the highlight mid-move (one
+# 104 px frame over CONTINUE + NEW GAME, labelled NEW GAME), so seek tapped
+# again and overshot onto the frameless button above CONTINUE.  A longer gap
+# after each tap lets the highlight settle before boot_p9 reads it.
+keytiming 200 1600
 seek menu-continue main up 6 CONTINUE
+keytiming 200 800
 phase loading
 key ret
 expect loaded 400 PRESS\b.{0,24}\bTO\s+CONTINUE
