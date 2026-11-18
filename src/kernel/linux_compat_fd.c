@@ -50,6 +50,7 @@
 #include "file_obj.h" /* GB-025 / M3: file_is_devfb(); M1: file_is_devgpu() */
 #include "ntsync.h"  /* C2-ntsync: /dev/ntsync ioctls */
 #include "gpu_abi.h" /* M1: /dev/gpu GPU_IOC_* surface */
+#include "linux_snd.h" /* C4-audio: /dev/snd ALSA ioctls */
 #include "fs.h"
 #include "kline.h"
 #include "kmem.h"
@@ -887,6 +888,19 @@ static int l_fd_ioctl(struct process *p, struct trap_frame *tf) {
        convention; the ioctl restarts on wake and re-checks its fence. */
     if (gr == GPU_ABI_PARKED) return l_park(p, tf);
     return l_ret(tf, gr);
+  }
+  /* C4-audio (docs/cp-audio.md): the ALSA control/PCM request set.  A blocking
+     WRITEI/DRAIN parks with the native -2 convention and restarts on the TX
+     completion wake. */
+  {
+    int sminor = file_devsnd_minor(p, fd);
+    if (sminor >= 0) {
+      uint32_t of = 0;
+      (void)file_open_flags(p, fd, &of);
+      int sr = linux_snd_ioctl(p, sminor, of, req, arg);
+      if (sr == LSND_PARKED) return l_park(p, tf);
+      return l_ret(tf, sr);
+    }
   }
   if (req == (uint32_t)L_F_GETFL) return l_ret(tf, file_fcntl(p, fd, K_F_GETFL, 0));
   if (req == (uint32_t)L_F_SETFL) return l_ret(tf, file_fcntl(p, fd, K_F_SETFL, arg));

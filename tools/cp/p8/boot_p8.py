@@ -80,8 +80,19 @@ def qemu_cmd(out, disk, cpdata, args):
            "-action", "shutdown=poweroff",
            "-qmp", f"unix:{qmp},server,nowait",
            "-enable-kvm", "-cpu", args.cpu]
-    cmd += diag_args()
+    cmd += diag_args() + audio_args()
     return cmd, qmp, serial
+
+
+def audio_args():
+    """C4-audio (docs/cp-audio.md): CP_AUDIO_WAV=/abs/out.wav adds a
+    virtio-sound device whose output goes to that WAV file (QEMU's `wav`
+    audiodev only: never a host sound server).  Unset: no device."""
+    w = os.environ.get("CP_AUDIO_WAV")
+    if not w:
+        return []
+    return ["-audiodev", f"wav,id=cpsnd0,path={w},out.frequency=48000,out.channels=2,out.format=s16",
+            "-device", "virtio-sound-pci,audiodev=cpsnd0,streams=1"]
 
 
 def diag_args():

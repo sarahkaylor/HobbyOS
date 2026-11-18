@@ -381,6 +381,17 @@ endif
 endif
 endif
 
+# C4-audio (docs/cp-audio.md): an opt-in virtio-sound device whose output goes
+# to a WAV file on the host (never a host audio backend: strix's PipeWire is the
+# user's desktop).  Unset -> the QEMU line is byte-for-byte unchanged.
+#   CP_AUDIO_WAV=/abs/path/out.wav make ARCH=intel run ...
+CP_AUDIO_WAV ?=
+ifeq ($(ARCH),intel)
+ifneq ($(strip $(CP_AUDIO_WAV)),)
+QEMU_CMD += -audiodev wav,id=cpsnd0,path=$(CP_AUDIO_WAV),out.frequency=48000,out.channels=2,out.format=s16 -device virtio-sound-pci,audiodev=cpsnd0,streams=1
+endif
+endif
+
 # --- F2.4 (browser.md §6): userland C++ build policy ---------------------
 # The minimal C++ runtime (src/libc/src/cxxrt.cpp) and C++ user programs
 # build with the SAME per-arch flags as C (USER_CFLAGS) plus the language
@@ -3788,6 +3799,12 @@ KCONSOLE_TEST = kconsole_test_host
 $(KCONSOLE_TEST): src/host/kconsole_test.c src/host/cons_host_shim.h src/kernel/kconsole.c src/include/console.h
 	$(HOST_CC) -Isrc/include -Isrc/host $(HOST_CFLAGS) -DCONS_HOST_TEST src/kernel/kconsole.c src/host/kconsole_test.c -o $@
 
+# C4-audio (docs/cp-audio.md): the ALSA hw_params refine/choose engine
+# (src/kernel/linux_snd_params.c), the same TU the kernel's /dev/snd PCM uses.
+LINUX_SND_PARAMS_TEST = linux_snd_params_test_host
+$(LINUX_SND_PARAMS_TEST): src/host/linux_snd_params_test.c src/kernel/linux_snd_params.c src/include/linux_snd_params.h
+	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/kernel/linux_snd_params.c src/host/linux_snd_params_test.c -o $@
+
 AUDIO_STUB_TEST = audio_stub_test_host
 $(AUDIO_STUB_TEST): src/host/audio_stub_test.c src/kernel/audio_stub.c src/include/audio_stub.h
 	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/kernel/audio_stub.c src/host/audio_stub_test.c -o $@
@@ -4747,7 +4764,7 @@ test_pr_sync:
 
 # The suite as one list, so a host-portable subset can be derived from it
 # without maintaining a second copy (see host_tests_portable).
-HOST_TESTS_TARGETS = $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness test_pr_sync $(GAMES_SCAN_TEST) $(GFX_STATS_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_SIGFRAME_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(VFS_BIND_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) $(T4_COMPAT_SELFTEST) $(OPEN_MODE_SCAN) $(NFS_RSIZE_SCAN) $(VECTOR_SHAPE_SCAN) $(SDL_TEST_APP_HOST) $(UNAME_PARITY) $(AUDIO_STUB_TEST) $(SSP_REPORT_TEST) $(KCONSOLE_TEST)
+HOST_TESTS_TARGETS = $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness test_pr_sync $(GAMES_SCAN_TEST) $(GFX_STATS_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_SIGFRAME_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(VFS_BIND_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) $(T4_COMPAT_SELFTEST) $(OPEN_MODE_SCAN) $(NFS_RSIZE_SCAN) $(VECTOR_SHAPE_SCAN) $(SDL_TEST_APP_HOST) $(UNAME_PARITY) $(AUDIO_STUB_TEST) $(LINUX_SND_PARAMS_TEST) $(SSP_REPORT_TEST) $(KCONSOLE_TEST)
 host_tests: $(HOST_TESTS_TARGETS)
 	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
 	$(HOST_RUN) ./$(GAMES_SCAN_TEST)
@@ -4804,6 +4821,7 @@ host_tests: $(HOST_TESTS_TARGETS)
 	$(HOST_RUN) ./$(LINUX_INPUT_TEST)
 	$(HOST_RUN) ./$(INPUT_NODE_TEST)
 	$(HOST_RUN) ./$(AUDIO_STUB_TEST)
+	$(HOST_RUN) ./$(LINUX_SND_PARAMS_TEST)
 	$(HOST_RUN) ./$(FB_MMAP_TEST)
 	$(HOST_RUN) ./$(SDL_TEST_APP_HOST)
 	$(HOST_RUN) ./$(WINDOW_DAMAGE_TEST)

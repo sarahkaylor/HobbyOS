@@ -1,0 +1,47 @@
+# tools/cp/audio/run-game-audio.sh audio-venus-on on strix, cp-audio 1a8194bb, P8_GPU=venus (ICD: copy of ~/cp/integ-venus stage), Wine = winealsa stage, CP_AUDIO_WAV on
+# The WAV (game content) was measured and deleted; numbers only.
+# timeline (run-p8):
+   +     0.0 s  22:39:20  slot 4 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 0
+   +   129.3 s  22:41:29  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
+   +   145.4 s  22:41:45  warm-up result: [P8] warm-up: display driver loaded
+   +   148.4 s  22:41:48  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+   +   165.2 s  22:42:05  first screen change after launch (45.5% of the screen differs from the baseline): s002-t000017
+   +   243.5 s  22:43:23  title prompt 'PRESS ... TO CONTINUE' at s007-t000095: sent one Space (#1)
+   +   335.7 s  22:44:55  title prompt 'PRESS ... TO CONTINUE' at s013-t000187: sent one Space (#2)
+   +   352.7 s  22:45:12  main menu OCR at s014-t000204: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+   +   376.1 s  22:45:36  main menu OCR at s015-t000227: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+   +   397.8 s  22:45:57  main menu OCR at s016-t000249: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+   +   400.2 s  22:46:00  verdict: main-menu; QEMU stopped, slot released; guests on the host now: 1
+# host WAV (wavcheck.py, 100 ms windows, active = RMS > -50 dBFS):
+wavcheck: file=/home/sarah/cp/lanes/audio/obj/cp-audio/game/audio-venus-on.wav rate=48000 channels=2 duration_s=236.598 rms_dbfs=-20.3 active_rms_dbfs=-19.9 active_s=216.8 first_active_s=18.0 peak_hz_median=110.0 tone_hz=None tone_s=None active_peak_dbfs=-2.0 verdict=PASS
+# guest [SND] rows:
+      1 [VIRGL3D] irq line=10 vector=42 (fences retired by INTx)
+      1 [VIRGL3D] irq late-enable line=10 elcr_before=0x0000000000000004 elcr_after=0x0000000000000004 pic_mask=0x00000000000000EB
+      1 [SND] virtio-sound 1af4:1059 bar=0x0000380A00008000 jacks=0 streams=1 chmaps=0 ctlq=64 txq=64
+      1 [SND] stream 0 out formats=0x00000000000E0078 rates=0x0000000000003FFF ch=1..2
+      1 [SND] pcm closed: chunks=0 frames=0 xruns=0 sync_ptr=1 writei=0 status=0 refine=3 parks=0 irqs=101553 tx=0 ctl=1 ctl_timeouts=0
+      1 [SND] pcm closed: chunks=0 frames=0 xruns=0 sync_ptr=1 writei=0 status=0 refine=3 parks=0 irqs=101550 tx=0 ctl=1 ctl_timeouts=0
+      1 [SND] pcm closed: chunks=0 frames=0 xruns=0 sync_ptr=1 writei=0 status=0 refine=3 parks=0 irqs=100969 tx=0 ctl=1 ctl_timeouts=0
+      1 [SND] pcm closed: chunks=0 frames=0 xruns=0 sync_ptr=1 writei=0 status=0 refine=3 parks=0 irqs=100959 tx=0 ctl=1 ctl_timeouts=0
+      1 [SND] pcm closed: chunks=0 frames=0 xruns=0 sync_ptr=1 writei=0 status=0 refine=3 parks=0 irqs=100950 tx=0 ctl=1 ctl_timeouts=0
+      1 [SND] pcm closed: chunks=0 frames=0 xruns=0 sync_ptr=1 writei=0 status=0 refine=1 parks=0 irqs=100965 tx=0 ctl=1 ctl_timeouts=0
+      1 [SND] pcm closed: chunks=0 frames=0 xruns=0 sync_ptr=1 writei=0 status=0 refine=0 parks=0 irqs=100934 tx=0 ctl=1 ctl_timeouts=0
+      1 [SND] pcm closed: chunks=0 frames=0 xruns=0 sync_ptr=1 writei=0 status=0 refine=0 parks=0 irqs=100924 tx=0 ctl=1 ctl_timeouts=0
+      1 [SND] irq line=10 vector=42 (TX completions by INTx)
+      1 [SND] hw_params rate=48000 ch=2 period=480 periods=4 buffer=1920
+      1 [SND] ALSA nodes: /dev/snd/controlC0 /dev/snd/pcmC0D0p
+# integ14 P8 Venus (audio off, x Wine) for comparison:
+   +    31.3 s  20:51:51  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
+   +    50.3 s  20:52:10  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+   +   178.0 s  20:54:18  title prompt 'PRESS ... TO CONTINUE' at s009-t000127: sent one Space (#1)
+   +   194.4 s  20:54:34  main menu OCR at s010-t000144: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+# audio-OFF comparison boot (same tree, same winealsa Wine stage, same Venus ICD, no CP_AUDIO_WAV): no virtio-sound device, 0 [SND] rows
+   +     0.0 s  22:49:45  slot 4 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 1
+   +   122.6 s  22:51:47  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
+   +   140.8 s  22:52:05  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+   +   234.0 s  22:53:39  title prompt 'PRESS ... TO CONTINUE' at s007-t000093: sent one Space (#1)
+   +   264.5 s  22:54:09  title prompt 'PRESS ... TO CONTINUE' at s009-t000123: sent one Space (#2)
+   +   280.1 s  22:54:25  main menu OCR at s010-t000139: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+   +   285.7 s  22:54:30  main menu OCR at s011-t000144: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+   +   291.3 s  22:54:36  main menu OCR at s012-t000150: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+   +   293.3 s  22:54:38  verdict: main-menu; QEMU stopped, slot released; guests on the host now: 3

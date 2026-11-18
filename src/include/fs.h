@@ -101,7 +101,11 @@ typedef enum {
   FILE_TYPE_SIGNALFD,
   /* C2-ntsync: /dev/ntsync or one of its objects (sem / mutex / event);
      linux_compat_ntsync.c owns the object (f->ntsync.obj). */
-  FILE_TYPE_NTSYNC
+  FILE_TYPE_NTSYNC,
+  /* C4-audio (docs/cp-audio.md): an ALSA node, /dev/snd/controlC0 or
+     /dev/snd/pcmC0D0p (linux_snd.c); exists only with a virtio-sound device.
+     read/write refuse it, ioctl goes to linux_snd_ioctl(), mmap is refused. */
+  FILE_TYPE_DEVSND
 } file_type_t;
 
 struct vm_object;
@@ -195,6 +199,9 @@ struct file {
       int slot;                    /**< L49: index into linux_compat_timers'
                                         epoll table */
     } epollfd;
+    struct {
+      int minor;                   /**< C4-audio: ALSA minor (linux_snd.h) */
+    } snd;
     struct {
       uint64_t mask;               /**< C1-k6: signals this signalfd reads
                                         (bit sig-1; never SIGKILL/SIGSTOP) */

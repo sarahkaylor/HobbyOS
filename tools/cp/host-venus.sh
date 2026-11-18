@@ -40,7 +40,8 @@
 #      VENUS_VNC (1: -vnc unix:WORK/vnc-sock, for tools/cp/venus/vncshot.py),
 #      VENUS_IOEVENTFD (1 = ioeventfd=on on the GPU, the default; 0 = QEMU's
 #      default, off), VENUS_GPU_OPTS (extra virtio-gpu-gl-pci properties;
-#      C6-present's A/B knobs, docs/cp-present.md).
+#      C6-present's A/B knobs, docs/cp-present.md), CP_AUDIO_WAV (C4-audio:
+#      virtio-sound whose output is written to this WAV file; unset = none).
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
@@ -129,6 +130,13 @@ argv() {
     if [ "${VENUS_VNC:-0}" = 1 ]; then
         rm -f "$work/vnc-sock"
         a+=(-vnc "unix:$work/vnc-sock")
+    fi
+    # C4-audio (docs/cp-audio.md): CP_AUDIO_WAV=/abs/out.wav adds virtio-sound
+    # with QEMU's `wav` backend.  Never a host sound server: PipeWire on strix
+    # is the user's desktop session.  Unset: the argv is unchanged.
+    if [ -n "${CP_AUDIO_WAV:-}" ]; then
+        a+=(-audiodev "wav,id=cpsnd0,path=$CP_AUDIO_WAV,out.frequency=48000,out.channels=2,out.format=s16"
+            -device virtio-sound-pci,audiodev=cpsnd0,streams=1)
     fi
     if [ -n "${VENUS_TRACE:-}" ]; then
         local t IFS=,

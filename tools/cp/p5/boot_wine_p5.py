@@ -42,10 +42,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from console_rows import resync  # noqa: E402
 import re  # noqa: E402
 
-PFX = {"vkcube": "[VK]", "d3d11": "[D3D11]", "d3d12": "[D3D12]", "fullscr": "[FS]"}
+PFX = {"vkcube": "[VK]", "d3d11": "[D3D11]", "d3d12": "[D3D12]", "fullscr": "[FS]", "audio": "[AUD]"}
 # C0-console: the rows this grader reads are found anywhere in a serial line
 # (tools/cp/console_rows.py), not only at its start.
-ROW_TAGS = ["P5", "VK", "D3D11", "D3D12", "FS", "NFSHARD", "NFLK"]
+ROW_TAGS = ["P5", "VK", "D3D11", "D3D12", "FS", "AUD", "ALSA", "SND", "NFSHARD", "NFLK"]
+# probes graded by their own rows, without screendumps
+NOSHOT = ("fullscr", "audio")
 
 
 def done0(rows, pfx):
@@ -85,7 +87,7 @@ def main():
     if args.grade_only:
         serial = os.path.join(args.out, "serial.log")
         shots = {p: [s for s in (os.path.join(args.out, f"{p}-t{t}s.ppm") for t in (20, 50))
-                     if os.path.exists(s)] for p in probes if p != "fullscr"}
+                     if os.path.exists(s)] for p in probes if p not in NOSHOT}
         if "fullscr" in probes:
             shots["fullscr"] = [s for s in (os.path.join(args.out, n + ".ppm") for n, _, _ in FS_SHOTS)
                                 if os.path.exists(s)]
@@ -103,7 +105,7 @@ def main():
     log(f"qemu pid {proc.pid}")
     try:
         qmp = Qmp(qmp_path, deadline_s=40)
-        pending = [(p, t) for p in probes if p != "fullscr" for t in ("t=20s", "t=50s")]
+        pending = [(p, t) for p in probes if p not in NOSHOT for t in ("t=20s", "t=50s")]
         fs_pending = list(FS_SHOTS) if "fullscr" in probes else []
         last_report = 0
         while time.time() - t0 < args.timeout and proc.poll() is None:
@@ -163,9 +165,14 @@ def grade(args, probes, serial, shots):
     fails = []
     log("--- [P5] rows and probe rows (serial) ---")
     for ln in lines:
-        if ln.startswith("[P5]") or any(ln.startswith(PFX[p]) for p in probes):
+        if ln.startswith("[P5]") or any(ln.startswith(PFX[p]) for p in probes) or \
+                ("audio" in probes and ln.startswith(("[ALSA]", "[SND]"))):
             print(ln, flush=True)
     for p in probes:
+        if p == "audio":
+            log("audio: " + ("PASS" if grade_audio(ser, fails) else "FAIL") +
+                " (rows only; the tones are graded in the host WAV: tools/cp/audio/run-wine-audio.sh)")
+            continue
         if p == "fullscr":
             if not grade_fullscr(args, ser, shots.get("fullscr", []), fails):
                 log("fullscr: FAIL")
@@ -247,7 +254,11 @@ def grade(args, probes, serial, shots):
         log("VERDICT: VOID (NFS failure rows; not evidence either way)")
         return 3
     if not fails:
-        log("PASS: " + ", ".join(probes) + " each ran >= 60 s under Wine with two distinct, recognisable screendumps")
+        shot = [p for p in probes if p not in NOSHOT]
+        if shot:
+            log("PASS: " + ", ".join(shot) + " each ran >= 60 s under Wine with two distinct, recognisable screendumps")
+        if "audio" in probes:
+            log("PASS: audio rows (alsatone s16 + float, wasapi, waveout); grade the tones in the host WAV")
     return 1 if fails else 0
 
 
@@ -263,6 +274,22 @@ def _ppm(path):
         parts.append(int(data[i:j]))
         i = j
     return parts[0], parts[1], data[i + 1:]
+
+
+def grade_audio(ser, fails):
+    """C4-audio (docs/cp-audio.md): alsatone (alsa-lib, Linux), then
+    audiotone.exe wasapi and waveout (winealsa.drv) each end rc=0."""
+    ok = True
+    if ser.count("[ALSA] done rc=0") < 2:
+        fails.append("audio: want two '[ALSA] done rc=0' (s16 + float)"); ok = False
+    for tag, done in (("alsatone", "[ALSA] done rc=0"), ("alsafloat", "[ALSA] done rc=0"), ("wasapi", "[AUD] wasapi done rc=0"),
+                      ("waveout", "[AUD] waveout done rc=0")):
+        e = [ln for ln in ser.splitlines() if ln.startswith(f"[P5] end {tag} ")]
+        if not e or " status=0 " not in e[-1] + " ":
+            fails.append(f"audio: launcher end row for {tag}: {e[-1] if e else '(none)'}"); ok = False
+        if done not in ser:
+            fails.append(f"audio: no '{done}'"); ok = False
+    return ok
 
 
 def grade_fullscr(args, ser, shots, fails):

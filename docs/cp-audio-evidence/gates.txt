@@ -1,0 +1,90 @@
+# C4-audio gate batch (device OFF), strix, tree ~/cp/lanes/audio-g = cp-audio 48ba44de (kernel = cbefd9b5 + the build scripts; later kernel commits only add the [SND] HW_PARAMS refusal row, the LSND_HOST_TEST include switch and the ARM ring size). Script: strix:~/cp/lanes/audio-gates.sh (integ-gates14.sh rows for gates 1-9 + P2 + P5 + one P8 lavapipe).
+tree audio-g (cp-audio 48ba44de) start 22:06:07
+build rc=0 22:10:02
+avx rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+console rc=1 [LP] done rc=0lp_check_console: kernel rows intact 25566/25569, user rows intact 11954/11955, interleaved lines 0, torn rows 1, missing 4, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+cow rc=0 [LP] done rc=0
+e2churn rc=0 [LP] done rc=0
+e2fault rc=0 [LP] done rc=0
+e2stress rc=0 [LP] done rc=0
+epserver rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+execthr rc=0 [LP] done rc=0
+exitgroup rc=0 [LP] done rc=0
+ext2w rc=0 [LP] done rc=0
+fatcoh rc=0 [LP] done rc=0
+fatren rc=0 [LP] done rc=0
+fattrunc rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fdrace rc=0 [LP] done rc=0
+fdscale rc=0 [LP] done rc=0
+forkcow rc=0 [LP] done rc=0
+forkva rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+hrtimer rc=0 [LP] done rc=0
+ipclat rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+killgrp rc=0 [LP] done rc=0
+kstack rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+manythr rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+netlink rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0
+pfx rc=0 [LP] done rc=0
+pipestorm rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+rusage rc=0 [LP] done rc=0
+shm rc=0 [LP] done rc=0
+sigfd rc=0 [LP] done rc=0
+siginfo rc=0 [LP] done rc=0
+snd rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tlb rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wfibound rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+probes end 00:13:05
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=1 exec_gate: FAIL
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/audio-g)
+unit rc=1 Tests failed! Tests run:    463 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244 
+host [host-tests] done: 38/40 passed snd_params=
+castscan rc=0 castscan: 371 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+pfx_gate rc=0 pfx_gate: PASS
+infra end 00:50:08
+gate_p2 rc=0 G1 wine cmd /c echo hello prints hello : PASS ([P2] end echo|G2 winprobe.exe every marker + exit 0 : PASS ([P2] end winpr|G3 wineserver -k leaves no processes : PASS ([P2] end kill s| 00:51:24
+gate_p5 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12, fullscr each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 384 s; lock released 00:59:47
+gate_p8_lavapipe rc=0    +   408.7 s  01:07:24  main menu OCR at s019-t000302: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   415.5 s  01:07:30  main menu OCR at s020-t000309: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   418.2 s  01:07:33  verdict: main-menu; QEMU stopped, sl 01:07:36
+ALLDONE 01:07:36
+
+# exec_gate rerun: the batch row failed at STAGE (mcopy: ::/lib64/ld-linux-x86-64.so.2 not found) because ~/cp/sysroot-glibc231/lib64/ld-linux-x86-64.so.2 dangles; rerun with GLIBC_SYSROOT=~/cp/lanes/audio-sysroot (the repaired copy) on ~/cp/lanes/audio:
+exec_gate(rerun, fixed sysroot) rc=0 exec_gate: PASS
+
+# console probe A/B under the same host load (integ11 13dc693b as ~/cp/lanes/audio-base vs this lane), alternating:
+audio-base console#1 rc=1 lp_check_console: kernel rows intact 25702/25746, user rows intact 11712/11741, interleaved lines 2, torn rows 8, missing 73, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+audio console#1 rc=1 lp_check_console: kernel rows intact 23685/23775, user rows intact 10920/10971, interleaved lines 0, torn rows 13, missing 141, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+audio-base console#2 rc=1 lp_check_console: kernel rows intact 26498/26538, user rows intact 12034/12050, interleaved lines 1, torn rows 6, missing 56, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+audio console#2 rc=1 lp_check_console: kernel rows intact 25459/25509, user rows intact 11802/11832, interleaved lines 0, torn rows 8, missing 80, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+console#1 rc=1 lp_check_console: kernel rows intact 25732/25776, user rows intact 11941/11958, interleaved lines 1, torn rows 7, missing 61, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+console#2 rc=1 lp_check_console: kernel rows intact 25921/25968, user rows intact 11896/11906, interleaved lines 0, torn rows 8, missing 57, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+
+# host_tests: the recipe stops at the python suite (38/40 known); this lane's golden run by name:
+linux_snd_params_test: 24 checks, 0 failed

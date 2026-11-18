@@ -71,6 +71,8 @@ int file_is_devfb(struct process *p, int fd);
  * close path calls gpu_abi_release_fd() so a client's context/resources die
  * with its fd.  0 for every other fd (including an absent one). */
 int file_is_devgpu(struct process *p, int fd);
+/* C4-audio: the ALSA node's minor when `fd` is one (linux_snd.h), else -1. */
+int file_devsnd_minor(struct process *p, int fd);
 
 /* --- the cache (file_obj.c) ------------------------------------------ */
 
