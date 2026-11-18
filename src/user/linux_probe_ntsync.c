@@ -23,7 +23,8 @@
  *   R*  the alert event          (alert_any, alert_all)
  *   G*  a handled signal ends a wait (G4: and how fast, against a pipe read)
  *   F*  Wine's shape: device + object fds over SCM_RIGHTS to a forked child
- *   X*  stress (stress_wait_any / stress_wait_all) and a ping-pong latency
+ *   X*  stress (stress_wait_any / stress_wait_all), a ping-pong latency, and
+ *       the cost of CREATE_EVENT + close (the wineserver's per-object price)
  */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -36,6 +37,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -1315,6 +1317,38 @@ static void t_pingpong(void) {
   close(pp_b);
 }
 
+/* X4: what the wineserver pays for every internal sync (each fd object,
+   APC, async...): CREATE_EVENT + close, with a small and a large fd table */
+static void t_create_close(void) {
+  int keep[1500];
+  int nk = 0;
+  {
+    /* as the wineserver does (server/main.c): soft RLIMIT_NOFILE = hard */
+    struct rlimit rl;
+    if (!getrlimit(RLIMIT_NOFILE, &rl)) {
+      rl.rlim_cur = rl.rlim_max;
+      setrlimit(RLIMIT_NOFILE, &rl);
+    }
+  }
+  for (int pass = 0; pass < 2; pass++) {
+    if (pass == 1)
+      for (nk = 0; nk < 1500; nk++)
+        if ((keep[nk] = create_event(dev, 1, 0)) < 0) break;
+    const int n = 5000;
+    uint64_t t0 = now_ns(CLOCK_MONOTONIC);
+    int bad = 0;
+    for (int i = 0; i < n; i++) {
+      int e = create_event(dev, 1, 0);
+      if (e < 0) bad++;
+      else close(e);
+    }
+    uint64_t ns = now_ns(CLOCK_MONOTONIC) - t0;
+    verdict(pass ? "X5" : "X4", pass ? "CREATE_EVENT + close, 1500 objects open" : "CREATE_EVENT + close",
+            !bad && (!pass || nk == 1500), "%.2f us per pair (kept %d, failed %d)", (double)ns / 1000.0 / n, nk, bad);
+  }
+  for (int i = 0; i < nk; i++) close(keep[i]);
+}
+
 int main(void) {
   setvbuf(stdout, 0, _IOLBF, 0);
   row("linux_probe_ntsync: /dev/ntsync (UAPI %s)",
@@ -1351,6 +1385,7 @@ int main(void) {
   t_scm();
   t_stress();
   t_pingpong();
+  t_create_close();
   close(dev);
   row("done rc=%d", fails);
   return fails ? 1 : 0;
