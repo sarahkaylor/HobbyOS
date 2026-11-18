@@ -532,4 +532,9 @@ crash classes above are all wave 5 / early wave 6 and gone on today's code.
 | `fpsprobe-blind.p9` | fpsprobe.p9 with the two menu seeks replaced by fixed tap counts, for game resolutions whose layout boot_p9's row tables do not know (H1-08) |
 | `settings.p9` | main menu, then interactive (`ctl`): the hand-driven Settings / reload boot |
 | `tables.py` | the P8 / P9 tables below from the per-boot files |
+| `reload2.p9` (round 2) | the P9 reload without the H1-12 traps: CONTINUE from the fresh main menu with two settled Ups, F5 without moving, 2 minutes in the world, QUIT GAME |
+| `focusprobe.py` (round 2) | boot_p9's own `focus_in()` on a shot without a tap (a failing `seek` ends the boot); `--list` the save-list frame with a choice of 1080p scaling; `--diff` where two shots differ |
+| `ctl.sh` (round 2) | drive an interactive P9 boot (`ctl`) from ssh: append boot_p9 lines, wait for the shot, print its OCR and focus readings |
+| `boot_p9_nn.py` (round 2) | boot_p9.py with only `game_view()` swapped for NEAREST scaling (the H1-17 experiment); `run-hunt.sh HUNT_BOOT=` runs a P9 boot with it |
+| `compare.py` (round 2) | two log directories side by side (the integ15 vs integ17 table) |
 | `test_hunt.py` + `golden/` | golden tests: classifier output, early-exit flag, aggregation, wavgaps on a synthetic WAV with a planted 20 ms dropout and 1 s gap |
