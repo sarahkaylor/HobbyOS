@@ -1,0 +1,23 @@
+# H1-hunt round 2, h2-ctl1 (strix, integ17, P9 32 GiB Venus, tools/cp/hunt/settings.p9 + tools/cp/hunt/ctl.sh; focus readings = tools/cp/hunt/focusprobe.py = boot_p9's focus_in)
+## 1. graphics preset: GRAPHICS tab (1/3 switch tabs), focus walked to Quick Preset (OCR of the description 'Presets are tailored ...'); Right does NOT change it (it moves the focus to the RUN BENCHMARK button), Enter does
+UserSettings.json written by the game when Settings closed (debugfs on the live per-run data disk, 08:55:10):
+/graphics/presets QuickPresets 'Ray Tracing Overdrive' (index 9); TextureQuality High; ResolutionScaling FSR2; /gameplay/performance CrowdDensity High; FieldOfView 80.0
+[X]  20.776:011c:0120:info:vkd3d-proton:d3d12_device_determine_ray_tracing_tier: DXR 1.1 support enabled.
+(was: QuickPresets Custom, TextureQuality Low, CrowdDensity Low, ResolutionScaling Off)
+## 2. main menu after Esc from Settings: no focus frame (H1-12); a relative mouse wiggle brings the keyboard focus back
+focusprobe s049-t000434-r0.png 1280x720: no highlighted row
+focusprobe s050-t000439-r1.png 1280x720: no highlighted row
+focusprobe s051-t000443-r1b.png 1280x720: no highlighted row
+focusprobe s053-t000453-r2.png 1280x720: no highlighted row
+focusprobe s054-t000457-r2b.png 1280x720: no highlighted row
+focusprobe s055-t000462-r2c.png 1280x720: rows 489..524 centre 506 -> NEW GAME
+focusprobe s056-t000467-r2d.png 1280x720: rows 526..561 centre 544 -> LOAD GAME
+focusprobe s059-t000493-r3b.png 1280x720: rows 526..561 centre 544 -> LOAD GAME
+focusprobe s060-t000497-r3c.png 1280x720: rows 489..524 centre 506 -> NEW GAME
+# r0: back from Settings, no input; r1, r1b: Up, Up; r2: look 60 0 (6 steps); r2b: look -60 0; r2c: Up -> NEW GAME; r2d: Down -> LOAD GAME
+# r3b: Enter on LOAD GAME (save list), Esc: this time the focus stayed visible (LOAD GAME), r3c: Up -> NEW GAME
+## 3. the save loaded with the new preset: world 15.5 fps median (16 rows), 18.8 (32 rows, walking); no [VENUS] stall / fence error / submit error, no device-lost or vkd3d err row; game ran on; boot ended script-done
+[P9W] +   596.6 s  08:58:29  listseek loadlist-focus: entry at y=509 focused after 5 taps
+[P9W] +   686.6 s  08:59:59  expect inworld: matched /RIPPERDOC|Jackie/ at s095-t000661-inworld
+[P9W] +   766.8 s  09:01:19  verdict: script-done; QEMU stopped, slot released; guests on the host now: 0
+== verdict: script-done
