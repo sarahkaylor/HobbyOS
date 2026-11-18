@@ -1,0 +1,11 @@
+# H1-hunt: an ~8 s freeze in the soak (strix, h-soak1, game s ~940-966, guest 1083-1112 s, host ~04:31:00-04:31:30)
+[[X] [COHBP] pNiSd!] [VENUS] stall pid=110 tid=139 waits_ms=2001 ctx=12 ring=1 seqno=0x00000001000E674B
+[VENUS] stall pid=110 tid=185 waits_ms=7754 ctx=12 ring=1 seqno=0x00000001000E8CEC
+[VENUS] stall ctx=12 inflight=4 rings(issued/done): r0=31/31 r1=953581/953577 r2=953569/953569 r3=953575/953575 r4=953572/953572
+[VENUS] stall slots: [ctx 12 r1 s953578 age_ms 7759] [ctx 12 r1 s953579 age_ms 7759] [ctx 12 r1 s953580 age_ms 7759] [ctx 12 r1 s953581 age_ms 7759]
+[X] [HBP] pid=110 n=1 fps=0.1 path=scanout acq=0/0 sub=1976/1976 wait=1/1 flip=8127/8127 geom=0/0 set=5726 flush=0 us sc
+[X] [HBP] pid=110 n=1 fps=0.1 path=scanout acq=1/1 sub=3829/3829 wait=3/3 flip=2893/2893 geom=0/0 set=147 flush=2703 us 
+# fps rows (guest-time gaps from classify.py): 1083.862 -> 1091.775 (7.9 s, 4.3 fps), 1103.876 -> 1112.009 (8.1 s, 1.7 fps); audio dropouts at game s 975.5 and 987.1 (wavgaps, WAV t0 = game s 66.3)
+# host sampler (run-hunt.sh, 1 Hz: date + cat renderD129 gpu_busy_percent + loadavg): its only gaps > 3 s in the whole 35-minute boot are here:
+04:30:59 37 13.91 04:31:00 34 13.91 04:31:01 36 13.76 04:31:02 36 13.76 04:31:10 34 13.86 04:31:11 36 14.67 04:31:12 35 14.67 04:31:13 36 14.67 04:31:14 0 14.67 04:31:16 35 14.77 04:31:17 42 14.77 04:31:18 40 14.77 04:31:19 39 14.77 04:31:20 39 14.77 04:31:21 41 14.87 04:31:22 0 14.87 04:31:30 37 15.52 04:31:31 35 15.72 
+# i.e. reading the 9070 XT's gpu_busy_percent (or the whole host) stalled ~8 s twice while the guest's 4 ring-1 fences sat unretired for 7.7 s; host load was ~14-15, no amdgpu/drm line in dmesg. Other boots' samplers: 0 gaps > 3 s (h-fp1, h-fp2, h-play1, h-p8v1).

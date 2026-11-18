@@ -204,7 +204,20 @@ diff (H2-early, `tools/cp/p8/boot_p8.py` ~287):
 ```
 (`return 0 if verdict in ("launcher-done", "main-menu")` then makes it rc 1.)
 
-<!-- FPS -->
+## P9 fps (strix, Venus, 32 GiB, the P9 verdict for the ≥ 30 fps world target)
+
+World = fpsprobe.p9's scripted 90 s walk (play / soak: every `world` /
+`soakN` row); median and p10 of winevulkan's `trace:fps` "approx" rows (each
+averages ~1.5 s of guest time); "world min row" is the lowest such row;
+"hitches" counts consecutive fps rows more than 2.5 s apart in **guest**
+time (`WINEDEBUG=+timestamp`), i.e. a frame that took ≥ 1 s.  (fps.csv's own
+`game_s` is the host's read time, which follows boot_p9's screendump cadence,
+so its gaps are not the game's.)  9070 XT busy = `gpu_busy_percent` of
+renderD129, 1 Hz, over the world phases; it includes the other lanes'
+Venus guests listed by the sampler.  The `prof-*` phases (boot_p9's QMP PC
+sampler running) are left out: the sampler itself costs frames.
+
+<!-- FPSTABLE -->
 
 <!-- MATRIX -->
 

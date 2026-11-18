@@ -40,7 +40,7 @@ for r in runs:
 print("   verdicts: " + ", ".join(f"{k}={v}" for k, v in sorted(verd.items(), key=lambda kv: -kv[1])))
 agg = {}
 for r in runs:
-    for c in ("kfault", "kstall", "kdiag", "exitpc", "red", "wine_err", "dxvk"):
+    for c in ("kfault", "kstall", "kdiag", "exitpc", "audio", "red", "wine_err", "dxvk"):
         for sig, v in r["classes"].get(c, {}).items():
             if c in ("wine_err", "dxvk") and benign(sig):
                 continue
@@ -49,7 +49,7 @@ for r in runs:
             e["boots"].append(r["short"])
             e["rows"] += v[0]
             e["last"] = max(e["last"], r["mtime"])
-for c in ("kfault", "kstall", "kdiag", "exitpc", "red", "wine_err", "dxvk"):
+for c in ("kfault", "kstall", "kdiag", "exitpc", "audio", "red", "wine_err", "dxvk"):
     items = sorted(((k, v) for k, v in agg.items() if k[0] == c), key=lambda kv: (-len(kv[1]["boots"]), -kv[1]["rows"]))
     if not items:
         continue

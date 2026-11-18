@@ -1,0 +1,16 @@
+# H1-hunt: trap.c's stall watchdog says 'console silent for more than 20s' about 1 s after the console printed (strix, h-soak1 serial.txt)
+# the [NFSIO] row the watchdog prints with it carries the kernel's ms; the row before it is a Wine +timestamp fps row (same clock: NtGetTickCount)
+[X] 217.256:01f8:trace:fps:win32u_vkQueuePresentKHR 0x10400c72f0 @ approx 103.17fps, total 141.82fps
+[NFSIO] bytes=0x0x000000005541d358 rpcs=0x0x000000000000ae4c ms=0x0x00000000000354af
+[WATCHDOG] console silent for more than 20s
+
+[X] 787.239:01f8:trace:fps:win32u_vkQueuePresentKHR 0x10400c72f0 @ approx 34.60fps, total 80.88fps
+[NFSIO] bytes=0x0x00000000efcd427d rpcs=0x0x000000000001e364 ms=0x0x00000000000c073f
+[WATCHDOG] console silent for more than 20s
+
+[X] 1240.402:01f8:trace:fps:win32u_vkQueuePresentKHR 0x10400c72f0 @ approx 39.37fps, total 59.40fps
+[NFSIO] bytes=0x0x0000000103bb427d rpcs=0x0x0000000000020b40 ms=0x0x000000000012f289
+[WATCHDOG] console silent for more than 20s
+
+# per boot: h-fp1=0 h-fp2=2 h-fq1b=6 h-fq1=2 h-p8l1=1 h-p8l2=1 h-p8v1=7 h-p8v2=2 h-p8v3=0 h-play1=4 h-rl1=1 h-soak1=4 
+# uart_last_activity_ms is written only by cons_hw_tx (src/kernel/arch/x64/uart.c:94), which kconsole.c's wire_piece calls for every piece; so either some console output does not pass there, or the timestamp/compare is wrong (both use rdtsc()/tsc_per_ms). Either way the watchdog's 'silent' is not evidence of a wedge in these boots, and its CPU dump fires on healthy boots (cooldown 30 s).

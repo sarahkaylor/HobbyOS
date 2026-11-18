@@ -23,3 +23,5 @@
 [THRS] pid=109 live=51 gt=51 hw=51 slots=52/511 regs=196 anon=153 anon_mib=1200 big_mib=63 stk=1 res_mib=450 pk_mib=12 Cyberpunk2077.e
 [X] 0180:trace:fps:present_queue 0x1234 @ approx 31.50fps, total 30.10fps
 [X] wine: failed to start L"C:\windows\syswow64\rundll32.exe": c0000135
+[WATCHDOG] console silent for more than 20s
+[X] ALSA lib /x/alsa-lib-1.2.14/src/pcm/pcm.c:8772:(snd_pcm_recover) underrun occurred

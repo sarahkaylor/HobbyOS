@@ -124,6 +124,9 @@ KDIAG = [
     # compat process this is a false positive that burns the 20-row cap.
     ("badelr", re.compile(r"\[BADELR\] .*")),
     ("stallbrk-hold", re.compile(r"\[(HOLDER|LOCKHOLD|SPINHOLD)\].*")),
+    # trap.c's stall watchdog: "console silent for more than 20s" -- in the
+    # game boots it fires ~1 s after console output (cp-hunt H1-14)
+    ("watchdog", re.compile(r"\[WATCHDOG\] console silent.*")),
 ]
 PROC_RX = re.compile(r"\[KERNEL\] Process (\d+): (.*?) exited unexpectedly or gracefully")
 EXITPC_RX = re.compile(r"\[EXITPC\] pid=(\d+) last_user_pc=(\S+) code=(0x[0-9A-Fa-f]+)")
@@ -176,7 +179,7 @@ def benign(sig):
 
 def classify_serial(text):
     """-> dict of class -> {signature: [count, first_line_no, example]} plus extras."""
-    cls = {k: {} for k in ("kfault", "kstall", "kdiag", "exit", "exitpc", "wine_err", "dxvk", "red")}
+    cls = {k: {} for k in ("kfault", "kstall", "kdiag", "exit", "exitpc", "audio", "wine_err", "dxvk", "red")}
     pidname = {}
     nfps = 0
     fps_vals = []
@@ -251,6 +254,9 @@ def classify_serial(text):
         m = VKD3D_RX.match(x)
         if m and m.group(1) in ("err", "warn"):
             add("dxvk", f"{m.group(1)}:{m.group(2)}:{m.group(3)} {norm(m.group(4))}", ln, line)
+            continue
+        if "snd_pcm_recover) underrun" in x:          # alsa-lib in the game process
+            add("audio", "alsa-lib snd_pcm_recover: underrun occurred", ln, line)
             continue
         m = re.match(r"wine: failed to start (.*)", x)
         if m:
@@ -436,6 +442,7 @@ def report(args):
     for c, title in (("kfault", "kernel faults"), ("kstall", "kernel stalls / lost wakes / timeouts"),
                      ("kdiag", "kernel diagnostics (instrument rows)"),
                      ("exitpc", "[EXITPC] non-zero exit codes"), ("exit", "process exits (by name)"),
+                     ("audio", "audio (alsa-lib in the guest)"),
                      ("wine_err", "Wine err: lines"), ("dxvk", "DXVK / vkd3d-proton err+warn"),
                      ("red", "REDEngineErrorReporter")):
         d = res["classes"][c]
@@ -485,7 +492,7 @@ def aggregate(paths, min_n, game_only=False, show_boots=12):
     print("   verdicts: " + ", ".join(f"{k}={len(v)}" for k, v in sorted(vs.items(), key=lambda kv: -len(kv[1]))))
     if n <= 40:
         print("   " + ", ".join(f"{r['run']}={r['runlog'].get('verdict', '?')}" for r in runs))
-    for c in ("kfault", "kstall", "kdiag", "exitpc", "red", "wine_err", "dxvk"):
+    for c in ("kfault", "kstall", "kdiag", "exitpc", "audio", "red", "wine_err", "dxvk"):
         items = [(k, v) for k, v in agg.items() if k[0] == c and len(v["boots"]) >= min_n]
         if not items:
             continue
