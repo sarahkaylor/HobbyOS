@@ -75,18 +75,66 @@ static spinlock_t vm_lock;
  * charge a fault its own wait and hold (lw=/lh=).  Two rdtsc per pair on
  * x86_64; plain lock calls elsewhere.  always_inline keeps the spinlock's own
  * call-site bookkeeping (lock audit, held-lock table) pointing at the caller. */
+/* H7-fault: console rows are never printed under vm_lock.  A row costs a
+ * trapped port write per byte and waits for the console wire, so a [PUB] /
+ * [PUBS] row printed by a fault held the lock every other faulting CPU spins
+ * on for 4-15 ms.  vm_row() parks the row in this CPU's record while the
+ * lock is held; vm_lock_rel() prints it after the release.  (vm_lock is not
+ * recursive, so "held on this CPU" is one flag; IRQs are off while it is.) */
+struct vm_lkcpu {
+  int held;
+  int npend;
+  struct kline pend[2];
+} __attribute__((aligned(64)));
+static struct vm_lkcpu vm_lk_pc[MAX_CPUS];
+static void vm_row(struct kline *kl) {
+  uint32_t c = get_cpuid();
+  if (c < MAX_CPUS && vm_lk_pc[c].held) {
+    if (vm_lk_pc[c].npend < 2)
+      vm_lk_pc[c].pend[vm_lk_pc[c].npend++] = *kl;
+    return; /* a third row in one hold is dropped (diagnostics only) */
+  }
+  kl_emit(kl);
+}
+
 static inline __attribute__((always_inline)) uint64_t vm_lock_acq(int site) {
 #if defined(__x86_64__)
   uint64_t t = pf_tsc();
   uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
   pfstat_lock_acquired(t, site);
-  return fl;
 #else
   (void)site;
-  return spinlock_acquire_irqsave(&vm_lock);
+  uint64_t fl = spinlock_acquire_irqsave(&vm_lock);
 #endif
+  uint32_t c = get_cpuid();
+  if (c < MAX_CPUS)
+    vm_lk_pc[c].held = 1;
+  return fl;
+}
+/* The rare release that has rows to print (kept out of line: the copies
+   would otherwise sit in the stack frame of every vm_lock user). */
+static __attribute__((noinline)) void vm_lock_rel_rows(uint64_t fl,
+                                                       struct vm_lkcpu *lc) {
+  struct kline pend[2];
+  int np = lc->npend;
+  for (int i = 0; i < np; i++)
+    pend[i] = lc->pend[i];
+  lc->npend = 0;
+  pfstat_lock_releasing();
+  spinlock_release_irqrestore(&vm_lock, fl);
+  for (int i = 0; i < np; i++)
+    kl_emit(&pend[i]);
 }
 static inline __attribute__((always_inline)) void vm_lock_rel(uint64_t fl) {
+  uint32_t c = get_cpuid();
+  if (c < MAX_CPUS) {
+    struct vm_lkcpu *lc = &vm_lk_pc[c];
+    lc->held = 0;
+    if (lc->npend) {
+      vm_lock_rel_rows(fl, lc);
+      return;
+    }
+  }
   pfstat_lock_releasing();
   spinlock_release_irqrestore(&vm_lock, fl);
 }
@@ -1673,7 +1721,7 @@ void vm_pub_note(struct addr_space *as, uint64_t va, uint64_t off, uint16_t prot
     kl_i(&kl, zero);
     kl_s(&kl, verified ? " ver=1" : " ver=0");
     kl_c(&kl, '\n');
-    kl_emit(&kl);
+    vm_row(&kl); /* H7-fault: after vm_lock if held */
     vm_pub_rows_printed++;
   }
 
@@ -1707,7 +1755,7 @@ void vm_pub_note(struct addr_space *as, uint64_t va, uint64_t off, uint16_t prot
       kl_i(&kl, (long)vm_pw_xunv[i]);
     }
     kl_c(&kl, '\n');
-    kl_emit(&kl);
+    vm_row(&kl); /* H7-fault: after vm_lock if held */
   }
 }
 
@@ -2653,8 +2701,14 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
          page (zero-fill) or an anonymous object's page: both are `src=zero`
          by definition, so an executable page here is a JIT/anon page whose
          bytes the writer supplies -- legal, counted, never alarmed. */
-      vm_pub_note(as, a, (a - r->base) + r->obj_off, r->prot, !shared,
-                  VM_PUB_ZERO, fr, 0, VM_PW_TOUCH_ANON);
+      /* H7-fault: noted after vm_lock (see vm_handle_fault's anon path) */
+      uint64_t pub_off = (a - r->base) + r->obj_off;
+      uint16_t pub_prot = r->prot;
+      vm_lock_rel(fl);
+      vm_pub_note(as, a, pub_off, pub_prot, !shared, VM_PUB_ZERO, fr, 0,
+                  VM_PW_TOUCH_ANON);
+      retouch = 0;
+      continue;
     } else if (write && vm_touch_leaf_cow_locked(as, a)) {
       /* C1-fork: a kernel write into a page shared copy-on-write since a
          fork must land in this AS's own copy (vm_kwrite stores through the
@@ -3864,9 +3918,13 @@ static int vm_handle_fault_body(struct process *grp, uint64_t va, int write,
   as->resident_frames++;
   if (as->resident_frames > as->peak_frames)
     as->peak_frames = as->resident_frames;
-  /* M6/L63: anonymous publish (zero-fill or an anonymous object's page). */
-  vm_pub_note(as, a, (a - r->base) + r->obj_off, r->prot, !shared,
-              VM_PUB_ZERO, fr, 0, VM_PW_FAULT_ANON);
+  /* M6/L63: anonymous publish (zero-fill or an anonymous object's page).
+     H7-fault: noted after vm_lock is released (below) -- it scans the page
+     and prints a [PUB]/[PUBS] row every 1024/4096 publishes, and a console
+     row under the one fault lock held every other faulting CPU for 4-15 ms
+     (ab-lane-fp1 [PFX] rows: kind=anon zero=7 lh=4043..15235). */
+  uint64_t pub_off = (a - r->base) + r->obj_off;
+  uint16_t pub_prot = r->prot;
   /* M6/L72: WHO IS TOUCHING FRESH ANONYMOUS PAGES?
    *
    * The post-load park grows resident memory at one page per 6.1 ms for 19
@@ -3878,14 +3936,16 @@ static int vm_handle_fault_body(struct process *grp, uint64_t va, int write,
    * instruction (`rip`, stashed by the #PF path in trap.c), the region's
    * identity and whether the page came from a shared object -- enough to name
    * the site and, with the 6.1 ms cadence, the loop. */
+  struct kline kf;
+  int anonf_emit = 0;
   {
     extern uint64_t vm_dbg_fault_rip;
     extern struct process *current_process(void);
     static unsigned l_anonf;
     unsigned k = __atomic_fetch_add(&l_anonf, 1u, __ATOMIC_RELAXED);
-    if ((k & 4095u) == 0) {
+    anonf_emit = (k & 4095u) == 0;
+    if (anonf_emit) {
       struct process *cp = current_process();
-      struct kline kf;
       kl_init(&kf);
       kl_s(&kf, "[ANONF] n=");
       kl_i(&kf, (long)k);
@@ -3910,11 +3970,14 @@ static int vm_handle_fault_body(struct process *grp, uint64_t va, int write,
       kl_s(&kf, " rip=");
       kl_hex(&kf, (unsigned long)vm_dbg_fault_rip);
       kl_c(&kf, '\n');
-      kl_emit(&kf);
     }
   }
   vm_fault_resolved(as);
   vm_lock_rel(fl);
+  vm_pub_note(as, a, pub_off, pub_prot, !shared, VM_PUB_ZERO, fr, 0,
+              VM_PW_FAULT_ANON);
+  if (anonf_emit)
+    kl_emit(&kf); /* H7-fault: built under vm_lock, printed after it */
   return 0; /* the instruction retries (ELR/CR2 untouched) */
 }
 
