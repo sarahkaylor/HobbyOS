@@ -27,8 +27,9 @@
 #
 # Env: HUNT_AUDIO=1, HUNT_FROM (P9 run under obj/cp-p9 to start from),
 #      HUNT_BOOT (P9: another boot script in place of tools/cp/p9/boot_p9.py),
-#      HUNT_LOGS (default ~/cp/lanes/hunt-logs), HUNT_EXPORT (export name
-#      prefix, default /srv/nfs/cp-hunt: -p8 / -p9 are appended; another
+#      HUNT_LOGS (default TREE/obj/hunt-logs), HUNT_WAVDIR (default
+#      ~/cp/lanes/<tree>-wav), HUNT_EXPORT (export name
+#      prefix, default /srv/nfs/cp-<tree>: -p8 / -p9 are appended; another
 #      lane's own name, H5-audio2), anything run-p8/run-p9 take.
 # One boot of this tree at a time (flock /tmp/cp-hunt-lane.<tree>.lock); the QEMU
 # slot and the big-guest lock are taken inside the harnesses, for the boot only.
@@ -36,13 +37,14 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT" || exit 2
 KIND="${1:?kind}"; RUN="${2:?run name}"
-LOGS="${HUNT_LOGS:-$HOME/cp/lanes/hunt-logs}"; mkdir -p "$LOGS"
+# round 3 (H6-hunt3): the evidence stays under the tree (obj/ is never rsync'ed over)
+LOGS="${HUNT_LOGS:-$ROOT/obj/hunt-logs}"; mkdir -p "$LOGS"
 L="$LOGS/$RUN.log"; H="$LOGS/$RUN.host.txt"
 export PATH="$HOME/.local/bin:$PATH" MAKEFLAGS=-j16 TOOLS_SKIP=1
 # wave 8b: the patched Wine stage (cp-winefix) is the default
 export CP_WINE_STAGE="${CP_WINE_STAGE:-$HOME/cp/wine-cp2/stage/CP/WINE}" WINE_BUILD="${WINE_BUILD:-$HOME/cp/wine-cp2}"
 export VENUS_BUILD="${VENUS_BUILD:-$HOME/cp/lanes/hunt-venus}" VENUS_VNC=1
-EXP="${HUNT_EXPORT:-/srv/nfs/cp-hunt}"
+EXP="${HUNT_EXPORT:-/srv/nfs/cp-$(basename "$ROOT")}"   # a name of this lane's own
 # one boot per TREE (a lane), not per host: other lanes copy this script into
 # their trees, and a shared /tmp/cp-hunt-lane.lock made their boots and this
 # lane's wait for each other (round 2, 2026-11-18).  HUNT_LOCK overrides.
@@ -52,7 +54,9 @@ flock 196
 
 WAV=""
 if [ "${HUNT_AUDIO:-0}" = 1 ]; then
-  mkdir -p "$HOME/cp/lanes/hunt-wav"; WAV="$HOME/cp/lanes/hunt-wav/$RUN.wav"; rm -f "$WAV"
+  # wave 8: CP_AUDIO_WAV=$HOME/cp/lanes/<lane>-wav/<run>.wav (QEMU's wav backend only)
+  WD="${HUNT_WAVDIR:-$HOME/cp/lanes/$(basename "$ROOT")-wav}"
+  mkdir -p "$WD"; WAV="$WD/$RUN.wav"; rm -f "$WAV"
   export CP_AUDIO_WAV="$WAV"
 fi
 

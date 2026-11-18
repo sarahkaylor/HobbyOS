@@ -1,0 +1,595 @@
+#!/usr/bin/env python3
+"""tools/cp/hunt/drive.py -- drive an interactive P9 boot (boot_p9.py `ctl`,
+tools/cp/hunt/settings.p9) from the host with feedback, for the sequences a
+fixed play script cannot do (lane H6-hunt3, docs/cp-hunt.md round 3):
+
+    drive.py churn    RUN   [--loads 10] [--menu-loads 5] [--saves 10]
+    drive.py settings RUN   [--cycles 3]
+    drive.py quit     RUN   [--from pause|main]
+
+The boot's own `seek` / `expect` end the boot when they fail (h3-ctl1,
+h3-ctl3), so this driver sends only boot_p9's input / wait / shot lines
+through OUT/ctl.txt and reads every result itself from the shots (numbers and
+OCR text only; the shots stay on strix):
+
+  * menu focus: the yellow highlight next to a label that tesseract found
+    (position-independent: works for a 1280x720 game on a 1920x1080 X screen,
+    a 1024x768 window, or a 1920x1080 game);
+  * the save list: boot_p9's cyan-frame rows and the save name OCR'd inside
+    the focused frame (QuickSave-3, ManualSave-86, ...);
+  * the settings rows: the focused row's faint cyan tint right of its label;
+  * waits: OCR until a regex matches or a timeout passes, never fatal.
+
+Every step is printed as one line ("[DRV] ...") with host time; the run log
+(OBJ/hunt-logs/RUN.log) has boot_p9's side.  Only in-game menus are driven.
+The game's first-run screens never appear here (boot_p9 stops the boot on
+one), and the GAMEPLAY settings tab is never entered: its "Share game
+telemetry" row trips boot_p9's first-run guard (cp-hunt H6-01).
+"""
+import argparse
+import glob
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+from PIL import Image, ImageStat  # noqa: E402
+
+SAVE_RX = re.compile(r"\b((?:Quick|Auto|Manual|Point\w*|End\w*)\s*S[ao]ve-\d+)", re.I)
+WORLD_RX = r"RIPPERDOC|Jackie|STREETKID|Kirk|WELCOME\s+TO|First\s+time\s+in"
+
+
+class Ended(Exception):
+    pass
+
+
+def log(msg):
+    print(f"[DRV] {time.strftime('%H:%M:%S')} {msg}", flush=True)
+
+
+class Boot:
+    def __init__(self, run, logs=None):
+        self.run = run
+        self.out = os.path.join(ROOT, "obj", "cp-p9", run)
+        self.ctl = os.path.join(self.out, "ctl.txt")
+        self.log = os.path.join(logs or os.path.join(ROOT, "obj", "hunt-logs"), run + ".log")
+        self.n = 0
+        if not os.path.isdir(self.out):
+            raise SystemExit(f"drive: no {self.out}")
+
+    def ended(self):
+        try:
+            return "verdict: " in open(self.log, errors="replace").read()
+        except OSError:
+            return True
+
+    def shot(self, name, *lines, timeout=180):
+        """append LINES + `shot TAG`; wait for the PNG; -> its path"""
+        self.n += 1
+        tag = f"d{self.n:03d}{name}"
+        with open(self.ctl, "a") as f:
+            for ln in lines:
+                f.write(ln + "\n")
+            f.write(f"shot {tag}\n")
+        end = time.time() + timeout
+        pat = os.path.join(self.out, "shots", f"s*-t*-{tag}.png")
+        while time.time() < end:
+            g = glob.glob(pat)
+            if g:
+                time.sleep(0.3)
+                return g[0]
+            if self.ended():
+                raise Ended(f"the boot ended (waiting for {tag})")
+            time.sleep(0.5)
+        raise Ended(f"no shot {tag} in {timeout} s")
+
+    def until(self, name, rx, timeout, *first, every=4):
+        """first lines, then shots `every` s apart until the OCR matches rx"""
+        end = time.time() + timeout
+        p = self.shot(name, *first)
+        while True:
+            t = ocr(p)
+            if re.search(rx, t, re.I):
+                return p, t
+            if time.time() >= end:
+                log(f"until {name}: /{rx}/ not seen in {timeout} s (last OCR {t[:80]!r})")
+                return None, t
+            p = self.shot(name, f"wait {every}")
+
+
+# --- readings -------------------------------------------------------------------
+def ocr(path, box=None, scale=1, psm=6, tsv=False):
+    im = Image.open(path).convert("L")
+    if box:
+        im = im.crop(box)
+    if scale != 1:
+        im = im.resize((int(im.size[0] * scale), int(im.size[1] * scale)))
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
+        im.save(tf.name)
+    try:
+        r = subprocess.run(["tesseract", tf.name, "-", "--psm", str(psm)] + (["tsv"] if tsv else []),
+                           capture_output=True, text=True, timeout=60).stdout
+    finally:
+        os.unlink(tf.name)
+    if not tsv:
+        return " ".join(r.split())
+    words = []
+    for ln in r.splitlines()[1:]:
+        p = ln.split("\t")
+        if len(p) == 12 and p[11].strip() and float(p[10]) > 20:
+            x, y, w, h = (int(int(v) / scale) for v in p[6:10])
+            if box:
+                x, y = x + box[0], y + box[1]
+            words.append((p[11], x, y, w, h))
+    return words
+
+
+def find_labels(words, label):
+    """every (x, y, w, h) where LABEL's words follow each other on one line"""
+    parts = label.upper().split()
+    out = []
+    for i, (t, x, y, w, h) in enumerate(words):
+        if t.upper().strip(".,:") != parts[0]:
+            continue
+        ok = True
+        for k, p in enumerate(parts[1:], 1):
+            if i + k >= len(words) or words[i + k][0].upper().strip(".,:") != p or abs(words[i + k][2] - y) > 8:
+                ok = False
+                break
+        if ok:
+            xe = words[i + len(parts) - 1][1] + words[i + len(parts) - 1][3]
+            out.append((x, y, xe - x, h))
+    return out
+
+
+def find_label(words, label):
+    f = find_labels(words, label)
+    return f[0] if f else None
+
+
+def column_boxes(words, labels):
+    """one box per label, all in the same text column: a label's word can also
+    occur in a description elsewhere on the screen ("...monitor's resolution.")"""
+    cands = {lab: find_labels(words, lab) for lab in labels}
+    xs = sorted(c[0] for v in cands.values() for c in v)
+    if not xs:
+        return {}
+    col = xs[len(xs) // 2]
+    out = {}
+    for lab, v in cands.items():
+        best = min(v, key=lambda c: abs(c[0] - col)) if v else None
+        if best and abs(best[0] - col) < 80:
+            out[lab] = best
+    return out
+
+
+def menu_focus(path, labels):
+    """the highlighted (yellow) menu row among LABELS found by OCR: (label, score)"""
+    im = Image.open(path).convert("RGB")
+    words = ocr(path, scale=2, psm=11, tsv=True)
+    px = im.load()
+    best = (None, 0)
+    for lab, (x, y, w, h) in column_boxes(words, labels).items():
+        n = 0
+        for yy in range(max(0, y - 10), min(im.size[1], y + h + 10)):
+            for xx in range(max(0, x - 40), min(im.size[0], x + w + 220), 2):
+                r, g, bb = px[xx, yy]
+                if r > 140 and g > 95 and bb < 90:
+                    n += 1
+        if n > best[1]:
+            best = (lab, n)
+    return best if best[1] > 40 else (None, best[1])
+
+
+def list_focus(path):
+    """the save list's cyan focus frame in the shot's own coordinates: (y0, y1) or None"""
+    im = Image.open(path).convert("RGB")
+    W, H = im.size
+    px = im.load()
+    ys = [y for y in range(int(H * 0.08), int(H * 0.98))
+          if sum(1 for x in range(int(W * 0.17), int(W * 0.83), 2)
+                 if px[x, y][0] < 120 and px[x, y][1] > 170 and px[x, y][2] > 170) > W // 32]
+    if not ys or ys[-1] - ys[0] > H // 5:
+        return None
+    return ys[0], ys[-1]
+
+
+def list_name(path, fr):
+    """the save name inside the focused frame (or None for a group header)"""
+    im = Image.open(path)
+    W, H = im.size
+    y0, y1 = fr
+    t = ocr(path, box=(int(W * 0.15), max(0, y0 - 6), int(W * 0.85), min(H, y1 + 6)), scale=3, psm=6)
+    m = SAVE_RX.search(t)
+    return (re.sub(r"\s+", "", m.group(1)).replace("Sove", "Save") if m else None), t
+
+
+# VIDEO tab rows: label (x, top y) in a 1280x720 game picture at the origin (h3-ctl3)
+VIDEO_TABLE = {"Monitor": (332, 165), "VSync": (332, 205), "Maximum FPS": (332, 245),
+               "Windowed Mode": (330, 281), "Resolution": (332, 323), "HDR Mode": (330, 360)}
+
+
+def set_row(path, labels, table=None):
+    """the focused settings row: its band carries a faint cyan tint, (g - r) of
+    the band x 300..900 about +17 against -5..-20 for the others (h3-ctl3).
+    With a TABLE the rows are placed from the labels OCR found (scale and
+    offset fitted, so the panel can sit anywhere and at 1.5x); a focused
+    label often does not OCR at all, so without a table a label missing from
+    the column is the fallback answer."""
+    im = Image.open(path).convert("RGB")
+    words = ocr(path, scale=2, psm=11, tsv=True)
+    cb = column_boxes(words, labels)
+    rows = {}
+    if table:
+        fit = [(table[l], (b[0], b[1])) for l, b in cb.items() if l in table]
+        if len(fit) >= 2:
+            (X0, Y0), (x0, y0) = min(fit, key=lambda f: f[0][1])
+            (X1, Y1), (x1, y1) = max(fit, key=lambda f: f[0][1])
+            sc = (y1 - y0) / (Y1 - Y0) if Y1 != Y0 else 1.0
+            if 0.5 < sc < 2.5:
+                ox = sorted(x - sc * X for (X, Y), (x, y) in fit)[len(fit) // 2]
+                oy = sorted(y - sc * Y for (X, Y), (x, y) in fit)[len(fit) // 2]
+                # local contrast: the row band against thin strips above and below it
+                # (the panel is translucent, so the world behind shifts every row's
+                # level; h3-ctl3: focused +17..+22, unfocused -12..+8)
+                res = []
+                for l in labels:
+                    if l not in table:
+                        continue
+                    X, Y = table[l]
+
+                    def gr(y0, y1):
+                        r, g, bb = ImageStat.Stat(im.crop((int(ox + sc * 300), int(oy + sc * y0),
+                                                          int(ox + sc * 900), int(oy + sc * y1)))).mean
+                        return g - r
+                    res.append((round(gr(Y - 3, Y + 15) - (gr(Y - 16, Y - 9) + gr(Y + 22, Y + 27)) / 2, 1), l))
+                res.sort(reverse=True)
+                if res and res[0][0] >= 13 and (len(res) < 2 or res[0][0] - res[1][0] >= 5):
+                    return res[0][1], res[:3]
+                return None, res[:3]
+    sc_ = []
+    for l, (x, y, w, h) in cb.items():
+        x1 = x + int(im.size[0] * 0.45)
+
+        def gr(y0, y1):
+            r, g, bb = ImageStat.Stat(im.crop((x, max(0, y0), x1, max(1, y1)))).mean
+            return g - r
+        sc_.append((round(gr(y - 6, y + h + 6) - (gr(y - 19, y - 12) + gr(y + h + 13, y + h + 18)) / 2, 1), l))
+    sc_.sort(reverse=True)
+    if sc_ and sc_[0][0] >= 13 and (len(sc_) < 2 or sc_[0][0] - sc_[1][0] >= 5):
+        return sc_[0][1], sc_[:3]
+    if not table:
+        miss = [l for l in labels if l not in cb]
+        if len(miss) == 1 and len(cb) >= 2:
+            return miss[0], sc_[:3] + [("missing", miss[0])]
+    return None, sc_[:3]
+
+
+# --- sequences -------------------------------------------------------------------
+PAUSE = ["RESUME", "SAVE GAME", "LOAD GAME", "SETTINGS", "EXIT TO MAIN MENU", "QUIT GAME"]
+MAIN = ["CONTINUE", "NEW GAME", "LOAD GAME", "SETTINGS", "QUIT GAME"]
+
+
+def seek(b, labels, want, limit=10, name="sk"):
+    """tap Up/Down until WANT is highlighted (direction from the label order)"""
+    for i in range(limit + 1):
+        p = b.shot(f"{name}{i}", "wait 0.6")
+        lab, n = menu_focus(p, labels)
+        if lab == want:
+            log(f"seek {want}: on it after {i} taps")
+            return True
+        d = "down" if lab is None or labels.index(want) > labels.index(lab) else "up"
+        if lab is None and i >= 2:
+            # cp-hunt H1-12: no visible focus after a sub-menu -> a relative mouse wiggle
+            b.shot(f"{name}w{i}", "look 60 0 1 16", "look -60 0 1 16", "wait 0.5")
+        b.shot(f"{name}k{i}", f"key {d}")
+    log(f"SEEK {want}: not reached in {limit} taps")
+    return False
+
+
+def pause_open(b):
+    p = b.shot("po", "key esc", "wait 4")
+    if re.search(r"RESUME|EXIT\s+TO\s+MAIN", ocr(p), re.I):
+        return True
+    p = b.shot("po2", "wait 2")          # once more: a popup may have eaten the Esc
+    if re.search(r"RESUME|EXIT\s+TO\s+MAIN", ocr(p), re.I):
+        return True
+    p = b.shot("po3", "key esc", "wait 4")
+    return bool(re.search(r"RESUME|EXIT\s+TO\s+MAIN", ocr(p), re.I))
+
+
+def in_world(b, name, timeout):
+    """wait for the HUD; close the prologue's tutorial popup with Esc if it shows"""
+    p, t = b.until(name, WORLD_RX, timeout)
+    if not p:
+        return None
+    if re.search(r"WELCOME\s+TO|First\s+time\s+in", t, re.I):
+        p2, t2 = b.until(name + "e", r"STREETKID|Kirk|RIPPERDOC|Jackie", 30, "wait 3", "key esc", "wait 3")
+        if re.search(r"RESUME|EXIT\s+TO\s+MAIN", t2 or "", re.I):
+            b.shot(name + "r", "key esc", "wait 3")
+        return "STREETKID" if p2 else None
+    return "RIPPERDOC" if re.search(r"RIPPERDOC|Jackie", t, re.I) else "STREETKID"
+
+
+def open_list(b):
+    """from the LOAD GAME list just opened: expand the groups"""
+    p, t = b.until("ll", r"LOAD\s*GAME|Expand|Progression", 30, "wait 3")
+    b.shot("l0", "key 0", "wait 2")
+    return p is not None
+
+
+def list_pick(b, avoid, prefer=None, steps=24):
+    """walk the list down from the top; return the first focused save whose
+    name is not in AVOID (or is PREFER), with Enter not yet pressed"""
+    seen = []
+    for i in range(steps):
+        p = b.shot(f"ls{i}", "key down", "wait 1.2")
+        fr = list_focus(p)
+        if not fr:
+            continue
+        nm, _ = list_name(p, fr)
+        seen.append(nm)
+        if nm and ((prefer and nm == prefer) or (not prefer and nm not in avoid)):
+            log(f"list: focus on {nm} (frame rows {fr[0]}..{fr[1]}) after {i + 1} taps")
+            return nm
+    log(f"list: no pick (seen {seen})")
+    return None
+
+
+def make_saves(b, n):
+    """n quick saves (F5) at different places, ~10 s of walking apart"""
+    for i in range(n):
+        b.shot(f"mv{i}", "down shift", "hold w 3000", "up shift", "look 300 0 10 16", "hold w 2000",
+               "look -150 0 5 16", "wait 1")
+        p = b.shot(f"qs{i}", "key f5", "wait 4")
+        log(f"quick save {i + 1}/{n}: OCR {ocr(p)[:60]!r}")
+
+
+def load_in_world(b, avoid, k):
+    if not pause_open(b):
+        log(f"load {k}: the pause menu did not open")
+        return None
+    if not seek(b, PAUSE, "LOAD GAME", name=f"pl{k}_"):
+        b.shot("bk", "key esc", "wait 3")
+        return None
+    b.shot(f"plr{k}", "key ret", "wait 3")
+    open_list(b)
+    nm = list_pick(b, avoid)
+    if not nm:
+        b.shot("bk", "key esc", "wait 3", "key esc", "wait 3")
+        return None
+    t0 = time.time()
+    p, t = b.until(f"cf{k}", r"sure.{0,30}load", 15, "key ret", "wait 2")
+    if p:
+        b.shot(f"cfy{k}", "key ret", "wait 3")
+    w = in_world(b, f"w{k}_", 400)
+    log(f"LOAD {k} (pause menu -> {nm}): {'world ' + w if w else 'NO WORLD'} after {time.time() - t0:.0f} s")
+    if w:
+        b.shot(f"walk{k}", "hold w 3000", "look 400 0 20 16", "hold w 2000", "wait 2")
+    return nm if w else None
+
+
+def exit_to_main(b, k):
+    if not pause_open(b) or not seek(b, PAUSE, "EXIT TO MAIN MENU", name=f"xm{k}_"):
+        return False
+    t0 = time.time()
+    p, _ = b.until(f"xc{k}", r"sure.{0,20}quit", 15, "key ret", "wait 2")
+    if not p:
+        return False
+    p, _ = b.until(f"tt{k}", r"PRESS\b.{0,24}\bTO\s+CONTINUE", 400, "key ret", "wait 5")
+    log(f"EXIT TO MAIN MENU {k}: title after {time.time() - t0:.0f} s" if p else f"EXIT {k}: no title")
+    if not p:
+        return False
+    p, _ = b.until(f"mm{k}", r"LOAD\s*GAME", 60, "key spc", "wait 5")
+    return p is not None
+
+
+def load_from_main(b, k, prefer):
+    if not seek(b, MAIN, "LOAD GAME", name=f"ml{k}_"):
+        return None
+    b.shot(f"mlr{k}", "key ret", "wait 3")
+    open_list(b)
+    nm = list_pick(b, set(), prefer=prefer) or list_pick(b, set())
+    if not nm:
+        return None
+    t0 = time.time()
+    p, _ = b.until(f"ld{k}", r"PRESS\b.{0,24}\bTO\s+CONTINUE", 400, "key ret", "wait 10")
+    if not p:
+        log(f"MAIN LOAD {k} ({nm}): no PRESS ... TO CONTINUE")
+        return None
+    w = in_world(b, f"mw{k}_", 90) if b.shot(f"sp{k}", "key spc", "wait 5") else None
+    log(f"MAIN LOAD {k} (main menu -> {nm}): {'world ' + w if w else 'NO WORLD'} after {time.time() - t0:.0f} s")
+    return nm if w else None
+
+
+def quit_game(b, frm):
+    if frm == "main":
+        if not exit_to_main(b, 99):
+            return False
+        if not seek(b, MAIN, "QUIT GAME", name="mq"):
+            return False
+    else:
+        if not pause_open(b) or not seek(b, PAUSE, "QUIT GAME", name="pq"):
+            return False
+    p, _ = b.until("qc", r"sure.{0,20}quit", 15, "exit_ok", "key ret", "wait 2")
+    if not p:
+        return False
+    log("QUIT GAME confirmed; waiting for the game to exit")
+    with open(b.ctl, "a") as f:
+        f.write("key ret\nwait_exit 180\n")
+    return True
+
+
+def churn(b, a):
+    """item 3: quick saves, then A.loads different saves loaded through the
+    pause menu, then A.menu_loads x (EXIT TO MAIN MENU -> LOAD GAME)"""
+    w = in_world(b, "w0_", 30)
+    if not w:
+        # from the main menu: LOAD GAME -> ManualSave-86
+        if not load_from_main(b, 0, "ManualSave-86"):
+            raise Ended("no world at the start")
+    make_saves(b, a.saves)
+    loaded, ok = [], 0
+    for k in range(1, a.loads + 1):
+        nm = load_in_world(b, set(loaded), k)
+        if nm:
+            ok += 1
+            loaded.append(nm)
+    log(f"CHURN pause-menu loads: {ok}/{a.loads} reached the world, {len(set(loaded))} different saves: {loaded}")
+    mok = 0
+    prefs = ["ManualSave-86", "AutoSave-16"]
+    for k in range(1, a.menu_loads + 1):
+        if exit_to_main(b, k) and load_from_main(b, k, prefs[k % 2]):
+            mok += 1
+    log(f"CHURN exit-to-main-menu -> load: {mok}/{a.menu_loads}")
+    quit_game(b, "pause")
+
+
+VIDEO_ROWS = ["Monitor", "VSync", "Maximum FPS", "Windowed Mode", "Resolution", "HDR Mode"]
+
+
+def settings_open(b, name):
+    """pause -> SETTINGS; the game reopens Settings on the tab it was left on,
+    so step LEFT (key 1) until the VIDEO tab's rows show, never through
+    GAMEPLAY (VIDEO's right-hand neighbours are INTERFACE...; the tab order is
+    SOUND CONTROLS GAMEPLAY GRAPHICS VIDEO INTERFACE KEY BINDINGS ACCESSIBILITY
+    UTILITIES, and the first shot after opening decides the direction)"""
+    if not pause_open(b) or not seek(b, PAUSE, "SETTINGS", name=name + "s"):
+        return False
+    p = b.shot(name + "o", "key ret", "wait 4")
+    for i in range(8):
+        t = ocr(p, scale=2, psm=11)
+        if re.search(r"Windowed\s+Mode", t, re.I) and re.search(r"Resolution", t, re.I):
+            return True
+        if re.search(r"Quick\s+Preset|Texture\s+Quality|Field\s+of\s+View", t, re.I):
+            p = b.shot(name + f"r{i}", "key 3", "wait 2")       # GRAPHICS -> VIDEO (right)
+            continue
+        if re.search(r"telemetry|cross-platform|Skip\s+NCPD|Crowd\s+Density", t, re.I):
+            log("settings opened on GAMEPLAY: leaving it to the right (GRAPHICS)")
+            p = b.shot(name + f"r{i}", "key 3", "wait 2")
+            continue
+        p = b.shot(name + f"l{i}", "key 1", "wait 2")           # left towards VIDEO
+    log("settings: VIDEO tab not found")
+    return False
+
+
+def video_set(b, row, value_rx, name, max_enter=12):
+    """focus ROW on the VIDEO tab, press Enter until its value matches
+    value_rx, then Esc + CONFIRM; -> (changed, seconds to the next good shot)"""
+    for i in range(14):
+        p = b.shot(f"{name}f{i}", "key down", "wait 1.2")
+        lab, sc = set_row(p, VIDEO_ROWS, VIDEO_TABLE)
+        if lab == row:
+            break
+    else:
+        log(f"settings: row {row} not focused ({sc})")
+        return False
+    for j in range(max_enter):
+        t = ocr(p, scale=2, psm=11)
+        if re.search(value_rx, t, re.I):
+            break
+        p = b.shot(f"{name}e{j}", "key ret", "wait 1.5")
+    else:
+        log(f"settings: {row} never showed /{value_rx}/")
+        return False
+    t0 = time.time()
+    p, t = b.until(f"{name}a", r"apply\s+these\s+changes", 10, "key esc", "wait 2")
+    if not p:
+        log(f"settings: {row} -> /{value_rx}/ already current (no apply prompt)")
+        b.shot(f"{name}x", "wait 1")
+        return True
+    b.shot(f"{name}c", "key ret", "wait 4")
+    log(f"SET {row} -> /{value_rx}/ applied")
+    return t0
+
+
+GRAPHICS_ROWS = ["Quick Preset", "Texture Quality", "Field of View", "Resolution Scaling"]
+
+
+def graphics_preset(b, name):
+    """GRAPHICS tab (one LEFT of VIDEO): Enter on Quick Preset cycles it (cp-hunt
+    round 2: Right moves the focus instead); -> the new preset's OCR"""
+    if not settings_open(b, name):
+        return None
+    p = b.shot(name + "g", "key 1", "wait 2")
+    if not re.search(r"Quick\s+Preset", ocr(p, scale=2, psm=11), re.I):
+        log("settings: GRAPHICS tab not where expected; closing")
+        return None
+    for i in range(10):
+        p = b.shot(f"{name}gf{i}", "key down", "wait 1.2")
+        lab, sc = set_row(p, GRAPHICS_ROWS)
+        if lab == "Quick Preset":
+            break
+    else:
+        log(f"settings: Quick Preset not focused ({sc})")
+        return None
+    before = ocr(p, scale=2, psm=11)
+    p = b.shot(name + "ge", "key ret", "wait 2")
+    after = ocr(p, scale=2, psm=11)
+    m = re.search(r"Quick\s+Preset\W+([A-Za-z][A-Za-z ]{2,30})", after)
+    pa, _ = b.until(name + "ga", r"apply\s+these\s+changes", 10, "key esc", "wait 2")
+    if pa:
+        b.shot(name + "gc", "key ret", "wait 5")
+    log(f"SET Quick Preset -> {m.group(1).strip() if m else '?'} ({'applied' if pa else 'no apply prompt'})")
+    return m.group(1).strip() if m else "?"
+
+
+def settings(b, a):
+    """item 4: resolution 720p <-> 1080p (needs P9_XSCREEN=1920x1080 so the
+    game offers 1920x1080), Windowed Mode cycled and back, the graphics
+    Quick Preset changed and back; between changes, walk and shoot"""
+    w = in_world(b, "w0_", 30)
+    if not w and not load_from_main(b, 0, "ManualSave-86"):
+        raise Ended("no world at the start")
+    seqs = [("Resolution", r"1920\s*x\s*1080"), ("Resolution", r"1280\s*x\s*720"),
+            ("Windowed Mode", r"\bFullscreen\b"), ("Windowed Mode", r"Windowed\s+Borderless"),
+            ("Windowed Mode", r"\bWindowed\b(?!\s+Borderless)"), ("Windowed Mode", r"Windowed\s+Borderless")]
+    for c in range(a.cycles):
+        for k, (row, rx) in enumerate(seqs):
+            if not settings_open(b, f"c{c}{k}"):
+                b.shot("bk", "key esc", "wait 3", "key esc", "wait 3")
+                continue
+            r = video_set(b, row, rx, f"c{c}{k}v")
+            # close Settings and the pause menu, then ~10 s in the world
+            b.shot(f"c{c}{k}z", "key esc", "wait 3", "key esc", "wait 3")
+            p = b.shot(f"c{c}{k}w", "hold w 3000", "look 300 0 10 16", "wait 3")
+            log(f"after {row} -> /{rx}/ ({'ok' if r else 'FAILED'}): world OCR {ocr(p)[:60]!r}")
+        for k in range(2):
+            g = graphics_preset(b, f"c{c}p{k}")
+            b.shot(f"c{c}p{k}z", "key esc", "wait 3", "key esc", "wait 3")
+            p = b.shot(f"c{c}p{k}w", "hold w 3000", "look 300 0 10 16", "wait 3")
+            log(f"after Quick Preset -> {g}: world OCR {ocr(p)[:60]!r}")
+        log(f"SETTINGS cycle {c + 1}/{a.cycles} done")
+    quit_game(b, "pause")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("what", choices=["churn", "settings", "quit"])
+    ap.add_argument("run")
+    ap.add_argument("--loads", type=int, default=10)
+    ap.add_argument("--menu-loads", type=int, default=5)
+    ap.add_argument("--saves", type=int, default=10)
+    ap.add_argument("--cycles", type=int, default=2)
+    ap.add_argument("--from", dest="frm", default="pause", choices=["pause", "main"])
+    a = ap.parse_args()
+    b = Boot(a.run)
+    try:
+        if a.what == "churn":
+            churn(b, a)
+        elif a.what == "settings":
+            settings(b, a)
+        else:
+            quit_game(b, a.frm)
+    except Ended as e:
+        log(f"ENDED: {e}")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

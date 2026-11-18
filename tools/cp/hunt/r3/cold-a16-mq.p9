@@ -1,0 +1,70 @@
+# tools/cp/hunt/r3/cold-a16-mq.p9 -- lane H6-hunt3 (docs/cp-hunt.md round 3): one cold
+# boot to the world: main menu -> LOAD GAME -> AutoSave-16 (The Streetkid, El Coyote Cojo; the prologue save)
+# -> loading -> ~90 s in the world -> EXIT TO MAIN MENU, then QUIT GAME from the main menu.
+# Items 1 (rare-failure rate), 5 (clean exit) and 6 (every save loads).
+phase menu
+shot menu
+seek menu-load main down 6 LOAD GAME
+key ret
+expect loadlist 30 LOAD\s*GAME|Expand\s*groups|Coll\w*\s*groups|Progression
+key 0
+wait 2
+# both groups expanded (h3-ctl1): Streetkid group header 316, AutoSave-16 380,
+# the second group's header 444, ManualSave-86 509 (frame centres, canon rows)
+listseek loadlist-focus down 8 380
+phase loading
+key ret
+expect loaded 400 PRESS\b.{0,24}\bTO\s+CONTINUE
+key spc
+wait 6
+phase world
+expect inworld 60 WELCOME|STREETKID|Kirk
+# the prologue save opens the game's tutorial popup ("WELCOME TO CYBERPUNK
+# 2077! ... [E] continue"; h3-ctl1/2: Esc closes it, E does not): Esc only
+# while it shows, so a missing popup never opens the pause menu
+wait 4
+unwind tutorial 2 WELCOME\s+TO|First\s+time\s+in
+expect inworld-hud 30 STREETKID|Kirk
+shot world-start
+# ~90 s in the world: sprint / walk / turn, a shot per loop (shotcheck.py)
+repeat 5
+down shift
+hold w 5000
+up shift
+look 350 0 15 16
+hold w 3000
+look -300 0 10 16
+hold a 1000
+hold d 1000
+wait 2
+shot cw
+end
+# ---- EXIT TO MAIN MENU, then QUIT GAME from the main menu ---------------------
+# (h3-ctl2: the exit shows "Are you sure you want to quit?" like QUIT GAME, then
+# the title screen's PRESS ... TO CONTINUE, then the main menu)
+phase exitmain
+key esc
+wait 4
+seek pause-exit pause down 9 EXIT TO MAIN MENU
+key ret
+wait 3
+expect exit-confirm 10 sure.{0,20}quit
+key ret
+phase title
+expect title 400 PRESS\b.{0,24}\bTO\s+CONTINUE
+key spc
+wait 5
+phase menu2
+expect menu2 60 LOAD\s*GAME
+# cp-hunt H1-12: after a sub-menu the main menu's focus can hide until the pointer moves
+look 60 0 1 16
+look -60 0 1 16
+wait 1
+seek menu-quit main down 8 QUIT GAME
+phase quit
+exit_ok
+key ret
+wait 3
+expect quit-confirm 10 sure.{0,20}quit
+key ret
+wait_exit 180
