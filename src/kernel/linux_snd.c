@@ -170,6 +170,7 @@ static struct {
   uint64_t z_run, z_t_us, z_q_vis, z_q_hw, z_call_n, z_prep_us;
   uint32_t z_calls, z_call_all;
   uint64_t z_runs, st_z0;
+  uint64_t gap_us, gap_at_us; /* the last service gap > 50 ms while running */
 } S;
 
 static spinlock_t lsnd_lock;
@@ -380,6 +381,13 @@ static void vis_update_locked(uint64_t now) {
   if (S.state != ST_RUNNING && S.state != ST_DRAINING) return;
   uint64_t dt = now > S.vis_us ? now - S.vis_us : 0;
   S.vis_us = now;
+  /* no completion, no SYNC_PTR, no WRITEI for 50 ms while running: the
+     guest (or at least the writer and the completion IRQ) was not running --
+     on strix, a host stall (the [CONS] stalls= rows) */
+  if (dt > 50000u && S.state == ST_RUNNING) {
+    S.gap_us = dt;
+    S.gap_at_us = now;
+  }
   uint64_t r = S.rate ? S.rate : 48000;
   if (dt > 10000000u) dt = 10000000u; /* no overflow; 10 s is "everything" */
   uint64_t x = dt * r + S.vis_rem;
@@ -637,6 +645,7 @@ int linux_snd_open(int minor, uint32_t flags) {
     S.dry = 0;
     S.held = 0;
     S.z_run = S.z_runs = S.z_prep_us = 0;
+    S.gap_us = S.gap_at_us = 0;
     S.st_t0_us = 0;
     spinlock_release_irqrestore(&lsnd_lock, fl);
   }
@@ -1121,6 +1130,10 @@ static void zero_end_locked(uint64_t now) {
       kl_i(&kl, (long)S.z_call_all);
       kl_s(&kl, " calls=");
       kl_i(&kl, (long)S.z_calls);
+      kl_s(&kl, " gap_ms=");
+      kl_i(&kl, (long)(S.gap_us / 1000));
+      kl_s(&kl, " since_gap_ms=");
+      kl_i(&kl, S.gap_at_us ? (long)((int64_t)(S.z_t_us - S.gap_at_us) / 1000) : -1);
       kl_s(&kl, " since_prepare_ms=");
       kl_i(&kl, S.z_prep_us ? (long)((int64_t)(S.z_t_us - S.z_prep_us) / 1000) : -1);
       kl_c(&kl, '\n');
