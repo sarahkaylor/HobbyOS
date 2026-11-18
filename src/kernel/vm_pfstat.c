@@ -324,7 +324,7 @@ static struct {
   uint32_t tr_n[PFT_N];
   uint64_t tr_tsc[PFT_N];
 } pf_prev, pf_sum;
-static uint64_t pf_thr_prev[MAX_PROCESSES];
+static uint64_t pf_thr_prev[MAX_PROCESSES], pf_thr_prev_irq[MAX_PROCESSES];
 
 static void kl_u(struct kline *k, uint64_t v) { kl_i(k, (long)v); }
 static void kl_us(struct kline *k, uint64_t tsc) { kl_i(k, (long)pfstat_tsc_to_us(tsc)); }
@@ -504,16 +504,24 @@ static void pf_emit(uint64_t now_ms) {
 
   /* the four threads with the most #PF + interrupt time this interval */
   int top[4] = {0, 0, 0, 0};
-  uint64_t topv[4] = {0, 0, 0, 0};
+  uint64_t topv[4] = {0, 0, 0, 0}, topp[4] = {0, 0, 0, 0};
   for (int s = 1; s < MAX_PROCESSES; s++) {
-    uint64_t cur = pf_thr_pf_t[s] + pf_thr_irq_t[s];
-    uint64_t d = cur >= pf_thr_prev[s] ? cur - pf_thr_prev[s] : cur;
-    pf_thr_prev[s] = cur;
+    uint64_t cp = pf_thr_pf_t[s], ci = pf_thr_irq_t[s];
+    uint64_t dp = cp >= pf_thr_prev[s] ? cp - pf_thr_prev[s] : cp;
+    uint64_t di = ci >= pf_thr_prev_irq[s] ? ci - pf_thr_prev_irq[s] : ci;
+    pf_thr_prev[s] = cp;
+    pf_thr_prev_irq[s] = ci;
+    uint64_t d = dp + di;
     for (int j = 0; j < 4; j++) {
       if (d <= topv[j]) continue;
-      for (int m = 3; m > j; m--) { top[m] = top[m - 1]; topv[m] = topv[m - 1]; }
+      for (int m = 3; m > j; m--) {
+        top[m] = top[m - 1];
+        topv[m] = topv[m - 1];
+        topp[m] = topp[m - 1];
+      }
       top[j] = s;
       topv[j] = d;
+      topp[j] = dp;
       break;
     }
   }
@@ -527,7 +535,9 @@ static void pf_emit(uint64_t now_ms) {
       if (j) kl_c(&kl, ',');
       kl_i(&kl, top[j]);
       kl_c(&kl, ':');
-      kl_us(&kl, topv[j]);
+      kl_us(&kl, topp[j]);
+      kl_c(&kl, ':');
+      kl_us(&kl, topv[j] - topp[j]);
       kl_c(&kl, ':');
       if (p) {
         int nn = 0;
