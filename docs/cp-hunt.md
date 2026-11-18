@@ -24,7 +24,25 @@ wine.inf, so no per-boot wineboot update).  The Venus ICD is unchanged
 this lane ran at a time, so it used one slot at a time; P9 boots ran under
 the big-guest lock.
 
-{R2SUMMARY}
+**Boots:** {R2BOOTS}.
+
+* **The fixes hold.**
+  - Early exits 0 of {R2N} launches.
+  - 0 kernel-fault rows.
+  - QEMU start → launcher: median **5.5 s** (integ15: 61.1 s; 11/22 boots over 60 s → 0/{R2N}), H2's `cache=unsafe`.
+  - `[BADELR]` and `[VENUS] fence_wait2 timeout` rows: 0 (integ15: 22/22 and 18/18 boots).
+  - The `[WATCHDOG]` row is down to {R2WD}. Each one now comes with a ≥ 19 s silence that the host saw too (the boot's end).
+  - The H1-04 wineboot reinstall is gone: 0 `InstallHinfSection` rows. However, H2's new warning about it fires falsely on every boot (H1-16).
+* **H1-12 (the reload) is solved by the harness:**
+  - play → save → reload → world passed 2/2: h2-play1 → h2-rl1, h2-play2 → h2-rl2b.
+  - In both, the F5 right after loading wrote the same `playerPosition` as the play boot's quick save.
+  - The root cause is a 104 px tall CONTINUE highlight. boot_p9's seek mislabels it and overshoots. There is a one-line `focus_in` diff for H2.
+  - The "no focus after Settings" variant is cured by a mouse wiggle (1/1).
+* **H1-08 on a real boot:** at 1920×1080, `--game-res` fixes the main menu; the UI does scale 1.5×. The save list then fails (H1-17, bicubic blur of a 1–2 px frame). With NEAREST scaling, the whole stock fpsprobe passed (h2-fq2nn, world 34.5).
+* **fps (fpsprobe 720p Low):** world medians {R2FPS}. The median of medians is {R2FPSMED} (integ15: 30.0). p10 is {R2P10} (integ15: 20.6–26.4); the low tail is up.
+* **Graphics preset:** the change now takes. Enter on Quick Preset, not Right, moved it from Custom to "Ray Tracing Overdrive". The save played on it at 15.5–18.8 fps with no device loss.
+* **Soak:** {R2SOAK}
+* **New:** H1-16 (a false prefix-stamp warning), H1-17 (the 1080p list seek), H1-18 (this lane's own lock collision, fixed).
 
 ### integ15 vs integ17 (this lane's boots)
 
