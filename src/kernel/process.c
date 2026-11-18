@@ -2034,7 +2034,12 @@ static void restore_context(struct process *p, struct trap_frame *tf) {
  * the next tick, as before. */
 static void resched_cpu(uint32_t c);
 static int scheduler_started_peek(void);
-static volatile uint8_t sched_kick_pending[MAX_CPUS]; /* see sched_wake_idle_cpu */
+/* C1-k7 (docs/cp-k7.md §3): the per-CPU words every trap or schedule()
+   touches live in one cache-line-aligned record per CPU (struct
+   sched_trap_pc, process.h): as [MAX_CPUS] arrays all eight CPUs wrote the
+   same line on every syscall.  sched_tpc[c].kick_pending: see
+   sched_wake_idle_cpu. */
+struct sched_trap_pc sched_tpc[MAX_CPUS];
 /* C1-k6 round 2 (docs/cp-k6.md §12): the sync wake.  A wake made inside a
  * user thread's syscall (a pipe or AF_UNIX write, an eventfd write, a futex
  * wake, a poll notify) does not IPI an idle CPU at once: it is parked here,
@@ -2044,15 +2049,14 @@ static volatile uint8_t sched_kick_pending[MAX_CPUS]; /* see sched_wake_idle_cpu
  * syscall's return to user sends the IPI (trap.c general_interrupt_handler).
  * Linux's WF_SYNC wakeups for pipes do the same.  One deferred wake per CPU;
  * a second one is sent at once. */
-static volatile int sched_defer_slot[MAX_CPUS]; /* +1; 0 = none */
+/* sched_tpc[c].defer_slot: +1; 0 = none */
 /* When the syscall that deferred returns to user mode, the wake waits at
    most SCHED_SYNC_WINDOW_US more for this thread's next park (Wine's client
    writes its request and reads the reply in two syscalls); this CPU's
    one-shot is armed for the end of the window, and the fire sends it. */
 #define SCHED_SYNC_WINDOW_US 30
-static volatile uint64_t sched_defer_until[MAX_CPUS]; /* 0 = still in the syscall */
-volatile int sched_trap_depth[MAX_CPUS];        /* trap.c: nesting depth */
-volatile int sched_trap_sys[MAX_CPUS];          /* the outer trap is a syscall */
+/* sched_tpc[c].defer_until: 0 = still in the syscall; .trap_depth: trap.c
+   nesting depth; .trap_sys: the outer trap is a syscall */
 static uint64_t sched_sync_local, sched_sync_ipi;
 static uint64_t hrt_armed_us[MAX_CPUS];
 static int hrt_boost_idx[MAX_CPUS]; /* +1; 0 = none (written by the fire) */
@@ -2205,8 +2209,8 @@ int sched_hrt_fire(void) {
   if (next) hrt_cover_locked(cpu, next, timer_get_us());
   {
     /* C1-k6 round 2: keep a pending sync-wake window's end armed. */
-    uint64_t until = sched_defer_until[cpu], tn = timer_get_us();
-    if (sched_defer_slot[cpu] && until > tn &&
+    uint64_t until = sched_tpc[cpu].defer_until, tn = timer_get_us();
+    if (sched_tpc[cpu].defer_slot && until > tn &&
         (hrt_armed_us[cpu] == 0 || hrt_armed_us[cpu] > until) &&
         hrt_arch_arm_us(until, tn))
       hrt_armed_us[cpu] = until;
@@ -2219,12 +2223,12 @@ int sched_hrt_fire(void) {
 void sched_wake_sync(int idx) {
   uint32_t cpu = get_cpuid();
   if (idx >= 0 && idx < MAX_PROCESSES && cpu < MAX_CPUS &&
-      sched_trap_depth[cpu] == 1 && sched_trap_sys[cpu] &&
-      __atomic_load_n(&sched_defer_slot[cpu], __ATOMIC_RELAXED) == 0) {
+      sched_tpc[cpu].trap_depth == 1 && sched_tpc[cpu].trap_sys &&
+      __atomic_load_n(&sched_tpc[cpu].defer_slot, __ATOMIC_RELAXED) == 0) {
     struct process *c = current_process();
     if (c && !c->is_kernel_process) {
-      sched_defer_until[cpu] = 0;
-      __atomic_store_n(&sched_defer_slot[cpu], idx + 1, __ATOMIC_RELAXED);
+      sched_tpc[cpu].defer_until = 0;
+      __atomic_store_n(&sched_tpc[cpu].defer_slot, idx + 1, __ATOMIC_RELAXED);
       return;
     }
   }
@@ -2237,14 +2241,14 @@ void sched_wake_sync(int idx) {
    IPI.  `now_ipi` sends it at once (the idle loop: nobody here will park). */
 void sched_sync_flush_ex(int now_ipi) {
   uint32_t cpu = get_cpuid();
-  if (cpu >= MAX_CPUS || !__atomic_load_n(&sched_defer_slot[cpu], __ATOMIC_RELAXED))
+  if (cpu >= MAX_CPUS || !__atomic_load_n(&sched_tpc[cpu].defer_slot, __ATOMIC_RELAXED))
     return;
   uint64_t now = timer_get_us();
   if (!now_ipi) {
-    uint64_t until = sched_defer_until[cpu];
+    uint64_t until = sched_tpc[cpu].defer_until;
     if (until == 0) {
       until = now + SCHED_SYNC_WINDOW_US;
-      sched_defer_until[cpu] = until;
+      sched_tpc[cpu].defer_until = until;
       /* Lowering this CPU's own armed time without proc_lock keeps the
          coverage invariant (an earlier fire only rescans). */
       uint64_t a = hrt_armed_us[cpu];
@@ -2255,7 +2259,7 @@ void sched_sync_flush_ex(int now_ipi) {
     if (now < until)
       return;
   }
-  if (__atomic_exchange_n(&sched_defer_slot[cpu], 0, __ATOMIC_RELAXED)) {
+  if (__atomic_exchange_n(&sched_tpc[cpu].defer_slot, 0, __ATOMIC_RELAXED)) {
     sched_sync_ipi++;
     sched_wake_idle_cpu();
   }
@@ -2378,7 +2382,7 @@ int sched_kick_idle_cpus(int n) {
   for (uint32_t c = 0; c < (uint32_t)ncpu && kicked < n; c++) {
     if (c == self) continue;
     if (current_pid_of_cpu(c) < 0) {
-      if (!__atomic_exchange_n(&sched_kick_pending[c], 1, __ATOMIC_SEQ_CST))
+      if (!__atomic_exchange_n(&sched_tpc[c].kick_pending, 1, __ATOMIC_SEQ_CST))
         resched_cpu(c);
       kicked++; /* pending or sent: that CPU will pick */
     }
@@ -2442,6 +2446,31 @@ static void ru_charge_locked(struct process *cur, uint32_t cpu) {
   }
 }
 static uint64_t ru_slice_t0_peek(uint32_t cpu) { return ru_slice_t0[cpu]; }
+
+/* C1-k7 (docs/cp-k7.md §4): a thread resumed into user mode by
+ * enter_user_space (after a park in a syscall, or a preemption) leaves the
+ * kernel there, not through general_interrupt_handler's ru_trap_exit.  Its
+ * ru_kin_us used to stay set until its next trap, so every microsecond of
+ * user code it ran after a park counted as system time -- and [THRW]
+ * showed the thread as "in the kernel" (the wineserver, which parks in
+ * epoll_wait for every request, read as ~95 % kernel).  Close the stretch
+ * here: kernel time since the later of its entry and this slice's start. */
+void ru_resume_user(void) {
+  struct process *c = current_process();
+  if (!c)
+    return;
+  c->in_sys = 0;
+  if (!c->ru_kin_us)
+    return;
+  uint32_t cpu = get_cpuid();
+  uint64_t now = timer_get_us();
+  uint64_t from = c->ru_kin_us;
+  if (cpu < MAX_CPUS && ru_slice_t0[cpu] > from)
+    from = ru_slice_t0[cpu];
+  if (now > from)
+    c->ru_ksl_us += now - from;
+  c->ru_kin_us = 0;
+}
 static void ru_count_switch_locked(int pid, int vol) {
   if (pid < 0 || pid >= MAX_PROCESSES || vol < 0) return;
   struct process *p = &proc_table[pid];
@@ -2467,7 +2496,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
   if (cpu >= MAX_CPUS)
     return;
   /* C1-k6: a reschedule IPI sent to this CPU is being served now. */
-  __atomic_store_n(&sched_kick_pending[cpu], 0, __ATOMIC_SEQ_CST);
+  __atomic_store_n(&sched_tpc[cpu].kick_pending, 0, __ATOMIC_SEQ_CST);
 
   /* Run the WHOLE switch with interrupts disabled.  The -2/blocking-syscall
      and yield paths enter via `syscall` (IF stays SET), so a timer
@@ -2566,7 +2595,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
   /* C1-k6 round 2: a deferred sync wake.  If this CPU's thread is parking,
      the woken slot is this pick (below); otherwise it gets its IPI now. */
   {
-    int ds = __atomic_exchange_n(&sched_defer_slot[cpu], 0, __ATOMIC_RELAXED) - 1;
+    int ds = __atomic_exchange_n(&sched_tpc[cpu].defer_slot, 0, __ATOMIC_RELAXED) - 1;
     if (ds >= 0) {
       int parking = current_pid >= 0 &&
                     proc_table[current_pid].state != PROC_STATE_RUNNING &&
@@ -2806,8 +2835,8 @@ void schedule(struct trap_frame *tf, int is_yield) {
       proc_table[next].state = PROC_STATE_RUNNING;
       /* C1-k6 round 2: resuming a context ends every trap this CPU had
          open (the switch never returns through them). */
-      sched_trap_depth[cpu] = 0;
-      sched_trap_sys[cpu] = 0;
+      sched_tpc[cpu].trap_depth = 0;
+      sched_tpc[cpu].trap_sys = 0;
       struct trap_frame local_tf;
       restore_context(&proc_table[next], &local_tf);
 
@@ -3794,7 +3823,7 @@ void sched_wake_idle_cpu(void) {
   for (uint32_t k = 1; k < MAX_CPUS; k++) {
     uint32_t c = (self + k) % MAX_CPUS;
     if (current_pid_of_cpu(c) < 0) {
-      if (__atomic_exchange_n(&sched_kick_pending[c], 1, __ATOMIC_SEQ_CST))
+      if (__atomic_exchange_n(&sched_tpc[c].kick_pending, 1, __ATOMIC_SEQ_CST))
         return; /* that idle CPU is already on its way into schedule() */
       resched_cpu(c);
 #ifdef FUTEX_TRACE_CONSOLE
@@ -5148,6 +5177,7 @@ static void cpw_pct(struct kline *kl, uint32_t n, uint32_t ticks) {
   kl_i(kl, (long)(v % 100));
 }
 
+volatile int cpw_tick_user; /* C1-k7: trap.c sets it: the tick came from user mode */
 void cp_wait_sample(int emit) {
   cpw_ticks++;
   for (int i = 1; i < MAX_PROCESSES; i++) {
@@ -5168,14 +5198,23 @@ void cp_wait_sample(int emit) {
           oncpu = (int)c;
           break;
         }
-      extern int cp_core_in_syscall(uint32_t cpu);
-      if (q->ru_kin_us && oncpu >= 0 && !cp_core_in_syscall((uint32_t)oncpu)) {
+      /* C1-k7: the thread this very tick interrupted in user mode is in
+         user mode, although the tick's own entry has just stamped its
+         ru_kin_us (every thread on the sampling CPU used to count as kernel
+         time); a syscall is told from a fault or an interrupt by the
+         thread's own in_sys, not by its CPU's last syscall number (a read,
+         nr 0, used to count as a trap, and a table-handled syscall left the
+         number behind after it returned). */
+      int kin = q->ru_kin_us != 0;
+      if (kin && oncpu >= 0 && (uint32_t)oncpu == get_cpuid() && cpw_tick_user)
+        kin = 0;
+      if (kin && oncpu >= 0 && !q->in_sys) {
         /* in the kernel, but not in a syscall: a fault or an interrupt */
         g->kern++;
         g->ktrap++;
         if (cpw_kern[i] < 0xFFFF) cpw_kern[i]++;
         if (cpw_ktrap[i] < 0xFFFF) cpw_ktrap[i]++;
-      } else if (q->ru_kin_us) {
+      } else if (kin) {
         /* in a syscall right now: name it by the syscall */
         g->kern++;
         if (cpw_kern[i] < 0xFFFF) cpw_kern[i]++;
@@ -5979,6 +6018,9 @@ int poll_park_bloom_locked(struct process *p, uint64_t seen, uint64_t bloom) {
   if (!p || p->pid <= 0 || p->pid >= MAX_PROCESSES)
     return 0;
   p->poll_bloom = bloom;
+  /* C1-k7: the filter before the bit, for poll_notify_bits' lock-free look
+     (a no-op on x86's TSO; ordered on ARM) */
+  __atomic_thread_fence(__ATOMIC_RELEASE);
   pid_mask_set(&poll_waiters, p->pid);
   p->poll_waiting = 1;
   __atomic_thread_fence(__ATOMIC_SEQ_CST);
@@ -6020,12 +6062,28 @@ static void poll_notify_bits(uint64_t bits) {
     extern void lt_epoll_pend_bits(uint64_t bits) __attribute__((weak));
     if (lt_epoll_pend_bits) lt_epoll_pend_bits(bits);
   }
+  /* C1-k7 (docs/cp-k7.md §5): look for a parked poller whose filter has
+     these keys before taking proc_lock.  Every pipe write (each wineserver
+     reply) notified, and with any poller parked anywhere in the system (the
+     X server, the wineserver itself) it took proc_lock to find that none of
+     them cared.  The look is the other half of poll_park_bloom_locked's
+     Dekker pair: the parker stores its filter and its bit, fences, then
+     reads the sequence this function has already moved, so either it sees
+     the new sequence and does not sleep, or this look sees its bit and
+     filter. */
   int any = 0;
-  for (int wi = 0; wi < PID_MASK_WORDS; wi++)
-    if (__atomic_load_n(&poll_waiters.w[wi], __ATOMIC_SEQ_CST)) {
-      any = 1;
-      break;
+  for (int wi = 0; wi < PID_MASK_WORDS && !any; wi++) {
+    uint64_t x = __atomic_load_n(&poll_waiters.w[wi], __ATOMIC_SEQ_CST);
+    while (x) {
+      int pid = (wi << 6) + __builtin_ctzll(x);
+      x &= x - 1;
+      if (pid < MAX_PROCESSES &&
+          (__atomic_load_n(&proc_table[pid].poll_bloom, __ATOMIC_ACQUIRE) & bits)) {
+        any = 1;
+        break;
+      }
     }
+  }
   if (!any)
     return;
   int woke = 0;
@@ -6399,9 +6457,9 @@ void start_scheduler(void) {
       static uint32_t fast_idle_pass[MAX_CPUS];
       uint32_t fc = get_cpuid();
       if (fc < MAX_CPUS) { /* C1-k6 round 2: no trap is open in the idle loop */
-        sched_trap_depth[fc] = 0;
-        sched_trap_sys[fc] = 0;
-        if (sched_defer_slot[fc]) sched_sync_flush_ex(1);
+        sched_tpc[fc].trap_depth = 0;
+        sched_tpc[fc].trap_sys = 0;
+        if (sched_tpc[fc].defer_slot) sched_sync_flush_ex(1);
       }
       uint64_t nu = timer_get_us();
       uint64_t snx = __atomic_load_n(&sleep_next_us, __ATOMIC_RELAXED);

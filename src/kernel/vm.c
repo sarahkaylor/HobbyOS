@@ -2588,7 +2588,30 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
   return 0;
 }
 
+/* C1-k7 (docs/cp-k7.md §3): is every page of [va, va+len) already mapped
+ * with the access, in the address space this CPU runs?  Lock-free; a "no"
+ * only means vm_touch must look (and materialize, break COW, or refuse). */
+static int vm_range_fast_ok(struct process *p, uint64_t va, uint64_t len, int write) {
+#ifdef __x86_64__
+  if (!p || !p->as || p->as->ver != AS_V2 || len == 0 || len > (64ULL << 20) ||
+      !vm_range_is_user(p->as, va, len))
+    return 0;
+  uint64_t end = va + len - 1;
+  for (uint64_t a = va & ~0xFFFULL; a <= end; a += FRAME_SIZE) {
+    uint64_t pa;
+    if (vm_arch_fast_leaf(p->as, a, write, &pa) != 0)
+      return 0;
+  }
+  return 1;
+#else
+  (void)p; (void)va; (void)len; (void)write;
+  return 0;
+#endif
+}
+
 int vm_range_ok(struct process *p, uint64_t va, uint64_t len, int write) {
+  if (vm_range_fast_ok(p, va, len == 0 ? 1 : len, write))
+    return 0;
   return vm_touch(p, va, len, write) == 0 ? 0 : -1;
 }
 
@@ -2607,11 +2630,65 @@ int vm_range_ok(struct process *p, uint64_t va, uint64_t len, int write) {
  * that RAM is statically direct-mapped and always resident, so a bounded
  * read there cannot fault.  With no process context at all there is
  * nothing to validate against — reject rather than guess. */
+/* C1-k7 (docs/cp-k7.md §3): the copy fast path.  The locked path below
+ * costs three vm_lock round trips and three region lookups per page (the
+ * caller's validation touch, this function's touch, the copy), and vm_lock
+ * is one lock for every address space: under the game every syscall that
+ * passes a struct serialised on it.  For the address space this CPU runs
+ * (the normal case: a thread's own syscall), a present leaf that already
+ * grants the access is copied straight through the direct map with no lock:
+ * interrupts stay off from the lookup to the end of the page's copy, and a
+ * peer's munmap/mprotect drops or downgrades a leaf only through a shootdown
+ * that waits for this CPU (C1-k4), so the frame cannot be released or the
+ * protection taken away before the copy is done -- the same guarantee a
+ * user-mode access on this CPU has.  A page that is absent, read-only for a
+ * write, copy-on-write or outside the direct map is not copied here: the
+ * caller falls back to the locked path, which materializes, breaks COW or
+ * refuses exactly as before.  0 = copied; -1 = take the locked path (a
+ * partial write already done is redone in full by it). */
+int vm_copy_fast(struct process *p, uint64_t va, void *buf, int len, int write) {
+#ifdef __x86_64__
+  extern void *memcpy(void *dst, const void *src, unsigned long n);
+  if (!p || !p->as || len <= 0 || p->as->ver != AS_V2 ||
+      !vm_range_is_user(p->as, va, (uint64_t)len))
+    return -1;
+  struct addr_space *as = p->as;
+  unsigned char *b = (unsigned char *)buf;
+  for (int i = 0; i < len;) {
+    uint64_t a = va + (uint64_t)i;
+    int in_page = (int)(FRAME_SIZE - (a & (FRAME_SIZE - 1)));
+    if (in_page > len - i)
+      in_page = len - i;
+    uint64_t fl;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(fl) : : "memory");
+    uint64_t pa = 0;
+    int ok = vm_arch_fast_leaf(as, a, write, &pa) == 0;
+    if (ok) {
+      if (write)
+        memcpy(phys_to_virt(pa), b + i, (unsigned long)in_page);
+      else
+        memcpy(b + i, phys_to_virt(pa), (unsigned long)in_page);
+    }
+    if (fl & 0x200)
+      __asm__ volatile("sti" ::: "memory");
+    if (!ok)
+      return -1;
+    i += in_page;
+  }
+  return 0;
+#else
+  (void)p; (void)va; (void)buf; (void)len; (void)write;
+  return -1;
+#endif
+}
+
 int vm_user_read(struct process *p, uint64_t va, void *dst, int len) {
   if (!dst || len <= 0)
     return 0;
   if (!p)
     return -1; /* SEC-2: no context -> user memory is unvalidatable */
+  if (vm_copy_fast(p, va, dst, len, 0) == 0)
+    return 0;
   unsigned char *d = (unsigned char *)dst;
 
   if (!p->as) {
@@ -2691,6 +2768,8 @@ int vm_kwrite(struct process *p, uint64_t va, const void *src, int len) {
     return 0;
   if (!p->as)
     return -1; /* v1: the caller owns the translation */
+  if (vm_copy_fast(p, va, (void *)src, len, 1) == 0)
+    return 0;
   const unsigned char *s = (const unsigned char *)src;
 
   struct addr_space *as = p->as;

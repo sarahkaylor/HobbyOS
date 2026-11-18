@@ -1,0 +1,13 @@
++     0.0 s  20:29:46  slot 3 acquired + big-guest lock; boot -smp 8 -m 32768M -cpu host (KVM, venus); QEMU guests on the host before ours: 1
++     2.3 s  20:29:48  kernel frame pool: [FRAME] frames=8192000 total_mib=32000 ext0=0x0x0000000020000000-0x0x0000000070000000 ext1=0x0x0000000100000000-0x0x0000000200000000 extents=3 hi_mib=26624 reserved=0
++     5.3 s  20:29:51  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-k7-p9 -> /CP ok
++    20.3 s  20:30:06  warm-up result: [P8] warm-up: display driver loaded
++    23.8 s  20:30:09  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
++    23.8 s  20:30:09  phase launch
++    23.8 s  20:30:09  dri nodes at game launch: qemu-system-x86/2073129: /dev/dri/renderD129
++    23.8 s  20:30:09  dri nodes at game launch: virgl_render_se/2073735: -
++    23.8 s  20:30:09  dri nodes at game launch: virgl-2-gpu_ren/2076168: /dev/dri/renderD129
++    23.8 s  20:30:09  baseline screendump 1920x1080
++    25.7 s  20:30:11  serial row: [X]  25.324:0140:trace:process:CreateProcessInternalW app L"Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe" cmdline L"REDEngineErrorReporter.exe 316"
++    26.2 s  20:30:12  game process ended: [P8] end game status=0 ms=2467
++    26.6 s  20:30:12  verdict: game-exited-before-menu; QEMU stopped, slot released; guests on the host now: 2

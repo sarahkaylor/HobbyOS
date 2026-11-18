@@ -1,7 +1,8 @@
 #include "arch/cpu.h"
 #include "process.h"
 
-static uint64_t user_sp[MAX_CPUS];
+/* C1-k7: written on every trap entry: one line per CPU. */
+static struct { uint64_t v; } __attribute__((aligned(64))) user_sp[MAX_CPUS];
 
 /**
  * Returns the logical ID of the current CPU core (0 to MAX_CPUS-1).
@@ -114,14 +115,14 @@ void interrupts_restore(uint64_t state) {
  * Retrieves the thread-local user-space stack pointer.
  */
 uint64_t arch_get_user_sp(void) {
-  return user_sp[get_cpuid()];
+  return user_sp[get_cpuid()].v;
 }
 
 /**
  * Sets the thread-local user-space stack pointer.
  */
 void arch_set_user_sp(uint64_t sp) {
-  user_sp[get_cpuid()] = sp;
+  user_sp[get_cpuid()].v = sp;
 }
 
 /**

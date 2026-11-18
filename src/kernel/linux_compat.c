@@ -33,6 +33,7 @@
 #include "process.h"
 #include "timer.h"
 #include "vm.h"
+#include "trapprof.h"
 
 /* Subsystem tables, defined by the lane that owns that file.  A missing file
    leaves the symbol undefined-and-weak: its address reads as 0 and the
@@ -71,6 +72,8 @@ int l_copy_from_user(struct process *p, void *kdst, uint64_t usrc,
                      uint64_t len) {
   if (len == 0) return 0;
   if (len > (uint64_t)(1 << 20)) return -EINVAL;
+  /* C1-k7: mapped and readable already -> no lock, no touch */
+  if (vm_copy_fast(p, usrc, kdst, (int)len, 0) == 0) return 0;
   if (!l_user_ok(p, usrc, len, 0)) return -EFAULT;
   return vm_user_read(p, usrc, kdst, (int)len) == 0 ? 0 : -EFAULT;
 }
@@ -79,6 +82,7 @@ int l_copy_to_user(struct process *p, uint64_t udst, const void *ksrc,
                    uint64_t len) {
   if (len == 0) return 0;
   if (len > (uint64_t)(1 << 20)) return -EINVAL;
+  if (vm_copy_fast(p, udst, (void *)ksrc, (int)len, 1) == 0) return 0;
   if (!l_user_ok(p, udst, len, 1)) return -EFAULT;
   return vm_kwrite(p, udst, ksrc, (int)len) == 0 ? 0 : -EFAULT;
 }
@@ -437,7 +441,16 @@ static int l_core_wfi_test(struct process *p, struct trap_frame *tf) {
   tf->regs[0] = (uint64_t)sched_wfi_test_op((int)l_arg(tf, 0), (int64_t)l_arg(tf, 1));
   return 1;
 }
-#define L_WFI_TEST_ENT {L_SYS_hb_wfi_test, l_core_wfi_test, "hb_wfi_test"},
+#define L_WFI_TEST_ENT {L_SYS_hb_wfi_test, l_core_wfi_test, "hb_wfi_test"}, L_TRAPPROF_ENT
+/* C1-k7: private L_SYS_hb_trapprof (0x4B37, test kernels only): the syscall
+   path's cycles per segment, for linux_probe_sysc (arch/x64/trapprof.c). */
+#define L_SYS_hb_trapprof 0x4B37
+static int l_core_trapprof(struct process *p, struct trap_frame *tf) {
+  extern int64_t trap_prof_op(struct process *p, int op, uint64_t a1, uint64_t a2);
+  tf->regs[0] = (uint64_t)trap_prof_op(p, (int)l_arg(tf, 0), l_arg(tf, 1), l_arg(tf, 2));
+  return 1;
+}
+#define L_TRAPPROF_ENT {L_SYS_hb_trapprof, l_core_trapprof, "hb_trapprof"},
 #else
 #define L_WFI_TEST_ENT
 #endif
@@ -498,7 +511,9 @@ static void l_skw_check(struct process *p, struct trap_frame *tf) {
         kl_c(&kl, '\n');
         kl_emit(&kl);
       }
-      l_skw[i].par = par;
+      /* C1-k7: a global table: store only on a change (it is almost never) */
+      if (l_skw[i].par != par)
+        l_skw[i].par = par;
       return;
     }
     if (!l_skw[i].used && !slot)
@@ -548,6 +563,7 @@ int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr)
   }
 #define L_DISPATCH_RET(v)                                                     \
   do {                                                                        \
+    TP_MARK(TP_HANDLER);                                                      \
     if (sh_ix >= 0) {                                                         \
       p->sc_hist[sh_ix].ret = (int64_t)tf->regs[0];                           \
       p->sc_hist[sh_ix].done = 1;                                             \
@@ -559,7 +575,7 @@ int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr)
     return (v);                                                               \
   } while (0)
 #else
-#define L_DISPATCH_RET(v) do { fat16_syscall_exit_check((long)nr); fat16_flush_pending(); return (v); } while (0)
+#define L_DISPATCH_RET(v) do { TP_MARK(TP_HANDLER); fat16_syscall_exit_check((long)nr); fat16_flush_pending(); return (v); } while (0)
 #endif
   /* C1-k6 round 2 (docs/cp-k6.md §12): the table walk -- three optional
      decline-capable tables, then the first match in the main tables -- was a
@@ -612,6 +628,7 @@ int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr)
       dcl = e;
     }
   }
+  TP_MARK(TP_DISP_PRE);
   for (int k = 0; k < 3; k++) {
     if (!dc->pre[k]) continue;
     int _t = dc->pre[k]->fn(p, tf);
