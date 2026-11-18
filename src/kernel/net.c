@@ -1654,6 +1654,7 @@ int net_socket_listen_lo(struct socket_pcb *pcb, int backlog) {
   if (backlog > 16) backlog = 16;
   pcb->listening = 1;
   pcb->lo_backlog = backlog;
+  pcb->lo_waiter = 0;
   return 0;
 }
 
@@ -1708,7 +1709,12 @@ int net_socket_connect_lo(struct socket_pcb *pcb, uint32_t ip_be,
   }
   lp->lo_q[lp->lo_tail % 16] = sp;
   lp->lo_tail++;
+  int waiter = lp->lo_waiter;
+  lp->lo_waiter = 0;
   spinlock_release_irqrestore(&net_lock, fl);
+  if (waiter > 0)
+    process_wakeup(waiter - 1); /* K11: the accept() parked on this listener */
+  poll_notify();                /* and any poller watching it */
   return 1;                                  /* paired on loopback */
 }
 
@@ -1719,6 +1725,26 @@ int net_socket_accept_lo(struct socket_pcb *lp, struct socket_pcb **out) {
   if (lp->lo_head == lp->lo_tail) {
     spinlock_release_irqrestore(&net_lock, fl);
     if (lp->nonblock) return -EAGAIN;
+    /* H4-kglitch round 2 (K11): park for real.  This returned the park -2
+       without marking the caller BLOCKED, so a blocking accept on a loopback
+       listener was rewound and rescheduled while RUNNING: a CPU-burning
+       yield loop (linux_probe_loaccept A1).  Now it sleeps until
+       net_socket_connect_lo queues a connection (lo_waiter), or 10 ms at
+       most.  The queue is re-read under proc_lock after lo_waiter is
+       published, and the connector wakes under proc_lock after queueing,
+       so no connection is slept through. */
+    struct process *cur = current_process();
+    if (cur) {
+      uint64_t pf = spinlock_acquire_irqsave(&proc_lock);
+      lp->lo_waiter = cur->pid + 1;
+      if (__atomic_load_n(&lp->lo_head, __ATOMIC_SEQ_CST) ==
+              __atomic_load_n(&lp->lo_tail, __ATOMIC_SEQ_CST) &&
+          process_park_ok_locked(cur)) {
+        proc_set_deadline_us(cur, timer_get_us() + 10000);
+        cur->state = PROC_STATE_BLOCKED;
+      }
+      spinlock_release_irqrestore(&proc_lock, pf);
+    }
     return -2;                               /* nothing pending: caller parks */
   }
   struct socket_pcb *sp = lp->lo_q[lp->lo_head % 16];
