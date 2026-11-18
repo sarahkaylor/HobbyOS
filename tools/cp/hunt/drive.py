@@ -53,7 +53,11 @@ SAVE_RX = re.compile(r"\b((?:Quick|Auto|Manual|Point\w*|End\w*)\s*S[ao]ve-\d+)",
 # "The Streetkid", so a screen that still shows the list or a dialog never counts.
 HUD_RX = r"Jackie|Weapon|Crouch|Skip\s+Ahead|K\w?rk|second\s+floor|Move\s+with"
 WORLD_RX = (rf"RIPPERD[O0]C.{{0,120}}({HUD_RX})|({HUD_RX}).{{0,120}}RIPPERD[O0]C|"
-            rf"STREETKI[DO0].{{0,120}}({HUD_RX})|WELCOME\s+TO|First\s+time\s+in")
+            rf"STREETKI[DO0].{{0,120}}({HUD_RX})|WELCOME\s+TO|First\s+time\s+in|"
+            # the bottom-right input hints alone: after an in-world load the
+            # quest title can stay hidden for minutes (h3-churn1 load 2: 391 s
+            # by the title, ~90 s by these)
+            r"Draw\s+Weapon.{0,60}Crouch")
 NOT_WORLD_RX = r"LOAD\s*GAME|Latest\s+save|Play\s*time|sure\s+you\s+want|PRESS\b.{0,24}\bTO\s+CONTINUE"
 
 
@@ -66,8 +70,9 @@ def log(msg):
 
 
 class Boot:
-    def __init__(self, run, logs=None):
+    def __init__(self, run, logs=None, max_s=3600):
         self.run = run
+        self.deadline = time.time() + max_s
         self.out = os.path.join(ROOT, "obj", "cp-p9", run)
         self.ctl = os.path.join(self.out, "ctl.txt")
         self.log = os.path.join(logs or os.path.join(ROOT, "obj", "hunt-logs"), run + ".log")
@@ -86,6 +91,8 @@ class Boot:
 
     def shot(self, name, *lines, timeout=180):
         """append LINES + `shot TAG`; wait for the PNG; -> its path"""
+        if time.time() > self.deadline:
+            raise Ended("the driver's own deadline (--max-s) passed")
         self.n += 1
         tag = f"{self.pre}{self.n:03d}{name}"
         with open(self.ctl, "a") as f:
@@ -551,32 +558,56 @@ def menu_loads(b, a):
 VIDEO_ROWS = ["Monitor", "VSync", "Maximum FPS", "Windowed Mode", "Resolution", "HDR Mode"]
 
 
+TAB_RX = {
+    "VIDEO": r"Windowed\s+Mode|Maximum\s+FPS|VSync",
+    "GRAPHICS": r"Quick\s+Preset|Texture\s+Quality|Resolution\s+Scaling|Ray\s+Tracing",
+    "SOUND": r"Controller\s+Speaker|Master\s+Volume|Dialogue\s+Volume|Music\s+Volume",
+}
+SETTINGS_STATE = {"opened": False}
+
+
+def settings_tab(b, p):
+    t = ocr(p, scale=2, psm=11) + " " + boot_ocr(p)
+    for tab, rx in TAB_RX.items():
+        if re.search(rx, t, re.I):
+            return tab
+    return None
+
+
 def settings_open(b, name):
-    """pause -> SETTINGS; the game reopens Settings on the tab it was left on,
-    so step LEFT (key 1) until the VIDEO tab's rows show, never through
-    GAMEPLAY (VIDEO's right-hand neighbours are INTERFACE...; the tab order is
-    SOUND CONTROLS GAMEPLAY GRAPHICS VIDEO INTERFACE KEY BINDINGS ACCESSIBILITY
-    UTILITIES, and the first shot after opening decides the direction)"""
+    """pause -> SETTINGS -> the VIDEO tab, never through GAMEPLAY: its "Share
+    game telemetry" row stops the boot (cp-hunt H6-01).  Tab order (in the
+    world): SOUND CONTROLS GAMEPLAY GRAPHICS VIDEO INTERFACE KEY BINDINGS
+    ACCESSIBILITY UTILITIES, wrapping; key 1 = left, key 3 = right.  The game
+    reopens Settings on the tab it was closed on, and a fresh session on
+    SOUND, so: SOUND -> exactly 5 x left; GRAPHICS -> 1 x right; VIDEO ->
+    done; anything this cannot name -> Esc out (a blind tap could land on
+    GAMEPLAY: KEY BINDINGS and UTILITIES have too little text to read)"""
     if not pause_open(b) or not seek(b, PAUSE, "SETTINGS", name=name + "s"):
         return False
     p = b.shot(name + "o", "key ret", "wait 4")
-    for i in range(8):
-        t = ocr(p, scale=2, psm=11)
-        if re.search(r"Windowed\s+Mode", t, re.I) and re.search(r"Resolution", t, re.I):
-            return True
-        if re.search(r"Quick\s+Preset|Texture\s+Quality|Field\s+of\s+View", t, re.I):
-            p = b.shot(name + f"r{i}", "key 3", "wait 2")       # GRAPHICS -> VIDEO (right)
-            continue
-        if re.search(r"telemetry|cross-platform|Skip\s+NCPD|Crowd\s+Density", t, re.I):
-            log("settings opened on GAMEPLAY: leaving it to the right (GRAPHICS)")
-            p = b.shot(name + f"r{i}", "key 3", "wait 2")
-            continue
-        p = b.shot(name + f"l{i}", "key 1", "wait 2")           # left towards VIDEO
-    log("settings: VIDEO tab not found")
+    tab = None
+    for i in range(3):
+        tab = settings_tab(b, p)
+        if tab:
+            break
+        p = b.shot(name + f"o{i}", "wait 2")
+    log(f"settings opened on {tab}")
+    if tab == "SOUND":
+        p = b.shot(name + "l", *(["key 1", "wait 2"] * 5))
+        tab = settings_tab(b, p)
+    elif tab == "GRAPHICS":
+        p = b.shot(name + "r", "key 3", "wait 2")
+        tab = settings_tab(b, p)
+    if tab == "VIDEO":
+        SETTINGS_STATE["opened"] = True
+        return True
+    log(f"settings: not on VIDEO ({tab}); closing")
+    b.shot(name + "q", "key esc", "wait 3")
     return False
 
 
-def video_set(b, row, value_rx, name, max_enter=12):
+def video_set(b, row, value_rx, name, max_enter=20):
     """focus ROW on the VIDEO tab, press Enter until its value matches
     value_rx, then Esc + CONFIRM; -> (changed, seconds to the next good shot)"""
     for i in range(14):
@@ -626,7 +657,7 @@ def graphics_preset(b, name):
     if not settings_open(b, name):
         return None
     p = b.shot(name + "g", "key 1", "wait 2")
-    if not re.search(r"Quick\s+Preset", ocr(p, scale=2, psm=11), re.I):
+    if settings_tab(b, p) != "GRAPHICS":
         log("settings: GRAPHICS tab not where expected; closing")
         return None
     for i in range(10):
@@ -688,8 +719,9 @@ def main():
     ap.add_argument("--from", dest="frm", default="pause", choices=["pause", "main"])
     ap.add_argument("--in-world", action="store_true", help="the boot is in the world already (a restarted driver)")
     ap.add_argument("--avoid", nargs="*", help="saves already loaded (a restarted driver)")
+    ap.add_argument("--max-s", type=int, default=3600, help="give up (and let the boot end) after this many s")
     a = ap.parse_args()
-    b = Boot(a.run)
+    b = Boot(a.run, max_s=a.max_s)
     try:
         if a.what == "churn":
             churn(b, a)
