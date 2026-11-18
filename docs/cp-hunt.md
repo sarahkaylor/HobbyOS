@@ -70,7 +70,7 @@ something recurs.
 | **H1-01** | audio dropouts: exact-zero runs of 10–290 ms (whole 10 ms periods) inside loud audio, most while the save loads, some in the world; alsa-lib in the guest reports each underrun | {R01} | `cp-hunt-evidence/audio-dropouts-fp2.txt` | `ALSA lib …/pcm.c:8772:(snd_pcm_recover) underrun occurred` (h-fp2 7 rows / 10 dropouts; h-soak1 49 / 22) | game audio thread starved under guest load + winealsa's 40 ms buffer (Wine / kernel scheduling) | wrong output (audible glitch) | open |
 | **H1-15** | ~8 s freeze in the world: Venus ring-1 fences unretired for 7.7 s, fps rows of 1.7 and 4.3, audio dropouts; the host's own 1 Hz sampler stalled 8 s twice at the same moment | {R15} | `cp-hunt-evidence/soak-venus-freeze.txt` | `[VENUS] stall pid=110 tid=185 waits_ms=7754 ctx=12 ring=1` | host (amdgpu / virglrenderer under host load), not the guest | hang (recovers) | open (not ours, most likely) |
 | **H1-02** | the game exits 2–3 s (or ~20 s) after launch, right after REDEngineErrorReporter starts; graded rc=0 "launcher-done" | {R02} | `cp-hunt-evidence/mine-census.txt` (run-log section) | `[P8] end game status=0 ms=2886` + REDEngineErrorR exits twice + services.exe/explorer.exe `code=0x1` | H2-early's (Wine session teardown) | crash | open (H2-early); grader diff below |
-| **H1-03** | ~2-minute silent stall between the X session and the launcher: the console stops reaching the host, the guest waits in the UART TX path | {R03} | `cp-hunt-evidence/pregame-console-stall.txt` | `no launcher/Wine row for 120 s before the game: sampling the vCPUs (prof-prestall)`; prof: `cons_hw_tx`, `uart_puts` | kernel console TX / QEMU serial chardev on a loaded host | hang (recovers) | open (H4-kglitch: console) |
+| **H1-03** | 1–2.5 minute stall before the launcher starts: twice in the firmware stage (serial stuck at the firmware's 113 bytes for 78 / 85 s), once after the X session (console bytes not reaching the host for ~145 s, vCPUs waiting in the UART TX path) | {R03} | `cp-hunt-evidence/pregame-console-stall.txt` | `no launcher/Wine row for 120 s before the game: sampling the vCPUs (prof-prestall)`; host `/proc/pressure/io` full avg10 50–55 % during the stall | host I/O pressure (QEMU's flushes / file writes wait behind other lanes' dirty data) | hang (recovers) | open: QEMU `cache=unsafe` A/B proposed below |
 | **H1-12** | after Esc back to the main menu from a sub-menu (the save list, Settings), Up/Down no longer show a focus frame: LOAD GAME → NEW GAME then nothing (h-rl1), a taller frame back at LOAD GAME then nothing (h-rl1b), nothing at all after Settings (h-set1) | 3/3 boots that returned from a sub-menu (h-rl1, h-rl1b, h-set1); lanes/play's reload boots (wave 6, wine-build-x) 3/3 fine | `cp-hunt-evidence/reload-seek-continue.txt`, `settings-menu.txt` | `SEEK FAILED menu-continue: main menu row 'CONTINUE' not focused after 6 x up` | game UI × input (where the keyboard focus goes after the sub-menu closes); harness can't follow it | harness (blocks the reload check) | open |
 | **H1-08** | P9 `seek` never finds the main-menu focus at a 1920×1080 game resolution | {R08} | `cp-hunt-evidence/p9-seek-1080.txt` | `SEEK FAILED menu-load: main menu row 'LOAD GAME' not focused after 6 x down` | harness (`boot_p9.canon`) | harness | worked around (`fpsprobe-blind.p9`); diff below (H2-early) |
 | **H1-09** | the ≥ 30 fps world target is met only at the median: fpsprobe 720p medians 29.0 / 33.4 / 30.0, 1080p 29.8 / 33.0; p10 17–26; single ~1.5 s rows down to 6–13 fps | 2/5 fpsprobe boots below 30 (h-fp1, h-fq1b) | P9 table below | `world median 29.0 (p10 24.7)` (h-fp1) | game user code + Venus fence/present path (cp-k7 §6); 1080p ≈ 720p, so not GPU fill | perf | open |
@@ -175,6 +175,32 @@ h-soak1), with identical serial content and no correlation with host load
 (max loadavg in the first minute 14–36 either way).  `run-hunt.sh`'s sampler now
 records the serial file size and the host's Dirty/Writeback each second, so
 the next occurrence shows which (boots from h-p8v4 on).
+
+**H1-03, continued.**  With the sampler's I/O column (h-p8v5, h-p8v6) the
+firmware-stage form lines up with the host: the guest sits at the
+firmware's 113 bytes while `/proc/pressure/io` "full" climbs to 50–55 % and
+Dirty is 2–3.7 GB, and gets through as the pressure drops.  QEMU honours
+guest flushes with the default `cache=writeback`, so OVMF's variable writes
+to the per-run `ovmf.fd` and the guest's NVMe flushes become host `fsync()`s
+that wait behind everyone's dirty data.  Every image these boots use is a
+per-run copy, so the flush is not worth a minute.  Proposed (H2-early owns
+`tools/cp/p8/boot_p8.py`; the integrator / C6 owns `tools/cp/host-venus.sh`),
+then an A/B of boot→launcher time on a busy host:
+
+```diff
+-           "-drive", f"if=pflash,format=raw,file={fw}",
++           "-drive", f"if=pflash,format=raw,file={fw},cache=unsafe",   # per-run copies: no host fsync per guest flush (cp-hunt H1-03)
+@@
+-           "-drive", f"file={disk},format=raw,id=disk0,if=none",
++           "-drive", f"file={disk},format=raw,id=disk0,if=none,cache=unsafe",
+@@
+-           "-drive", f"file={cpdata},format=raw,id=cpdata,if=none",
++           "-drive", f"file={cpdata},format=raw,id=cpdata,if=none,cache=unsafe",
+```
+(and the same three in `host-venus.sh` lines 112/118 and its cpdata line).
+`cache=unsafe` still writes everything back when QEMU exits normally, so a
+P9 play boot's data disk keeps its save for the reload; only a host crash
+mid-boot loses it, and these copies are throwaway.
 
 **H1-04 (stale prefix stamp).**  Not a game bug: every game boot of this
 lane ran a ~9.5 s `wineboot` prefix update (PreInstall, DefaultInstall,
