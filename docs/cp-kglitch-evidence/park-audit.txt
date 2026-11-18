@@ -1,0 +1,46 @@
+# H4-kglitch: park/restart sentinel audit of src/kernel + src/include at integ15 (a23bfbeb),
+# read-only, every claim file:line.  errno.h: EPERM=1 ENOENT=2 EINTR=4 EAGAIN=11.
+
+## Named sentinels
+GPU_ABI_PARKED  gpu_abi.h:368 = -2 (== -ENOENT)  returned by virtio_gpu_3d.c:2304 virtio_gpu_3d_fence_park,
+                passed on by gpu_abi.c:1476, tested at linux_compat_fd.c:889 -> l_park.
+                SAFE TODAY ONLY BY LUCK: no -ENOENT anywhere in gpu_abi.c / virtio_gpu*.c, but gpu_abi.c passes raw
+                rc through from virtio_gpu_3d_capset_at, capset_get, blob_map, gpu_m2_map_user and
+                virtio_gpu_x64_scanout_flip (~980, 994, 1165, 1170, 1321): any future -ENOENT there = endless restart.
+                -> moved to -100001 (H4-kglitch).
+LSND_PARKED     linux_snd.h:15 = -100000 (C4-audio's fix)       SAFE
+L_PI_PARKED     linux_compat_thr.c:109 = +1 (tested thr.c:2590)  SAFE (other returns 0 or -errno)
+
+## The native -2 park convention: returners
+fs.c:1965,1977 fs_poll_park (passed on fs.c:2100,2155 select/poll); fs.c:3796 file_read TIMERFD; fs.c:3632 file_read_user;
+pipe.c:349 pipe_read_ex; pipe.c:551 pipe_writev_ex; unix.c:462 usock_park; unix.c:1001 usock_name_park;
+linux_compat_fd.c:1389 l_efd_park; linux_compat_fd.c:1589 l_signalfd_read; net.c:1722 net_socket_accept_lo (NOT BLOCKED, K11);
+linux_compat_timers.c:441 l_tmr_pause (returned straight to the dispatcher; not an ENOENT question).
+Internal -2 codes that never reach a park test: fat16.c (EEXIST at fs.c:1203), nfs_proto.c, nfs.c, vfs_bind.c, process.c
+(E2BIG in trap.c), vm.c vm_touch (EFAULT), linux_snd.c:226, thr.c:1642, mmu.c:267/326 (boot), ext2_vfs.c:583 io_ret folds to -EIO.
+
+## Testers (r == -2 -> park) and whether a real -ENOENT reaches them
+fd.c:319 accept/accept4            SAFE (EFAULT/EINVAL/EBADF/ENOTSOCK/EMFILE/ENFILE/EAGAIN only)
+fd.c:364/373 connect               COLLIDES, MITIGATED: unix.c:1054 returns -ENOENT; the first probe is forced non-blocking,
+                                   so -2 there can only mean ENOENT.  Residue: the blocking retry at :373 can see ENOENT if the
+                                   listener unbinds between probe and retry -> one spurious l_park of a RUNNING thread (restart fixes it).
+x64 trap.c:968, arm trap.c:668     native connect: COLLIDES, MITIGATED (state not BLOCKED/READY -> -ENOENT; x64:976, arm:675)
+fd.c:507 sendto, :537 recvfrom, :585 sendmsg/recvmsg, :1184 sendmmsg     SAFE
+fd.c:714/784 poll/ppoll/select/pselect                                  SAFE
+fd.c:889 ioctl /dev/gpu            SAFE today (see GPU_ABI_PARKED)
+fd.c:901 ioctl ALSA                SAFE (LSND_PARKED)
+misc.c:92/125/142 readv/pread64/pwrite64                                SAFE
+x64 trap.c:431/1181/1249/1272/1322/783/817/870/893/954, arm 186/838/499/530/577/597/657   SAFE
+vfs_compat.c:422/453 SETLKW/flock (parks on -EAGAIN)                     SAFE (vfs_lock.c:221; full table -ENOLCK :257)
+file_read/file_write backends (fs.c:3711-3960, 4090-4228): no backend returns -ENOENT.
+
+## Other sentinels equal to a real errno (open findings)
+K8  -1 read as EBADF: x64 trap.c:449/1194, arm 194/846, compat fd.c:508/538 map -1 -> -EBADF, but a sealed memfd write
+    returns a real -EPERM (tmpfs.c:476 F_SEAL_WRITE; vm.c:656/660 via tmpfs.c:481-482; reached from fs.c:4189).
+K9  raw -1 passed through as -EPERM: x64 trap.c:1287 writev, :1333 readv, misc.c:102 readv, misc.c:132/148 pread64/pwrite64;
+    the -1 is fs.c's generic failure (closed fd fs.c:3712-3730/4092-4106, NFS write :4197, NFS dir read :3839, wrong pipe
+    end :3944/4200, net_socket_send/recv).  fd.c:1180 instead folds -1 to -EIO.
+K10 l_connect (fd.c:361) sets O_NONBLOCK on every family: a blocking non-loopback TCP connect() hits pcb->nonblock and
+    returns -EINPROGRESS (fs.c:1433-1436) instead of blocking.  Loopback is unaffected (fs.c:1417).
+K11 net_socket_accept_lo (net.c:1722) returns -2 without setting BLOCKED: a blocking loopback-INET accept rewinds and
+    reschedules while RUNNING -- a CPU-burning yield loop, not a sleep.

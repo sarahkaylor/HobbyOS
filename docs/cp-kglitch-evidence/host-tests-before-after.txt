@@ -1,0 +1,99 @@
+# H4-kglitch: src/host/kconsole_mt_test.c and kconsole_test.c, Mac (Apple M-series, macOS host-cc), against
+# integ15's src/kernel/kconsole.c (a23bfbeb, 'base') and this lane's ('lane').  -DCONS_WAIT_US=300000ULL for the MT test.
+# base build: the integ15 kconsole.c + console.h, the test with cons_stats.usurped/stalls read as split (fields absent there).
+
+== base MT run 1
+ok   none   rows intact 9000/9000, torn 0, soup 0, fragments 0, forced 0, usurped 0
+  soup: [CSTR] c=2 s=200141 p=HOVcjqx4B[CONS!] [CSTR] c=3 s=200141 p=IPWdkry5CJQXelsz6DKRYfmt07ELSZgnu18FMTahov29GN e=46
+  torn: [CSTR] c=3 s=200441 p=8FMTahov29GNUbiIPWdkry5CJQXelsz6DKRYfmt e=33
+  torn: [LPC] w=5 s=2pw3AHOVcjqx4BIPWdkry5CJQXelsz6D e=46
+  torn: [CSTR] c=3 s=200741 p=y5CJQXelsz6DKRY00434 p=3AHOVcjqx4BIPWdkry5CJQX e=23
+FAIL jump   rows intact 8985/9000, torn 4, soup 1, fragments 10, forced 6, usurped 0
+ok   short  rows intact 9000/9000, torn 0, soup 0, fragments 0, forced 0, usurped 0
+  soup: [CSTR] c=2 s=400139 p=3AHOVcjqx4BIPWdkry5CJQXelsz6DKRYfmt07ELSZgnu18FMTaho[CONS!] [LPC] w=4 s=[4C0S0TR0]78  pc=3= 6DKsR=40Y0fmt1039 7pELS=Z4BIgPnu1W8d
+  frag: y5CJQXelsz6DKRYfmt07ELSZgnu18FMTahov29GNUbipw3AHOVcjqx4BIPWdkry5CJ e=118
+  frag: v29GNUbipw3AHOVcjqx4BIPWdkry5CJQXelsz6DKRYfmt07ELSZgnu18FMTahov29GN e=119
+FAIL long   rows intact 8997/9000, torn 0, soup 1, fragments 2, forced 1, usurped 0
+kconsole_mt_test: FAIL (2 failures)
+== base MT run 2
+ok   none   rows intact 9000/9000, torn 0, soup 0, fragments 0, forced 0, usurped 0
+  torn: [CSTR] c=2 s=200140 p=GNUbi[[CCONOSN[!SC]!O] N S[[!CC]SS TTR[R]C] S cTc=R=3]1   scs===2020 00s01=1402 4p000= 1Hp5O=0VF cMpjT=qaOxhV4ocBvjI2qP9xWG4dNBk
+  frag: uz168FMDTKRYafhovm2t079EGNULbSZginpw3uA18FHMOVcTjaqx4hBov2 9e=7G0NUb
+  frag: ipw3AHOVcjqx4B[ILPWPdCk] wr=5 ys5CJ=Q200X0e7l7 ps=z6DIKPWdRYfmt e=1k13
+  frag: ry5CJQXelsz6DKRYfmt e=24
+FAIL jump   rows intact 8978/9000, torn 5, soup 0, fragments 17, forced 6, usurped 0
+ok   short  rows intact 9000/9000, torn 0, soup 0, fragments 0, forced 0, usurped 0
+  torn: [CSTR] c=1 s=400142 p=5CJQXe[[[CCCOOONNNSS!S!]!] ]  [[C[CLSSPTTRCR]]]   cwc===342   sss===444000000101474191   ppp===675DECKLJRSQYZXfgemnltus01z786EFD
+  frag: iTpawh e3=3A3H
+  frag: OVcjqx4B e=46
+  frag: lsz6DKRYfmt07ELSZgnu1 e=27
+FAIL long   rows intact 8996/9000, torn 1, soup 0, fragments 3, forced 1, usurped 0
+kconsole_mt_test: FAIL (2 failures)
+== base MT run 3
+ok   none   rows intact 9000/9000, torn 0, soup 0, fragments 0, forced 0, usurped 0
+  torn: [CSTR] c=1 s=200146 p=LSZgnu18FMTahov29GNU[[C[OCCNOOSNN!SS]!! ]] [ L[[PCCCSS]TT RRw]]=  5cc ==s23=  2ss0==022000800011 44p55=  LppS==ZLSZgnu18MFgMTnaT
+  frag: t0077 Ee[L=CS6SZT1gR
+  frag: n]u c18F=MTa0h so=v200219GN5U0 pb= e=O7Vcj4q
+  frag: x4BIPWdkry5CJQXelsz6DKRYfmt07ELSZgnu18FMTahov29GNUbipw3AHOVcjqx4B e=70
+FAIL jump   rows intact 8983/9000, torn 5, soup 0, fragments 11, forced 5, usurped 0
+ok   short  rows intact 9000/9000, torn 0, soup 0, fragments 0, forced 0, usurped 0
+  torn: [CSTR] c=2 s=400142 p=6DKRYfmt07EL[[[CCCOOONNNSSS!!!]]]   [[C[LSCPTSCRT]]R  ]wc ==c53=  1ss ==s44=0040014020 07p18=4 71pE =Lp7S=EZ4LgBSnIZuPg1Wn8duFkM
+  frag: V3cAjH[qOCVxS T4eRB=]I3 P1cW
+  frag: =d0kry 5s=4C0JQX0e150l spz e==CJQ5X3
+  frag: elsz6DKRYfmt07ELSZgnu18FMTahov29GNUbipw3AHOVcjqx4BIPWdkry5CJQXelsz e=70
+FAIL long   rows intact 8995/9000, torn 1, soup 0, fragments 4, forced 1, usurped 0
+kconsole_mt_test: FAIL (2 failures)
+
+== lane MT run 1
+ok   none   rows intact 9000/9000, torn 0, soup 0, fragments 0, forced 0, usurped 0
+ok   jump   rows intact 9000/9000, torn 0, soup 0, fragments 0, forced 0, usurped 0
+ok   short  rows intact 9000/9000, torn 0, soup 0, fragments 0, forced 0, usurped 0
+  frag: [
+  frag: CSTR] c=1 s=400142 p=5CJQXelsz6DKRYfmt07ELSZgnu1 e=27
+ok   long   rows intact 8999/9000, torn 0, soup 0, fragments 2, forced 1, usurped 1
+kconsole_mt_test: PASS (0 failures)
+== lane MT run 2
+ok   none   rows intact 9000/9000, torn 0, soup 0, fragments 0, forced 0, usurped 0
+ok   jump   rows intact 9000/9000, torn 0, soup 0, fragments 0, forced 0, usurped 0
+ok   short  rows intact 9000/9000, torn 0, soup 0, fragments 0, forced 0, usurped 0
+  frag: [
+  frag: CSTR] c=1 s=400143 p=6DKRYfmt07ELSZgnu18FMTahov29GNUbip e=34
+ok   long   rows intact 8999/9000, torn 0, soup 0, fragments 2, forced 1, usurped 1
+kconsole_mt_test: PASS (0 failures)
+== lane MT run 3
+ok   none   rows intact 9000/9000, torn 0, soup 0, fragments 0, forced 0, usurped 0
+ok   jump   rows intact 9000/9000, torn 0, soup 0, fragments 0, forced 0, usurped 0
+ok   short  rows intact 9000/9000, torn 0, soup 0, fragments 0, forced 0, usurped 0
+  frag: [
+  frag: LPC] w=4 s=400079 p=7ELSZgnu18FMTahov29GNUbip e=25
+ok   long   rows intact 8999/9000, torn 0, soup 0, fragments 2, forced 1, usurped 1
+kconsole_mt_test: PASS (0 failures)
+== lane MT run 4
+ok   none   rows intact 9000/9000, torn 0, soup 0, fragments 0, forced 0, usurped 0
+ok   jump   rows intact 9000/9000, torn 0, soup 0, fragments 0, forced 0, usurped 0
+ok   short  rows intact 9000/9000, torn 0, soup 0, fragments 0, forced 0, usurped 0
+  frag: [
+  frag: CSTR] c=1 s=400142 p=5CJQXelsz6DKRYfmt07ELSZgnu1 e=27
+ok   long   rows intact 8999/9000, torn 0, soup 0, fragments 2, forced 1, usurped 1
+kconsole_mt_test: PASS (0 failures)
+== lane MT run 5
+ok   none   rows intact 9000/9000, torn 0, soup 0, fragments 0, forced 0, usurped 0
+ok   jump   rows intact 9000/9000, torn 0, soup 0, fragments 0, forced 0, usurped 0
+ok   short  rows intact 9000/9000, torn 0, soup 0, fragments 0, forced 0, usurped 0
+  frag: [
+  frag: CSTR] c=3 s=400140 p=5CJQXelsz6DKRYfmt07ELSZgnu18FMTahov29GN e=39
+ok   long   rows intact 8999/9000, torn 0, soup 0, fragments 2, forced 1, usurped 1
+kconsole_mt_test: PASS (0 failures)
+
+== base kconsole_test (T14 added)
+  got:  [CSTR] c=6 k=0 s=7 p=
+[K] other row
+xyz e=3
+
+FAIL T14 stalls=+0, want +1
+kconsole_test: FAIL (2 failures)
+== lane kconsole_test
+ok   T13 interrupted thread's row not pushed
+ok   T13b and it ends whole
+ok   T14 whole-guest stall is not staleness
+kconsole_test: PASS (0 failures)

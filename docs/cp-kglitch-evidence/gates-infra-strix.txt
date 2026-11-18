@@ -1,0 +1,23 @@
+tree  start 03:55:16
+build rc=0 03:58:49
+avx rc=0 [LP] done rc=0
+# restart (infra+P gates) 04:11:17
+tree  start 04:11:17
+build rc=0 04:12:59
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/kglitch)
+unit rc=0 Tests run:    463 Tests failed: 0   reass=1
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 40/42 passed summary=[host_tests] summary: 1 step(s) failed: kconsole=kconsole_test: PASS (0 failures) kconsole_mt_test: PASS (0 failures) 
+castscan rc=0 castscan: 373 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+panic_sink_allowlist rc=0 panic_sink_allowlist: PASS — every reference is accounted for
+# 05:04:02 tree synced to 2bb7bc15 (final code) before P2/P5/P8
+pfx_gate rc=0 pfx_gate: PASS
+infra end 06:15:19
+gate_p2#1 rc=0 G1 wine cmd /c echo hello prints hello : PASS ([P2] end echo|G2 winprobe.exe every marker + exit 0 : PASS ([P2] end winpr|G3 wineserver -k leaves no processes : PASS ([P2] end kill s| 06:18:23
+gate_p5#1 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 335 s; lock released serial=309568 06:28:18
+gate_p8_venus rc=0    +   237.4 s  06:34:42  main menu OCR at s011-t000147: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   320.3 s  06:36:05  main menu OCR at s012-t000229: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   323.5 s  06:36:08  verdict: main-menu; QEMU stopped, sl 06:36:11
+ALLDONE 06:36:11
