@@ -18,10 +18,10 @@
  *   L*  WAIT_ALL                 (test_wait_all)
  *   I*  invalid objects / args   (invalid_objects)
  *   W*  wakeups of a parked WAIT_ANY (wake_any), timeouts both clocks,
- *       close while waiting, fan-out
+ *       close while waiting, fan-out, FIFO, wake latency (W17)
  *   B*  wakeups of a parked WAIT_ALL (wake_all)
  *   R*  the alert event          (alert_any, alert_all)
- *   G*  a handled signal ends a wait
+ *   G*  a handled signal ends a wait (G4: and how fast, against a pipe read)
  *   F*  Wine's shape: device + object fds over SCM_RIGHTS to a forked child
  *   X*  stress (stress_wait_any / stress_wait_all) and a ping-pong latency
  */
@@ -771,6 +771,30 @@ static void t_wake_any(void) {
   join_waiter(&ws[1]);
   verdict("W16", "FIFO: the earlier waiter gets the first release", first && !second && !ws[0].err && !ws[1].err,
           "first=%d second=%d", first, second);
+  /* W17: EVENT_SET -> the parked waiter running again */
+  {
+    enum { N = 100 };
+    uint64_t lat[N];
+    int bad = 0;
+    for (int i = 0; i < N; i++) {
+      start_waiter(&ws[0], NT_IOC_WAIT_ANY, 1, &aut, 31, 0, 3000);
+      usleep(3000);
+      uint64_t t0 = now_ns(CLOCK_MONOTONIC);
+      ev_op(aut, NT_IOC_EVENT_SET, &prev);
+      join_waiter(&ws[0]);
+      if (ws[0].err) bad++;
+      lat[i] = ws[0].t1 > t0 ? (ws[0].t1 - t0) / 1000 : 0;
+    }
+    for (int i = 1; i < N; i++)
+      for (int j = i; j > 0 && lat[j - 1] > lat[j]; j--) {
+        uint64_t t = lat[j];
+        lat[j] = lat[j - 1];
+        lat[j - 1] = t;
+      }
+    verdict("W17", "EVENT_SET -> parked waiter returns (latency)", !bad && lat[N / 2] < 2000,
+            "p50=%lluus p90=%lluus max=%lluus bad=%d", (unsigned long long)lat[N / 2],
+            (unsigned long long)lat[N * 9 / 10], (unsigned long long)lat[N - 1], bad);
+  }
   close(sm);
   close(man);
   close(aut);
@@ -890,6 +914,32 @@ static void t_alert(void) {
 /* ---- G: signals ----------------------------------------------------------- */
 static volatile int g_hits;
 static void g_handler(int sig) { (void)sig; g_hits++; }
+struct sigw {
+  int kind, fd, ev;
+  volatile int done;
+  int err;
+  uint64_t t1;
+};
+static void *g_sigw_fn(void *a) {
+  struct sigw *x = a;
+  int r;
+  if (x->kind == 0) {
+    struct nts_wait_args wa;
+    memset(&wa, 0, sizeof wa);
+    wa.objs = (uintptr_t)&x->ev;
+    wa.count = 1;
+    wa.owner = 1;
+    wa.timeout = ~0ull;
+    r = ioctl(dev, NT_IOC_WAIT_ANY, &wa);
+  } else {
+    char c;
+    r = (int)read(x->fd, &c, 1);
+  }
+  x->err = r < 0 ? errno : 0;
+  x->t1 = now_ns(CLOCK_MONOTONIC);
+  __atomic_store_n(&x->done, 1, __ATOMIC_SEQ_CST);
+  return 0;
+}
 static void t_signals(void) {
   int ev = create_event(dev, 1, 0);
   struct sigaction sa;
@@ -937,6 +987,54 @@ static void t_signals(void) {
     ok += (w.err == 0 || w.err == EINTR);
   }
   verdict("G3", "pulse + signal races: only 0 or EINTR", ok == 20, "ok=%d/20", ok);
+  /* G4/G5: how long a signal takes to end a parked wait, against a
+     blocking pipe read (the control: the kernel's ordinary rewound park).
+     Wine 11 + ntsync interrupts a thread's inproc wait with SIGUSR1 for every
+     system APC (server/thread.c queue_apc), so this is on Wine's hot path. */
+  sa.sa_flags = 0;
+  sigaction(SIGUSR1, &sa, 0);
+  {
+    enum { N = 40 };
+    uint64_t lat[2][N];
+    int bad = 0;
+    for (int kind = 0; kind < 2; kind++) {
+      int pp[2] = {-1, -1};
+      if (kind && pipe(pp)) bad++;
+      for (int i = 0; i < N; i++) {
+        struct sigw sw = {kind, pp[0], ev, 0, 0, 0};
+        pthread_t th;
+        pthread_create(&th, 0, g_sigw_fn, &sw);
+        usleep(20000);
+        uint64_t t0 = now_ns(CLOCK_MONOTONIC);
+        pthread_kill(th, SIGUSR1);
+        for (int k = 0; k < 3000 && !__atomic_load_n(&sw.done, __ATOMIC_SEQ_CST); k++) usleep(1000);
+        if (!sw.done) {
+          bad++;
+          if (kind == 0) ev_op(ev, NT_IOC_EVENT_SET, &prev);
+          else if (write(pp[1], "x", 1) != 1) bad++;
+        }
+        pthread_join(th, 0);
+        if (kind == 0) ev_op(ev, NT_IOC_EVENT_RESET, &prev);
+        if (sw.err != EINTR) bad++;
+        lat[kind][i] = sw.t1 > t0 ? (sw.t1 - t0) / 1000 : 0;
+      }
+      if (kind) {
+        close(pp[0]);
+        close(pp[1]);
+      }
+    }
+    for (int kind = 0; kind < 2; kind++)
+      for (int i = 1; i < N; i++)
+        for (int j = i; j > 0 && lat[kind][j - 1] > lat[kind][j]; j--) {
+          uint64_t t = lat[kind][j];
+          lat[kind][j] = lat[kind][j - 1];
+          lat[kind][j - 1] = t;
+        }
+    verdict("G4", "signal -> EINTR latency, ntsync wait", !bad && lat[0][N / 2] < 2000 && lat[0][N - 1] < 100000,
+            "p50=%lluus p90=%lluus max=%lluus (pipe read: %llu/%llu/%lluus) bad=%d",
+            (unsigned long long)lat[0][N / 2], (unsigned long long)lat[0][N * 9 / 10], (unsigned long long)lat[0][N - 1],
+            (unsigned long long)lat[1][N / 2], (unsigned long long)lat[1][N * 9 / 10], (unsigned long long)lat[1][N - 1], bad);
+  }
   signal(SIGUSR1, SIG_DFL);
   close(ev);
 }
