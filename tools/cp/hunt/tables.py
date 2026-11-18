@@ -59,3 +59,35 @@ for r in p9:
     w = r.get("world") or (None, None, 0)
     m = r.get("menu") or (None, None, 0)
     print(f"| {r['run']} | {r['kind']} | {r['verdict']} | {w[0]} | {w[1]} | {w[2]} | {m[0]} | {r['gpuw']} | {r['mem']} | {r['ks']} | {r['guests']} | {r['fail'][:60]} |")
+
+# the soak: per phase fps (decay) and the game's memory (growth), from
+# RUN.fps.csv / RUN.thrs.csv of every boot that has soak phases
+for r in p9:
+    fp = os.path.join(d, r["run"] + ".fps.csv")
+    tp = os.path.join(d, r["run"] + ".thrs.csv")
+    rows = list(csv.DictReader(open(fp)))
+    if not any(x["phase"].startswith("soak") for x in rows):
+        continue
+    th = [x for x in csv.DictReader(open(tp)) if x["name"].startswith("Cyberpunk")] if os.path.exists(tp) else []
+    print()
+    print(f"Soak {r['run']}: per phase")
+    print()
+    print("| phase | game s | fps rows | median | p10 | min | max gap s | game res MiB (last) | anon MiB (last) | threads (last) |")
+    print("|---|---|---|---|---|---|---|---|---|---|")
+    for ph in ["world"] + [f"soak{i}" for i in range(1, 7)]:
+        v = [x for x in rows if x["phase"] == ph]
+        if not v:
+            continue
+        f = [float(x["approx_fps"]) for x in v]
+        t = [float(x["game_s"]) for x in v]
+        gap = max((b - a for a, b in zip(t, t[1:])), default=0)
+        m = [x for x in th if x["phase"] == ph]
+        last = m[-1] if m else {}
+        print(f"| {ph} | {t[0]:.0f}-{t[-1]:.0f} | {len(f)} | {statistics.median(f):.1f} | {q10(f):.1f} | {min(f):.1f} | {gap:.1f} | "
+              f"{last.get('res_mib', '-')} | {last.get('anon_mib', '-')} | {last.get('threads', '-')} |")
+    s = [x for x in th if x["phase"].startswith("soak")]
+    if len(s) >= 2:
+        g0, g1 = float(s[0]["game_s"]), float(s[-1]["game_s"])
+        r0, r1 = int(s[0]["res_mib"]), int(s[-1]["res_mib"])
+        print(f"\nresident growth over the soak phases: {r0} -> {r1} MiB in {(g1 - g0) / 60:.1f} min = "
+              f"{(r1 - r0) / max((g1 - g0) / 60, 1e-9):.1f} MiB/min")
