@@ -1,0 +1,5 @@
+[P8W] +    21.3 s  01:56:32  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8W] +   243.5 s  01:55:51  main menu OCR at s015-t000222: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   250.8 s  01:55:59  verdict: main-menu; QEMU stopped, slot released; guests on the host now: 1
+== verdict: main-menu
+rc=0 01:56:00

@@ -1,0 +1,26 @@
+# H1-hunt: trap.c's stall watchdog says 'console silent for more than 20s' about 1 s after the console printed (strix, h-soak1 serial.txt)
+# the [NFSIO] row the watchdog prints with it carries the kernel's ms; the row before it is a Wine +timestamp fps row (same clock: NtGetTickCount)
+[X] 217.256:01f8:trace:fps:win32u_vkQueuePresentKHR 0x10400c72f0 @ approx 103.17fps, total 141.82fps
+[NFSIO] bytes=0x0x000000005541d358 rpcs=0x0x000000000000ae4c ms=0x0x00000000000354af
+[WATCHDOG] console silent for more than 20s
+
+[X] 787.239:01f8:trace:fps:win32u_vkQueuePresentKHR 0x10400c72f0 @ approx 34.60fps, total 80.88fps
+[NFSIO] bytes=0x0x00000000efcd427d rpcs=0x0x000000000001e364 ms=0x0x00000000000c073f
+[WATCHDOG] console silent for more than 20s
+
+[X] 1240.402:01f8:trace:fps:win32u_vkQueuePresentKHR 0x10400c72f0 @ approx 39.37fps, total 59.40fps
+[NFSIO] bytes=0x0x0000000103bb427d rpcs=0x0x0000000000020b40 ms=0x0x000000000012f289
+[WATCHDOG] console silent for more than 20s
+
+# per boot: h-fp1=0 h-fp2=2 h-fq1b=6 h-fq1=2 h-p8l1=1 h-p8l2=1 h-p8v1=7 h-p8v2=2 h-p8v3=0 h-play1=4 h-rl1=1 h-soak1=4 
+# uart_last_activity_ms is written only by cons_hw_tx (src/kernel/arch/x64/uart.c:94), which kconsole.c's wire_piece calls for every piece; so either some console output does not pass there, or the timestamp/compare is wrong (both use rdtsc()/tsc_per_ms). Either way the watchdog's 'silent' is not evidence of a wedge in these boots, and its CPU dump fires on healthy boots (cooldown 30 s).
+# ROOT CAUSE (reading src/kernel/arch/x64/trap.c watchdog_tick): `now = timer_get_ms()` is read at the top of the tick; the
+# tick then prints [NFSIO] every 30 s through wd_puts -> uart_putc_dbg -> cons_kputc -> kconsole -> cons_hw_tx, which sets
+# uart_last_activity_ms = timer_get_ms() -- a LATER ms than `now` once the print crosses a millisecond (or another CPU prints
+# in between).  `if (now - uart_last_activity_ms < WATCHDOG_SILENCE_MS)` is uint64_t arithmetic: now < last underflows to
+# ~2^64, the test fails, and the watchdog reports 20 s of silence plus a CPU dump.
+# this lane's 12 first boots: 32 [WATCHDOG] rows, 24 with the tick's own [NFSIO] row in the 3 lines before, the other 8 with
+# console output (fps / [HBV] rows) in the 1-8 lines before; old boots: 101/128 game boots carry the row, 56 of the first 62
+# sampled rows right after [NFSIO].
+# the uptime of the p8v4 pair: [NFSIO] ms=0x7530 (30000) and 0xea60 (60000) -- the first two 30 s [NFSIO] ticks of the boot.
+# host-side check (run-hunt.sampler records serial.log's size each second from h-p8v4 on): longest stretch with no serial growth after the firmware preamble -- h-p8v4 3 s, h-fp3 14 s, h-fq2 7 s -- while the guest watchdog printed 'silent for more than 20s' 2, 2 and 4 times in those boots. The console was never silent for 20 s.

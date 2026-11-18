@@ -1,0 +1,54 @@
+# tools/cp/hunt/fpsprobe-blind.p9 -- tools/cp/p9/fpsprobe.p9 with the two
+# screen-position seeks (main menu, save list) replaced by the fixed tap
+# counts every 720p boot needed, for game resolutions whose menu layout the
+# boot_p9.py row tables do not know (1920x1080: docs/cp-hunt.md H1-08).
+# The OCR `expect` checks are unchanged, so a wrong entry still stops the boot.
+phase menu
+shot menu
+# ---- LOAD GAME -> ManualSave-86 ---------------------------------------------
+# blind taps instead of `seek` (its row table is the 1280x720 layout; at a
+# 1920x1080 game resolution the menu rows sit elsewhere): in 10 of 10
+# fpsprobe/play boots at 720p the first Down showed the focus on SETTINGS and
+# one Up then reached LOAD GAME (tools/cp/hunt/inputcheck.py)
+key down
+wait 1
+key up
+wait 1
+shot menu-load-blind
+key ret
+expect loadlist 30 LOAD\s*GAME|Expand\s*groups|Coll\w*\s*groups|Progression
+key 0
+wait 2
+# the list with both groups expanded (ctl1): Streetkid/AutoSave-16 group at
+# the top, then the second Streetkid group whose one entry, "The Ripperdoc"
+# (ManualSave-86), has its frame centred at screen row 509
+expect loadlist-ripperdoc 10 Ripperdoc
+# blind: in 10 of 10 boots the list focus reached the Ripperdoc entry after
+# 5 Down taps (none, reveal, +1, +1, +1)
+key down down down down down
+wait 1
+shot loadlist-focus-blind
+phase loading
+key ret
+expect loaded 400 PRESS\b.{0,24}\bTO\s+CONTINUE
+key spc
+wait 6
+phase world
+expect inworld 60 RIPPERDOC|Jackie
+shot world-start
+
+# ---- 3 minutes of walking, then stop (no save) -------------------------------
+hold w 3000
+look 1200 0 40 16
+repeat 6
+down shift
+hold w 6000
+up shift
+look 350 0 15 16
+hold w 4000
+look -300 0 10 16
+wait 3
+shot fp-loop
+end
+prof 20 10 fp-world
+stop

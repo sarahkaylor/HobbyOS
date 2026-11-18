@@ -1,0 +1,44 @@
+# H1-hunt: classify.py --aggregate over this lane's 22 boots (strix, integ15; benign tags from classify.py's table)
+== aggregate over 22 boots: h-fp1 h-fp2 h-fp3 h-fq1b h-fq1 h-fq2 h-p8l1 h-p8l2 h-p8l3 h-p8l4 h-p8v1 h-p8v2 h-p8v3 h-p8v4 h-p8v5 h-p8v6 h-play1 h-rl1b h-rl1 h-set1 h-soak1 h-win1
+   verdicts: main-menu=11, script-stop=6, seek-failed:menu-load=2, seek-failed:menu-continue=2, script-done=1
+   h-fp1=script-stop, h-fp2=script-stop, h-fp3=script-stop, h-fq1b=script-stop, h-fq1=seek-failed:menu-load, h-fq2=script-stop, h-p8l1=main-menu, h-p8l2=main-menu, h-p8l3=main-menu, h-p8l4=m
+-- kstall
+   18/22  rows=285   venus: [VENUS] fence_wait2 timeout pid=N ctx=N ring=N  
+   17/22  rows=41    nfspipe: [NFSPIPE] stall inflight=N issued=N replies=N contig=#  
+   12/22  rows=29    nfspipe: [NFSPIPE] stall inflight=N issued=N replies=N contig=N  
+   1/22  rows=3     venus: [VENUS] stall ctx=N inflight=N rings(issued/done): r0=N/N  
+   1/22  rows=2     venus: [VENUS] stall pid=N tid=N waits_ms=N ctx=N  
+   1/22  rows=2     venus: [VENUS] stall slots: [ctx N r1  
+   1/22  rows=1     venus: [VENUS] stall slots: none in flight  
+   1/22  rows=1     venus: [VENUS] stall slots: [ctx N r0  
+-- kdiag
+   22/22  rows=422   badelr: elr~0x140000000 in Cyberpunk2077.e  
+   15/22  rows=43    watchdog: [WATCHDOG] console silent for more than 20s  
+   7/22  rows=11    badelr: elr~0x140000000 in services.exe  
+   2/22  rows=3     badelr: elr~0x140000000 in wineboot.exe  
+   2/22  rows=3     badelr: elr~0x140000000 in p8caps.exe  
+-- exitpc
+   22/22  rows=42    wine code=0xC0000135 DLL_NOT_FOUND  
+-- audio
+   2/22  rows=56    alsa-lib snd_pcm_recover: underrun occurred  
+-- red
+   22/22  rows=23    REDEngineErrorReporter exited  
+   21/22  rows=21    REDEngineErrorReporter.exe loaded  
+-- wine_err
+   22/22  rows=22    winediag:getaddrinfo Failed to resolve your host name IP  [benign: no DNS name for the guest]
+   22/22  rows=22    wineboot:process_run_key Error running cmd L"C:\\windows\\system32\\winemenubuilder.exe -a -r" (N).  [benign: winemenubuilder disabled in the prefix]
+   22/22  rows=22    ntoskrnl:ZwLoadDriver failed to create driver L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\winebth": #  [benign: no Bluetooth driver]
+   22/22  rows=22    secur32:SECUR32_initSchannelSP no schannel support, expect problems  [benign: no GnuTLS in the stage]
+   22/22  rows=22    kerberos:kerberos_LsaApInitializePackage no Kerberos support, expect problems  [benign: no Kerberos in the stage]
+   22/22  rows=22    module:import_dll Library mfc140u.dll (which is needed by L"Z:\\GAME\\bin\\x64\\CChromaEditorLibrary64.dll") not found  [benign: Razer Chroma plugin needs MFC; game igno
+   20/22  rows=20    setupapi:SetupDefaultQueueCallbackW copy error N L"@C:\\windows\\system32\\drivers\\wineusb.sys,-N" -> L"C:\\windows\\inf\\wineusb.inf"  [benign: no USB / HID devices]
+   20/22  rows=20    wine: failed to start L"C:\\windows\\syswow64\\rundll32.exe": #  [benign: no 32-bit Wine: the prefix update's Wow64Install step (stale prefix stamp, cp-hunt H1-04)]
+   2/22  rows=8     system:find_gpu_from_path Failed to find gpu with path "PCI\\VEN_1002&DEV_7550&SUBSYS_00000000&REV_00\\#"  [new]
+   2/22  rows=4     system:lock_display_devices Failed to read display config.  [new]
+-- dxvk
+   22/22  rows=44    err: readMonitorEdidFromKey: Failed to get EDID reg key size  [benign: DXVK: no EDID for the virtual monitor]
+   22/22  rows=44    err: DXGI: Failed to parse display metadata + colorimetry info, using blank.  [benign: DXVK: no EDID / HDR metadata]
+   22/22  rows=44    warn: DxgiAdapter::QueryInterface: Unknown interface query  [benign: DXVK: the game asks the adapter for an interface DXVK lacks (E_NOINTERFACE); every boot, menus fine]
+   22/22  rows=44    warn: #-fe5a-42a2-bd62-#  [benign: DXVK: the game asks the adapter for an interface DXVK lacks (E_NOINTERFACE); every boot, menus fine]
+   22/22  rows=22    warn: CreateDXGIFactory2: Ignoring flags  [benign: DXVK: flags it does not implement]
+   22/22  rows=22    warn: DXGI: MakeWindowAssociation: Ignoring flags  [benign: DXVK: flags it does not implement]

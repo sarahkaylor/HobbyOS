@@ -1,0 +1,27 @@
+[KERNEL] Activating secondary cores via LAPIC IPIs...
+[EXEC] load pid=23 /CP/WINE/lib/wine/x86_64-unix/wine-preloader 5 17
+[X] 002c:err:winediag:getaddrinfo Failed to resolve your host name IP
+[KERNEL] Process 23: wine exited unexpectedly or gracefully.
+[EXITPC] pid=23 last_user_pc=0x1080143146 code=0xC0000135
+[EXITPC] pid=24 last_user_pc=0x1080143146 code=0x0
+[X] 002c:err:wineboot:process_run_key Error running cmd L"C:\\windows\\system32\\winemenubuilder.exe -a -r" (126).
+[X] 0140:err:module:import_dll Library mfc140u.dll (which is needed by L"Z:\\GAME\\bin\\x64\\CChromaEditorLibrary64.dll") not found
+[X]  55.251:0180:0184:err:vkd3d-proton:d3d12_device_create: Something went wrong 0x80004005.
+[X] err:   DXGI: Failed to parse display metadata + colorimetry info, using blank.
+[X] warn:  DXGI: MakeWindowAssociation: Ignoring flags
+[X] 0148:trace:loaddll:build_module Loaded L"Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe" at 0000000140000000: native
+[BADELR] picking a user slot with an implausible frame.elr=0x00000001406A5043 slot=109 pid=109 sp=0x00007FFFFE2FFCE8 Cyberpunk2077.e
+[BADELR] picking a user slot with an implausible frame.elr=0x0000000141969F19 slot=109 pid=109 sp=0x00007FFFFE2FFE60 Cyberpunk2077.e
+[KERNEL] Process 131: REDEngineErrorR exited unexpectedly or gracefully.
+[VENUS] fence_wait2 timeout pid=109 ctx=12 ring=4 seqno=0x0000000100000022 issued=0x0000000100000022 done=0x0000000000000000 ctx_inflight=3
+[VENUS] fence_wait2 timeout pid=109 ctx=12 ring=1 seqno=0x0000000100000028 issued=0x0000000100000028 done=0x0000000100000024 ctx_inflight=2
+[KERNEL] User process fault! Vector: 14 pid=77 rip=0x0000000140001234
+[LCOMPAT] fault sig=11 pid=77 rip=0x140001234 addr=0x0
+[NFSPIPE] stall inflight=10 issued=22 replies=12
+[THRS] pid=109 live=50 gt=50 hw=50 slots=52/511 regs=196 anon=153 anon_mib=1000 big_mib=63 stk=1 res_mib=400 pk_mib=12 Cyberpunk2077.e
+[THRS] pid=109 live=52 gt=52 hw=52 slots=52/511 regs=196 anon=153 anon_mib=1100 big_mib=63 stk=1 res_mib=500 pk_mib=12 Cyberpunk2077.e
+[THRS] pid=109 live=51 gt=51 hw=51 slots=52/511 regs=196 anon=153 anon_mib=1200 big_mib=63 stk=1 res_mib=450 pk_mib=12 Cyberpunk2077.e
+[X] 0180:trace:fps:present_queue 0x1234 @ approx 31.50fps, total 30.10fps
+[X] wine: failed to start L"C:\windows\syswow64\rundll32.exe": c0000135
+[WATCHDOG] console silent for more than 20s
+[X] ALSA lib /x/alsa-lib-1.2.14/src/pcm/pcm.c:8772:(snd_pcm_recover) underrun occurred
