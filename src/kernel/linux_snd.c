@@ -159,6 +159,11 @@ static struct {
   uint32_t dring_n;
   uint64_t st_t0_us, st_frames0, st_xruns0, st_dry0, dry;
   uint64_t st_maxgap_us, st_maxlat_us, st_maxwr_us, st_max100, st_minq;
+  /* H5-audio2 play clock (vis_update_locked): `vis` is hw limited to the
+     guest's real time -- how far the stream can really have played */
+  uint64_t vis, vis_us, vis_rem;
+  uint64_t held, st_held0, st_maxahead; /* xruns the play clock held back */
+  int in_hold;
 } S;
 
 static spinlock_t lsnd_lock;
@@ -324,6 +329,53 @@ static uint64_t avail_locked(void) {
   return used >= S.buffer ? 0 : S.buffer - used;
 }
 
+/* H5-audio2 (docs/cp-audio2.md §1): the underrun rule runs on a play clock.
+ *
+ * hw advances when QEMU returns a TX message, and QEMU returns one as soon
+ * as its mixing engine has COPIED the frames (a 1024-frame buffer filled at
+ * every 10 ms audio tick), not when they have played.  Worse, QEMU's audio
+ * backends are rate-controlled against QEMU's virtual clock: time in which
+ * the device had nothing -- a host stall that froze the whole guest, a late
+ * writer -- is owed and paid back by draining up to the whole mixing buffer
+ * per tick.  Measured (strix, idle guest): after one 270 ms host stall the
+ * device completed 10560 frames in 100 ms (2.2x real time) for ~200 ms, and
+ * winealsa's 40 ms buffer took an xrun on every 10 ms writer tick -- 19 from
+ * one stall; a writer that keeps one period queued underran on every tick
+ * with no stall at all.  Each winealsa recovery puts a period of silence in
+ * front of the music (cp-hunt H1-01).
+ *
+ * So the xrun rule uses `vis`: hw, but never more than real time ahead of
+ * where it was -- vis = min(hw, vis + elapsed x rate).  A device that plays
+ * at real time or slower is unchanged (vis == hw, so a writer that really is
+ * late still underruns); a device that runs ahead of the clock cannot drain
+ * the writer's buffer faster than the music plays.  Everything else (avail,
+ * hw_ptr, poll, drain) still uses hw, so no waiter depends on the clock and
+ * nothing needs a timer. */
+static void vis_start_locked(void) {
+  S.vis = S.hw;
+  S.vis_us = timer_get_us();
+  S.vis_rem = 0;
+  S.in_hold = 0;
+}
+
+static void vis_update_locked(uint64_t now) {
+  if (S.state != ST_RUNNING && S.state != ST_DRAINING) return;
+  uint64_t dt = now > S.vis_us ? now - S.vis_us : 0;
+  S.vis_us = now;
+  uint64_t r = S.rate ? S.rate : 48000;
+  if (dt > 10000000u) dt = 10000000u; /* no overflow; 10 s is "everything" */
+  uint64_t x = dt * r + S.vis_rem;
+  S.vis_rem = x % 1000000u;
+  uint64_t v = S.vis + x / 1000000u;
+  S.vis = v < S.hw ? v : S.hw;
+  if (S.hw - S.vis > S.st_maxahead) S.st_maxahead = S.hw - S.vis;
+}
+
+static uint64_t avail_vis_locked(void) {
+  uint64_t used = S.appl - S.vis;
+  return used >= S.buffer ? 0 : S.buffer - used;
+}
+
 static void submit_locked(void) {
   if (S.state != ST_RUNNING && S.state != ST_DRAINING) return;
   uint64_t ring_pa = kimg_pa(lsnd_ring);
@@ -362,6 +414,8 @@ static void stat_reset_locked(uint64_t now) {
   S.st_frames0 = S.frames_done;
   S.st_xruns0 = S.xruns;
   S.st_dry0 = S.dry;
+  S.st_held0 = S.held;
+  S.st_maxahead = 0;
   S.st_maxgap_us = S.st_maxlat_us = S.st_maxwr_us = S.st_max100 = 0;
   S.st_minq = ~0ull;
 }
@@ -398,6 +452,10 @@ static void stat_row_locked(uint64_t now) {
   kl_i(&kl, (long)(S.dry - S.st_dry0));
   kl_s(&kl, " xruns=+");
   kl_i(&kl, (long)(S.xruns - S.st_xruns0));
+  kl_s(&kl, " held=+");
+  kl_i(&kl, (long)(S.held - S.st_held0));
+  kl_s(&kl, " maxahead=");
+  kl_i(&kl, (long)S.st_maxahead);
   kl_c(&kl, '\n');
   kl_emit(&kl);
   stat_reset_locked(now);
@@ -405,6 +463,15 @@ static void stat_row_locked(uint64_t now) {
 
 static void check_xrun_locked(void) {
   if (S.state == ST_RUNNING && S.stop_thr < S.boundary && avail_locked() >= S.stop_thr) {
+    if (avail_vis_locked() < S.stop_thr) { /* the device ran ahead of the clock */
+      if (!S.in_hold) S.held++;
+      S.in_hold = 1;
+      return;
+    }
+  } else {
+    S.in_hold = 0;
+  }
+  if (S.state == ST_RUNNING && S.stop_thr < S.boundary && avail_vis_locked() >= S.stop_thr) {
     S.state = ST_XRUN;
     S.xruns++;
     S.trigger_us = timer_get_us();
@@ -461,12 +528,15 @@ static void reap_cb(int slot, uint32_t status, void *ctx) {
 /* Reap completions and keep the device fed.  Returns 1 when anything moved. */
 static int service_locked(void) {
   int n = virtio_snd_tx_reap(reap_cb, 0);
+  uint64_t now = timer_get_us();
   if (n > 0) {
     if (S.hw > S.appl) S.hw = S.appl; /* never: the device returns what we gave it */
     uint64_t av = avail_locked();
     if (av > S.avail_max) S.avail_max = av;
+  }
+  vis_update_locked(now);
+  if (n > 0) {
     if (S.state == ST_RUNNING) {
-      uint64_t now = S.last_done_us;
       uint64_t q = S.appl - S.hw;
       if (q < S.st_minq) S.st_minq = q;
       if (S.inflight == 0) S.dry++;
@@ -474,11 +544,12 @@ static int service_locked(void) {
       if (d100 > S.st_max100) S.st_max100 = d100;
       stat_row_locked(now);
     }
-    check_xrun_locked();
     if (S.state == ST_DRAINING && S.hw >= S.appl) S.state = ST_SETUP;
   }
+  int was = S.state;
+  check_xrun_locked(); /* also between completions: the play clock moves on */
   submit_locked();
-  return n > 0;
+  return n > 0 || S.state != was;
 }
 
 void linux_snd_irq(void) {
@@ -517,7 +588,7 @@ int linux_snd_open(int minor, uint32_t flags) {
     uint64_t fl = spinlock_acquire_irqsave(&lsnd_lock);
     S.open = 1;
     S.state = ST_OPEN;
-    S.hw = S.appl = S.submit = 0;
+    S.hw = S.appl = S.submit = S.vis = 0;
     S.epoch++;
     S.inflight = 0;
     S.user_pversion = 0;
@@ -527,6 +598,7 @@ int linux_snd_open(int minor, uint32_t flags) {
     S.last_done_us = S.last_writei_us = S.last_ioctl_us = S.run_start_us = 0;
     S.dring_n = 0;
     S.dry = 0;
+    S.held = 0;
     S.st_t0_us = 0;
     spinlock_release_irqrestore(&lsnd_lock, fl);
   }
@@ -571,6 +643,8 @@ void linux_snd_release(int minor) {
     kl_i(&kl, (long)S.n_refine);
     kl_s(&kl, " parks=");
     kl_i(&kl, (long)S.n_parks);
+    kl_s(&kl, " held=");
+    kl_i(&kl, (long)S.held);
     {
       struct vsnd_stats vs;
       virtio_snd_stats(&vs);
@@ -837,6 +911,7 @@ static int do_start(void) {
   S.state = ST_RUNNING;
   S.trigger_us = timer_get_us();
   if (!S.run_start_us) S.run_start_us = S.trigger_us;
+  vis_start_locked();
   submit_locked();
   spinlock_release_irqrestore(&lsnd_lock, fl);
   return 0;
@@ -929,7 +1004,7 @@ static int do_hw_params(struct process *p, uint64_t arg, int refine_only) {
   S.avail_min = period;
   S.start_thr = 1;
   S.stop_thr = buffer;
-  S.hw = S.appl = S.submit = 0;
+  S.hw = S.appl = S.submit = S.vis = 0;
   S.epoch++;
   S.inflight = 0;
   S.state = ST_SETUP;
@@ -1187,6 +1262,7 @@ static int pcm_ioctl(struct process *p, uint32_t req, uint64_t arg, int nonblock
       return -EBUSY;
     }
     S.hw = S.appl = S.submit = 0;
+    S.vis = 0;
     S.epoch++;
     S.inflight = 0;
     S.avail_max = 0;
@@ -1203,6 +1279,7 @@ static int pcm_ioctl(struct process *p, uint32_t req, uint64_t arg, int nonblock
     S.epoch++;
     S.inflight = 0;
     S.appl = S.submit = S.hw;
+    if (S.vis > S.hw) S.vis = S.hw;
     spinlock_release_irqrestore(&lsnd_lock, fl);
     return 0;
   case PCM_START: return do_start();
@@ -1229,6 +1306,7 @@ static int pcm_ioctl(struct process *p, uint32_t req, uint64_t arg, int nonblock
     if (push && S.state == ST_RUNNING) S.state = ST_PAUSED;
     else if (!push && S.state == ST_PAUSED) {
       S.state = ST_RUNNING;
+      vis_start_locked();
       submit_locked();
     } else r = -EBADFD;
     S.trigger_us = timer_get_us();
