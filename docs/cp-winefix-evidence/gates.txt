@@ -1,0 +1,24 @@
+H3-winefix Wine gates on the PATCHED stage (strix, tree ~/cp/lanes/winefix-g = cp-winefix 37d7b28b + docs; script ~/cp/lanes/winefix-gates.sh)
+Reference: integ-gates15.txt (integ16 batch still running when these ran).
+
+tree winefix-g (cp-winefix) stage /home/sarah/cp/lanes/winefix-wine patches: 0001-ntdll-block-sigquit-in-thread-exit.patch 0002-ntdll-quit-handler-no-syscall-frame.patch  start 02:40:34
+gate_p2#1 rc=0 G1 wine cmd /c echo hello prints hello : PASS ([P2] end echo|G2 winprobe.exe every marker + exit 0 : PASS ([P2] end winpr|G3 wineserver -k leaves no processes : PASS ([P2] end kill s| 02:55:19
+gate_p4#1 rc=0 [P4G] qemu pid 218443 [P4G] clip row: [RI] phase clip total n=70 rel=70 abs=0 dx=850 dy=25 lastabs=0,0 cursor=835,428 inside=1 [P4G] modes: fullscreen (magenta) window bbox on the glass (0, 0, 1278, 718, 921600) [P4G] winecfg dialog face bbox (4, 30, 412, 474, 28824) [P4G] winecfg tab libraries: region hash d75e74c3f3ffe411 -> b585f8d695dab704 [P4G] winecfg tab graphics: region hash b585f8d695dab7 03:11:35
+gate_p5#1 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 296 s; lock released 03:29:21
+gate_p5#2 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 313 s; lock released 03:41:03
+gate_p5#3 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 301 s; lock released 03:51:00
+p8_pfx rc=0 == exports.sh: remove /srv/nfs/cp-winefix-p8 ok (non-cp lines unchanged) == removed /srv/nfs/cp-winefix-p8  03:56:11
+gate_p8_venus rc=0    +   300.1 s  04:05:06  main menu OCR at s009-t000118: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   305.8 s  04:05:12  main menu OCR at s010-t000124: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   308.8 s  04:05:15  verdict: main-menu; QEMU stopped, sl 04:05:17
+ALLDONE 04:05:17
+
+== P5 serial fault lines / SIGQUIT deliveries per boot
+p5.1 faults=0 sigquit_deliveries=68
+p5.2 faults=0 sigquit_deliveries=69
+p5.3 faults=0 sigquit_deliveries=70
+
+== P8 Venus tail
+   +   292.8 s  04:04:59  main menu OCR at s008-t000111: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+   +   300.1 s  04:05:06  main menu OCR at s009-t000118: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+   +   305.8 s  04:05:12  main menu OCR at s010-t000124: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+   +   308.8 s  04:05:15  verdict: main-menu; QEMU stopped, slot released; guests on the host now: 2
+p8-venus serial fault lines: 0 (W1/W1b)

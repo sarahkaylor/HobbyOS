@@ -1,0 +1,32 @@
+From: HobbyOS H3-winefix
+Subject: [PATCH] ntdll: Handle SIGQUIT in a thread that has no syscall frame yet.
+
+On x86_64 a new thread's ntdll_thread_data.syscall_frame stays NULL until
+signal_start_thread() sets it up, after server_init_thread().  The server
+knows the thread's unix tid as soon as it has processed init_thread, so a
+process termination in that window SIGQUITs the thread while it waits for
+the init_thread reply.  quit_handler() then sees is_inside_syscall() fail
+(sp <= NULL is false) and calls user_mode_abort_thread( 0, NULL ), which
+reads NULL+0xa8 (frame->syscall_cfa) -> SIGSEGV.  Treat a thread with no
+frame as inside a syscall: abort_thread() directly.
+Seen on HobbyOS as "memory fault VA=0xA8 PC=user_mode_abort_thread"
+(tools/cp/p5/run-quitrace.sh proc mode, docs/cp-winefix.md).
+
+Applies to wine-11.0 (dlls/ntdll/unix/signal_x86_64.c), after 0001.
+---
+--- a/dlls/ntdll/unix/signal_x86_64.c
++++ b/dlls/ntdll/unix/signal_x86_64.c
+@@ -2609,7 +2609,12 @@
+ {
+     ucontext_t *ucontext = init_handler( sigcontext );
+ 
+-    if (!is_inside_syscall( RSP_sig(ucontext) )) user_mode_abort_thread( 0, get_syscall_frame() );
++    /* A new thread has no syscall frame until signal_start_thread() sets it up,
++     * but the server can already SIGQUIT it while it waits for the init_thread
++     * reply: it is still in its unix-side start, so treat it as inside a syscall
++     * instead of passing a NULL frame to user_mode_abort_thread(). */
++    if (get_syscall_frame() && !is_inside_syscall( RSP_sig(ucontext) ))
++        user_mode_abort_thread( 0, get_syscall_frame() );
+     abort_thread( 0 );
+ }
+ 
