@@ -22,6 +22,39 @@ from PIL import Image, ImageChops  # noqa: E402
 import boot_p9 as B  # noqa: E402
 
 
+RS = {"nearest": Image.NEAREST, "box": Image.BOX, "bilinear": Image.BILINEAR, "lanczos": Image.LANCZOS}
+
+
+def list_frame(im, a):
+    """boot_p9.list_focus() on one shot: (first row, last row, centre) of the
+    rows with > 40 cyan pixels in x 540..1380 of the canon image.  With
+    --resample unscaled the 1080p shot is searched at its own scale (x and y
+    ranges and the pixel count x1.5) and the rows are reported back in canon
+    coordinates."""
+    if a.game_res != "1280x720" and a.resample == "unscaled":
+        px = im.load()
+        ys = [y for y in range(int(70 * 1.5), int(720 * 1.5))
+              if sum(1 for x in range(int(220 * 1.5), int(1060 * 1.5), 2)
+                     if px[x, y][0] < 120 and px[x, y][1] > 170 and px[x, y][2] > 170) > 60]
+        ys = [y / 1.5 + 180 for y in ys]
+    else:
+        if a.game_res != "1280x720" and a.resample != "default":
+            gw, gh = (int(v) for v in a.game_res.split("x"))
+            g = (im if im.size == (gw, gh) else im.crop((0, 0, gw, gh))).resize((1280, 720), RS[a.resample])
+            c = Image.new("RGB", (1920, 1080))
+            c.paste(g, (320, 180))
+        else:
+            c = B.canon_image(im, a.xscreen, a.game_res)
+        px = c.load()
+        ys = [y for y in range(250, 900)
+              if sum(1 for x in range(540, 1380, 2)
+                     if px[x, y][0] < 120 and px[x, y][1] > 170 and px[x, y][2] > 170) > 40]
+    if not ys:
+        return "no frame"
+    cen = (ys[0] + ys[-1]) / 2 if ys[-1] - ys[0] < 120 else None
+    return f"rows {ys[0]:.0f}..{ys[-1]:.0f} ({len(ys)} rows) centre {cen}"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("shots", nargs="*")
@@ -29,8 +62,14 @@ def main():
     ap.add_argument("--xscreen", default="1280x720")
     ap.add_argument("--game-res", default="1280x720")
     ap.add_argument("--diff", nargs=2)
+    ap.add_argument("--list", action="store_true", help="the save list's cyan focus frame (boot_p9 list_focus)")
+    ap.add_argument("--resample", default="default", choices=["default", "nearest", "box", "bilinear", "lanczos", "unscaled"],
+                    help="--list with --game-res other than 1280x720: how the 1080p shot is scaled")
     a = ap.parse_args()
-    for p in a.shots:
+    for p in a.shots if a.list else []:
+        im = Image.open(p).convert("RGB")
+        print(f"focusprobe list {os.path.basename(p)}: {list_frame(im, a)}")
+    for p in a.shots if not a.list else []:
         im = Image.open(p).convert("RGB")
         label, yc, rows = B.focus_in(B.canon_image(im, a.xscreen, a.game_res), a.menu)
         print(f"focusprobe {os.path.basename(p)} {im.size[0]}x{im.size[1]}: "

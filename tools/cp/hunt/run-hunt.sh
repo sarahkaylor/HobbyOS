@@ -26,6 +26,7 @@
 #   script    P9 with HUNT_SCRIPT=<path>
 #
 # Env: HUNT_AUDIO=1, HUNT_FROM (P9 run under obj/cp-p9 to start from),
+#      HUNT_BOOT (P9: another boot script in place of tools/cp/p9/boot_p9.py),
 #      HUNT_LOGS (default ~/cp/lanes/hunt-logs), anything run-p8/run-p9 take.
 # One boot of this tree at a time (flock /tmp/cp-hunt-lane.<tree>.lock); the QEMU
 # slot and the big-guest lock are taken inside the harnesses, for the boot only.
@@ -107,7 +108,17 @@ case "$KIND" in
           X+=(P9_FROM=hunt-src1080 P9_XSCREEN=1920x1080 P9_GAME_RES=1920x1080)
         fi
         [ -n "${HUNT_FROM:-}" ] && X+=(P9_FROM="$HUNT_FROM")
-        set -- env "${X[@]}" bash tools/cp/p9/run-p9.sh ;;
+        if [ -n "${HUNT_BOOT:-}" ]; then
+          # a P9 boot with another boot script (e.g. tools/cp/hunt/boot_p9_nn.py):
+          # run-p9.sh hard-codes P8_BOOT, so a generated copy beside this script
+          # (same ROOT) swaps it; removed after the boot
+          GEN="$ROOT/tools/cp/hunt/.run-p9-$RUN.sh"
+          sed "s#P8_BOOT=tools/cp/p9/boot_p9.py#P8_BOOT=$HUNT_BOOT#" tools/cp/p9/run-p9.sh > "$GEN"
+          grep -q "P8_BOOT=$HUNT_BOOT" "$GEN" || { echo "run-hunt: could not swap P8_BOOT" >&2; exit 2; }
+          set -- env "${X[@]}" bash "$GEN"
+        else
+          set -- env "${X[@]}" bash tools/cp/p9/run-p9.sh
+        fi ;;
   *) echo "run-hunt: unknown kind $KIND" >&2; exit 2 ;;
 esac
 
@@ -120,6 +131,7 @@ SP=$!
 wait "$BP"; rc=$?
 kill "$SP" 2>/dev/null; wait "$SP" 2>/dev/null
 echo "rc=$rc $(date +%T)" >> "$L"
+[ -n "${GEN:-}" ] && rm -f "$GEN"
 
 SER="$OUT/serial.txt"; [ -f "$SER" ] || SER="$OUT/serial.log"
 python3 -I tools/cp/hunt/classify.py --run "$RUN" --log "$L" --host "$H" --json "$LOGS/$RUN.class.json" "$SER" > "$LOGS/$RUN.class.txt" 2>&1
