@@ -639,6 +639,11 @@ to be HobbyOS's hottest syscall paths.
 **AD-9 — Audio: null in v1.** Wine with no audio endpoints; P0 item 7 proves
 the game tolerates it. virtio-sound + an ALSA path is P9 work, and it also
 lifts the GB-029 decision for every other program.
+*Amended in waves 7–8:* virtio-sound + ALSA exists as an opt-in (`docs/cp-audio.md`). QEMU's virtio-sound returns a
+TX buffer once its mixer has copied it, not once it has played, and after the device was starved its rate control
+drains at up to 2× real time. Under QEMU, hw_ptr is therefore not a play position, and the driver's underrun rule uses
+a real-time play clock (`docs/cp-audio2.md` §1). Exact zeros in the guest WAV come from winealsa's silence lead-in,
+not from the device.
 
 **AD-10 — Measured on KVM on the Linux workstation only.** No TCG numbers, no
 Mac numbers. Every fps figure is reported next to two baselines: host-native
@@ -885,10 +890,15 @@ log, `check-no-game-files` output.
 
 ### P9 — Playability (size L; open-ended)
 
-- [ ] Load a save made on the host; play 10 minutes; save; reload.
-- [ ] fps vs both baselines at 1280×720 Low and 1920×1080 Low.
+- [x] Load a save made on the host; play 10 minutes; save; reload. *(wave 6 on Venus; 2/2 on integ17 with
+  `tools/cp/hunt/reload2.p9`, §7.2h)*
+- [ ] fps vs both baselines at 1280×720 Low and 1920×1080 Low. *(integ17, Venus: 720p median of medians 30.3, p10
+  25.5–27.6; 1080p 34.5; the 28-minute soak median 37.6 with no leak. The target is met at the median, not with margin.)*
 - [ ] Native context lane if P0 or P9 numbers call for it (§1.4).
-- [ ] virtio-sound + ALSA (AD-9).
+- [x] virtio-sound + ALSA (AD-9). *(opt-in `CP_AUDIO_WAV`; C4-audio, H5-audio2)*
+  - [ ] audio without dropouts: the kernel xrun cascades are fixed (H1-01 part A). The remaining 5–6 zero runs per
+    fp720 boot are winealsa lead-ins (H5-04, Wine) and the game's padding during loading (H5-05). Measure them with
+    the `[SND] zeros` rows and `tools/cp/audio2/gamecheck.sh`.
 
 **Gate P9:** recorded session (screendump sequence + fps rows), no crash, the
 save reloads. Target: ≥30 fps at 1280×720 Low, or within 70 % of the
@@ -1253,6 +1263,119 @@ Merge order: whichever goes green first; C1-k7 and C2-ntsync are re-measured tog
 boots, plus one 1920×1080 Low run) before the 30 fps verdict. C2-ntsync's and C4-audio's Wine changes are combined
 into one Wine build at integration.
 
+#### Wave 7 results (integ15 = a23bfbeb, landed on `cyberpunk` 2026-11-18)
+
+integ12 (C2-ntsync) landed first (39e4a288), then integ13 (cp-regress), integ14 (cp-audio plus build-wine
+`CP_WINE_NTSYNC`) and integ15 (cp-k7). Batch `strix:~/cp/integ-gates16.txt` (logs `~/cp/integ16/`) passed:
+- all 59 probes, including `snd`, `sysc` and `console` (0 torn);
+- ext2/exec/pfx/reg gates, NFS guards, unit 463/0, host 39/41, castscan, ARM;
+- P2, P4, P6 Venus, P7 fullscreen, thrstorm;
+- P8 lavapipe ×2 (menu at 270 s and 280 s) and P8 Venus (menu at 129 s).
+
+Its two reds were fixed in wave 8: `ext2w_gate` (a harness timer, below) and P5 run #1's `services.exe` NULL+0x3A8.
+
+- **ntsync (C2-ntsync, `docs/cp-ntsync.md`).** `/dev/ntsync` in the compat layer; Wine is built with it. The combined
+  default Wine (X11 + ntsync + winealsa) is `strix:~/cp/wine-cp`, built by `~/cp/build-wine-cp.sh`. P8 Venus
+  reaches the menu in 124 s (was 200 s).
+- **Kernel entry cost (C1-k7, `docs/cp-k7.md`).**
+  - Changes: lock-free user copies, a futex wake that skips when there are no waiters, and one cache-line record per
+    CPU on the trap path.
+  - Invariants (binding): every futex slot `uaddr` write goes through `l_fx_key_set()`; a WAIT counts itself in
+    `l_fx_cnt` before comparing; per-CPU trap/lock state is never a `[MAX_CPUS]` array.
+  - The guest is about 60 % idle in the world. The remaining levers are the Venus fence/present path, host GPU
+    sharing and wineserver.
+  - `sysret` is not possible with the current GDT (user CS 0x1B sits below user DS 0x23).
+- **Audio (C4-audio, `docs/cp-audio.md`).**
+  - virtio-sound-pci with an ALSA subset (`/dev/snd/controlC0`, `pcmC0D0p`).
+  - alsa-lib 1.2.14 in the guest, routed plug → mmap_emul → hw. Wine has `winealsa.drv`.
+  - Opt-in per boot with `CP_AUDIO_WAV=/abs.wav`, which uses QEMU's `wav` backend only and never a host audio device.
+  - `LSND_PARKED` is −100000, because −2 collides with −ENOENT.
+- **Regressions (C10-regress, `docs/cp-regress-evidence/`).** The unit image's `virtio_gpu_test.c` rows (unit
+  463/0), the ARM unit link, and a reaper for host-test spawns (atexit, `PR_SET_PDEATHSIG`).
+- **fps:** 25–28 median of medians at 720p Low; not yet reliably ≥30. Wave 8 re-measured it (below).
+
+### 7.2h Wave 8 (v8, 2026-11-18) — the crash and glitch hunt
+
+Wave 8 hunts crashes, hangs, faults and glitches with many boots, k/n counts and a check seen failing before each fix.
+It starts from integ15. Rules: `wave8-overrides` (lane ownership, at most 2 qemu slots per lane, audio via `wav`
+only, no game content in git).
+
+| Lane | Scope | Result |
+|---|---|---|
+| **H1-hunt** | discovery: 40 game boots over two rounds, the catalog `docs/cp-hunt.md` (H1-01..H1-18), P9 verdicts | 0 kernel faults, 0 early exits on integ15 and integ17; reload passes 2/2 |
+| **H2-early** | the P8/P9 early exit after REDEngineErrorReporter starts (`docs/cp-early.md`) | kernel NFS race fixed; graders grade `early-exit` (rc 3) |
+| **H3-winefix** | Wine-side crashes (`docs/cp-winefix.md`) | the `quit_handler` race fixed with two Wine patches |
+| **H4-kglitch** | kernel glitches (`docs/cp-kglitch.md`) | console stall-proof; waitpid, rt_sigreturn and sentinel fixes; host_tests runs every step |
+| **H5-audio2** | audio dropouts (`docs/cp-audio2.md`) | kernel xrun cascades fixed; the audible lead-ins are open |
+
+#### Wave 8 results (integ19, landed on `cyberpunk` 2026-11-18)
+
+integ16 = integ15 + cp-winefix + cp-hunt + the ext2w gate fix + cp-kglitch; integ17 = + cp-early; integ18 = + cp-audio2; integ19 = + cp-hunt2 and three P9/P8 harness fixes. Batch `strix:~/cp/integ-gates18.txt` (integ17, Wine `wine-cp2`):
+- all 63 probes, ext2_gate and ext2w_gate, unit 463/0, host 40/42;
+- P4, P5 ×3 (no `services.exe` fault), P6 Venus, P7, thrstorm;
+- P8 lavapipe ×2 and Venus at the menu (229 s, 376 s and 139 s).
+
+Its two reds, `exitgroup` #3 and P2 W6, were load flakes (below). The `integ-gates19.txt` delta on integ18 passed:
+- all probes, unit, host, ARM;
+- `exitgroup` ×4 paired with integ15;
+- P2 ×3, P5 and P8 Venus.
+
+integ19 adds only harness files and docs on top of integ18.
+
+- **The early exit (H2-F1, 7 of ~150 boots → 0/10 after the fix).**
+  - Cause: `nfs.c` kept one unlocked directory-listing cache for every lister. conhost, started for
+    REDEngineErrorReporter, lists Wine's fonts directory (56 entries) while the game lists its config directories. The
+    game got the font names (`[GDT] rel=/engine/config/base total=56`; the right count is 7), found no config and
+    exited 0.
+  - Fix: `nfs_dir_lock`, a ylock held across one fill; getdents64 holds it from the count to the last entry. Guard
+    row G11 (6 listers) fails 6/6 before the fix and passes after.
+- **Wine's shutdown race (W1, ~0.7 % of boots; P5's `services.exe` NULL+0x3A8).**
+  - Cause: wineserver SIGQUITs threads that are already exiting, or not yet fully started.
+  - Fix: `tools/cp/wine-patches/0001` (an exiting thread blocks SIGQUIT) and `0002` (`quit_handler` with no syscall
+    frame).
+  - Check: the quitrace repro failed 5/5 boots on stock Wine and 0/5 patched. P5 passed 3/3 on integ17.
+  - **The default Wine stage is now `strix:~/cp/wine-cp2`** (`~/cp/build-wine-cp2.sh` = wine-cp +
+    `CP_WINE_PATCHES`). Every Wine change goes in through `tools/cp/wine-patches/`, and each build records its patches
+    in `share/wine/cp-wine-patches.txt`.
+- **Kernel (H4-kglitch).**
+  - The console survives host stalls: the takeover bound counts only time the waiter watched, and only the head of
+    the queue may take over. With injected 350 ms stalls every second: base 0/4 clean, lane 3/3. This ends the
+    "console torn under load" known red.
+  - K13: a leader-exited group was reclaimed while it exited, so waitpid returned ECHILD (`exitrace` 5/5 → 0/7).
+  - rt_sigreturn resumes into an unmapped RIP the way Linux does; this was Wine's "unexpected trap 128".
+  - `GPU_ABI_PARKED` is now −100001.
+  - Instrument rows (`[BADELR]`, `fence_wait2`, the watchdog's unsigned wrap) no longer fire falsely.
+  - `[SND] xrun` rows are printed per xrun.
+- **Audio (H1-01, H5-audio2).**
+  - Fixed: the kernel's xrun cascades. QEMU returns a TX buffer once its mixer has copied it, not once it has played,
+    and after a host stall it drains at up to 2× real time. The underrun rule now uses a real-time play clock. Kernel
+    xruns per game boot: 534 → 2.
+  - Open: the 5–6 audible exact-zero runs per fp720 boot. They are winealsa's silence lead-in when the game's padding
+    falls under one period (H5-04 Wine, H5-05 game or event timing).
+- **Harness.**
+  - Game boots use `cache=unsafe` on their throwaway per-run drives: QEMU start → launcher median 61 s → 5.3 s.
+  - `ext2w_gate`'s crash-run clock starts at the first console byte, so a slot wait no longer fails it.
+  - `tools/cp/hunt/` holds the soak, classifier and comparison tools; `reload2.p9` is the working reload path.
+  - The P9 seek works at 1080p (NEAREST scaling) and with tall focus frames.
+- **P9 on integ17 (H1, Venus).**
+  - fpsprobe 720p world medians 33.7 / 28.1 / 30.3 (median of medians 30.3, p10 25.5–27.6); 1080p 34.5.
+  - 28-minute soak: median 37.6 (p10 29.7), 0 hitches, memory flat at the end.
+  - Play → save → reload → world: 2/2.
+  - The ≥30 fps target is met at the median, with a better low tail than integ15 (p10 20.6–26.4). It is not met with
+    margin.
+- **Known flakes under heavy host load (not regressions; paired A/B on 2026-11-18).**
+  - `exitgroup` X7 can exceed its 1000 ms bound: integ17 and integ15 side by side gave 12–205 ms in all 8 runs.
+  - winprobe W6 can see `GetTickCount64` lag a `Sleep(200)` when the VM is stalled. Wine's tick is written by
+    wineserver, and the woken thread can read it first. P2 passed 3/3 on the rerun.
+- **Open after wave 8:**
+  - `wineserver -k` ignoring SIGINT for 10.5 s while parked in `epoll_wait` (H2-F2; H4's `[SIGINT-S]`/`[SIGINT-D]`
+    rows are in place for the next repro);
+  - the audible audio lead-ins (H5-04/05);
+  - wineserver `grab_object(NULL)` after EMFILE (W2, no repro);
+  - Wine's TEB leak after ~20 000 TerminateThread (W3);
+  - errno and socket items K8–K11 and the ext2 flusher nap K12 (`docs/cp-kglitch.md`);
+  - the menu focus after a sub-menu (H1-12, worked around in the harness).
+
 ### 7.3 Frozen interfaces (binding)
 
 | # | Interface | Owner (sole writer) | Change protocol |
@@ -1301,6 +1424,8 @@ into one Wine build at integration.
   (per-file windows), G8 (64-bit, large reads, stat times, symlinks) and G9
   (hard mount under injected reply loss). When a conflict lands in those files, keep the cp/nfs side; see
   `docs/cp-nfs.md` §6.
+- Slots (wave 8): a lane uses at most 2 of the 4 qemu slots and leaves one free between its batches; probe loops run one stream at a time. A gate whose timer starts before `qemu-slot.sh` returns must not count the slot wait.
+- Wine changes go only through `tools/cp/wine-patches/` (applied by `build-wine.sh` `CP_WINE_PATCHES`); the default stage is `~/cp/wine-cp2`. A seeded prefix made by another Wine stage re-runs the wineboot update on every boot (`run-p8.sh` warns): rebuild it with `P8_PHASE=pfx`.
 - Game files: never in a worktree, never in a commit.
 
 ---
