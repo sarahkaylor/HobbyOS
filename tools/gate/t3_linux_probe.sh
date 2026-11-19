@@ -97,6 +97,15 @@ echo "--- unhandled Linux syscalls (name the next handler) ---"
 grep -a '\[LCOMPAT\]' "$CONSOLE" | head -20 || true
 echo "--- faults / exits ---"
 grep -aE 'memory fault|\[EXITPC\]|pid=[0-9]+ \(PROBE' "$CONSOLE" | tail -8 || true
+# H8-root: page-table assertion rows fail every probe (docs/cp-root.md).  The
+# patterns are the kernel rows' own text, so a checker's "0 [FREERACE] row(s)"
+# summary does not match.
+LP_ROOTBAD='\[FREERACE\] freeing root=|\[ROOTSW0\] cpu=|\[ROOTFREE\] .* unsafe=[1-9]'
+if grep -aqE "$LP_ROOTBAD" "$CONSOLE"; then
+  grep -aoE "($LP_ROOTBAD).*" "$CONSOLE" | head -4
+  echo "t3_linux_probe: FAIL — $NAME: a page-table assertion row ([FREERACE]/[ROOTSW0]/unsafe=)"
+  exit 1
+fi
 if grep -aqE "$LP_DONE0" "$CONSOLE"; then
   # A probe whose verdict lives in the console itself (it cannot see the
   # console) ships a host-side checker: tools/gate/lp_check_<name>.py.
