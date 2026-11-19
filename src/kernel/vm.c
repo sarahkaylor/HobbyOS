@@ -236,6 +236,22 @@ static int vm_zp_others_ready(int self) {
   }
   return 0;
 }
+/* Is a Linux-ABI process (the pool's only users) still alive?  vmzero exits
+   when the last one has, so a harness that kills its Wine processes finds
+   nothing of theirs left (run-thrstorm S3, the P2/P4/P5 leftover censuses:
+   "[K5] leftover pid=5 name=vmzero"); the next compat mmap starts it again,
+   and the pool's frames stay parked for it. */
+static int vm_zp_users_alive(int self) {
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    struct process *q = i != self ? process_get_pcb(i) : 0;
+    if (!q || !(q->abi_flags & PROC_FLAG_LINUX_ABI))
+      continue;
+    int st = __atomic_load_n(&q->state, __ATOMIC_RELAXED);
+    if (st != PROC_STATE_FREE && st != PROC_STATE_EXITED && st != PROC_STATE_THREAD_DONE)
+      return 1;
+  }
+  return 0;
+}
 static void vm_zeroer_task(void *arg) {
   (void)arg;
   struct process *me = current_process();
@@ -259,8 +275,7 @@ static void vm_zeroer_task(void *arg) {
       }
       vm_zp_made++;
     }
-    extern int process_others_alive(int self);
-    int others = process_others_alive(self);
+    int others = vm_zp_users_alive(self);
     if (others)
       seen_other = 1;
     if (seen_other && !others) {
