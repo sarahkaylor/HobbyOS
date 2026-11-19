@@ -1470,6 +1470,49 @@ integ21's 114 s.
   - the host first-touch cost. Hugepage- or prealloc-backed guest RAM would be a host setting, so it needs the
     user's approval.
 
+#### Wave 9 round 2 (integ23)
+
+integ23 = integ22 + cp-fault round 2 + cac5d3bd. Batch `strix:~/cp/integ-gates23.txt` was all green except thrstorm,
+which caught a kernel crash (below). The fix was re-gated in `~/cp/integ-gates23b.txt`: the away/ntsync/snd/sigmask
+probes, thrstorm ×4 with no faults, P8 Venus at the menu (155 s) and ARM. The full batch:
+- all 78 probes, `sigmask-gate`, the file-system and NFS gates;
+- unit 464/0, host 40/42, castscan, ARM, `exitgroup` ×3;
+- P2, P4, P5 ×3, P6, P7, k5probes;
+- P8 lavapipe ×2 and Venus at the menu (309 s, 259 s and 140 s, with H6 and H7 guests on the host).
+
+- **Kernel #DE in `away_clock_set` (cac5d3bd).**
+  - The `[AWAY]` clock table from integ21 is unlocked. When two CPUs set the same ntsync event at once, one could
+    stamp `win_ms` 1 ms after the other read `now`. `now - win_ms + 1` then wrapped to 0 and the eviction-rate
+    division faulted in kernel mode (vector 0, wineserver, thrstorm). That was 1 of 3 thrstorm runs since integ21.
+  - Elapsed time is now clamped at 0, which also stops the 1 s window check from resetting on the wrap.
+- **Lost NFS reply fragments (H7-05, f83a2dfe).**
+  - virtio-net handed each RX buffer back to the device before copying it out, so a new frame could overwrite a
+    fragment still waiting for reassembly. Once that delivered wrong bytes.
+  - Every frame is now copied out per CPU first. Lost-fragment stalls fell from 2/5 boots to 0/6.
+- **TLB shootdowns (H7-07).**
+  - KVM PV TLB flush (MSR 0x4b564d03): a preempted target vCPU is flagged `KVM_VCPU_FLUSH_TLB` instead of being
+    waited for.
+  - A shootdown no longer waits behind another CPU's console write; owed flushes settle first.
+  - A `vmzero` kernel task keeps a 64 MiB pool of pre-zeroed frames.
+  - Probe `tlbstale` checks that no stale mapping survives.
+- **Long `vm_lock` holds (H7-10):** mprotect works in chunks, and munmap/MAP_FIXED unhook whole 2 MiB page tables.
+- **New probes:** `tlbstale`, `vmhold`, `shootwait`, `conswait`, `cpus`.
+- fp720 A/B (5 base boots, 4 lane boots):
+  - fault time 13.9 → 5.6 s per boot;
+  - shootdown time 6.0 → 1.3 s;
+  - audio dropouts 5.4 → 2.8, about the size of boot-to-boot noise;
+  - hitches 0.6 → 0.2;
+  - fps median unchanged.
+- **Open:**
+  - thrstorm storm rounds were 785–909 on integ23b against 1062–1250 on integ19–22. That batch ran at host load ~13
+    with lane guests running. A paired A/B under equal load is pending (H7).
+  - H7-14: the ext2 flusher holds one of the 8 vCPUs while the data disk is mounted (every P9 boot).
+  - H7-08: the census runs inside the PIT interrupt (13–99 ms hitches).
+  - H7-11/12: console cost; the NFS periodic rows are 41 % of console output.
+  - CPU-time clocks: CLOCK_THREAD_CPUTIME_ID reads 0, and CLOCK_PROCESS_CPUTIME_ID over-reads (65 s over 2 s).
+  - H6-07: a host stall of ~5 s ends Venus `submit2` with DEVICE_LOST (1 of 20 cold boots).
+  - The host first-touch cost (hugepages need the user's approval).
+
 ### 7.3 Frozen interfaces (binding)
 
 | # | Interface | Owner (sole writer) | Change protocol |
