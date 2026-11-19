@@ -1,0 +1,26 @@
+H9-03: Esc pressed while sprinting (Shift held) opens IceWM's window menu over the
+game, not the game's pause menu (strix, Venus, integ25, lane H9-hunt4)
+
+drive.py exit "sprint": down shift, down w, wait 3, key esc, wait 2, up w, up shift
+h4-p07 run log, the shot right after that Esc (OCR, boot_p9):
+  [P9W] shot s279-t001291-d553b230pqss0: OCR '208 PH © Move Alt+F7 Fullscreen Alt+F11 @) THE ippeR00C
+        Layer Wok to Jackie, Tile Move To Alt+F2 —— Occupy All deat Tray icon Rename title i! Close
+        Altera — Window list Alt+Ctri+Esc — nl ya Fe a Draw '
+  ... the same IceWM window menu in every shot for 10 Down taps:
+  [DRV] 12:24:06 SEEK QUIT GAME: not reached in 10 taps
+  [DRV] 12:24:06 PLAY sprint pause seek without the wiggle: NO focus
+then Esc (closes the WM menu), a standing Esc -> the game's pause menu:
+  [DRV] 12:24:48 seek QUIT GAME: on it after 5 taps
+Rate: 3/3 Esc-while-sprinting (h4-p01, h4-p04, h4-p07); 0/~60 plain Esc (pause_open)
+in the same boots.
+
+Cause: IceWM's default KeySysWinMenu is "Shift+Esc" (a root-window key grab), and
+the guest session's preferences (third_party/x11/icewm/data/preferences, staged as
+::/ICEWM/preferences) do not override it.  A player who pauses while sprinting
+gets the window manager's menu over the game, and the game sees no Esc.
+Proposed (no owner this wave):
+  --- a/third_party/x11/icewm/data/preferences
+  +++ b/third_party/x11/icewm/data/preferences
+  +# cp-hunt H9-03: IceWM grabs Shift+Esc (the window menu) by default, so Esc while
+  +# sprinting in the game never reaches it
+  +KeySysWinMenu=""

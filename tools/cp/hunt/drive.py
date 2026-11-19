@@ -1189,8 +1189,16 @@ def exit_vehicle(b, tally):
         # Esc in mid-sprint; the keys are let go once the pause menu is up (held,
         # W and Shift hid the menu's focus for 10 taps: h4-p01)
         b.state("quit:sprint")
-        b.shot("pqs", "down shift", "down w", "wait 3", "key esc", "wait 2", "up w", "up shift", "wait 2")
-        if not seek(b, PAUSE, "QUIT GAME", name="pqss"):
+        # Shift is let go before the Esc: IceWM grabs Shift+Esc (its window menu,
+        # cp-hunt H9-03), so Esc goes in with W still held, mid-walk
+        b.shot("pqs", "down shift", "down w", "wait 3", "up shift", "key esc", "wait 2", "up w", "wait 2")
+        # h4-p01 / h4-p04: no focus here for 10 taps; is it seek's own pointer
+        # wiggle (H6-04's mechanism)?  The first seek moves no pointer
+        w0, WIGGLE[0] = WIGGLE[0], False
+        ok = seek(b, PAUSE, "QUIT GAME", name="pqss")
+        WIGGLE[0] = w0
+        log(f"PLAY sprint pause seek without the wiggle: {'focus found' if ok else 'NO focus'}")
+        if not ok:
             return quit_now(b, "sprint-retry")
         p, _ = b.until("pqsc", r"sure.{0,20}quit", 15, "exit_ok", "key ret", "wait 2")
         if not p:

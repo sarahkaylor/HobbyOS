@@ -22,6 +22,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import r3table  # noqa: E402
 
 
+def _read(path):
+    try:
+        return open(path, errors="replace").read()
+    except OSError:
+        return ""
+
+
 def play_summary(path):
     d = {}
     if not os.path.exists(path):
@@ -62,6 +69,8 @@ def row(logs, run):
     r["drv"] = p.get("drive_s")
     r["menus"] = p.get("menus")
     r["exit"] = p.get("exit")
+    if p.get("active_min") or re.search(r"MAIN LOAD 0 .*: world ", _read(os.path.join(logs, run + ".drive.txt"))):
+        r["world"] = "yes"          # a drive boot reaches the world through drive.py, not `expect inworld`
     r["ghitch"], r["gmax"] = glass(os.path.join(logs, run + ".glass-report.txt"))
     # fps rows: the world-like phases (drive.py's states are boot_p9 phases from h4-p03 on)
     gaps = j.get("fps_gaps") or {}

@@ -1,0 +1,19 @@
+H9-06: a Venus game boot's QEMU vanished mid-play (strix, h4-p06, 2026-11-19)
+
+h4-p06 run log (boot_p9), game healthy until the end:
+  [X] 665.208:01b4:trace:fps:win32u_vkQueuePresentKHR 0x104009d2c0 @ approx 30.90fps
+  serial.log last write 12:00:47 (a row cut mid-line; no panic / fault row)
+glasswatch (the VNC socket):  # disconnected 1795111248.910 (12:00:48.9): vnc: closed
+boot_p9 (the QMP socket):     +667.4 s 12:00:49 verdict: main-menu; QEMU stopped
+                              BrokenPipeError: [Errno 32] Broken pipe  (qmp.cmd input-send-event)
+qemu-stderr.txt: no "terminating on signal"; coredumpctl: no qemu entry; dmesg: no
+qemu segfault; journal: no OOM / systemd-oomd entry -> an outside SIGKILL.
+
+Cause (integrator, 12:16): main's CI desktop_test tier on ~/cp/mm-base,
+run_desktop_test.py ends with `pkill -9 -f qemu-system-x86_64`, which kills every
+guest on the host.  Fixed host-side: ~/cp/safe-bin/pkill (signals only QEMUs whose
+cwd is the caller's tree) first on PATH for those runs.
+Other host-wide killers in the repo: tools/gate/t3_nullentry.sh:101
+(`for pid in $(pgrep -f qemu-system); do kill -9`), tools/evidence_rig.py,
+tools/perf_game_cycle.py, tools/run_make_smoke.py (`pkill -9 -f qemu-system[-]`).
+h4-p06 is excluded from every k/n of this round (rerun as h4-p06b).
