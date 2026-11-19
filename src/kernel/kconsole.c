@@ -75,7 +75,13 @@ extern int cpu_is_halted(uint32_t cpu);
 #define CONS_SUMMARY_US 60000000ULL   /* [CONS] row at most once a minute */
 
 #ifndef CP_DIAG_DEFAULT
+#ifdef KERNEL_MODE_TEST
+/* H7-fault round 3 (H7-12): test kernels keep the [PF*] detail rows on (the
+   probes' console checks read them); game kernels print the 60 s summary. */
+#define CP_DIAG_DEFAULT "pf"
+#else
 #define CP_DIAG_DEFAULT ""
+#endif
 #endif
 
 struct cons_slot {
@@ -306,7 +312,7 @@ static const struct cons_dtag cons_dtags[] = {
   {"[ANONF]", 0, CONS_D_ANONF},
 };
 static const char *const cons_dnames[CONS_D_NCLASS] = {
-  "pub", "mr", "futex", "alive", "resume", "blkd", "pecow", "anonf"};
+  "pub", "mr", "futex", "alive", "resume", "blkd", "pecow", "anonf", "pf"};
 
 static int cls_index(uint32_t cls) {
   int i = 0;
@@ -581,7 +587,42 @@ static struct cons_upend *upend_new(uint32_t cpu, uint64_t who) {
   return o;
 }
 
+static void cons_user_write1(uint64_t who, const char *s, int n);
+/* H7-fault round 3 (H7-11): one wire hold -- and one interrupts-off
+ * stretch -- per LINE, not per write() window.  The wire sends every byte as
+ * a port exit (9-55 us under load), and a whole 8 KiB window held it, with
+ * interrupts off, for 80-500 ms: every other writer (kernel rows, other
+ * threads' lines) waited the whole time (linux_probe_conslat: a one-line
+ * write() beside an 8 KiB writer, p50 66 ms, max 545 ms).  Lines stay whole;
+ * another writer's line may now land between two of ours. */
+#if defined(KERNEL_MODE_TEST) && defined(__x86_64__) && !defined(CONS_HOST_TEST)
+void cons_hw_stall_ms(uint32_t ms);
+#endif
 void cons_user_write(uint64_t who, const char *s, int n) {
+#if defined(KERNEL_MODE_TEST) && defined(__x86_64__) && !defined(CONS_HOST_TEST)
+  {
+    static const char k[] = "[LPSTALL] "; /* cp-hunt H6-09 repro (uart.c) */
+    int i = 0;
+    while (k[i] && i < n && s[i] == k[i]) i++;
+    if (!k[i]) {
+      uint32_t ms = 0;
+      while (i < n && s[i] >= '0' && s[i] <= '9') ms = ms * 10 + (uint32_t)(s[i++] - '0');
+      cons_hw_stall_ms(ms > 5000 ? 5000 : ms);
+    }
+  }
+#endif
+  int off = 0;
+  while (off < n) {
+    int end = off;
+    while (end < n && s[end] != '\n')
+      end++;
+    int seg = end < n ? end - off + 1 : n - off; /* through its newline */
+    cons_user_write1(who, s + off, seg);
+    off += seg;
+  }
+}
+
+static void cons_user_write1(uint64_t who, const char *s, int n) {
   if (n <= 0)
     return;
   uint64_t fl = cons_hw_irqsave();

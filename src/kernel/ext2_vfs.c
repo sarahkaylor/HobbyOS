@@ -304,6 +304,7 @@ static void flusher_guard_check(volatile uint64_t *g) {
                       (unsigned long)g_flusher_pid);
 }
 
+
 static void flusher_task(void *arg) {
   (void)arg;
   int seen_other = 0;
@@ -342,8 +343,16 @@ static void flusher_task(void *arg) {
       (void)commit_locked(&g_ncommit_timer);
       ylock_release(&g_lock);
     }
-    uint64_t t0 = timer_get_ms();
-    while (timer_get_ms() - t0 < 50) safe_wfi();
+    /* H7-fault round 2 proposal (H7-14): never keep the CPU.  A kernel task
+       is not preempted, so a 50 ms halt loop here held one of the guest's
+       CPUs from every user thread for as long as the volume was mounted
+       (linux_probe_cpus with an ext2 data disk: 6.85 of 8 CPUs).  Halt
+       only while no thread is READY, then give the CPU back. */
+    /* H7-fault round 3 (H7-17): and off the run queue -- a READY flusher is
+       what an idle CPU's pick scan finds first (thrstorm, vmzero: ac0e1fc8):
+       nap the 50 ms BLOCKED with a deadline. */
+    extern void process_nap_ms(uint32_t ms);
+    process_nap_ms(50);
     flusher_guard_check(guard);
     __atomic_fetch_sub(&g_fl_inside, 1, __ATOMIC_SEQ_CST);
   }

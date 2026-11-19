@@ -44,6 +44,7 @@
 #include "process.h"
 #include "pidmask.h"
 #include "frame.h"
+#include "arch/cpu.h" /* safe_wfi (H6-07) */
 
 extern void uart_puts(const char* s);
 extern void print_int(int val);
@@ -1468,6 +1469,12 @@ static uint32_t gpu3d_fence_errors = 0;
 static uint32_t gpu3d_posted_done = 0, gpu3d_posted_errors = 0;
 int gpu3d_post_unfenced = 1; /* 0: the synchronous unfenced path (A/B) */
 static uint32_t gpu3d_fence_retired = 0;
+/* H6-07: the slot wait's state (see virtio_gpu_3d_submit2). */
+#define GPU3D_HANG_MS 30000
+static volatile uint64_t gpu3d_last_retire_ms; /* a fence slot freed */
+static volatile uint64_t gpu3d_full_since_ms;  /* every slot in flight since */
+static volatile int gpu3d_full_warned;
+static uint32_t gpu3d_slot_parks, gpu3d_slot_waits_5s;
 static uint32_t gpu3d_stale_skips = 0; /* fence wakes withheld from non-parked pids */
 /* post -> retire latency histogram (us bucket upper bounds) and where the
  * retirement was seen (the INTx handler vs a transaction's drain). */
@@ -1964,10 +1971,52 @@ int virtio_gpu_3d_blob_unmap(uint32_t res_id) {
   return rc;
 }
 
+/* H7-fault round 3 (cp-hunt H6-07): the fence hold, MODE=test kernels only.
+ * An unfenced 8-byte SUBMIT2 { 0x4A4E4937 "7INJ", <ms> } is not sent: for
+ * <ms> from then on every fence the host retires is kept in flight (its slot
+ * stays used, its seqno undone), as a host stall looks from the guest.  The
+ * held completions are applied when the hold ends, at the next drain of a
+ * submit or a fence check (src/user/cp/vn_probe_fencehold.c). */
+static void gpu3d_async_done_now(int slot, uint32_t resp_type);
+#ifdef KERNEL_MODE_TEST
+static uint64_t gpu3d_inj_hold_until_ms;
+static uint32_t gpu3d_inj_held[VGPU_ASYNC_SLOTS]; /* resp_type | 1u << 31 */
+static uint32_t gpu3d_inj_nheld;
+/* gpu lock held */
+static void gpu3d_inj_release_locked(void) {
+  if (!gpu3d_inj_hold_until_ms || timer_get_ms() < gpu3d_inj_hold_until_ms) return;
+  gpu3d_inj_hold_until_ms = 0;
+  for (int k = 0; k < VGPU_ASYNC_SLOTS; k++)
+    if (gpu3d_inj_held[k]) {
+      uint32_t rt = gpu3d_inj_held[k] & 0x7FFFFFFFu;
+      gpu3d_inj_held[k] = 0;
+      gpu3d_async_done_now(k, rt);
+    }
+  uart_puts("[VENUS] inject: fence hold ended, held=");
+  print_int((int)gpu3d_inj_nheld);
+  uart_puts("\n");
+  gpu3d_inj_nheld = 0;
+}
+#else
+static inline void gpu3d_inj_release_locked(void) {}
+#endif
+
 /* Drain-time callback (gpu lock held): slot `slot` completed, i.e. its ring
  * fence retired on the host. */
 void virtio_gpu_3d_async_done(int slot, uint32_t resp_type) {
   if (slot < 0 || slot >= VGPU_ASYNC_SLOTS) return;
+#ifdef KERNEL_MODE_TEST
+  if (gpu3d_inj_hold_until_ms && timer_get_ms() < gpu3d_inj_hold_until_ms &&
+      gpu3d_fslots[slot].used && gpu3d_fslots[slot].kind == GPU3D_KIND_FENCE) {
+    gpu3d_inj_held[slot] = resp_type | (1u << 31);
+    gpu3d_inj_nheld++;
+    return;
+  }
+#endif
+  gpu3d_async_done_now(slot, resp_type);
+}
+
+static void gpu3d_async_done_now(int slot, uint32_t resp_type) {
   struct gpu3d_fslot* f = &gpu3d_fslots[slot];
   if (!f->used) return;
   if (f->kind == GPU3D_KIND_WAITED) {
@@ -1985,6 +2034,8 @@ void virtio_gpu_3d_async_done(int slot, uint32_t resp_type) {
       uart_puts("\n");
     }
     f->used = 0;
+    gpu3d_last_retire_ms = timer_get_ms();
+    gpu3d_wake_pending = 1; /* H6-07: a submit may be parked for this slot */
     return;
   }
   if (f->ctx_index >= 0) {
@@ -2014,6 +2065,7 @@ void virtio_gpu_3d_async_done(int slot, uint32_t resp_type) {
     else gpu3d_retire_inline++;
   }
   f->used = 0;
+  gpu3d_last_retire_ms = timer_get_ms();
   gpu3d_wake_pending = 1;
 }
 
@@ -2069,16 +2121,52 @@ int virtio_gpu_3d_free_slots(void) {
   return n;
 }
 
+/* Park the caller until a fence retires: the fence IRQ's wake
+ * (virtio_gpu_3d_fence_wake) or the deadline.  1 when parked; 0 when a slot
+ * is free again or the caller cannot park (no process / not parkable). */
+static int gpu3d_slot_park(uint64_t deadline_ms) {
+  struct process* cur = current_process();
+  if (!cur || cur->pid < 0 || cur->pid >= MAX_PROCESSES) return 0;
+  int parked = 0;
+  uint64_t pf = spinlock_acquire_irqsave(&proc_lock);
+  int any_free = 0;
+  for (int i = 0; i < VGPU_ASYNC_SLOTS && !any_free; i++)
+    any_free = !__atomic_load_n(&gpu3d_fslots[i].used, __ATOMIC_SEQ_CST);
+  if (!any_free && process_park_ok_locked(cur)) {
+    pid_mask_set(&gpu3d_waiters, cur->pid);
+    gpu3d_parked[cur->pid] = 1;
+    cur->wake_ms = deadline_ms;
+    cur->state = PROC_STATE_BLOCKED;
+    parked = 1;
+    gpu3d_slot_parks++;
+  }
+  spinlock_release_irqrestore(&proc_lock, pf);
+  return parked;
+}
+
 int virtio_gpu_3d_submit2(uint32_t ctx_id, uint32_t ring_idx, int fenced, const void* cs,
                           uint32_t len, uint64_t* seqno) {
   if (!gpu3d_ready) return -ENODEV;
   if (len > GPU3D_SUBMIT_MAX || (len & 3u) || (len && !cs)) return -EINVAL;
   if (!fenced && len == 0) return -EINVAL;
+#ifdef KERNEL_MODE_TEST
+  if (!fenced && len == 8 && ((const uint32_t*)cs)[0] == 0x4A4E4937u) {
+    uint64_t fl = virtio_gpu_x64_lock();
+    gpu3d_inj_hold_until_ms = timer_get_ms() + ((const uint32_t*)cs)[1];
+    virtio_gpu_x64_unlock(fl);
+    uart_puts("[VENUS] inject: fence hold ");
+    print_int((int)((const uint32_t*)cs)[1]);
+    uart_puts(" ms\n");
+    if (seqno) *seqno = 0;
+    return 0;
+  }
+#endif
   uint64_t t0 = 0;
   int stream_sent = 0;
   for (;;) {
     uint64_t fl = virtio_gpu_x64_lock();
     virtio_gpu_x64_drain();
+    gpu3d_inj_release_locked();
     struct gpu3d_ctx2* c2 = gpu3d_ctx2_find(ctx_id);
     if (!c2 || ring_idx >= c2->num_rings) {
       virtio_gpu_x64_unlock(fl);
@@ -2123,16 +2211,39 @@ int virtio_gpu_3d_submit2(uint32_t ctx_id, uint32_t ring_idx, int fenced, const 
         break;
       }
     if (k < 0) {
-      /* Every slot in flight: wait (lock dropped) for the IRQ to free one. */
+      /* Every slot in flight: wait (lock dropped) for the IRQ to free one.
+       * H7-fault round 3 (cp-hunt H6-07): this used to spin with pause and
+       * give up after 5 s ("no fence slot for 5 s" -> EIO -> vkd3d's
+       * DEVICE_LOST); a host stall (3 game guests, host writeback) held the
+       * fences that long, and the spin took a vCPU for all of it.  Now: spin
+       * 1 ms, then park until a fence retires (the IRQ's fence wake, or a
+       * 10 ms re-check); fail only when no fence has retired anywhere for
+       * GPU3D_HANG_MS while every slot is in flight -- a real hang. */
       virtio_gpu_x64_unlock(fl);
-      if (!t0) t0 = timer_get_ms();
-      if (timer_get_ms() - t0 > 5000) {
-        uart_puts("[VENUS] submit2: no fence slot for 5 s\n");
+      uint64_t now = timer_get_ms();
+      if (!t0) t0 = now;
+      if (!gpu3d_full_since_ms) gpu3d_full_since_ms = now;
+      uint64_t quiet_from = gpu3d_last_retire_ms > gpu3d_full_since_ms ? gpu3d_last_retire_ms
+                                                                         : gpu3d_full_since_ms;
+      if (now - gpu3d_full_since_ms > 5000 && !gpu3d_full_warned) {
+        gpu3d_full_warned = 1;
+        gpu3d_slot_waits_5s++;
+        uart_puts("[VENUS] submit2: every fence slot in flight for 5 s; waiting (host stall?)\n");
+      }
+      if (now > quiet_from && now - quiet_from > GPU3D_HANG_MS) {
+        uart_puts("[VENUS] submit2: no fence retired for 30 s with every slot in flight: device hang\n");
         return -EIO;
       }
-      __asm__ volatile("pause");
+      if (now - t0 >= 1) {
+        if (!stream_sent && gpu3d_slot_park(now + 10)) return GPU_ABI_PARKED;
+        safe_wfi(); /* cannot park (the stream already went): halt, not spin */
+      } else {
+        __asm__ volatile("pause");
+      }
       continue;
     }
+    gpu3d_full_since_ms = 0;
+    gpu3d_full_warned = 0;
     struct gpu3d_fslot* f = &gpu3d_fslots[k];
     struct virtio_gpu_cmd_submit* sc = (struct virtio_gpu_cmd_submit*)f->req;
     if (post_unfenced) {
@@ -2196,6 +2307,7 @@ int virtio_gpu_3d_fence_check(uint32_t ctx_id, uint32_t ring_idx, uint64_t seqno
   if (!gpu3d_ready) return -ENODEV;
   uint64_t fl = virtio_gpu_x64_lock();
   virtio_gpu_x64_drain();
+  gpu3d_inj_release_locked();
   struct gpu3d_ctx2* c2 = gpu3d_ctx2_find(ctx_id);
   int rc;
   if (!c2 || ring_idx >= c2->num_rings || seqno == 0 || seqno > c2->issued[ring_idx])
@@ -2270,6 +2382,7 @@ int virtio_gpu_3d_fence_kick_check(uint32_t ctx_id, uint32_t ring_idx, uint64_t 
   uint64_t fl = virtio_gpu_x64_lock();
   virtio_gpu_x64_kick();
   virtio_gpu_x64_drain();
+  gpu3d_inj_release_locked();
   struct gpu3d_ctx2* c2 = gpu3d_ctx2_find(ctx_id);
   int rc;
   if (!c2 || ring_idx >= c2->num_rings || seqno == 0 || seqno > c2->issued[ring_idx])

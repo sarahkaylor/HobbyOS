@@ -39,6 +39,7 @@
  */
 #include <stdint.h>
 
+#include "console.h"
 #include "kline.h"
 #include "process.h"
 #include "vm_pfstat.h"
@@ -140,7 +141,15 @@ static int pf_bucket(uint64_t tsc) {
 static int pf_long_rows;
 static const char *const pf_kname[PFK_N];
 static uint64_t pf_long_tsc(void) { return (uint64_t)PF_LONG_US * (timer_tsc_per_ms() / 1000u); }
+/* H7-fault round 3 (H7-12): the detail rows and the 10 s cadence are the
+   CP_DIAG class "pf" (default on in MODE=test kernels, off in game kernels,
+   tools/cp/fault/fp.sh turns it on); without it a [PFK] + [PFL] summary
+   every PF_QUIET_MS.  Checked here, before a row is built. */
+#define PF_QUIET_MS 60000
+static inline int pf_detail(void) { return (cons_diag_mask & CONS_D_PF) != 0; }
+
 static void pf_long_row(char what, int k, uint64_t dt, const struct pf_open *o) {
+  if (!pf_detail()) return;
   if (pf_long_rows >= PF_LONG_ROWS) return;
   pf_long_rows++;
   struct kline kl;
@@ -488,6 +497,7 @@ static void pf_emit(uint64_t now_ms) {
   kl_c(&kl, '\n');
   kl_emit(&kl);
 
+  if (pf_detail()) {
   kl_init(&kl);
   kl_s(&kl, "[PFH] t=");
   kl_u(&kl, now_ms);
@@ -503,6 +513,7 @@ static void pf_emit(uint64_t now_ms) {
   }
   kl_c(&kl, '\n');
   kl_emit(&kl);
+  }
 
   kl_init(&kl);
   kl_s(&kl, "[PFL] t=");
@@ -574,6 +585,10 @@ static void pf_emit(uint64_t now_ms) {
   }
   kl_c(&kl, '\n');
   kl_emit(&kl);
+  if (!pf_detail()) {
+    pf_prev = pf_sum; /* the summary only: [PFK] + [PFL] */
+    return;
+  }
 
   static const char *const tn[PFT_N] = {"pf", "tmr", "ipi", "oth"};
   kl_init(&kl);
@@ -708,9 +723,10 @@ static void pf_emit(uint64_t now_ms) {
 static void pf_maybe_emit(int force) {
   if (pf_sets >= PF_SETS) return;
   uint64_t now = timer_get_ms();
-  if (!force && now - pf_last_emit_ms < PF_EMIT_MS) return;
+  uint64_t iv = pf_detail() ? PF_EMIT_MS : PF_QUIET_MS;
+  if (!force && now - pf_last_emit_ms < iv) return;
   if (__sync_lock_test_and_set(&pf_emitting, 1)) return;
-  if (force || now - pf_last_emit_ms >= PF_EMIT_MS) {
+  if (force || now - pf_last_emit_ms >= iv) {
     pf_sets++;
     pf_emit(now);
     pf_last_emit_ms = now;

@@ -397,7 +397,7 @@ static void nfs_pf_record(uint32_t want, uint64_t sock_us, uint64_t send_us,
  * write; at 1 MiB the three-row set cost the 64 MiB sequential bench ~30% of
  * its throughput once the windows made [NFSRA] print on every set, and Gate
  * P2 (run23) printed 12576 [NFSRTT] rows. */
-#define NFS_PERF_DUMP_BYTES (8u << 20)
+#define NFS_PERF_DUMP_BYTES (64u << 20) /* H7-fault round 3 (H7-12): was 8 MiB */
 static uint64_t nfs_pf_since_dump;
 static void nfs_perf_note_bytes(uint32_t n) {
   nfs_pf_since_dump += n;

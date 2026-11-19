@@ -1357,6 +1357,9 @@ static void gpu_m2_release_maps(struct process* p, int pid, int fd) {
 
 static int gpu_m2_submit2(struct process* p, int fd, uint64_t arg) {
   struct gpu_submit2 sb;
+  /* H7-fault round 3 (H6-07): a SUBMIT2 that found every fence slot in
+     flight parks (GPU_ABI_PARKED) and restarts here: not parked any more. */
+  virtio_gpu_3d_fence_unpark();
   if (vm_user_read(p, arg, &sb, sizeof(sb)) != 0) return -EFAULT;
   uint32_t rings = 0;
   if (!gpu_m2_owns_ctx(p, fd, sb.ctx_id, &rings) || rings == 0) return -EINVAL;
@@ -1376,6 +1379,7 @@ static int gpu_m2_submit2(struct process* p, int fd, uint64_t arg) {
   } else {
     rc = virtio_gpu_3d_submit2(sb.ctx_id, sb.ring_idx, fenced, 0, 0, &seq);
   }
+  if (rc == GPU_ABI_PARKED) return rc; /* restarts on the fence wake */
   if (rc != 0) return rc == -EFAULT ? -EFAULT : (rc == -EINVAL ? -EINVAL : -EIO);
   sb.seqno = seq;
   return vm_kwrite(p, arg, &sb, sizeof(sb)) == 0 ? 0 : -EFAULT;

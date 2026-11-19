@@ -1101,9 +1101,38 @@ static void sys_gettime(struct trap_frame *tf) {
     ms = timer_get_ms();
   } else if (clk == 5) {        /* CLOCK_REALTIME_COARSE */
     ms = hb_clock_realtime_ms();
+  } else if (clk == 2 || clk == 3 || clk < 0) {
+    /* H7-fault round 3: PROCESS_CPUTIME_ID (2), THREAD_CPUTIME_ID (3) and
+       the dynamic CPU clocks (~id << 3 | type, bit 2 per-thread; type 3 is
+       invalid) of this group or this thread: the rusage totals schedule()
+       keeps (user + system), with the running slice.  They used to be
+       -EINVAL, and a caller that did not check read its own stack
+       (linux_probe_cpus: "65 s" over 2 s of 8 threads, a thread "0"). */
+    struct process *cp = current_process();
+    struct process *g = cp ? process_group(cp) : 0;
+    int thread = clk == 3;
+    if (clk < 0) {
+      int type = clk & 7, id = ~(clk >> 3);
+      thread = (type & 4) != 0;
+      if ((type & 3) == 3 || !cp || (thread ? (id != 0 && id != cp->pid)
+                                            : (id != 0 && (!g || id != g->pid)))) {
+        tf->regs[0] = -EINVAL;
+        return;
+      }
+    }
+    if (!cp) {
+      tf->regs[0] = -EINVAL;
+      return;
+    }
+    struct ho_rusage ru;
+    process_rusage(cp, thread ? 1 : 0, &ru);
+    uint64_t us = (uint64_t)(ru.ru_utime_sec + ru.ru_stime_sec) * 1000000ULL +
+                  (uint64_t)(ru.ru_utime_usec + ru.ru_stime_usec);
+    *sec = (int64_t)(us / 1000000);
+    *nsec = (int64_t)((us % 1000000) * 1000);
+    tf->regs[0] = 0;
+    return;
   } else {
-    /* 2/3 are PROCESS/THREAD_CPUTIME: answering them with wall time would be
-       a lie, and nothing in the target set uses them. */
     tf->regs[0] = -EINVAL;
     return;
   }
@@ -5170,6 +5199,16 @@ static void general_interrupt_inner(struct trap_frame *tf) {
         if (++thr_ticks >= 500) {
           uint64_t tc0 = pf_tsc();
           thr_ticks = 0;
+          /* H7-fault round 3 (H7-08): while the census task runs (a
+             Linux-ABI process is alive) it prints the census; the IRQ only
+             asks.  Otherwise (boot, native-only waves) as before. */
+          extern int census_task_running(void);
+          extern void census_kick(void);
+          if (census_task_running()) {
+            census_kick();
+            pfstat_tseg(PFR_T32_CENSUS, pf_tsc() - tc0);
+            goto census_done;
+          }
           rw_thr_sample();
           /* M6/L72: the display mode is the kernel's, and a lost mode is
              silent from inside the guest (presents still "work").  Read the
@@ -5181,6 +5220,7 @@ static void general_interrupt_inner(struct trap_frame *tf) {
               virtio_gpu_health_tick();
           }
           pfstat_tseg(PFR_T32_CENSUS, pf_tsc() - tc0);
+        census_done:;
         }
       }
 

@@ -188,6 +188,7 @@ static inline void vm_zs_irqrestore(uint64_t f) {
 #define VM_ZP_N 16384
 #define VM_ZP_BATCH 32    /* frames per turn: a few host faults, then yield */
 #define VM_ZP_TURN_US 200 /* ... or this long, whichever comes first */
+#define VM_ZP_NAP_MS 5    /* idle: off the run queue this long */
 static uint64_t vm_zp[VM_ZP_N];
 static volatile int vm_zp_n;
 static volatile int vm_zp_lk;      /* a byte lock taken with interrupts off */
@@ -256,7 +257,11 @@ static void vm_zeroer_task(void *arg) {
   (void)arg;
   struct process *me = current_process();
   int self = me ? me->pid : -1, seen_other = 0;
+  extern void census_attach(int pid), census_service(void), census_detach(void);
+  extern int census_pending(void);
+  census_attach(self); /* H7-08: vmzero prints the 5 s census (process.c) */
   for (;;) {
+    census_service();
     int idle = 0;
     uint64_t t0 = timer_get_us();
     for (int k = 0; k < VM_ZP_BATCH && vm_zp_n < VM_ZP_N; k++) {
@@ -279,6 +284,7 @@ static void vm_zeroer_task(void *arg) {
     if (others)
       seen_other = 1;
     if (seen_other && !others) {
+      census_detach();
       __atomic_store_n(&vm_zp_task, 0, __ATOMIC_SEQ_CST);
       kernel_exit();
       return;
@@ -290,8 +296,15 @@ static void vm_zeroer_task(void *arg) {
        L1-L3 under 8 burners: 1 ms sleeps took 10 ms).  Full (or no free
        frame): halt until the next interrupt, then give the CPU back; else
        back after each batch. */
-    if ((idle || vm_zp_n >= VM_ZP_N) && !vm_zp_others_ready(self))
-      safe_wfi();
+    if ((idle || vm_zp_n >= VM_ZP_N) && !census_pending()) {
+      /* H7-fault round 3: nothing to do -- sleep off the run queue for
+         VM_ZP_NAP_MS (process_check_sleeping wakes it), instead of staying
+         READY.  A READY vmzero was the first thing an idle CPU's scan found
+         on every wake: thrstorm T2 797-961 rounds vs 1000-1088 without it. */
+      extern void process_nap_ms(uint32_t ms);
+      process_nap_ms(VM_ZP_NAP_MS);
+      continue;
+    }
     arch_yield();
   }
 }
