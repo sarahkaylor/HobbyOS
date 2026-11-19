@@ -175,9 +175,9 @@ lane's brief).
 **Host stalls (H6-07, H6-09, the soaks' hitches).**  Every severe event in
 this round came with strix itself stalling: run-hunt.sh's 1 Hz sampler
 missing 3–7 s at a time while `/proc/pressure/io` "full" avg10 stood at
-25–64 % (h3-c06 20:33, h3-soakB 00:19, h3-d05 00:55).  At 00:19 and 00:55 the
-sampler saw no other lane's guest, so the pressure is not only other lanes'
-boots.  What the guest sees is QEMU's main loop not running: Venus fences
+25–64 % (h3-c06 20:33, h3-soakB 00:19, h3-d05 00:55).  At 00:19 the sampler saw
+no other guest at all (00:55: the integrator's and fault-dev's 12 GiB guests),
+so the pressure is not only other lanes' boots.  What the guest sees is QEMU's main loop not running: Venus fences
 unretired (H6-07 fatal at 5 s, soakB 2–3 s recovered), the console waiting on
 its UART (`[CONS] takeover … watched_us≈2000000`), and in h3-d05 a TLB
 shootdown that the CPU stuck in that console wait could not ack in time
