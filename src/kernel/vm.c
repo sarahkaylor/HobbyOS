@@ -186,7 +186,8 @@ static inline void vm_zs_irqrestore(uint64_t f) {
  * the ext2 flusher once nothing else is alive.  Pool frames
  * count as free (frame_parked). */
 #define VM_ZP_N 16384
-#define VM_ZP_BATCH 32 /* frames per turn: a few host faults, then yield */
+#define VM_ZP_BATCH 32    /* frames per turn: a few host faults, then yield */
+#define VM_ZP_TURN_US 200 /* ... or this long, whichever comes first */
 static uint64_t vm_zp[VM_ZP_N];
 static volatile int vm_zp_n;
 static volatile int vm_zp_lk;      /* a byte lock taken with interrupts off */
@@ -221,13 +222,32 @@ static int vm_zp_push(uint64_t fr) {
     frame_parked_add(1);
   return ok;
 }
+extern uint64_t timer_get_us(void);
+/* Is any other thread waiting for a CPU?  Then vmzero must not halt: a CPU
+   kicked for a new or woken thread can pick vmzero first, and a halt there
+   holds that thread until the next interrupt (linux_probe_ntsync W8: a
+   waiter thread started 2.5-4.5 ms late, its 100 ms timeout measured
+   95.5-97.5 ms; 3/3 PASS with vmzero off). */
+static int vm_zp_others_ready(int self) {
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    struct process *q = i != self ? process_get_pcb(i) : 0;
+    if (q && q->state == PROC_STATE_READY)
+      return 1;
+  }
+  return 0;
+}
 static void vm_zeroer_task(void *arg) {
   (void)arg;
   struct process *me = current_process();
   int self = me ? me->pid : -1, seen_other = 0;
   for (;;) {
     int idle = 0;
+    uint64_t t0 = timer_get_us();
     for (int k = 0; k < VM_ZP_BATCH && vm_zp_n < VM_ZP_N; k++) {
+      /* Bounded in time too: each zero can be a host page fault, 2-7 ms
+         under host memory pressure, and nothing preempts this task. */
+      if (k && timer_get_us() - t0 >= VM_ZP_TURN_US)
+        break;
       uint64_t fr = frame_alloc_zeroed();
       if (!fr) {
         idle = 1; /* no free frame: wait, do not spin */
@@ -255,7 +275,7 @@ static void vm_zeroer_task(void *arg) {
        L1-L3 under 8 burners: 1 ms sleeps took 10 ms).  Full (or no free
        frame): halt until the next interrupt, then give the CPU back; else
        back after each batch. */
-    if (idle || vm_zp_n >= VM_ZP_N)
+    if ((idle || vm_zp_n >= VM_ZP_N) && !vm_zp_others_ready(self))
       safe_wfi();
     arch_yield();
   }
