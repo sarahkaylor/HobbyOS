@@ -1248,6 +1248,18 @@ def exit_settings(b, tally, a):
         g = graphics_preset(b, "pqs")
         t0 = time.time() if g else None
         log(f"PLAY exit settings: Quick Preset -> {g}")
+    elif a.exit_setting == "resolution2":
+        # Resolution away and back, the quit right after the second apply: the
+        # pause menu is then read at the layout its tables were measured on
+        # (h4-p03: after one 1024x768 apply the rows were read at the wrong
+        # place; h4-p09: the VSync row read Off/30/60, i.e. not VSync, and the
+        # Enters started the game's benchmark)
+        if settings_open(b, "pqs"):
+            r1 = video_set(b, "Resolution", r"1024\s*x\s*768", "pqsa")
+            r2 = video_set(b, "Resolution", r"1280\s*x\s*720", "pqsb") if r1 else None
+            t0 = r2 or None
+            log(f"PLAY exit settings: Resolution -> 1024x768 ({'applied' if r1 else 'NOT'}) -> 1280x720 "
+                f"({'applied' if r2 else 'NOT'})")
     elif a.exit_setting == "vsync":
         # a setting that does not move the picture: after a Resolution apply the
         # pause menu's rows are read at the wrong place (h4-p03: 1024x768 in the
@@ -1376,7 +1388,7 @@ def main():
     ap.add_argument("--drive-s", type=float, default=60, help="play: seconds per drive")
     ap.add_argument("--exit", default="pause", choices=["pause", "vehicle", "load", "settings", "none"])
     ap.add_argument("--no-wiggle", action="store_true", help="seek: never move the pointer (cp-hunt H6-04)")
-    ap.add_argument("--exit-setting", default="resolution", choices=["resolution", "preset", "vsync"])
+    ap.add_argument("--exit-setting", default="resolution", choices=["resolution", "preset", "vsync", "resolution2"])
     a = ap.parse_args()
     b = Boot(a.run, max_s=a.max_s)
     LIST_STEPS[0] = a.list_steps
