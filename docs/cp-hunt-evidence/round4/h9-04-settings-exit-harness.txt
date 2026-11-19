@@ -1,0 +1,26 @@
+H9-04: the "quit right after a settings apply" exit -- three harness failures and
+one game observation (strix, Venus, integ25, X screen 1280x720, lane H9-hunt4)
+
+h4-p03: Resolution 1280x720 -> 1024x768, applied; then the pause menu's rows were
+read with the 1024x768 game in a 1280x720 X screen: the seek "found" QUIT GAME on a
+world frame, no confirm came, the boot ended with the game running.
+  [DRV] 10:59:08 SET Resolution -> /1024\s*x\s*768/ applied (view now {'xscreen': '1280x720', 'game_res': '1024x768', ...})
+  [DRV] 10:59:14 seek QUIT GAME: tap 0 focus QUIT GAME
+  [DRV] 10:59:30 until pqsc: /sure.{0,20}quit/ not seen in 15 s (last OCR '... THE RIPPEROOG ok to ...')
+h4-p09: VSync: the row placed as "VSync" read Off / 30 / 60 (the Maximum FPS row);
+20 Enters cycled values and started the game's own benchmark, which ran to its
+results screen with no crash:
+  [DRV] 13:16:18 settings: VSync never showed /\bOn\b/ (values seen: ['... Off D>', '... < 30 D>*', '... < 60 >*', ...])
+  [P9W] shot s317-...-d6076264pqsrr10u: OCR 'Results Settings Average FPS 28.93 Custom ... 1280x720 ... Windowed Borderless ...
+        Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1...'
+  (shotcheck: 110 "tear?@233" candidates, all one full-width row of the static
+  results screen in consecutive shots: a UI line, not a tear)
+h4-p11: Resolution -> 1024x768 applied, back to 1280x720 not possible (no row
+found), then QUIT through the pause menu: at 1024x768 the focus read as QUIT GAME
+was EXIT TO MAIN MENU, whose dialog has the same "Are you sure you want to quit?"
+text; the game went to the title screen (PRESS ... TO CONTINUE, 115-150 fps) and
+boot_p9's wait_exit ended exit-timeout.  Not a hang: the game kept running.
+  [P9W] shot s317-t001454-...qc: OCR 'Are you sure you want to quit? Any unsaved progress will be lost. ...'
+  [P9W] +1660.2 s 14:11:52 play script ended: exit-timeout
+Fix (drive.py de96fb5f + later): resolution2 = 1280x720 -> 1920x1080 -> 1280x720 with
+P9_XSCREEN=1920x1080 (H6's h3-set2 path, 10/10), quit right after the second apply.

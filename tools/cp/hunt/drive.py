@@ -1255,10 +1255,14 @@ def exit_settings(b, tally, a):
         # place; h4-p09: the VSync row read Off/30/60, i.e. not VSync, and the
         # Enters started the game's benchmark)
         if settings_open(b, "pqs"):
-            r1 = video_set(b, "Resolution", r"1024\s*x\s*768", "pqsa")
+            # with a 1920x1080 X screen (P9_XSCREEN) the game offers 1920x1080 and
+            # H6's h3-set2 path holds (10/10); at 1024x768 in a 1280x720 screen the
+            # rows could not be placed again (h4-p11)
+            away = r"1920\s*x\s*1080" if VIEW["xscreen"] == "1920x1080" else r"1024\s*x\s*768"
+            r1 = video_set(b, "Resolution", away, "pqsa")
             r2 = video_set(b, "Resolution", r"1280\s*x\s*720", "pqsb") if r1 else None
             t0 = r2 or None
-            log(f"PLAY exit settings: Resolution -> 1024x768 ({'applied' if r1 else 'NOT'}) -> 1280x720 "
+            log(f"PLAY exit settings: Resolution -> /{away}/ ({'applied' if r1 else 'NOT'}) -> 1280x720 "
                 f"({'applied' if r2 else 'NOT'})")
     elif a.exit_setting == "vsync":
         # a setting that does not move the picture: after a Resolution apply the
