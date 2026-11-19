@@ -84,6 +84,7 @@ struct pf_cpu {
   uint64_t ss_tsc[PFS_N];
   uint64_t ss_mx[PFS_N];
   uint32_t slow_cpu[MAX_CPUS]; /* slow acks by target CPU */
+  uint32_t slow_infault;        /* ... whose thread was inside a fault (IRQs off) */
   uint32_t tg_n[PFR_N];         /* round 2: timer-interrupt segments */
   uint64_t tg_tsc[PFR_N], tg_mx[PFR_N];
   /* interval maxima (the emitter zeroes them) */
@@ -298,6 +299,10 @@ void pfstat_tseg(int seg, uint64_t tsc) {
   if (tsc > c->tg_mx[seg]) c->tg_mx[seg] = tsc;
 }
 
+int pfstat_pid_in_fault(int pid) {
+  return pid > 0 && pid < MAX_PROCESSES && pf_op[pid].depth > 0;
+}
+
 void pfstat_shoot_site(int site) {
   if (site > 0 && site < PFS_N) pf_me()->sh_site = site;
 }
@@ -323,6 +328,7 @@ void pfstat_shoot(uint64_t tsc, int targets, int running, int slow, uint32_t slo
   for (int k = 0; k < MAX_CPUS; k++)
     if (slowmask & (1u << k)) c->slow_cpu[k]++;
 }
+void pfstat_shoot_infault(int n) { pf_me()->slow_infault += (uint32_t)n; }
 
 uint64_t pfstat_thr_pf(int slot) {
   return (slot > 0 && slot < MAX_PROCESSES) ? pf_thr_pf_t[slot] : 0;
@@ -358,6 +364,7 @@ static struct {
   uint32_t ss_n[PFS_N], ss_tg[PFS_N], ss_run[PFS_N], ss_slow[PFS_N];
   uint64_t ss_tsc[PFS_N];
   uint32_t slow_cpu[MAX_CPUS];
+  uint32_t slow_infault;
   uint32_t tg_n[PFR_N];
   uint64_t tg_tsc[PFR_N];
 } pf_prev, pf_sum;
@@ -412,6 +419,7 @@ static void pf_emit(uint64_t now_ms) {
       c->ss_mx[t] = 0;
     }
     for (int k = 0; k < MAX_CPUS; k++) pf_sum.slow_cpu[k] += c->slow_cpu[k];
+    pf_sum.slow_infault += c->slow_infault;
     for (int t = 0; t < PFR_N; t++) {
       pf_sum.tg_n[t] += c->tg_n[t];
       pf_sum.tg_tsc[t] += c->tg_tsc[t];
@@ -592,6 +600,8 @@ static void pf_emit(uint64_t now_ms) {
         kl_c(&kl, '/');
         kl_u(&kl, D(ss_slow[t]));
       }
+      kl_s(&kl, " slow_infault=");
+      kl_u(&kl, D(slow_infault));
       kl_s(&kl, " slowcpu=");
       for (int k = 0; k < MAX_CPUS; k++) {
         if (k) kl_c(&kl, ',');

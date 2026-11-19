@@ -171,6 +171,9 @@ def main():
                 g[k + ".tg"] += v[3]
                 g[k + ".run"] += v[4]
                 g[k + ".slow"] += v[5]
+            m = re.search(r" slow_infault=(\d+)", r)
+            if m:
+                g["slow_infault"] += int(m.group(1))
             m = re.search(r" slowcpu=([\d,]+)", r)
             if m:
                 for i, x in enumerate(m.group(1).split(",")):
@@ -244,7 +247,7 @@ def main():
             print("   shootdowns by site (n/us/max/targets/running/slow): " + " ".join(
                 f"{st}={int(g['ss.' + st + '.n'])}/{int(g['ss.' + st + '.us'])}/{int(g['ss.' + st + '.max'])}/"
                 f"{int(g['ss.' + st + '.tg'])}/{int(g['ss.' + st + '.run'])}/{int(g['ss.' + st + '.slow'])}"
-                for st in sites) + " slowcpu=" + ",".join(str(int(g["slowcpu%d" % i])) for i in range(8)))
+                for st in sites) + f" slow_infault={int(g['slow_infault'])} slowcpu=" + ",".join(str(int(g["slowcpu%d" % i])) for i in range(8)))
         segs = sorted({k.split(".")[1] for k in g if k.startswith("tg.")})
         if segs:
             print("   timer segments (n/us/max): " + " ".join(

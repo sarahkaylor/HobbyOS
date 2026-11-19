@@ -1286,8 +1286,15 @@ void vm_arch_shootdown(struct addr_space *as) {
         left |= 1u << c;
     if (!left)
       break;
-    if (!slowmask && x64_rdtsc() - t0 > tsc_ms)
-      slowmask = left; /* who is late */
+    if (!slowmask && x64_rdtsc() - t0 > tsc_ms) {
+      slowmask = left; /* who is late, and was its thread inside a fault? */
+      extern int current_pid_of_cpu(uint32_t cpu);
+      int inf = 0;
+      for (uint32_t c = 0; c < ncpu; c++)
+        if ((left & (1u << c)) && pfstat_pid_in_fault(current_pid_of_cpu(c)))
+          inf++;
+      pfstat_shoot_infault(inf);
+    }
     uint64_t now = x64_rdtsc();
     if (now - t0 > 6000000000ULL) {
       for (uint32_t c = 0; c < ncpu; c++)
