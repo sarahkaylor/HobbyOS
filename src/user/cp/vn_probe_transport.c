@@ -226,8 +226,14 @@ int main(int argc, char** argv) {
   struct gpu_submit2 sbad = sb;
   sbad.ring_idx = 64;
   CHECK(xioctl(fd, GPU_IOC_SUBMIT2, &sbad) == -EINVAL, "submit2 ring 64 -> EINVAL");
-  uint8_t dummy[64];
-  CHECK(xioctl(fd, GPU_IOC_SCANOUT_BLOB, dummy) == -ENOSYS, "scanout_blob reserved -> ENOSYS");
+  /* GPU_IOC_SCANOUT_BLOB is no longer reserved (P7, docs/gpu-abi.md
+     §10.7): res_id 0 releases this fd's scanout, which it does not own, so
+     the answer is 0 -- or ENODEV on a device without blob scanout.  (The
+     row used to expect the P6-era ENOSYS, from an uninitialised buffer.) */
+  struct gpu_scanout_blob so0;
+  memset(&so0, 0, sizeof so0);
+  rc = xioctl(fd, GPU_IOC_SCANOUT_BLOB, &so0);
+  CHECK(rc == 0 || rc == -ENODEV, "scanout_blob res_id 0 (release, none owned) -> 0 or ENODEV rc=%d", rc);
 
   /* A burst deeper than the slot table: 100 fences in flight, then wait the last. */
   uint64_t last = 0;
