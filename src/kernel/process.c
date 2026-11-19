@@ -6195,6 +6195,25 @@ void process_sleep(void) {
   }
 }
 
+/* H7-fault round 3: a kernel task (vmzero) leaves the run queue for `ms`:
+ * BLOCKED with a deadline, which schedule() covers with a one-shot and
+ * process_check_sleeping ends.  An always-READY kernel task cost every idle
+ * CPU a switch through it (thrstorm T2 rounds). */
+void process_nap_ms(uint32_t ms) {
+  uint32_t cpu = get_cpuid();
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  int pid = cpu_current_pids[cpu];
+  if (pid >= 0) {
+    proc_table[pid].wake_ms = timer_get_ms() + ms;
+    proc_table[pid].state = PROC_STATE_BLOCKED;
+    spinlock_release_irqrestore(&proc_lock, flags);
+    arch_yield();
+  } else {
+    spinlock_release_irqrestore(&proc_lock, flags);
+    safe_wfi();
+  }
+}
+
 /**
  * Wakes up a blocked process, marking it as READY.
  */
