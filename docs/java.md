@@ -77,15 +77,31 @@ behind it:
 | malformed tails are still rejected, and decoding still works | `tools/jdk/tests/Base64Probe.java`, one boot | `B64 SUMMARY pass=13 fail=0` (`obj/jdk/base64.log`) |
 | the new runtime did not regress the port | `tools/jdk/sdktest.sh --no-build` | version / javac / run / suite all PASS, `SUMMARY pass=18 fail=0` (`obj/jdk/sdktest-cve.log`) |
 
-**Reachability in this guest, stated so nobody overreads the patch:** measured,
-not assumed.  `java -XX:+PrintFlagsFinal -version` in the guest prints
-`UseAVX = 0` and `UseBASE64Intrinsics = false` (`obj/jdk/flags.log`), because
-`boot.sh` boots q35's default CPU model under TCG, which exposes no AVX at all --
-so the vulnerable stub was never generated here even on the old pin.  The guest
-also has no TCP stack (loopback only, `net.c`), so there is no remote path in.
-The pin was moved anyway: the runtime is what any future networked or
-AVX-512-capable guest would run, and leaving a known heap overflow in the image
-turns "we are not reachable" into a claim that has to keep being true.
+**Reachability in this guest, stated so nobody overreads the patch.**  Two
+independent conditions decide it, and they must be kept apart:
+
+- **The CPU feature is the one that decides it.**  `java -XX:+PrintFlagsFinal
+  -version` in the guest prints `UseAVX = 0` and `UseBASE64Intrinsics = false`
+  (`obj/jdk/flags.log`): `boot.sh` boots q35's default CPU model under TCG,
+  which exposes no AVX at all, so the vulnerable stub was never generated here
+  even on the old pin.
+- **The network is not a mitigation, and an earlier version of this section
+  wrongly said it was** ("no TCP stack, loopback only").  `net.c` (1607 lines)
+  plus `virtio_net.c` carry ARP, IPv4, ICMP, UDP, a DHCP client and a TCP
+  *client* with SYN retransmit; the probe boot's own console shows
+  `DHCP Ack received` and `DHCP DNS server: 10.0.2.3`, and `boot.sh` attaches
+  `-netdev user` (QEMU slirp).  Outbound connections therefore exist, which is
+  exactly the shape of Java4Shell's **client-side** variant -- a JVM dialing a
+  malicious TLS server.  What does not exist is an externally reachable
+  listener: AF_INET `bind`/`listen` route to `net_socket_bind_lo` /
+  `net_socket_listen_lo`, a bind to anything but `127.0.0.1` is refused with
+  `-EINVAL` (`fs.c`: "this stack has no NIC-bound listener to back it"), and no
+  launch line passes `hostfwd`.  So no attacker can dial in; a malicious server
+  the guest connects to is a real path, and what closes it is hardware feature
+  detection, not the network stack.
+
+The pin moved anyway: a known heap overflow should not be what the image runs,
+and "we are not reachable" is a claim that has to keep being true.
 
 Reproduce: `tools/jdk/fetch-jdk.sh --glibc` (verifies the tarball's published
 SHA-256 `005e57ee...86d107` before unpacking), then `sdktest.sh` and the probe
