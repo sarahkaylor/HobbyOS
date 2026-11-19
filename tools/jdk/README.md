@@ -4,16 +4,20 @@ The x86_64 build of HobbyOS carries a Linux-ABI compatibility layer that runs
 real glibc binaries.  This directory is the lane that proves it can run a full
 JDK, and the acceptance gate for that claim.
 
-Measured with **Adoptium OpenJDK 27 (27.0.1.0.2+1), linux/x64 hotspot**, glibc
+Measured with **Adoptium OpenJDK 27 (27.0.1.1+4), linux/x64 hotspot**, glibc
 **2.31** (the pin the compat layer was proven against; the JDK itself asks for
-no more than GLIBC_2.17).
+no more than GLIBC_2.17).  27.0.1.1 -- not 27.0.1 -- because of
+CVE-2026-114938, the AVX-512 VBMI Base64 decoder overflow; `docs/java.md`
+("The pin is a security decision") carries the evidence, and
+`tools/jdk/fetch-jdk.sh` reproduces the pin from its published SHA-256.
 
 ```
-$ tools/jdk/sdktest.sh                     # build + 4 boots, ~15 min under TCG
-PASS version              openjdk version "27.0.1.0.2" 2026-10-21
-PASS javac                /T/Hello.java -> /JDKOUT/Hello.class (1528 bytes)
-PASS run                  java -cp /JDKOUT Hello prints 27.0.1.0.2 / Linux / amd64
-PASS suite                SUMMARY pass=18 fail=0 skip=0, "System halt"
+$ tools/jdk/sdktest.sh --no-build         # 4 boots, ~15 min under TCG
+   version  PASS   openjdk version "27.0.1.1" 2026-11-17
+   javac    PASS   Hello.class written; javac exited
+   run      PASS   HELLO-JAVA: java.version=27.0.1.1
+   suite    PASS   SUMMARY pass=18 fail=0 skip=0
+   all checks passed
 ```
 
 ## Why each check is a separate boot
@@ -35,7 +39,7 @@ image looks exactly like an infinitely slow program.
 | Script | Does |
 |---|---|
 | `sdktest.sh` | the gate: version, javac, run, suite. `--no-build`, `--only=name` |
-| `build.sh` | downloads/pins JDK 27 + glibc 2.31 under `third_party/` |
+| `fetch-jdk.sh` | reproduces the pinned runtime: Temurin **27.0.1.1+4** (SHA-256 checked before unpack) -> `third_party/jdk-27`, plus `--glibc` for the 2.31 pin `stage.sh` needs |
 | `stage.sh` | rebuilds `disk.img`: `--jdk DIR`, `--dir SRC:/DEST`, `--probe SRC` (8.3 name from the source basename, so probe sources must be hyphen-free), `--wave "CMD ARG..."` |
 | `cycle.sh` | build + repack + boot in one step. **Use this, not hand-run make+boot** -- `boot.sh` loads `hobbyos.elf` from *inside* `disk.img`, so a kernel you did not repack is a kernel you did not test |
 | `boot.sh` | boot and wait for a marker. `--timeout`, `--log`, `QEMU_DEBUG=`/`QEMU_DEBUG_LOG=` |
@@ -44,6 +48,17 @@ image looks exactly like an infinitely slow program.
 reflection, jimage reads, threads, monitors, NIO files/directories, sockets,
 process exec, GC, compression and crypto.  It is one JVM so a single boot can
 report all of them.
+
+`tools/jdk/tests/Base64Probe.java` is the CVE-2026-114938 regression probe: it
+feeds the decoder the published trigger shapes (65-byte padded tails and
+friends), asserts `IllegalArgumentException`, then asserts that well-formed
+padded groups still decode and that objects allocated before the burst are
+byte-identical after it.  Stage it as its own boot:
+
+```bash
+tools/jdk/stage.sh --dir obj/jdk/classes:/C --wave "JDK/bin/java -cp /C Base64Probe"
+tools/jdk/boot.sh --timeout 420 --log obj/jdk/base64.log
+```
 
 ## What the port actually needed from the kernel
 
