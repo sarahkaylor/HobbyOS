@@ -1,0 +1,19 @@
+# [FREERACE] rows in the integ22/integ23 gate batches (strix), one per boot; context: Wine services exiting after SIGQUIT (wineserver shutdown)
+== ~/cp/integ22/p6venus.1.serial
+[SIGR] pid=58 sig=3 ipc=0x10801745CB mask=0x10012A07
+[SIGR] pid=61 sig=3 ipc=0x10801745CB mask=0x10012A07
+[SIGR] pid=62 sig=3 ipc=0x10801745CB mask=0x10012A07
+[PANIC-SINK-VIOLATION] panic_puts from a returning path (suppressed=1)
+[FREERACE] freeing root=0x000000020BE38000 while cpu=0x0000000000000002 still translates through it
+== ~/cp/integ23/p2.1.serial
+[PFX] I tid=33 at=22033 us=3504 vec=132
+[KERNEL] Process 61: winedevice.exe exited unexpectedly or gracefully.
+[EXITPC] pid=61 last_user_pc=0x1080143146 code=0x0
+[PANIC-SINK-VIOLATION] panic_puts from a returning path (suppressed=1)
+[FREERACE] freeing root=0x000000022ABDA000 while cpu=0x0000000000000004 still translates through it
+== ~/cp/integ23/p6venus.1.serial
+[GB145-GHOST] skipping thread slot=57 pid=57 tgid=53 anchor_state=9
+[KERNEL] Process 57: svchost.exe exited unexpectedly or gracefully.
+[EXITPC] pid=57 last_user_pc=0x1080143146 code=0x0
+[PANIC-SINK-VIOLATION] panic_puts from a returning path (suppressed=1)
+[FREERACE] freeing root=0x000000020D50C000 while cpu=0x0000000000000004 still translates through it

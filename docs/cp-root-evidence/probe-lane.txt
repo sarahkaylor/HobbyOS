@@ -1,0 +1,31 @@
+# linux_probe_rootfree on the lane, strix KVM, -no-reboot
+## ab1 B.*: park fix (16054105) WITHOUT the process_clone guard (60503d3d), interleaved with ab1 A.* (instrument-only)
+B.1 t3_linux_probe: FAIL — rootfree never printed '[LP] done rc=0' (tier rc=1) last="[LP] R2 the last worker returns, leader "
+B.2 lp_check_rootfree: PASS -- [ROOTFREE] every64 td=897 self=80 onroot=61 unsafe=0 deferred=61 drained=61 parked=0 leaked=0 wait_max_us=175164 cons=0 irq=75 sw=0 stale=0 idle=0 thr=60 other=0; 0 [FREERACE] row(s) last="[LP] R0 elapsed_ms=6376"
+B.3 t3_linux_probe: FAIL — rootfree never printed '[LP] done rc=0' (tier rc=1) last="[LP] R2 the last worker returns, leader "
+B.4 lp_check_rootfree: PASS -- [ROOTFREE] park td=863 self=62 onroot=40 unsafe=0 deferred=40 drained=39 parked=1 leaked=0 wait_max_us=114282 cons=0 irq=58 sw=0 stale=0 idle=0 thr=28 other=0; 0 [FREERACE] row(s) last="[LP] R0 elapsed_ms=6063"
+B.5 t3_linux_probe: FAIL — rootfree never printed '[LP] done rc=0' (tier rc=1) last="[LP] R2 the last worker returns, leader "
+
+## cap1: + the vm_arch_switch guard: the R3 death caught as a switch to a torn-down AS (caller = start_scheduler idle pick; pid 500 is a thread created while its group 494 was being killed)
+[ROOTSW0] cpu=5 tgid=494 ver=0 caller=0x700D2F57
+[RESUME-PREFLIGHT] pid=500 cs=0x000000000000001B rip=0x00000010000017AB as=0x000000007694A820 -> QUARANTINE
+
+## fix2: all lane commits (60503d3d), 5 boots
+fix2.1 boots=1 rootsw0=0 lp_check_rootfree: PASS -- [ROOTFREE] park td=839 self=46 onroot=40 unsafe=0 deferred=40 drained=39 parked=1 leaked=0 wait_max_us=187896 cons=0 irq=28 sw=0 stale=0 idle=0 thr=53 other=0; 0 [FREERACE] row(s)
+fix2.2 boots=1 rootsw0=0 lp_check_rootfree: PASS -- [ROOTFREE] every64 td=897 self=80 onroot=61 unsafe=0 deferred=61 drained=61 parked=0 leaked=0 wait_max_us=9375 cons=0 irq=36 sw=0 stale=0 idle=0 thr=94 other=0; 0 [FREERACE] row(s)
+fix2.3 boots=1 rootsw0=0 lp_check_rootfree: PASS -- [ROOTFREE] every64 td=897 self=88 onroot=57 unsafe=0 deferred=57 drained=57 parked=0 leaked=0 wait_max_us=10688 cons=0 irq=67 sw=0 stale=0 idle=0 thr=62 other=0; 0 [FREERACE] row(s)
+fix2.4 boots=1 rootsw0=0 lp_check_rootfree: PASS -- [ROOTFREE] every64 td=897 self=84 onroot=59 unsafe=0 deferred=59 drained=59 parked=0 leaked=0 wait_max_us=13891 cons=0 irq=38 sw=0 stale=0 idle=0 thr=110 other=0; 0 [FREERACE] row(s)
+fix2.5 boots=1 rootsw0=0 lp_check_rootfree: PASS -- [ROOTFREE] every64 td=897 self=73 onroot=58 unsafe=0 deferred=58 drained=58 parked=0 leaked=0 wait_max_us=9869 cons=0 irq=33 sw=0 stale=0 idle=0 thr=111 other=0; 0 [FREERACE] row(s)
+
+## fix2.1 probe rows and park rows
+[LP] R1 a worker exit_group(0)s                  children=150 reaped=150 error=0 wrong-status=0 (first 0x0) timeout=0 -> PASS
+[LP] R2 the last worker returns, leader gone     children=150 reaped=150 error=0 wrong-status=0 (first 0x0) timeout=0 -> PASS
+[LP] R3 the parent SIGKILLs the group            children=150 reaped=150 error=0 wrong-status=0 (first 0x0) timeout=0 -> PASS
+[LP] R4 two exit_group children at once          children=300 reaped=300 error=0 wrong-status=0 (first 0x0) timeout=0 -> PASS
+[LP] R5 SIGKILL while every thread spins         children=150 reaped=150 error=0 wrong-status=0 (first 0x0) timeout=0 -> PASS
+[LP] R0 elapsed_ms=6139
+[LP] done rc=0
+[ROOTPARK] root=0x21D7DD000 cpus=0xA2 why=irq tgid=164 site=0x700C4D6E
+[ROOTPARK] root=0x21D62F000 cpus=0x14 why=irq tgid=182 site=0x700C4D6E
+[ROOTPARK] root=0x21D18F000 cpus=0x24 why=irq tgid=200 site=0x700C4D6E
+[ROOTPARK] root=0x21E081000 cpus=0x20 why=irq tgid=209 site=0x700C4D6E

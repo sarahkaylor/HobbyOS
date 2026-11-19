@@ -1,0 +1,6 @@
+# linux_probe_rootfree (f7268aae) on integ25 = f888a274 (no instrument: lp_check has no [ROOTFREE] row to grade), strix KVM, -no-reboot, 5 boots
+b25.1 boots=1 done=0 last="[LP] R4 two exit_group children at once         " last_line="[FREERACE] freeing root=0x000000021D918000 while cpu=0x000000000000000"
+b25.2 boots=1 done=0 last="[LP] R2 the last worker returns, leader gone    " last_line="[EXITPC] pid=471 last_user_pc=0x1000002C30 code=0x9 k"
+b25.3 boots=1 done=0 last="[LP] R2 the last worker returns, leader gone    " last_line="[GB071-FORK] childpid=313 cs=3 ctx5=0x100000C304"
+b25.4 boots=1 done=0 last="[LP] R1 a worker exit_group(0)s                 " last_line="[GB07"
+b25.5 boots=1 done=0 last="[LP] R2 the last worker returns, leader gone    " last_line="[LP] console stress"

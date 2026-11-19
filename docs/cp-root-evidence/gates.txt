@@ -1,0 +1,124 @@
+tree  start 09:50:57
+build rc=0 09:51:04
+avx rc=0 [LP] done rc=0
+away rc=0 [LP] done rc=0
+badelr rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+census rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+conslat rc=0 [LP] done rc=0
+console rc=0 [LP] done rc=0lp_check_console: kernel rows intact 30252/30252, user rows intact 6896/6896, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+consstall rc=0 [LP] done rc=0
+conswait rc=0 [LP] done rc=0
+cow rc=0 [LP] done rc=0
+cpus rc=0 [LP] done rc=0
+cputime rc=0 [LP] done rc=0
+e2churn rc=0 [LP] done rc=0
+e2fault rc=0 [LP] done rc=0
+e2stress rc=0 [LP] done rc=0
+epserver rc=0 [LP] done rc=0
+errnomap rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+execthr rc=0 [LP] done rc=0
+exitgroup rc=0 [LP] done rc=0
+exitrace rc=0 [LP] done rc=0
+ext2w rc=0 [LP] done rc=0
+fatcoh rc=0 [LP] done rc=0
+fatren rc=0 [LP] done rc=0
+fattrunc rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fdrace rc=0 [LP] done rc=0
+fdscale rc=0 [LP] done rc=0
+forkcow rc=0 [LP] done rc=0
+forkva rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+hrtimer rc=0 [LP] done rc=0
+ipclat rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+killgrp rc=0 [LP] done rc=0
+kstack rc=0 [LP] done rc=0
+loaccept rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+manythr rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+netlink rc=0 [LP] done rc=0
+ntsync rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0
+pfpar rc=0 [LP] done rc=0
+pfstat rc=0 [LP] done rc=0
+pfx rc=0 [LP] done rc=0
+pipestorm rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+rootfree rc=0 [LP] done rc=0
+rusage rc=0 [LP] done rc=0
+shm rc=0 [LP] done rc=0
+shootwait rc=1 [LP] done rc=0
+sigfd rc=0 [LP] done rc=0
+siginfo rc=0 [LP] done rc=0
+sigint rc=0 [LP] done rc=0
+sigmask rc=0 [LP] done rc=0
+sigret rc=0 [LP] done rc=0
+snd rc=0 [LP] done rc=0
+sysc rc=0 [LP] done rc=0
+tcpconn rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tlb rc=0 [LP] done rc=0
+tlbstale rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+vmhold rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wfibound rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+probes end 10:17:14
+sigmask_gate rc=0 sigmask-gate: PASS (8/8)
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/root)
+unit rc=0 Tests run:    464 Tests failed: 0   reass=1
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 40/42 passed kconsole=kconsole_test: PASS (0 failures)
+castscan rc=0 castscan: 376 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+panic_sink_allowlist rc=0 panic_sink_allowlist: PASS — every reference is accounted for
+pfx_gate rc=0 pfx_gate: PASS
+ext2w_gate rc=0 ext2w_gate: PASS
+reg_gate rc=0 == removed /srv/nfs/cp-root-reg
+ext2_test_host rc=0 ext2_test: PASS
+exitgroup#1 rc=0 [LP] done rc=0
+exitgroup#2 rc=0 [LP] done rc=0
+exitgroup#3 rc=0 [LP] done rc=0
+infra end 10:28:09
+gate_p2#1 rc=0 G1 wine cmd /c echo hello prints hello : PASS ([P2] end echo|G2 winprobe.exe every marker + exit 0 : PASS ([P2] end winpr|G3 wineserver -k leaves no processes : PASS ([P2] end kill s| 10:28:39
+gate_p4#1 rc=0 [P4G] qemu: qemu-system-x86_64 -M q35,vmport=on -enable-kvm -cpu host -smp 8 -m 12288M -drive if=pflash,format=raw,readonly=on,file=/home/sarah/cp/lanes/root/obj/p4/root-1/ovmf.fd -display none -serial file:/home/sarah/cp/lanes/root/obj/p4/root-1/serial.log -device pcie-root-port,id=p
+gate_p5#1 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 273 s; lock released serial=258248 10:36:48
+gate_p5#2 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 274 s; lock released serial=259592 10:41:27
+gate_p5#3 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 273 s; lock released serial=258060 10:46:14
+venus_mesa rc=0 cp-venus-mesa: audit: ok (1921696 bytes)
+gate_p6_venus#1 rc=0 [P5W] vkcube vkcube-t20s.ppm: clear=241960 saturated=65812 bbox=(44, 70, 682, 548) hash=b2b6d8c53ba3ecf9 [P5W] vkcube vkcube-t50s.ppm: clear=239792 saturated=67976 bbox=(44, 70, 682, 548) hash=b71d66bae6873c80 [P5W] vkcube: PASS [P5W] d3d11 d3d11-t20s.ppm: clear=237244 saturated
+thrstorm rc=0 [TS] PASS T1 create (threads=256 why=0) [TS] PASS T1 start (started=256 toolhelp=257) [TS] PASS T2 storm (rounds=1141 ms=60042) [TS] PASS T3 stop (bad=0 first=0)  10:52:25
+k5probes rc=0 [P8ENV] E1 execve env: 40/40 entries intact -> PASS [P8ENV] E2 malformed entries: 0 -> PASS [P8ENV] E3 spawn_ex env: 40/40 entries intact -> PASS [P8ENV] E4 malformed entries: 0 -> PASS [K5P] E5 spawn_ex env > HO_ENV_LEN: rc=-1 errno=7 -> PASS [P8SCM] S1 recvmsg ret=4 errno=0 -> PASS [
+gate_p7_fullscreen rc=0 [P5W] vkcube vkcube-t20s.ppm: clear=1726112 saturated=347488 bbox=(0, 0, 1918, 1078) hash=a3cf8ec524211005 [P5W] vkcube vkcube-t50s.ppm: clear=1769504 saturated=304096 bbox=(0, 0, 1918, 1078) hash=826fc79c534982e7 [P5W] vkcube: PASS [P5W] d3d12 d3d12-t20s.ppm: clear=1602140 s
+p8_pfx rc=0 == exports.sh: remove /srv/nfs/cp-root-p8 ok (non-cp lines unchanged) == removed /srv/nfs/cp-root-p8  10:56:35
+gate_p8_lavapipe#1 rc=0    +   227.7 s  11:00:27  main menu OCR at s014-t000206: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   233.2 s  11:00:32  main menu OCR at s015-t000212: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   235.1 s  11:00:34  verdict: mai
+gate_p8_lavapipe#2 rc=0    +   304.3 s  11:05:43  main menu OCR at s016-t000283: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   309.8 s  11:05:49  main menu OCR at s017-t000288: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   311.6 s  11:05:51  verdict: mai
+gate_p8_venus rc=0    +   154.9 s  11:08:32  main menu OCR at s009-t000130: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   160.6 s  11:08:37  main menu OCR at s010-t000136: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   162.6 s  11:08:40  verdict: main-men
+thrstorm#2 rc=0 [TS] PASS T1 create (threads=256 why=0) [TS] PASS T1 start (started=256 toolhelp=257) [TS] PASS T2 storm (rounds=981 ms=60095) [TS] PASS T3 stop (bad=0 first=0)  faults=0 11:10:12
+thrstorm#3 rc=0 [TS] PASS T1 create (threads=256 why=0) [TS] PASS T1 start (started=256 toolhelp=257) [TS] PASS T2 storm (rounds=1061 ms=60079) [TS] PASS T3 stop (bad=0 first=0)  faults=0 11:11:39
+p9_cold1 rc=0 run-hunt: root-cold1 rc=0 verdict=script-done    quiesce after kill: extra=0    clean exit: yes (game status=0, wineserver -k 225 ms, left after -k: none, sync yes, [P8] done yes)  11:17:25
+p9_fp720 rc=0 the game was still running (no QUIT GAME) 11:23:38
+rootrows rootfree.gate freerace=1 rootsw0=0 
+rootrows: 1 file(s) with an assertion row
+ALLDONE 11:23:39

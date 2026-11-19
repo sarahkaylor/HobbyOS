@@ -1,0 +1,7 @@
+# thrstorm T2 rounds, interleaved integ25 (root-base) / lane (root, 9c4b48b9), strix, one boot at a time, H9 game boots alongside
+base#1 rc=0 T2 rounds=1040 T3 stop (bad=0 first=0)  load=7.79 11:33:17
+lane#1 rc=0 T2 rounds=1004 T3 stop (bad=0 first=0)  load=7.49 11:34:59
+base#2 rc=0 T2 rounds=1042 T3 stop (bad=0 first=0)  load=6.49 11:36:39
+lane#2 rc=0 T2 rounds=1036 T3 stop (bad=0 first=0)  load=6.24 11:38:29
+ALLDONE
+# lane batch thrstorm x3 (09:50 batch, load 7-11): 1141, 981, 1061; integ25 batch x3 (quiet host): 1231, 1166, 1184
