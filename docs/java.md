@@ -90,7 +90,9 @@ independent conditions decide it, and they must be kept apart:
   plus `virtio_net.c` carry ARP, IPv4, ICMP, UDP, a DHCP client and a TCP
   *client* with SYN retransmit; the probe boot's own console shows
   `DHCP Ack received` and `DHCP DNS server: 10.0.2.3`, and `boot.sh` attaches
-  `-netdev user` (QEMU slirp).  Outbound connections therefore exist, which is
+  `-netdev user` (QEMU slirp).  Outbound connections therefore exist -- measured,
+  not inferred: `tools/jdk/nettest.sh` has the guest dial a host-side echo server
+  at `10.0.2.2` and round-trip bytes through the NIC (6/6, below) -- which is
   exactly the shape of Java4Shell's **client-side** variant -- a JVM dialing a
   malicious TLS server.  What does not exist is an externally reachable
   listener: AF_INET `bind`/`listen` route to `net_socket_bind_lo` /
@@ -117,6 +119,57 @@ mitigation is `-XX:-UseBASE64Intrinsics` (preferred) or `-XX:UseAVX=2` on x86-64
 only -- and it belongs in the launch line, not in a document.  Do not use
 `-XX:DisableIntrinsic=_base64_decodeBlock` on its own: it stops the JVM from
 starting.
+
+## java.net TCP over the NIC (TcpProbe)
+
+The suite's `sockets-loopback` check proves only the in-kernel `127.0.0.1` pair
+(`fs.c` pairs the endpoints, `send()` writes into the peer's ring).  It says
+nothing about the wire.  The guest does have a wire: `net.c` + `virtio_net.c`
+carry ARP / IPv4 / ICMP / UDP / DHCP and a TCP client, and `boot.sh` attaches
+`-netdev user` (slirp) -- so `tools/jdk/nettest.sh` runs `TcpProbe` against an
+echo server the *harness* starts on the host, reached at **10.0.2.2** (slirp's
+host alias, the address `tools/run_browser_accept.sh` and
+`tools/rw/nfs-export.sh` already use).  Literal address, no DNS, no internet:
+a green run means "TCP works", not "the network happened to be up".
+
+| check | what it proves |
+|---|---|
+| `resolve-literal` | getaddrinfo parses a literal without a resolver |
+| `connect-echo` | SYN / SYN-ACK / ACK plus a byte-identical round trip |
+| `local-address` | the socket is bound to the DHCP lease, not `127.0.0.1`/`0.0.0.0` |
+| `bulk-8192` | 8192 B = 6 segments past `TCP_MAX_PAYLOAD` (1446) |
+| `reconnect` | a second connection after the first was closed |
+| `refused-closed-port` | the host's RST surfaces as `ConnectException`, not a hang |
+
+Measured on 27.0.1.1+4 (`obj/jdk/nettest-tcp.log`):
+
+```
+TCP PASS resolve-literal  10.0.2.2
+TCP PASS connect-echo  sent=22B nonce=b91e979eac453264
+TCP PASS local-address  local=10.0.2.15:49160 peer=10.0.2.2
+TCP PASS bulk-8192  bytes=8192
+TCP PASS reconnect  second connection round-tripped
+TCP PASS refused-closed-port  ConnectException: Connection refused (connect failed)
+TCP SUMMARY pass=6 fail=0
+```
+
+### The two ABI bugs the first run found
+
+The probe was written before any fix and came back 2/6.  Both failures were
+kernel-side, and both are the class of defect this lane exists to catch:
+
+| symptom | cause | fix |
+|---|---|---|
+| `SocketException: Protocol not available` on every TCP socket | `file_socket_setopt` rejected every level except `SOL_SOCKET`, so `setsockopt(IPPROTO_TCP, TCP_NODELAY)` returned `ENOPROTOOPT`.  `NioSocketImpl` sets TCP_NODELAY on **every** socket and maps that to the exception above, so ordinary Java networking was unusable. | `fs.c`: IPPROTO_TCP options (NODELAY / MAXSEG / KEEP*) accepted as documented no-ops -- there is no Nagle batching to disable and no keepalive timer -- plus advisory SNDBUF / RCVBUF / KEEPALIVE.  `SO_RCVTIMEO`-style timeouts stay **refused**: accepting one would turn a hang into a hang with a flag set.  `getopt` answers NODELAY=1, MAXSEG=1446 (`TCP_MAX_PAYLOAD`). |
+| `Socket.getLocalAddress()` / `getInetAddress()` answered `127.0.0.1` for a connection to `10.0.2.2` | `file_sockname` hardcoded `0x7F000001` for **both** the local and the peer address of every AF_INET socket -- true of a loopback-only stack, a lie once `connect()` leaves through the NIC.  Load-bearing: those calls feed peer identity, TLS hostname verification among it. | `fs.c`: answer the pcb's real endpoints (network byte order, so `ntohl`), fall back to the interface address (`net_get_ip()`) when the pcb has not recorded one yet, and keep `127.0.0.1` for the loopback pair (`pcb->peer`) and for sockets that are not connected. |
+
+Neither fix is a JDK change; the pin stayed 27.0.1.1+4.  Worth remembering the
+next time a Java-level symptom on this layer looks like a runtime bug.
+
+```bash
+tools/jdk/nettest.sh             # build + host echo server + 1 boot, ~10 min under TCG
+tools/jdk/nettest.sh --no-build  # reuse the current kernel/image
+```
 
 ## Workstreams
 

@@ -1871,7 +1871,23 @@ int file_socket_getopt(struct process *p, int fd, int level, int optname,
   if (!f) return -err;
   struct socket_pcb *pcb = f->socket.pcb;
 
-  if (level != K_SOL_SOCKET) return -ENOPROTOOPT;
+  if (level != K_SOL_SOCKET) {
+    /* TCP_NODELAY is readable because java.net's getTcpNoDelay() asks, and the
+     * honest answer for this stack is "on": there is no Nagle delay to observe
+     * (net.c sends each write as segments immediately). */
+    if (level == K_IPPROTO_TCP) {
+      int v;
+      switch (optname) {
+      case K_TCP_NODELAY: v = 1; break;
+      case K_TCP_MAXSEG:  v = 1446; break;   /* TCP_MAX_PAYLOAD, net.c */
+      default: return -ENOPROTOOPT;
+      }
+      *(int *)val = v;
+      *len = (int)sizeof(int);
+      return 0;
+    }
+    return -ENOPROTOOPT;
+  }
   if (!val || !len) return -EINVAL;
   if (*len < (int)sizeof(int)) return -EINVAL;
 
@@ -1885,6 +1901,13 @@ int file_socket_getopt(struct process *p, int fd, int level, int optname,
     break;
   case K_SO_REUSEADDR:
     value = 0; /* we never "reuse" an address: every socket has its own port */
+    break;
+  case K_SO_KEEPALIVE:
+    value = 0; /* no keepalive timer */
+    break;
+  case K_SO_SNDBUF:
+  case K_SO_RCVBUF:
+    value = SOCKET_RX_BUF_SIZE;    /* the one ring this stack has */
     break;
   default:
     return -ENOPROTOOPT;
@@ -1923,6 +1946,32 @@ int file_socket_setopt(struct process *p, int fd, int level, int optname,
   int err = 0;
   struct file *f = f1_socket_file(p, fd, &err);
   if (!f) return -err;
+
+  /* IPPROTO_TCP: accepted as no-ops.  There is no Nagle batching to disable
+   * (each write becomes segments immediately) and no keepalive timer, so the
+   * behaviour asked for is already what this stack does.  Refusing them broke
+   * every java.net.Socket -- NioSocketImpl sets TCP_NODELAY and maps
+   * ENOPROTOOPT to "SocketException: Protocol not available"
+   * (tools/jdk/tests/TcpProbe).  SO_RCVTIMEO/SO_SNDTIMEO stay unsupported on
+   * purpose: silently accepting a timeout would turn a hang into a hang with
+   * a flag set. */
+  if (level == K_IPPROTO_TCP) {
+    switch (optname) {
+    case K_TCP_NODELAY:
+    case K_TCP_MAXSEG:
+    case K_TCP_KEEPIDLE:
+    case K_TCP_KEEPINTVL:
+    case K_TCP_KEEPCNT:
+    case K_TCP_USER_TIMEOUT:
+      return 0;
+    default:
+      return -ENOPROTOOPT;
+    }
+  }
+  if (level == K_SOL_SOCKET &&
+      (optname == K_SO_KEEPALIVE || optname == K_SO_SNDBUF ||
+       optname == K_SO_RCVBUF))
+    return 0;                      /* advisory buffer sizes */
 
   if (level != K_SOL_SOCKET) return -ENOPROTOOPT;
   if (optname == K_SO_REUSEADDR) {
@@ -4457,12 +4506,30 @@ int file_sockname(struct process *p, int fd, int peer, uint8_t *sa_out,
   struct file *f = f1_any_sock_file(pg, fd, &err);
   if (!f) return err;
   if (f->type == FILE_TYPE_SOCKET) {
-    /* Java's ServerSocket.getLocalPort() lands here after bind(port 0). */
+    /* Java's ServerSocket.getLocalPort() lands here after bind(port 0).
+     *
+     * GB-… (TcpProbe): this used to answer 127.0.0.1 as BOTH the local and the
+     * peer address of every AF_INET socket.  That was true while the stack was
+     * loopback-only; once connect() leaves through the NIC it is a lie, and a
+     * load-bearing one: Socket.getInetAddress()/getLocalAddress() feed exactly
+     * the code that identifies a peer (TLS hostname verification among it).
+     * Answer the pcb's real endpoints -- they are network byte order -- and keep
+     * 127.0.0.1 for the in-kernel loopback pair (pcb->peer) and for a socket
+     * that is not connected yet (remote_ip 0), which is what callers saw before. */
     struct socket_pcb *pcb = f->socket.pcb;
+    int lo = pcb->peer != 0 || pcb->remote_ip == 0 || pcb->remote_ip == 0x7F000001u;
+    uint32_t lip, rip;
+    if (lo) {
+      lip = 0x7F000001u;
+      rip = 0x7F000001u;
+    } else {
+      lip = ntohl(pcb->local_ip ? pcb->local_ip : net_get_ip());
+      rip = ntohl(pcb->remote_ip);
+    }
     if (peer)
-      f1_inet_format(sa_out, 0x7F000001u, pcb->remote_port);
+      f1_inet_format(sa_out, rip, pcb->remote_port);
     else
-      f1_inet_format(sa_out, 0x7F000001u,
+      f1_inet_format(sa_out, lip,
                      pcb->bound_port ? pcb->bound_port : pcb->local_port);
     *salen_out = 16;
     return 0;

@@ -285,6 +285,19 @@ struct fd_set_k {
 #define K_SOCK_DGRAM   2
 #define K_IPPROTO_TCP  6
 #define K_IPPROTO_UDP  17
+/* IPPROTO_TCP option numbers (Linux values).  This stack has no Nagle
+ * batching (a write becomes segments immediately) and no keepalive timer, so
+ * these are accepted as no-ops.  They cannot be refused: java.net's
+ * NioSocketImpl sets TCP_NODELAY on every TCP socket and maps ENOPROTOOPT to
+ * "SocketException: Protocol not available", which made the whole Java
+ * networking path unusable (tools/jdk/tests/TcpProbe,
+ * obj/jdk/nettest-tcp.log). */
+#define K_TCP_NODELAY      1
+#define K_TCP_MAXSEG       2
+#define K_TCP_KEEPIDLE     4
+#define K_TCP_KEEPINTVL    5
+#define K_TCP_KEEPCNT      6
+#define K_TCP_USER_TIMEOUT 18
 #define K_SOL_SOCKET   1
 #define K_SO_REUSEADDR 2
 #define K_SO_TYPE      3
