@@ -3455,6 +3455,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
            console output the tier greps (not a hand-derived zero). */
         extern void lock_print_counters(void);
         lock_print_counters();
+        vm_arch_root_report(); /* H8-root: [ROOTFREE] final row */
         /* Lock-scope audit summary: the test tiers assert BLOCKHOLD/SELF/
          * CLASSERR are 0 and bound the worst IRQ-off window.  Printed here, on
          * CPU 0 before the halt, so it is real console output. */
@@ -6902,6 +6903,8 @@ void start_scheduler(void) {
     /* P2.2 (S2): this core no longer runs any process; do not keep a
        (possibly torn-down) AS as its translation. */
     vm_arch_restore_kernel();
+    /* H8-root: free the roots parked because a CPU was still on them. */
+    vm_arch_reap_roots();
 
     /* Liveness heartbeat: this CPU is alive and idling. */
     cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
@@ -8521,7 +8524,32 @@ int process_clone(struct process *caller, struct trap_frame *tf, uint64_t flags,
     if (linux_compat_sig_clone && (caller->abi_flags & PROC_FLAG_LINUX_ABI))
       linux_compat_sig_clone(caller, t);
   }
-  proc_mark_ready(t);
+  /* H8-02 (H8-root): publish only into a live group -- the GB-145 rule
+     process_thread_create already had.  This is the path musl's
+     pthread_create takes, and it published READY with no lock and no check:
+     a SIGKILL of the group landing while the new PCB was being filled
+     (process_kill_group_sig marks the members it can see THREAD_DONE; this
+     one was not READY yet) left a READY member of a dead group.  A CPU then
+     picked it after the teardown and vm_arch_switch loaded CR3 = 0 (the dead
+     AS's root_phys): the guest triple-faulted with no console row
+     (linux_probe_rootfree R3, 3 of 5 boots on the lane before this). */
+  {
+    struct process *grp = process_group(caller);
+    uint64_t f2 = spinlock_acquire_irqsave(&proc_lock);
+    if (grp->state == PROC_STATE_FREE || grp->state == PROC_STATE_EXITED ||
+        grp->state == PROC_STATE_THREAD_DONE || grp->teardown_done ||
+        (grp->as == 0 && grp->phys_block_idx < 0)) {
+      if (grp->live_threads > 0)
+        grp->live_threads--;
+      t->as = 0;
+      t->phys_block_idx = -1;
+      t->state = PROC_STATE_THREAD_DONE; /* tombstone: never ran, reclaimable */
+      spinlock_release_irqrestore(&proc_lock, f2);
+      return -EAGAIN;
+    }
+    proc_mark_ready(t);
+    spinlock_release_irqrestore(&proc_lock, f2);
+  }
   return t->pid;
 }
 #endif

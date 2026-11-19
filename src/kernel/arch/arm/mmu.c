@@ -51,6 +51,22 @@ static uint8_t v2_live[MAX_CPUS];
    (0 = kernel/host table).  Used to hand the CPU back to the kernel
    table before an AS is freed or when a CPU stops running user code. */
 static uint64_t v2_active_root[MAX_CPUS];
+/* H8-root: the root TTBR0 really holds, written only after the write to
+   TTBR0 and its isb (v2_active_root is written before it, and cleared
+   before the restore's TTBR0 write): a CPU leaving a root reads as on it
+   until the change has taken effect.  One cache line per CPU (C1-k7). */
+static struct { volatile uint64_t ttbr; } __attribute__((aligned(64))) arm_ttbr_pub[MAX_CPUS];
+/* H8-root (ASID reuse): ASID = tgid, so a new process on a reused pid runs
+   under the dead one's ASID, and a v2 -> v2 switch is TTBR0 + isb only.
+   TLB and walk-cache entries a CPU still held for the old root (an
+   ASID-tagged walk-cache entry is used for any root with that ASID; the
+   root frame itself may even be reused) would serve the new process.
+   arm_asid_gen[a] counts the roots allocated under ASID a; arm_asid_seen[c][a]
+   is the generation CPU c last ran under it.  A switch to a newer generation
+   flushes that ASID locally first.  Each row of arm_asid_seen is written
+   only by its own CPU (768 bytes, line-aligned). */
+static volatile uint32_t arm_asid_gen[MAX_PROCESSES];
+static uint32_t arm_asid_seen[MAX_CPUS][MAX_PROCESSES] __attribute__((aligned(64)));
 
 #define MAIR_DEVICE_nGnRnE  0x00
 #define MAIR_NORMAL_NC      0x44  // Normal Non-Cacheable (avoids explicit flushes)
@@ -564,6 +580,8 @@ uint64_t vm_arch_root_alloc(struct addr_space *as) {
   uint64_t root = frame_alloc_zeroed();
   if (!root)
     return 0;
+  if (as->asid < MAX_PROCESSES) /* H8-root: a new generation of this ASID */
+    __atomic_add_fetch(&arm_asid_gen[as->asid], 1, __ATOMIC_ACQ_REL);
   uint64_t *l1 = (uint64_t *)root;
   l1[0] = ((uint64_t)&l2_table_0) | 0b11;
   l1[1] = ((uint64_t)&l2_kernel_1) | 0b11;
@@ -694,10 +712,21 @@ void vm_arch_switch(struct addr_space *as) {
                      "tlbi vmalle1\n"
                      "dsb sy\n"
                      "isb" ::: "memory");
+  } else if (as->asid < MAX_PROCESSES &&
+             arm_asid_seen[cpu][as->asid] != __atomic_load_n(&arm_asid_gen[as->asid], __ATOMIC_ACQUIRE)) {
+    /* H8-root: first run of this root's generation of its ASID on this CPU */
+    __asm__ volatile("dsb ishst\n"
+                     "tlbi aside1, %0\n"
+                     "dsb nsh\n"
+                     "isb" ::"r"((uint64_t)as->asid << 56)
+                     : "memory");
   } else {
     __asm__ volatile("isb" ::: "memory");
   }
+  if (as->asid < MAX_PROCESSES)
+    arm_asid_seen[cpu][as->asid] = __atomic_load_n(&arm_asid_gen[as->asid], __ATOMIC_ACQUIRE);
   v2_live[cpu] = 1;
+  __atomic_store_n(&arm_ttbr_pub[cpu].ttbr, as->root_phys, __ATOMIC_SEQ_CST);
 }
 
 /* L85: which CPU still has `root_phys` loaded as its user translation (see
@@ -728,19 +757,64 @@ void vm_arch_restore_kernel(void) {
                    "tlbi vmalle1\n"
                    "dsb sy\n"
                    "isb" ::: "memory");
+  /* H8-root: the next v2 switch is a v1 -> v2 one, with a full flush, so
+     arm_asid_seen needs no reset here. */
+  __atomic_store_n(&arm_ttbr_pub[cpu].ttbr, 0, __ATOMIC_SEQ_CST);
 }
 
 /* Free every table frame this AS owns plus its private leaf frames, then
    the root.  Runs after the group is claim-drained (no CPU is executing
    in this AS), under proc_lock (design section 5.3). */
-void vm_arch_teardown(uint64_t root_phys, uint16_t asid) {
-  if (!root_phys)
-    return;
-  /* P2.2 (S2): if THIS cpu is translating through the AS being freed,
-     leave v2 mode first (the design's claim-drain guarantees no other
-     CPU is executing in it). */
-  if (v2_active_root[get_cpuid()] == root_phys)
-    vm_arch_restore_kernel();
+/* H8-root: teardowns, and how many found another CPU on the root being
+   freed (the x64 [ROOTFREE] row's arm counterpart). */
+static volatile uint64_t arm_rf_td, arm_rf_onroot, arm_rf_deferred, arm_rf_drained, arm_rf_leaked,
+    arm_rf_unsafe;
+
+static int arm_cpu_may_be_on(uint32_t c, uint64_t root) {
+  return __atomic_load_n(&v2_active_root[c], __ATOMIC_SEQ_CST) == root ||
+         __atomic_load_n(&arm_ttbr_pub[c].ttbr, __ATOMIC_SEQ_CST) == root;
+}
+static uint32_t arm_root_users(uint64_t root) {
+  uint32_t m = 0;
+  __asm__ volatile("dmb ish" ::: "memory");
+  for (uint32_t c = 0; c < MAX_CPUS; c++)
+    if (arm_cpu_may_be_on(c, root))
+      m |= 1u << c;
+  return m;
+}
+
+void vm_arch_teardown_site(const void *pc) { (void)pc; }
+void vm_arch_root_report(void) {
+  extern void uart_puts(const char *s);
+  extern void print_int(int v);
+  uart_puts("[ROOTFREE] final td=");
+  print_int((int)arm_rf_td);
+  uart_puts(" onroot=");
+  print_int((int)arm_rf_onroot);
+  uart_puts(" unsafe=");
+  print_int((int)arm_rf_unsafe);
+  uart_puts(" deferred=");
+  print_int((int)arm_rf_deferred);
+  uart_puts(" drained=");
+  print_int((int)arm_rf_drained);
+  uart_puts(" leaked=");
+  print_int((int)arm_rf_leaked);
+  uart_puts("\n");
+}
+
+/* Free every table frame a dead root owns plus its private leaf frames,
+   then the root.  No CPU is on it (the callers checked); the ASID is
+   invalidated everywhere FIRST, so no TLB or walk-cache entry built from
+   these frames survives their reuse (it used to run after the L2/L3 frames
+   were already back in the pool). */
+static void arm_free_tables(uint64_t root_phys, uint16_t asid) {
+  if (arm_root_users(root_phys))
+    arm_rf_unsafe++; /* assertion: must stay 0 */
+  __asm__ volatile("dsb ishst\n"
+                   "tlbi aside1is, %0\n"
+                   "dsb ish\n"
+                   "isb" ::"r"((uint64_t)asid << 56)
+                   : "memory");
   uint64_t *l1 = (uint64_t *)root_phys;
   for (uint64_t c = 64; c <= 95; c++) {
     uint64_t l2d = l1[c];
@@ -765,14 +839,75 @@ void vm_arch_teardown(uint64_t root_phys, uint16_t asid) {
     }
     frame_free(l2p);
   }
-  /* ASID free/reuse: broadcast-invalidate before the root is released.
-     Operand ASID in [63:56] (8-bit config, see vm_arch_switch). */
-  __asm__ volatile("dsb ishst\n"
-                   "tlbi aside1is, %0\n"
-                   "dsb ish\n"
-                   "isb" ::"r"((uint64_t)asid << 56)
-                   : "memory");
   frame_free(root_phys);
+}
+
+/* H8-root: roots parked because another CPU may still be on them (the x64
+   design, docs/cp-root.md): 0 free, 1 busy, 2 parked; never waited on. */
+#define ARM_DYING_MAX 32
+static struct {
+  volatile uint64_t root;
+  volatile uint32_t state;
+  uint16_t asid;
+} arm_dying[ARM_DYING_MAX];
+static volatile uint32_t arm_dying_n;
+
+void vm_arch_reap_roots(void) {
+  if (!__atomic_load_n(&arm_dying_n, __ATOMIC_ACQUIRE))
+    return;
+  for (int i = 0; i < ARM_DYING_MAX; i++) {
+    if (__atomic_load_n(&arm_dying[i].state, __ATOMIC_ACQUIRE) != 2)
+      continue;
+    uint64_t root = arm_dying[i].root;
+    if (arm_root_users(root))
+      continue;
+    uint32_t exp = 2;
+    if (!__atomic_compare_exchange_n(&arm_dying[i].state, &exp, 1, 0, __ATOMIC_ACQ_REL,
+                                     __ATOMIC_ACQUIRE))
+      continue;
+    uint16_t asid = arm_dying[i].asid;
+    arm_dying[i].root = 0;
+    __atomic_sub_fetch(&arm_dying_n, 1, __ATOMIC_ACQ_REL);
+    arm_free_tables(root, asid);
+    arm_rf_drained++;
+    __atomic_store_n(&arm_dying[i].state, 0, __ATOMIC_RELEASE);
+  }
+}
+
+/* Free an AS's tables once no CPU can use them (design section 5.3; H8-root:
+   the claim drain does not guarantee that no other CPU still has the root in
+   TTBR0 -- see the x64 copy for the cases).  A root another CPU may be on is
+   parked and freed by the next teardown or idle loop after that CPU's next
+   TTBR0 change.  Never waits. */
+void vm_arch_teardown(uint64_t root_phys, uint16_t asid) {
+  if (!root_phys)
+    return;
+  arm_rf_td++;
+  uint32_t me = get_cpuid();
+  /* P2.2 (S2): if THIS cpu is translating through the AS being freed,
+     leave v2 mode first. */
+  if (me < MAX_CPUS && arm_cpu_may_be_on(me, root_phys))
+    vm_arch_restore_kernel();
+  vm_arch_reap_roots();
+  uint32_t found = arm_root_users(root_phys) & ~(me < MAX_CPUS ? 1u << me : 0);
+  if (!found) {
+    arm_free_tables(root_phys, asid);
+    return;
+  }
+  arm_rf_onroot++;
+  for (int i = 0; i < ARM_DYING_MAX; i++) {
+    uint32_t exp = 0;
+    if (!__atomic_compare_exchange_n(&arm_dying[i].state, &exp, 1, 0, __ATOMIC_ACQ_REL,
+                                     __ATOMIC_ACQUIRE))
+      continue;
+    arm_dying[i].root = root_phys;
+    arm_dying[i].asid = asid;
+    __atomic_add_fetch(&arm_dying_n, 1, __ATOMIC_ACQ_REL);
+    __atomic_store_n(&arm_dying[i].state, 2, __ATOMIC_RELEASE);
+    arm_rf_deferred++;
+    return;
+  }
+  arm_rf_leaked++; /* the park is full: never free what may be in use */
 }
 
 /* P1 (docs/cp-address-space.md): the compat layout is x86_64-only (AD-11);

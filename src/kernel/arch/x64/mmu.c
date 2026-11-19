@@ -8,6 +8,7 @@
 #include "kmem.h"
 #include "vm_pfstat.h" /* H7-fault */
 #include "console.h"   /* x64_in_console (H6-09) */
+#include "kline.h"     /* H8-root: [ROOTFREE] / [FREERACE] records */
 
 extern uint32_t get_cpuid(void);
 extern void uart_puts(const char *s);
@@ -540,6 +541,10 @@ void mmu_init_core_with_id(uint32_t cpu) {
   }
 
   __asm__ volatile("mov %0, %%cr3" : : "r"(pml4_phys) : "memory");
+  {
+    extern void x64_aspc_boot_cr3(uint32_t cpu, uint64_t cr3);
+    x64_aspc_boot_cr3(cpu, pml4_phys);
+  }
 
   // Set up core-local GS base for swapgs stack switching
   extern void trap_init_core_with_id(uint32_t cpu);
@@ -702,10 +707,30 @@ volatile void *mmu_map_mmio_range(uint64_t phys_addr, uint64_t size) {
 #define X64_PTE_PAT4K (1ULL << 7)
 #define X64_PTE_CACHE_MASK (X64_PTE_PWT | X64_PTE_PCD | X64_PTE_PAT4K)
 
-/* P2.2 (S2): the root_phys this CPU is currently translating through
-   (0 = kernel PML4).  Used to hand the CPU back to the kernel table
-   before an AS is freed or when a CPU stops running user code. */
-static uint64_t v2_active_root[MAX_CPUS];
+/* H8-root: one cache-line record per CPU for its address-space state (the
+   C1-k7 invariant: per-CPU words on the trap/lock path never share a line;
+   these were three packed [MAX_CPUS] arrays, v2_active_root[],
+   x64_tlb_pending[] and x64_tlb_owed_root[]).
+     root  P2.2 (S2): the v2 root this CPU runs, the bookkeeping copy (0 =
+           kernel PML4).  Written BEFORE CR3 is loaded with it, so a
+           shooter that reads it after changing a leaf targets every CPU
+           that may have walked the old leaf.
+     cr3   the root CR3 really holds.  Written AFTER every load of CR3, so a
+           CPU that is leaving a root still reads as on it until the load has
+           retired: `root` alone said "gone" one instruction early
+           (restore_kernel cleared it before the load), and an interrupt
+           taken in between ran its handler on the old root unseen.
+     sw    inside vm_arch_switch / vm_arch_restore_kernel (diagnostics).
+     tlb_pending, tlb_owed_root: the shootdown's per-target words (below). */
+struct x64_as_pc {
+  volatile uint64_t root;
+  volatile uint64_t cr3;
+  volatile uint64_t tlb_owed_root; /* H6-09: the owed flush's root */
+  volatile uint32_t tlb_pending;
+  volatile uint32_t sw;
+  const void *td_site; /* the caller of vm_as_teardown now running here */
+} __attribute__((aligned(64)));
+static struct x64_as_pc x64_aspc[MAX_CPUS];
 
 static uint64_t x64_v2_pte_desc(uint64_t phys, uint16_t prot, uint16_t kind) {
   uint64_t d = (phys & X64_OA_MASK) | X64_PTE_P | X64_PTE_US;
@@ -1118,7 +1143,7 @@ int vm_arch_walk(struct addr_space *as, uint64_t va, uint64_t *leaf) {
 int vm_arch_fast_leaf(struct addr_space *as, uint64_t va, int write, uint64_t *pa) {
   uint32_t c = get_cpuid();
   if (c >= MAX_CPUS || !as || !as->root_phys ||
-      __atomic_load_n(&v2_active_root[c], __ATOMIC_RELAXED) != as->root_phys)
+      __atomic_load_n(&x64_aspc[c].root, __ATOMIC_RELAXED) != as->root_phys)
     return -1;
   uint64_t *pte = x64_v2_walk_alloc(as, va, 0);
   if (!pte)
@@ -1214,9 +1239,7 @@ void vm_arch_reload_cr3(struct addr_space *as) {
  * The caller holds no spinlock: a target spinning on one with IRQs off
  * could not take the IPI. */
 static volatile uint64_t x64_tlb_root;
-static volatile uint32_t x64_tlb_pending[MAX_CPUS];
 uint32_t x64_tlb_console_owed; /* H6-09: flushes left owed to a console writer */
-static volatile uint64_t x64_tlb_owed_root[MAX_CPUS]; /* H6-09: the owed flush's root */
 
 /* H7-fault round 2 (H7-07): KVM's paravirtual TLB flush.
  *
@@ -1329,7 +1352,7 @@ void x64_send_test_ipi(uint32_t cpu, uint32_t vector) {
 /* Settle this CPU's owed flush, if any.  Safe from any context. */
 static void x64_tlb_service(void) {
   uint32_t me = get_cpuid();
-  if (me >= MAX_CPUS || !__atomic_load_n(&x64_tlb_pending[me], __ATOMIC_ACQUIRE))
+  if (me >= MAX_CPUS || !__atomic_load_n(&x64_aspc[me].tlb_pending, __ATOMIC_ACQUIRE))
     return;
   /* H7-fault round 3 (H6-09): a flush left owed to a console writer is for
      the root recorded with it (x64_tlb_owed_root), which the next shootdown
@@ -1337,16 +1360,16 @@ static void x64_tlb_service(void) {
      root.  (14bbf334 reloaded whatever CR3 held: a CPU still sitting on a
      dead process's freed root then re-walked it, and the next LAPIC EOI
      faulted -- kernel #PF in lapic_send_eoi from x64_tlb_service, P5 gate.) */
-  uint64_t root = __atomic_load_n(&x64_tlb_owed_root[me], __ATOMIC_ACQUIRE);
+  uint64_t root = __atomic_load_n(&x64_aspc[me].tlb_owed_root, __ATOMIC_ACQUIRE);
   if (!root)
     root = __atomic_load_n(&x64_tlb_root, __ATOMIC_ACQUIRE);
   uint64_t cr3;
   __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
   if (root && (cr3 & X64_OA_MASK) == root)
     __asm__ volatile("mov %0, %%cr3" ::"r"(cr3) : "memory");
-  if (__atomic_load_n(&x64_tlb_owed_root[me], __ATOMIC_RELAXED)) /* rare: no store per IPI */
-    __atomic_store_n(&x64_tlb_owed_root[me], 0, __ATOMIC_RELEASE);
-  __atomic_store_n(&x64_tlb_pending[me], 0, __ATOMIC_RELEASE);
+  if (__atomic_load_n(&x64_aspc[me].tlb_owed_root, __ATOMIC_RELAXED)) /* rare: no store per IPI */
+    __atomic_store_n(&x64_aspc[me].tlb_owed_root, 0, __ATOMIC_RELEASE);
+  __atomic_store_n(&x64_aspc[me].tlb_pending, 0, __ATOMIC_RELEASE);
 }
 
 /* C1-pe: how many other CPUs this CPU's last shootdown had to flush (0 = the
@@ -1381,7 +1404,7 @@ void vm_arch_shootdown(struct addr_space *as) {
   for (uint32_t c = 0; c < ncpu; c++) {
     if (c == me)
       continue;
-    int hit = (__atomic_load_n(&v2_active_root[c], __ATOMIC_ACQUIRE) == root);
+    int hit = (__atomic_load_n(&x64_aspc[c].root, __ATOMIC_ACQUIRE) == root);
     int run = 0; /* H7-fault: a thread of this AS is this CPU's current one */
     {
       extern int current_pid_of_cpu(uint32_t cpu);
@@ -1408,13 +1431,13 @@ void vm_arch_shootdown(struct addr_space *as) {
   __atomic_store_n(&x64_tlb_root, root, __ATOMIC_RELEASE);
   for (uint32_t c = 0; c < ncpu; c++)
     if (targets & (1u << c))
-      __atomic_store_n(&x64_tlb_pending[c], 1, __ATOMIC_RELEASE);
+      __atomic_store_n(&x64_aspc[c].tlb_pending, 1, __ATOMIC_RELEASE);
   __atomic_thread_fence(__ATOMIC_SEQ_CST);
   int pv = 0; /* H7-fault: targets the host flushes (preempted vCPUs) */
   for (uint32_t c = 0; c < ncpu; c++)
     if (targets & (1u << c)) {
       if (x64_pv_flush_if_preempted(c)) {
-        __atomic_store_n(&x64_tlb_pending[c], 0, __ATOMIC_RELEASE);
+        __atomic_store_n(&x64_aspc[c].tlb_pending, 0, __ATOMIC_RELEASE);
         pv++;
         continue;
       }
@@ -1432,7 +1455,7 @@ void vm_arch_shootdown(struct addr_space *as) {
     uint32_t left = 0;
     for (uint32_t c = 0; c < ncpu; c++)
       if ((targets & ~owed & (1u << c)) &&
-          __atomic_load_n(&x64_tlb_pending[c], __ATOMIC_ACQUIRE))
+          __atomic_load_n(&x64_aspc[c].tlb_pending, __ATOMIC_ACQUIRE))
         left |= 1u << c;
     if (!left)
       break;
@@ -1444,11 +1467,11 @@ void vm_arch_shootdown(struct addr_space *as) {
       __atomic_thread_fence(__ATOMIC_SEQ_CST);
       for (uint32_t c = 0; c < ncpu; c++)
         if ((left & (1u << c)) && __atomic_load_n(&x64_in_console[c].in, __ATOMIC_SEQ_CST)) {
-          __atomic_store_n(&x64_tlb_owed_root[c], root, __ATOMIC_SEQ_CST);
-          if (!__atomic_load_n(&x64_tlb_pending[c], __ATOMIC_SEQ_CST)) {
+          __atomic_store_n(&x64_aspc[c].tlb_owed_root, root, __ATOMIC_SEQ_CST);
+          if (!__atomic_load_n(&x64_aspc[c].tlb_pending, __ATOMIC_SEQ_CST)) {
             /* it flushed meanwhile: take the record back (unless it did) */
             uint64_t exp = root;
-            __atomic_compare_exchange_n(&x64_tlb_owed_root[c], &exp, 0, 0, __ATOMIC_SEQ_CST,
+            __atomic_compare_exchange_n(&x64_aspc[c].tlb_owed_root, &exp, 0, 0, __ATOMIC_SEQ_CST,
                                         __ATOMIC_SEQ_CST);
             left &= ~(1u << c);
             continue;
@@ -1473,7 +1496,7 @@ void vm_arch_shootdown(struct addr_space *as) {
     if (now - t0 > 6000000000ULL) {
       for (uint32_t c = 0; c < ncpu; c++)
         if (left & (1u << c))
-          __atomic_store_n(&x64_tlb_pending[c], 0, __ATOMIC_RELEASE);
+          __atomic_store_n(&x64_aspc[c].tlb_pending, 0, __ATOMIC_RELEASE);
       if (x64_tlb_timeouts++ < 8) {
         /* No spinlock is held here (the caller's contract), so the normal
            console path is safe (the panic sink is for paths that stop). */
@@ -1491,7 +1514,7 @@ void vm_arch_shootdown(struct addr_space *as) {
        from the host when it resumes: stop waiting for it */
     for (uint32_t c = 0; c < ncpu; c++)
       if ((left & (1u << c)) && x64_pv_flush_if_preempted(c)) {
-        __atomic_store_n(&x64_tlb_pending[c], 0, __ATOMIC_RELEASE);
+        __atomic_store_n(&x64_aspc[c].tlb_pending, 0, __ATOMIC_RELEASE);
         pv++;
       }
     if (now - last > 3000000ULL) { /* ~1 ms: re-send to the laggards */
@@ -1531,16 +1554,52 @@ void vm_arch_restore_kernel(void) {
      [IDMAP-TRIP] on a v1 status store with a stale v2 CR3). */
   uint64_t cur;
   __asm__ volatile("mov %%cr3, %0" : "=r"(cur));
-  if (!v2_active_root[cpu] && (cur & X64_OA_MASK) == cr3)
+  if (!x64_aspc[cpu].root && (cur & X64_OA_MASK) == cr3)
     return;
-  v2_active_root[cpu] = 0;
+  x64_aspc[cpu].sw = 1;
+  __atomic_store_n(&x64_aspc[cpu].root, 0, __ATOMIC_SEQ_CST);
   __asm__ volatile("mov %0, %%cr3" ::"r"(cr3) : "memory");
+  /* H8-root: published only once the load has retired (mov to CR3 is
+     serializing): until here the CPU may still walk the old root. */
+  __atomic_store_n(&x64_aspc[cpu].cr3, cr3, __ATOMIC_SEQ_CST);
+  x64_aspc[cpu].sw = 0;
 }
 
+static volatile uint32_t x64_switch_dead; /* H8-root: switches to a torn-down AS */
+
 void vm_arch_switch(struct addr_space *as) {
-  v2_active_root[get_cpuid()] = as->root_phys;
+  uint32_t cpu = get_cpuid();
   uint64_t cr3 = as->root_phys;
+  if (!cr3) {
+    /* H8-root: a switch to an AS whose teardown already ran (root_phys 0).
+       Loading CR3 = 0 walks physical page 0 as a PML4: the next fetch or
+       stack push faults through garbage and the guest triple-faults, with
+       no console row.  Stay on the kernel PML4 and say so. */
+    if (__atomic_fetch_add(&x64_switch_dead, 1, __ATOMIC_RELAXED) < 8) {
+      struct kline k;
+      kl_init(&k);
+      kl_s(&k, "[ROOTSW0] cpu="); kl_i(&k, (long)cpu);
+      kl_s(&k, " tgid="); kl_i(&k, (long)as->tgid);
+      kl_s(&k, " ver="); kl_i(&k, (long)as->ver);
+      kl_s(&k, " caller="); kl_hex(&k, (unsigned long)(uintptr_t)__builtin_return_address(0));
+      kl_c(&k, '\n');
+      kl_emit(&k);
+    }
+    vm_arch_restore_kernel();
+    return;
+  }
+  x64_aspc[cpu].sw = 1;
+  __atomic_store_n(&x64_aspc[cpu].root, cr3, __ATOMIC_SEQ_CST);
   __asm__ volatile("mov %0, %%cr3" ::"r"(cr3) : "memory");
+  __atomic_store_n(&x64_aspc[cpu].cr3, cr3, __ATOMIC_SEQ_CST);
+  x64_aspc[cpu].sw = 0;
+}
+
+/* H8-root: CR3 at bring-up (mmu_init_core_with_id), so the record starts
+   true. */
+void x64_aspc_boot_cr3(uint32_t cpu, uint64_t cr3) {
+  if (cpu < MAX_CPUS)
+    __atomic_store_n(&x64_aspc[cpu].cr3, cr3, __ATOMIC_SEQ_CST);
 }
 
 /* L85: ground truth for "is this address space still loaded on a CPU?".
@@ -1555,49 +1614,132 @@ int vm_arch_root_cpu(uint64_t root_phys) {
   if (!root_phys)
     return -1;
   for (uint32_t c = 0; c < MAX_CPUS; c++)
-    if (v2_active_root[c] == root_phys)
+    if (x64_aspc[c].root == root_phys)
       return (int)c;
   return -1;
 }
 
-void vm_arch_teardown(uint64_t root_phys, uint16_t asid) {
-  (void)asid; /* unused on x64 */
-  if (!root_phys)
-    return;
-  /* P2.2 (S2): if THIS cpu is translating through the AS being freed,
-     leave v2 mode first (the design's claim-drain guarantees no other
-     CPU is executing in it). */
-  if (v2_active_root[get_cpuid()] == root_phys)
-    vm_arch_restore_kernel();
-  /* GB-057: the comment above says "the design's claim-drain guarantees no
-     other CPU is executing in it".  This ticket has MEASURED that guarantee to
-     be imperfect -- a claim leaked on an idle CPU (probe32: c4=16), and the
-     claim guard carries a documented block-to-schedule window -- so observe it
-     instead of trusting it.  If another CPU still translates through the root
-     we are freeing, every access it makes lands in frames about to be recycled,
-     and an interrupt handler's LAPIC EOI (0xFEE000B0) is simply the first one
-     that page-faults.
+/* H8-root: may CPU c still translate through `root`?  Either its bookkeeping
+   says so (it runs, or is about to load, that root) or CR3 still holds it (a
+   load away from it has not been published yet, or a reload path left it
+   there).  Both words are read: each one alone has a window. */
+static int x64_cpu_may_be_on(uint32_t c, uint64_t root) {
+  return __atomic_load_n(&x64_aspc[c].root, __ATOMIC_SEQ_CST) == root ||
+         __atomic_load_n(&x64_aspc[c].cr3, __ATOMIC_SEQ_CST) == root;
+}
 
-     Reports and changes no behaviour: the fix is a shootdown-and-ack before
-     freeing (x64_send_ipi / x64_shootdown_acks already exist), and the first
-     step is knowing whether this ever happens.  Lock-free printing on purpose:
-     we may hold vm_lock here, and uart_puts can take a lock. */
-  {
-    extern void panic_puts(const char *s);
-    extern void panic_print_hex(uint64_t v);
-    static volatile uint64_t freerace_seen;
-    uint32_t me = get_cpuid();
-    for (uint32_t c = 0; c < MAX_CPUS; c++) {
-      if (c == me || v2_active_root[c] != root_phys)
-        continue;
-      if (freerace_seen >= 20)
-        break;
-      freerace_seen++;
-      panic_puts("[FREERACE] freeing root=");
-      panic_print_hex(root_phys);
-      panic_puts(" while cpu=");
-      panic_print_hex((uint64_t)c);
-      panic_puts(" still translates through it\n");
+/* H8-root: what a CPU found on a root being freed is doing ([ROOTFREE]).
+   One class per CPU found, in this priority order. */
+enum { RF_CONS, RF_IRQ, RF_SW, RF_STALE, RF_IDLE, RF_THR, RF_OTHER, RF_NCLASS };
+static const char *const rf_name[RF_NCLASS] = {"cons", "irq", "sw", "stale", "idle", "thr", "other"};
+static int x64_rootfree_class(uint32_t c, uint64_t root, uint16_t tgid) {
+  extern int current_pid_of_cpu(uint32_t cpu);
+  if (__atomic_load_n(&x64_in_console[c].in, __ATOMIC_RELAXED))
+    return RF_CONS; /* inside cons_hw_tx (H6-09) */
+  int depth = sched_tpc[c].trap_depth, sys = sched_tpc[c].trap_sys;
+  if (depth > (sys ? 1 : 0))
+    return RF_IRQ; /* in an interrupt or exception handler */
+  if (x64_aspc[c].sw)
+    return RF_SW; /* between the bookkeeping store and the CR3 load */
+  if (x64_aspc[c].root != root)
+    return RF_STALE; /* CR3 holds it, the bookkeeping does not */
+  int pid = current_pid_of_cpu(c);
+  if (pid < 0)
+    return RF_IDLE; /* claims no process: idle entry / scheduler tail */
+  struct process *p = process_get_pcb(pid);
+  struct process *g = p ? process_group(p) : 0;
+  if (g && (uint16_t)g->pid == tgid)
+    return RF_THR; /* a thread of the dying group still claims this CPU */
+  return RF_OTHER;
+}
+
+struct x64_rootfree_stats {
+  volatile uint64_t teardowns;  /* vm_arch_teardown calls with a root */
+  volatile uint64_t self;       /* this CPU was on it (restore_kernel first) */
+  volatile uint64_t onroot;     /* another CPU may still have been on it */
+  volatile uint64_t unsafe;     /* ... and its frames were freed anyway (must stay 0) */
+  volatile uint64_t deferred;   /* parked in x64_dying until every such CPU left */
+  volatile uint64_t drained;    /* parked roots freed later */
+  volatile uint64_t leaked;     /* the park was full: never freed (safe, counted) */
+  volatile uint64_t wait_max_us; /* longest park */
+  volatile uint64_t cls[RF_NCLASS];
+} __attribute__((aligned(64)));
+static struct x64_rootfree_stats x64_rf;
+
+/* H8-root: roots whose AS is gone but that some CPU may still translate
+   through.  A slot is FREE (0), BUSY (1: being filled or being freed, owned
+   by one CPU) or PARKED (2).  Lock-free: slots are claimed by compare-and-
+   swap, and nothing ever waits on one. */
+#define X64_DYING_MAX 64
+struct x64_dying {
+  volatile uint64_t root;
+  volatile uint32_t state;
+  uint32_t mask; /* the CPUs found on it at teardown (diagnostics) */
+  uint64_t t0;   /* TSC at teardown */
+};
+static struct x64_dying x64_dying[X64_DYING_MAX];
+static volatile uint32_t x64_dying_n; /* PARKED slots (the idle hook's test) */
+
+static void x64_rootfree_row(const char *why) {
+  struct kline k;
+  kl_init(&k);
+  kl_s(&k, "[ROOTFREE] "); kl_s(&k, why);
+  kl_s(&k, " td="); kl_i(&k, (long)x64_rf.teardowns);
+  kl_s(&k, " self="); kl_i(&k, (long)x64_rf.self);
+  kl_s(&k, " onroot="); kl_i(&k, (long)x64_rf.onroot);
+  kl_s(&k, " unsafe="); kl_i(&k, (long)x64_rf.unsafe);
+  kl_s(&k, " deferred="); kl_i(&k, (long)x64_rf.deferred);
+  kl_s(&k, " drained="); kl_i(&k, (long)x64_rf.drained);
+  kl_s(&k, " parked="); kl_i(&k, (long)x64_dying_n);
+  kl_s(&k, " leaked="); kl_i(&k, (long)x64_rf.leaked);
+  kl_s(&k, " wait_max_us="); kl_i(&k, (long)x64_rf.wait_max_us);
+  for (int i = 0; i < RF_NCLASS; i++) {
+    kl_c(&k, ' '); kl_s(&k, rf_name[i]); kl_c(&k, '='); kl_i(&k, (long)x64_rf.cls[i]);
+  }
+  kl_c(&k, '\n');
+  kl_emit(&k);
+}
+
+void vm_arch_teardown_site(const void *pc) {
+  uint32_t c = get_cpuid();
+  if (c < MAX_CPUS)
+    x64_aspc[c].td_site = pc;
+}
+
+/* H8-root: the end-of-run row (process.c prints it beside [LOCKCNT]). */
+void vm_arch_root_report(void) { x64_rootfree_row("final"); }
+
+/* Mask of the CPUs that may still translate through `root` (all CPUs, the
+   caller included). */
+static uint32_t x64_root_users(uint64_t root) {
+  uint32_t m = 0;
+  __atomic_thread_fence(__ATOMIC_SEQ_CST);
+  for (uint32_t c = 0; c < MAX_CPUS; c++)
+    if (x64_cpu_may_be_on(c, root))
+      m |= 1u << c;
+  return m;
+}
+
+/* Free the tables of a root no CPU translates through any more.  The check
+   at the top is the assertion: every caller has just established that no
+   CPU is on the root, and a CR3 load is never made from a torn-down AS, so
+   a CPU found on it here is a bug ([FREERACE], unsafe=). */
+static void x64_free_tables(uint64_t root_phys, uint16_t asid) {
+  uint32_t users = x64_root_users(root_phys);
+  if (users) {
+    static volatile uint32_t freerace_seen;
+    __atomic_add_fetch(&x64_rf.unsafe, 1, __ATOMIC_RELAXED);
+    if (__atomic_fetch_add(&freerace_seen, 1, __ATOMIC_RELAXED) < 20) {
+      uint32_t c = (uint32_t)__builtin_ctz(users);
+      struct kline k;
+      kl_init(&k);
+      kl_s(&k, "[FREERACE] freeing root="); kl_hex(&k, root_phys);
+      kl_s(&k, " while cpu="); kl_i(&k, (long)c);
+      kl_s(&k, " still translates through it why="); kl_s(&k, rf_name[x64_rootfree_class(c, root_phys, asid)]);
+      kl_s(&k, " mask="); kl_hex(&k, users);
+      kl_s(&k, " tgid="); kl_i(&k, (long)asid);
+      kl_c(&k, '\n');
+      kl_emit(&k);
     }
   }
   /* P1 (D7): free every user table in the lower half (PML4[0..255]) --
@@ -1650,4 +1792,135 @@ void vm_arch_teardown(uint64_t root_phys, uint16_t asid) {
     frame_free(pdpt_pa);
   }
   frame_free(root_phys);
+}
+
+/* H8-root: free every parked root that no CPU is on any more.  Called from
+   vm_arch_teardown and from the idle loop (process.c), never with vm_lock
+   held; it never waits. */
+void vm_arch_reap_roots(void) {
+  if (!__atomic_load_n(&x64_dying_n, __ATOMIC_ACQUIRE))
+    return;
+  for (int i = 0; i < X64_DYING_MAX; i++) {
+    struct x64_dying *d = &x64_dying[i];
+    if (__atomic_load_n(&d->state, __ATOMIC_ACQUIRE) != 2)
+      continue;
+    uint64_t root = d->root;
+    if (x64_root_users(root))
+      continue;
+    uint32_t exp = 2;
+    if (!__atomic_compare_exchange_n(&d->state, &exp, 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+      continue; /* another CPU is freeing it */
+    uint64_t t0 = d->t0;
+    d->root = 0;
+    __atomic_sub_fetch(&x64_dying_n, 1, __ATOMIC_ACQ_REL);
+    extern uint64_t timer_tsc_per_ms(void);
+    uint64_t per_ms = timer_tsc_per_ms();
+    uint64_t us = per_ms ? (x64_rdtsc() - t0) * 1000 / per_ms : 0;
+    if (us > x64_rf.wait_max_us)
+      x64_rf.wait_max_us = us;
+    x64_free_tables(root, 0);
+    __atomic_add_fetch(&x64_rf.drained, 1, __ATOMIC_RELAXED);
+    __atomic_store_n(&d->state, 0, __ATOMIC_RELEASE);
+  }
+}
+
+/* H8-root: free an address space's page tables, but only once no CPU can
+   use them.
+   - This CPU leaves the root first (restore_kernel), as before.
+   - Another CPU may still be on it: its bookkeeping says so (it is in the
+     scheduler tail of the group's last thread, or of a sibling killed by
+     exit_group whose claim already drained), or its CR3 still holds it (an
+     interrupt handler, a console write the host holds, a CPU spinning with
+     interrupts off).  Freeing then hands that CPU's next walk -- a TLB miss,
+     a speculative walk, the paging-structure caches -- recycled frames: the
+     H7-18 kernel #PF in lapic_send_eoi.
+   - Such a root is parked instead.  Every CPU on it passes a CR3 load soon
+     (vm_arch_switch or vm_arch_restore_kernel: the scheduler tail, the idle
+     loop), which publishes its new CR3 only after the load retired, and with
+     PCID and global pages off that load also drops every cached translation
+     and paging-structure entry of the old root.  The next teardown, or any
+     CPU's idle loop, then frees it.
+   - Nothing here waits: no IPI, no ack, no lock.  A CPU that never leaves
+     (wedged, halted on the root) keeps the root parked for ever, which
+     costs its frames and nothing else; a full park leaks the root ([ROOTFREE]
+     leaked=) rather than free it.  So it cannot deadlock, under any lock the
+     caller holds (proc_lock with interrupts off included), and a console
+     writer stalled in a port exit (H6-09) or a CPU with interrupts off only
+     delays the free. */
+void vm_arch_teardown(uint64_t root_phys, uint16_t asid) {
+  if (!root_phys)
+    return;
+  uint32_t me = get_cpuid();
+  __atomic_add_fetch(&x64_rf.teardowns, 1, __ATOMIC_RELAXED);
+  /* P2.2 (S2): if THIS cpu is translating through the AS being freed,
+     leave v2 mode first.  H8-root: decided on CR3 too (the unit tier's
+     kernel-context faults leave a test AS's root in CR3). */
+  if (me < MAX_CPUS && x64_cpu_may_be_on(me, root_phys)) {
+    __atomic_add_fetch(&x64_rf.self, 1, __ATOMIC_RELAXED);
+    vm_arch_restore_kernel();
+  }
+  vm_arch_reap_roots();
+  /* GB-057: "the design's claim-drain guarantees no other CPU is executing
+     in it" was MEASURED to be imperfect (probe32: c4=16; [FREERACE] in
+     integ22/23 Wine shutdowns).  H8-root: both words of every CPU's record
+     are read; a root that some CPU may still be on is parked. */
+  uint32_t found = x64_root_users(root_phys) & ~(me < MAX_CPUS ? 1u << me : 0);
+  if (!found) {
+    x64_free_tables(root_phys, asid);
+#ifdef KERNEL_MODE_TEST
+    /* The running totals, for the probe checks.  Test kernels only: this
+       path can run under proc_lock with interrupts off, and uart_puts may
+       spin on uart_lock for a stalled host.  Every kernel keeps the final
+       row and the [FREERACE] / [ROOTSW0] assertion rows. */
+    if ((x64_rf.teardowns & 63) == 1)
+      x64_rootfree_row("every64");
+#endif
+    return;
+  }
+  __atomic_add_fetch(&x64_rf.onroot, 1, __ATOMIC_RELAXED);
+  int first_cls = RF_OTHER;
+  for (uint32_t c = 0; c < MAX_CPUS; c++)
+    if (found & (1u << c)) {
+      int cls = x64_rootfree_class(c, root_phys, asid);
+      if (!(found & ((1u << c) - 1)))
+        first_cls = cls;
+      __atomic_add_fetch(&x64_rf.cls[cls], 1, __ATOMIC_RELAXED);
+    }
+  int parked = 0;
+  for (int i = 0; i < X64_DYING_MAX && !parked; i++) {
+    struct x64_dying *d = &x64_dying[i];
+    uint32_t exp = 0;
+    if (!__atomic_compare_exchange_n(&d->state, &exp, 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+      continue;
+    d->root = root_phys;
+    d->mask = found;
+    d->t0 = x64_rdtsc();
+    __atomic_add_fetch(&x64_dying_n, 1, __ATOMIC_ACQ_REL);
+    __atomic_store_n(&d->state, 2, __ATOMIC_RELEASE);
+    parked = 1;
+  }
+  if (parked)
+    __atomic_add_fetch(&x64_rf.deferred, 1, __ATOMIC_RELAXED);
+  else
+    __atomic_add_fetch(&x64_rf.leaked, 1, __ATOMIC_RELAXED);
+#ifdef KERNEL_MODE_TEST
+  /* Test kernels only (see the every64 row above); the counters run in
+     every kernel and reach the final row. */
+  static volatile uint32_t rows;
+  if (__atomic_fetch_add(&rows, 1, __ATOMIC_RELAXED) < 40) {
+    struct kline k;
+    kl_init(&k);
+    kl_s(&k, parked ? "[ROOTPARK] root=" : "[ROOTPARK] FULL, leaked root=");
+    kl_hex(&k, root_phys);
+    kl_s(&k, " cpus="); kl_hex(&k, found);
+    kl_s(&k, " why="); kl_s(&k, rf_name[first_cls]);
+    kl_s(&k, " tgid="); kl_i(&k, (long)asid);
+    kl_s(&k, " site="); kl_hex(&k, (unsigned long)(uintptr_t)(me < MAX_CPUS ? x64_aspc[me].td_site : 0));
+    kl_c(&k, '\n');
+    kl_emit(&k);
+    x64_rootfree_row("park");
+  }
+#else
+  (void)first_cls;
+#endif
 }

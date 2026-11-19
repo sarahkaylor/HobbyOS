@@ -42,13 +42,13 @@ ALLOW = {
     "src/kernel/arch/arm/locks.c": (36, "same, arm"),
 
     # ---- RETURNING paths: these are the GB-097 residue, not an endorsement ----
-    "src/kernel/arch/x64/mmu.c": (7, "FREERACE diagnostic inside v2 free -- RETURNS (GB-097 residue)"),
     "src/kernel/main.c": (9, "hex/decimal helpers -- RETURN (GB-097 residue; 11->9 in f89a8177)"),
     "src/kernel/process.c": (39, "resume-RETURNED / spawn diagnostics -- RETURN (GB-097 residue)"),
 }
 
-RESIDUE = {"src/kernel/arch/x64/mmu.c",
-           "src/kernel/main.c", "src/kernel/process.c"}
+# (x64 mmu.c's 7 FREERACE references went in H8-root: the row is a kline
+#  record now, printed from a returning path through the locked console.)
+RESIDUE = {"src/kernel/main.c", "src/kernel/process.c"}
 
 
 def scan(root):
