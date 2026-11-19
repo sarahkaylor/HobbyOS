@@ -933,6 +933,7 @@ uint64_t vm_arch_unmap_keep(struct addr_space *as, uint64_t va) {
    then vm_arch_unmap_keep) and invlpg'd each one, under vm_lock: 6-9 ms for
    256 MiB (linux_probe_vmhold).  Here the page table is walked once per
    2 MiB and its entries are read in a row. */
+static void x64_tlb_service(void);
 int vm_arch_zap_range(struct addr_space *as, uint64_t va, uint64_t end,
                       void (*rel)(void *ctx, uint64_t fr), void *ctx) {
   int n = 0;
@@ -965,6 +966,7 @@ int vm_arch_zap_range(struct addr_space *as, uint64_t va, uint64_t end,
       rel(ctx, fr);
     }
     va = tend;
+    x64_tlb_service(); /* H7-07: interrupts are off under vm_lock */
   }
   if (n >= 32)
     vm_arch_reload_cr3(as); /* this CPU, if it runs the AS (a flush) */
@@ -1154,6 +1156,76 @@ void vm_arch_reload_cr3(struct addr_space *as) {
  * could not take the IPI. */
 static volatile uint64_t x64_tlb_root;
 static volatile uint32_t x64_tlb_pending[MAX_CPUS];
+
+/* H7-fault round 2 (H7-07): KVM's paravirtual TLB flush.
+ *
+ * A shootdown IPI to a vCPU the host has descheduled is not delivered until
+ * the host runs that vCPU again, and the sender spins until it acknowledges:
+ * on the loaded strix host that is milliseconds per shootdown (5.2 s per
+ * fp720 boot, up to 740 ms each).  KVM publishes, per vCPU, a steal-time
+ * record whose `preempted` byte says the vCPU is not running; a guest that
+ * sets KVM_VCPU_FLUSH_TLB in it (with a compare-and-swap, so a vCPU that
+ * resumed meanwhile is not missed) gets that vCPU's TLB flushed by the host
+ * before it runs guest code again -- the same flush the IPI would have done
+ * (Linux: kvm_flush_tlb_multi).  Each CPU registers its record at bring-up
+ * (MSR_KVM_STEAL_TIME) when CPUID says KVM offers steal time and PV TLB
+ * flush; the shootdown then skips, and stops waiting for, every target whose
+ * record says preempted. */
+struct kvm_steal_time_rec {
+  uint64_t steal;
+  uint32_t version;
+  uint32_t flags;
+  uint8_t preempted;
+  uint8_t u8_pad[3];
+  uint32_t pad[11];
+} __attribute__((aligned(64)));
+#define KVM_VCPU_PREEMPTED (1u << 0)
+#define KVM_VCPU_FLUSH_TLB (1u << 1)
+static struct kvm_steal_time_rec x64_st[MAX_CPUS];
+static volatile uint32_t x64_st_mask; /* CPUs whose record is registered */
+static volatile int x64_pvtlb_ok = -1; /* -1 not probed, 0 no, 1 yes */
+volatile uint32_t x64_pvtlb_used;    /* targets the host flushed for us */
+
+static int x64_kvm_pvtlb_available(void) {
+  uint32_t a, b, c, d;
+  __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(0x40000000u), "c"(0u));
+  /* "KVMKVMKVM\0\0\0" */
+  if (b != 0x4b4d564bu || c != 0x564b4d56u || d != 0x4du || a < 0x40000001u)
+    return 0;
+  __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(0x40000001u), "c"(0u));
+  return (a & (1u << 5)) && (a & (1u << 9)); /* STEAL_TIME, PV_TLB_FLUSH */
+}
+
+/* Called on every CPU at bring-up (trap_init_core_with_id). */
+void vm_arch_pv_init_cpu(uint32_t cpu) {
+  if (cpu >= MAX_CPUS)
+    return;
+  if (x64_pvtlb_ok < 0) {
+    x64_pvtlb_ok = x64_kvm_pvtlb_available();
+    extern void uart_puts(const char *s);
+    uart_puts(x64_pvtlb_ok ? "[PVTLB] KVM steal time + PV TLB flush: on\n"
+                           : "[PVTLB] KVM PV TLB flush: not offered (IPIs only)\n");
+  }
+  if (!x64_pvtlb_ok)
+    return;
+  uint64_t pa = kimg_pa(&x64_st[cpu]) | 1u; /* enable */
+  __asm__ volatile("wrmsr" : : "a"((uint32_t)pa), "d"((uint32_t)(pa >> 32)), "c"(0x4b564d03u));
+  __atomic_fetch_or(&x64_st_mask, 1u << cpu, __ATOMIC_SEQ_CST);
+}
+
+/* 1 when CPU c is preempted and the host has taken the flush over. */
+static int x64_pv_flush_if_preempted(uint32_t c) {
+  if (!(x64_st_mask & (1u << c)))
+    return 0;
+  uint8_t st = __atomic_load_n(&x64_st[c].preempted, __ATOMIC_ACQUIRE);
+  if (!(st & KVM_VCPU_PREEMPTED))
+    return 0;
+  if (!__atomic_compare_exchange_n(&x64_st[c].preempted, &st,
+                                   (uint8_t)(st | KVM_VCPU_FLUSH_TLB), 0,
+                                   __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
+    return 0; /* it resumed meanwhile: it takes the IPI */
+  return 1;
+}
 static volatile uint32_t x64_tlb_lock;
 static volatile uint64_t x64_tlb_timeouts;
 
@@ -1267,8 +1339,14 @@ void vm_arch_shootdown(struct addr_space *as) {
     if (targets & (1u << c))
       __atomic_store_n(&x64_tlb_pending[c], 1, __ATOMIC_RELEASE);
   __atomic_thread_fence(__ATOMIC_SEQ_CST);
+  int pv = 0; /* H7-fault: targets the host flushes (preempted vCPUs) */
   for (uint32_t c = 0; c < ncpu; c++)
     if (targets & (1u << c)) {
+      if (x64_pv_flush_if_preempted(c)) {
+        __atomic_store_n(&x64_tlb_pending[c], 0, __ATOMIC_RELEASE);
+        pv++;
+        continue;
+      }
       x64_icr_wait_idle();
       x64_send_ipi(c, 0x82);
     }
@@ -1313,6 +1391,13 @@ void vm_arch_shootdown(struct addr_space *as) {
       }
       break;
     }
+    /* H7-fault: a laggard the host has descheduled since gets its flush
+       from the host when it resumes: stop waiting for it */
+    for (uint32_t c = 0; c < ncpu; c++)
+      if ((left & (1u << c)) && x64_pv_flush_if_preempted(c)) {
+        __atomic_store_n(&x64_tlb_pending[c], 0, __ATOMIC_RELEASE);
+        pv++;
+      }
     if (now - last > 3000000ULL) { /* ~1 ms: re-send to the laggards */
       last = now;
       for (uint32_t c = 0; c < ncpu; c++)
@@ -1325,13 +1410,16 @@ void vm_arch_shootdown(struct addr_space *as) {
   }
   __atomic_store_n(&x64_tlb_root, 0, __ATOMIC_RELEASE);
   __atomic_store_n(&x64_tlb_lock, 0, __ATOMIC_RELEASE);
+  x64_pvtlb_used += (uint32_t)pv;
   pfstat_shoot(x64_rdtsc() - sh_t0, __builtin_popcount(targets), __builtin_popcount(running),
                __builtin_popcount(slowmask), slowmask);
+  pfstat_shoot_pv(pv);
 }
 
 /* Called from the vector 0x82 handler (trap.c): never schedules, never
  * touches kernel-mode task state beyond a CR3 reload of the target AS. */
 void vm_x64_shootdown_handler(void) { x64_tlb_service(); }
+void vm_arch_tlb_poll(void) { x64_tlb_service(); }
 
 /* P2.2 (S2): hand this CPU back to the kernel PML4.  Cheap no-op when
    already there.  Required (a) when a CPU stops running a v2 AS (v1

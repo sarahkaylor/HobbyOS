@@ -70,6 +70,7 @@ void pfstat_zeroed(uint64_t phys, uint64_t tsc);
 void pfstat_shoot_site(int site); /* the next shootdown on this CPU is `site`'s */
 int pfstat_pid_in_fault(int pid);  /* thread `pid` is inside vm_handle_fault */
 void pfstat_shoot_infault(int n);  /* n slow targets were inside a fault */
+void pfstat_shoot_pv(int n);       /* n targets were flushed by the host (preempted) */
 void pfstat_tseg(int seg, uint64_t tsc);
 /* targets: CPUs IPI'd; running: ... of which ran a thread of the AS;
    slow: ... of which took >= 1 ms to acknowledge; slowmask: which */
@@ -95,6 +96,7 @@ static inline void pfstat_zeroed(uint64_t phys, uint64_t tsc) { (void)phys; (voi
 static inline void pfstat_shoot_site(int site) { (void)site; }
 static inline int pfstat_pid_in_fault(int pid) { (void)pid; return 0; }
 static inline void pfstat_shoot_infault(int n) { (void)n; }
+static inline void pfstat_shoot_pv(int n) { (void)n; }
 static inline void pfstat_tseg(int seg, uint64_t tsc) { (void)seg; (void)tsc; }
 static inline void pfstat_shoot(uint64_t tsc, int targets, int running, int slow, uint32_t slowmask) {
   (void)tsc; (void)targets; (void)running; (void)slow; (void)slowmask;

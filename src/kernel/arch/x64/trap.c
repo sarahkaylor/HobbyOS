@@ -6643,6 +6643,10 @@ void trap_init_core_with_id(uint32_t cpu) {
 
   // Initialize syscall instruction extensions
   syscall_init();
+
+  /* H7-fault round 2 (H7-07): KVM steal-time record for the PV TLB flush */
+  extern void vm_arch_pv_init_cpu(uint32_t cpu);
+  vm_arch_pv_init_cpu(cpu);
 }
 
 void trap_init_core(void) {

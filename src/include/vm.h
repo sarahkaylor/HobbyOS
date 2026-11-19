@@ -782,6 +782,11 @@ void vm_arch_flush_va(struct addr_space *as, uint64_t va);
  * CPU is only guaranteed to be seen after a CR3 reload on every
  * implementation; the retry path uses this once the cheap flush has failed. */
 void vm_arch_reload_cr3(struct addr_space *as);
+/* H7-fault round 2 (H7-07): settle this CPU's owed TLB shootdown now, if one
+   is pending.  For waits that spin with interrupts off (a spinlock, an NFS
+   reply inside a page fault), which cannot take the 0x82 IPI: the sender
+   would otherwise wait for the whole spin.  Safe in any context. */
+void vm_arch_tlb_poll(void);
 void vm_arch_shootdown(struct addr_space *as);
 /* C1-fork (x86_64): copy-on-write sharing of private frames across fork.
    vm_arch_cow_mark makes a present private leaf read-only + COW (local

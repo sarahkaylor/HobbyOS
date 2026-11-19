@@ -5636,6 +5636,8 @@ int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot)
     }
     if (vm_arch_walk(as, a, 0) != 0)
       continue;
+    if ((mprot_n & 63) == 63)
+      vm_arch_tlb_poll(); /* H7-07: interrupts are off under vm_lock */
     if (++mprot_n % VM_MPROT_CHUNK == 0) {
       vm_lock_rel(fl);
       fl = vm_lock_acq(__LINE__);

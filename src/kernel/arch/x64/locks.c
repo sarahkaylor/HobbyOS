@@ -296,6 +296,15 @@ static void spin_acquire_raw(spinlock_t *lock) {
     uint64_t spins = 0;
     while (__atomic_test_and_set(&lock->locked, __ATOMIC_ACQUIRE)) {
       __builtin_ia32_pause();
+      /* H7-fault round 2 (H7-07): a CPU spinning here usually has
+         interrupts off (irqsave) and cannot take a shootdown IPI; settle
+         the flush it owes, so the sender does not wait out our spin. */
+#ifndef HOST_TEST /* the host lock tests link locks.c without the MMU */
+      if ((spins & 63) == 63) {
+        extern void vm_arch_tlb_poll(void);
+        vm_arch_tlb_poll();
+      }
+#endif
       /* DIAG (temporary): 67M pause iterations is minutes under TCG, so a real
        * stall is reported by STALLBREAK-DIAG first with owner_pid=-1 and no
        * owner PC.  16M still cannot be reached by a lock held across one
