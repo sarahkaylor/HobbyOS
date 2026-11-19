@@ -96,6 +96,8 @@ uint64_t frame_alloc_contig(int n);
 
 int frame_total_count(void);
 int frame_free_count(void);
+/* H7-fault: vm.c's zeroed-frame stashes, counted as free (frame.c). */
+void frame_parked_add(int delta);
 /* C1-k6: frees of an already-free frame seen so far ([FRAME-DFREE] rows). */
 int frame_dfree_count(void);
 int frame_used_count(void);

@@ -339,6 +339,18 @@ int net_socket_recv(struct socket_pcb* pcb, void* buf, uint32_t len);
  */
 int net_socket_recv_timeout(struct socket_pcb* pcb, void* buf, uint32_t len, int timeout_ms);
 
+/* H7-fault (docs/cp-fault.md §3): what a timed-out wait saw.  Filled by
+ * net_socket_recv_timeout_st; diagnostic only (the wait behaves exactly like
+ * net_socket_recv_timeout). */
+struct net_wait_st {
+  uint32_t iters;      /* looks at the socket */
+  uint32_t gap_max_us; /* the longest stretch between two looks (vCPU stall) */
+  uint32_t pend;       /* RX used-ring entries not yet processed, at timeout */
+  uint32_t rxpk;       /* RX frames processed (any CPU) during the wait */
+};
+int net_socket_recv_timeout_st(struct socket_pcb* pcb, void* buf, uint32_t len,
+                               int timeout_ms, struct net_wait_st *st);
+
 /**
  * Closes a socket connection and frees the PCB.
  * @param pcb Pointer to the socket PCB to close.

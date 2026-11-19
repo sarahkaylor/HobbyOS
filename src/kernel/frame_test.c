@@ -90,6 +90,39 @@ static void test_frame_reuse(void) {
   frame_free(g);
 }
 
+/* H7-fault (docs/cp-fault.md §4): a frame freed after the allocator has
+   moved on is handed out again first (the warm LIFO), not only after the
+   rotating hint wraps the whole pool.  Before frame.c's LIFO, `g` came from
+   the hint's word, four words past `f`. */
+static void test_frame_warm_lifo(void) {
+  tests_run++;
+  uart_puts("  Running test_frame_warm_lifo...\n");
+  enum { PAD = 256 };
+  static uint64_t pad[PAD];
+  uint64_t f = frame_alloc();
+  EXPECT_EQ((f != 0), 1);
+  int padded = 0;
+  for (int i = 0; i < PAD; i++) {
+    pad[i] = frame_alloc();
+    if (pad[i])
+      padded++;
+  }
+  frame_free(f);
+  uint64_t g = frame_alloc();
+  uart_puts("  [warm] f=");
+  uart_print_hex(f);
+  uart_puts(" g=");
+  uart_print_hex(g);
+  uart_puts("\n");
+  int same = (g == f);
+  frame_free(g);
+  for (int i = 0; i < PAD; i++)
+    if (pad[i])
+      frame_free(pad[i]);
+  EXPECT_EQ(padded, PAD);
+  EXPECT_EQ(same, 1);
+}
+
 static void test_frame_alloc_zeroed(void) {
   tests_run++;
   uart_puts("  Running test_frame_alloc_zeroed...\n");
@@ -337,6 +370,7 @@ void frame_test_suite(void) {
   test_frame_counts();
   test_frame_alloc_free_delta();
   test_frame_reuse();
+  test_frame_warm_lifo();
   test_frame_alloc_zeroed();
   test_frame_block_layer();
   test_frame_exhaustion_path();

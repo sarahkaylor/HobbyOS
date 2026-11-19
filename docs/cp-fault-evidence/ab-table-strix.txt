@@ -1,0 +1,58 @@
+# H7-fault A/B, strix, fp720 audio boots (tools/cp/fault/fp.sh fp720, FAULT_AUDIO=1: QEMU wav backend, WAV checked by gamecheck.sh/wavcheck.py and deleted), booted alternately one at a time, 2026-11-18 15:31-16:31
+# base = af9da50b (instrument + tools on integ21) in ~/cp/lanes/fault-base; lane chain 1 = 92f7fbb4 (F1+F2); lane chain 2 (fin) = 1164f98f (F0-F4; fin-fp2/3 with the 1dc4aa02/df28d9ca counters)
+# columns: fpsprobe world / prof-fp-world median and p10 (summary.txt), gamecheck dropouts and [SND] zeros rows, the boot totals of [PFK]/[PFL] (faults, ms in faults, anon avg us, vm_lock wait/hold inside faults ms, vm_lock wait at every site ms, shootdown ms), [PFX] faults that waited >= 1 ms for vm_lock, NFS pipeline stalls, virtio-net TX drops
+| run | w_med | w_p10 | p_med | p_p10 | drop | zeros | faults | fault_ms | anon_avg | lw_ms | lh_ms | vmlw_ms | shoot_ms | pfx_lw1ms | stalls | txdrop | hitch |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| ab-base-fp1 | 26.3 | 23.9 | 31.0 | 30.2 | 4 | 5 | 1894428 | 22188.3 | 11.0 | 2021.1 | 18434.0 | 9993.6 | 5192.6 | 25 | 0 | - | - |
+| ab-base-fp2 | 24.5 | 21.6 | 29.3 | 26.6 | 4 | 5 | 1846213 | 21309.2 | 10.8 | 1854.1 | 17666.2 | 9740.0 | 4932.6 | 32 | 1 | - | - |
+| ab-base-fp3 | 25.7 | 24.3 | 30.7 | 26.1 | 6 | 8 | 1959493 | 22592.9 | 10.9 | 1954.8 | 18990.6 | 9925.5 | 4970.7 | 21 | 1 | - | - |
+| ab-base-fp4 | 25.5 | 24.1 | 28.8 | 25.6 | 4 | 6 | 1877213 | 22755.7 | 11.5 | 2335.9 | 18877.1 | 10726.5 | 5587.3 | 44 | 0 | - | - |
+| ab-base-fp5 | 26.7 | 21.1 | 32.8 | 31.4 | 4 | 6 | 1892582 | 21799.6 | 10.7 | 1932.4 | 18008.6 | 11093.5 | 5176.6 | 35 | 2 | - | - |
+| ab-lane-fp1 | 25.9 | 21.8 | 30.3 | 24.6 | 5 | 6 | 1849955 | 12191.0 | 6.0 | 430.0 | 2429.7 | 5338.0 | 4501.1 | 21 | 0 | - | - |
+| ab-lane-fp2 | 24.1 | 21.0 | 27.8 | 27.2 | 4 | 5 | 1894388 | 12320.9 | 5.7 | 436.8 | 2427.9 | 5171.7 | 5316.3 | 27 | 0 | - | - |
+| ab-fin-fp1 | 24.6 | 21.5 | 31.2 | 28.3 | 4 | 5 | 1900257 | 14296.9 | 6.9 | 321.6 | 907.5 | 1739.6 | 5410.8 | 7 | 0 | - | - |
+| ab-fin-fp2 | 34.6 | 26.2 | 34.5 | 29.8 | 5 | 6 | 1928978 | 13455.6 | 6.3 | 355.0 | 915.5 | 1653.4 | 5145.7 | 10 | 2 | 0 | - |
+| ab-fin-fp3 | 25.8 | 23.6 | 30.9 | 28.9 | 4 | 6 | 1858879 | 13450.2 | 6.4 | 321.5 | 881.8 | 1442.2 | 5154.4 | 6 | 0 | 0 | - |
+| **mean ab-base-fp** (n=5) | 25.7 | 23.0 | 30.5 | 28.0 | 4.4 | 6.0 | 1893985.8 | 22129.2 | 11.0 | 2019.7 | 18395.3 | 10295.8 | 5172.0 | 31.4 | 0.8 | - | - |
+| **mean ab-lane-fp** (n=2) | 25.0 | 21.4 | 29.1 | 25.9 | 4.5 | 5.5 | 1872171.5 | 12256.0 | 5.8 | 433.4 | 2428.8 | 5254.8 | 4908.7 | 24.0 | 0.0 | - | - |
+| **mean ab-fin-fp** (n=3) | 28.3 | 23.8 | 32.2 | 29.0 | 4.3 | 5.7 | 1896038.0 | 13734.2 | 6.6 | 332.7 | 901.6 | 1611.7 | 5237.0 | 7.7 | 0.7 | 0.0 | - |
+
+# host stall per boot (console [CONS] stolen_ms, CPU 0 tick gaps)
+ab-base-fp1 stalls=22 stolen_ms=1589
+ab-base-fp2 stalls=27 stolen_ms=1720
+ab-base-fp3 stalls=32 stolen_ms=5228
+ab-base-fp4 stalls=18 stolen_ms=1620
+ab-base-fp5 stalls=22 stolen_ms=1669
+ab-lane-fp1 stalls=19 stolen_ms=1535
+ab-lane-fp2 stalls=23 stolen_ms=1855
+ab-fin-fp1 stalls=24 stolen_ms=2061
+ab-fin-fp2 stalls=23 stolen_ms=1661
+ab-fin-fp3 stalls=24 stolen_ms=1473
+
+# NFS stall pauses (first wait + re-send or late original)
+ab-base-fp2 [NFSRS] off=301793280 want=32768 age_ms=151 inflight=1 sys_kib=32 resend_ms=8 late_ms=-1 iters=2385569 gap_max_us=43 pend=0 rxpk=1 frags+=23 ipr_to+=0 stale=0 stalls=1 at=90415
+ab-base-fp3 [NFSRS] off=3136552960 want=32768 age_ms=150 inflight=2 sys_kib=64 resend_ms=328 late_ms=328 iters=2271792 gap_max_us=13 pend=0 rxpk=0 frags+=92 ipr_to+=0 stale=2 stalls=1 at=181781
+ab-base-fp5 [NFSRS] off=77103104 want=32768 age_ms=152 inflight=1 sys_kib=32 resend_ms=1 late_ms=-1 iters=2337171 gap_max_us=438 pend=0 rxpk=1 frags+=65980 ipr_to+=0 stale=0 stalls=1 at=29257
+ab-base-fp5 [NFSRS] off=5282234368 want=32768 age_ms=151 inflight=1 sys_kib=32 resend_ms=1 late_ms=-1 iters=2202213 gap_max_us=40 pend=0 rxpk=1 frags+=23 ipr_to+=0 stale=0 stalls=1 at=313936
+ab-fin-fp2 [NFSRS] off=3153854464 want=32768 age_ms=50 inflight=2 sys_kib=64 resend_ms=-1 late_ms=21 iters=790007 gap_max_us=152 pend=0 rxpk=0 frags+=46 ipr_to+=0 stale=0 stalls=1 ipr=0/0/0 last=0x800
+ab-fin-fp2 [NFSRS] off=4835803136 want=32768 age_ms=51 inflight=1 sys_kib=32 resend_ms=2 late_ms=-1 iters=670397 gap_max_us=676 pend=0 rxpk=1 frags+=23 ipr_to+=0 stale=0 stalls=1 ipr=2/31424/52 last=0
+
+# [AWAY] T share over the audio-clock waiters absences ([AWAY] rows with audio=1: T samples / all samples)
+ab-base-fp1 samples=1441 T=451 (31.3%)
+ab-base-fp2 samples=1496 T=444 (29.7%)
+ab-base-fp3 samples=1893 T=670 (35.4%)
+ab-base-fp4 samples=1876 T=621 (33.1%)
+ab-base-fp5 samples=1819 T=666 (36.6%)
+ab-lane-fp1 samples=1190 T=290 (24.4%)
+ab-lane-fp2 samples=777 T=158 (20.3%)
+ab-fin-fp1 samples=1689 T=410 (24.3%)
+ab-fin-fp2 samples=1143 T=254 (22.2%)
+ab-fin-fp3 samples=1335 T=255 (19.1%)
+
+# soaks (tools/cp/fault/fp.sh soak; tools/cp/hunt/soak.p9, no audio)
+| ab-base-soak1 | 36.6 | 33.7 | - | - | - | - | 2782497 | 30839.3 | 10.6 | 2294.7 | 26538.4 | 19105.8 | 7086.1 | 32 | 1 | - | 1 |
+| ab-fin-soak1 | 31.8 | 29.2 | - | - | - | - | 3393463 | 18401.0 | 5.1 | 438.6 | 1250.0 | 6511.7 | 10438.1 | 6 | 0 | 0 | 0 |
+ab-base-soak1: soak1 30.3/23.9  soak2 34.4/30.4  soak3 37.2/31.6  soak4 38.1/36.5  soak5 36.6/34.9  soak6 36.0/33.7  
+[NFSRS] off=773750784 want=32768 age_ms=151 inflight=1 sys_kib=32 resend_ms=1 late_ms=-1 iters=2398200 gap_max_us=17 pend=0 rxpk=1 frags+=23 ipr_to+=0 stale=0 stalls=1 at=269341
+ab-fin-soak1: soak1 31.8/29.2  soak2 30.5/28.8  soak3 28.9/26.1  soak4 31.8/26.2  soak5 34.6/33.0  soak6 33.1/30.1  
+txq_wait=0 txq_drop=0 txq_wmax_us=0 rxq_reuse=1

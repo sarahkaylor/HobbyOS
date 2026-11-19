@@ -1,0 +1,51 @@
+# linux_probe_pfpar, strix (Zen 5, KVM, 12 GiB intel guest), base af9da50b-equivalent instrument tree vs lane candidate (stash + LIFO), booted alternately 2026-11-18 15:2x while a 32 GiB P9 guest ran
+== base-pfpar.1
+[LP] S1 threads=1 pages=16384 ms=64.8 pages_per_ms=253 p50_us=0.74 p99_us=1.3 p999_us=1177.6 max_us=4249
+[LP] P4 threads=4 pages=65536 ms=940.1 pages_per_ms=70 p50_us=2.05 p99_us=157.5 p999_us=6627.3 max_us=152210
+[LP] P4V scaling=0.28 (4 x S1 / P4) p999_us=6627.3 bound=100 -> FAIL
+== base-pfpar.2
+[LP] S1 threads=1 pages=16384 ms=121.2 pages_per_ms=135 p50_us=8.20 p99_us=14.3 p999_us=275.4 max_us=999
+[LP] P4 threads=4 pages=65536 ms=929.9 pages_per_ms=70 p50_us=2.23 p99_us=235.8 p999_us=6423.2 max_us=265026
+[LP] P4V scaling=0.52 (4 x S1 / P4) p999_us=6423.2 bound=100 -> FAIL
+== base-pfpar.r1
+[LP] S1 threads=1 pages=16384 ms=27.9 pages_per_ms=588 p50_us=0.66 p99_us=1.0 p999_us=405.1 max_us=1127
+[LP] P4 threads=4 pages=65536 ms=119.1 pages_per_ms=550 p50_us=1.23 p99_us=42.3 p999_us=709.7 max_us=7961
+[LP] R1V rounds1-5 ms=74.9 max_us=4433
+[LP] P4V scaling=0.94 (4 x S1 / P4) p999_us=709.7 bound=100 -> FAIL
+== dev-pfpar.r1
+[LP] S1 threads=1 pages=16384 ms=32.1 pages_per_ms=510 p50_us=0.65 p99_us=2.2 p999_us=536.3 max_us=992
+[LP] P4 threads=4 pages=65536 ms=72.9 pages_per_ms=900 p50_us=2.02 p99_us=11.9 p999_us=705.3 max_us=1545
+[LP] R1V rounds1-5 ms=43.5 max_us=692
+[LP] P4V scaling=1.76 (4 x S1 / P4) p999_us=705.3 bound=100 -> FAIL
+== base-pfpar.r2
+[LP] S1 threads=1 pages=16384 ms=319.6 pages_per_ms=51 p50_us=7.90 p99_us=21.2 p999_us=591.9 max_us=60466
+[LP] P4 threads=4 pages=65536 ms=496.5 pages_per_ms=132 p50_us=1.59 p99_us=92.3 p999_us=6401.4 max_us=98369
+[LP] R1V rounds1-5 ms=143.8 max_us=13385
+[LP] P4V scaling=2.57 (4 x S1 / P4) p999_us=6401.4 bound=100 -> FAIL
+== dev-pfpar.r2
+[LP] S1 threads=1 pages=16384 ms=102.3 pages_per_ms=160 p50_us=0.88 p99_us=20.0 p999_us=380.1 max_us=15422
+[LP] P4 threads=4 pages=65536 ms=1172.6 pages_per_ms=56 p50_us=8.28 p99_us=33.7 p999_us=13815.1 max_us=226611
+[LP] R1V rounds1-5 ms=48.1 max_us=751
+[LP] P4V scaling=0.35 (4 x S1 / P4) p999_us=13815.1 bound=100 -> FAIL
+== dev3-pfpar
+[LP] S1 threads=1 pages=16384 ms=17.0 pages_per_ms=963 p50_us=0.65 p99_us=1.4 p999_us=73.7 max_us=709
+[LP] P4 threads=4 pages=65536 ms=173.0 pages_per_ms=379 p50_us=1.56 p99_us=12.0 p999_us=399.0 max_us=31288
+[LP] R1V rounds1-5 ms=48.7 max_us=789
+[LP] P4V scaling=0.39 (4 x S1 / P4) p999_us=399.0 bound=100 -> FAIL
+
+# base-pfpar.2 / base r2: the long faults ([PFX] rows): one thread zeroes a fresh frame holding vm_lock (lh=zero), the other three wait for it (lw)
+[PFX] F tid=3 at=1591 us=59501 kind=anon va=0x10831A1000 io=0 lw=0 lh=59500 zero=59497 shoot=0 rpc=0 km=0
+[PFX] F tid=3 at=1599 us=2424 kind=anon va=0x10833A0000 io=0 lw=0 lh=2424 zero=2421 shoot=0 rpc=0 km=0
+[PFX] F tid=3 at=1606 us=5695 kind=anon va=0x108359F000 io=0 lw=0 lh=5695 zero=5693 shoot=0 rpc=0 km=0
+[PFX] F tid=3 at=1635 us=21936 kind=anon va=0x108379E000 io=0 lw=0 lh=21935 zero=21932 shoot=0 rpc=0 km=0
+[PFX] F tid=3 at=1645 us=4663 kind=anon va=0x108399D000 io=0 lw=0 lh=4663 zero=4661 shoot=0 rpc=0 km=0
+[PFX] F tid=3 at=1694 us=47673 kind=anon va=0x1083B9C000 io=0 lw=0 lh=47672 zero=47669 shoot=0 rpc=0 km=0
+[PFX] F tid=3 at=1709 us=10140 kind=anon va=0x1083D9B000 io=0 lw=0 lh=10139 zero=10136 shoot=0 rpc=0 km=0
+[PFX] F tid=3 at=1724 us=10080 kind=anon va=0x1083F9A000 io=0 lw=0 lh=10079 zero=10077 shoot=0 rpc=0 km=0
+# dev-pfpar.r2 (stash): the zero is outside the lock (lh 1-3 us), nobody waits (lw 0)
+[PFX] F tid=3 at=1365 us=14466 kind=anon va=0x10807D3000 io=0 lw=0 lh=0 zero=14464 shoot=0 rpc=0 km=0
+[PFX] F tid=6 at=1520 us=2863 kind=anon va=0x1090329000 io=0 lw=0 lh=1 zero=2859 shoot=0 rpc=0 km=0
+[PFX] F tid=7 at=1541 us=23716 kind=anon va=0x108C311000 io=0 lw=1 lh=3 zero=23709 shoot=0 rpc=0 km=0
+[PFX] F tid=5 at=1544 us=27140 kind=anon va=0x10882CC000 io=0 lw=1 lh=3 zero=27132 shoot=0 rpc=0 km=0
+[PFX] F tid=4 at=1544 us=27217 kind=anon va=0x108431F000 io=0 lw=0 lh=1 zero=27213 shoot=0 rpc=0 km=0
+[PFX] F tid=6 at=1550 us=28241 kind=anon va=0x1090525000 io=0 lw=0 lh=0 zero=28239 shoot=0 rpc=0 km=0
