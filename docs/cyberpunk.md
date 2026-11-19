@@ -1513,6 +1513,43 @@ probes, thrstorm ×4 with no faults, P8 Venus at the menu (155 s) and ARM. The f
   - H6-07: a host stall of ~5 s ends Venus `submit2` with DEVICE_LOST (1 of 20 cold boots).
   - The host first-touch cost (hugepages need the user's approval).
 
+#### Wave 9 H6-hunt3 (integ24)
+
+integ24 = integ23 + cp-hunt3 + 4276c18c. Batch `strix:~/cp/integ-gates24.txt`, all green:
+- all 79 probes, `sigmask-gate`, the file-system and NFS gates;
+- unit 464/0, host 40/42, castscan, ARM;
+- P2, P4, P5 ×3, P6, P7, k5probes;
+- thrstorm (1013 rounds);
+- P8 lavapipe ×2 and Venus at the menu (275 s, 213 s and 154 s).
+
+A P9 cold boot (`~/cp/integ-gates24b.txt`, `tools/cp/hunt/r3/cold-m86-pq.p9`) loaded ManualSave-86 into the world and
+quit from the pause menu. Game status was 0, `wineserver -k` took 226 ms, nothing was left, and the quiesce reported
+`extra=0`.
+
+- **H6-hunt3 coverage (`docs/cp-hunt.md` round 3):** 44 game boots (34 on integ21, 10 on integ22).
+  - 30/30 cold boots reached the world.
+  - Two soaks of more than 60 min.
+  - Load churn: 12 pause-menu loads of 10 different saves, then 5 quit-to-menu reloads.
+  - 10 in-world settings changes.
+  - 34/34 clean quits.
+  - Both user saves load every time (33/33 and 21/21).
+  - No visual corruption in 6216 screendumps.
+  - Not covered: Quick Preset, lavapipe cold boots, and Wine handle counts.
+- **H6-03 (4276c18c):** `p8launch` `quiesce()` now reaps the exited session keepalive. Only `keep_pid` is reaped, so
+  no other child's status is consumed. Every game boot's teardown is 30 s shorter, and the false console watchdog is
+  gone.
+- **H6-05 (4276c18c):** `boot_p9` adds a verdict detail when a play script ends with no `[P8] end game` row.
+- **H6-01, not applied:** the first-run guard still stops a boot on the game's Settings → GAMEPLAY tab ("Share game
+  telemetry"). Stopping is the safe direction, and `drive.py` steers around the tab.
+- **For H7 (round 3):**
+  - H6-07: Venus DEVICE_LOST after a ~5 s host stall, 1/34 on integ21 and 0/10 on integ22;
+  - H6-02: the `[THRS]` 4000-row cap;
+  - H6-09: an unacked TLB shootdown behind a 2 s console hold during a host stall, 1/10 on integ22. The boot
+    recovered.
+- **Open:**
+  - H6-04: no keyboard focus on the main menu after EXIT TO MAIN MENU when the pointer moved (game UI);
+  - H6-06: one 2.6 s frame during an exit to the main menu (Venus/host).
+
 ### 7.3 Frozen interfaces (binding)
 
 | # | Interface | Owner (sole writer) | Change protocol |
