@@ -1420,6 +1420,56 @@ integ20 = integ19 + cp-audio2 round 2 (tools and docs only); integ21 = + cp-kgli
   - H1-13 (NFS resend pauses of 150–260 ms, 14/18 boots; they cause no audio dropout);
   - fault-handling cost during streaming.
 
+#### Wave 9 (integ22)
+
+Two lanes run on integ21. H6-hunt3 is a wider discovery soak: 20+ cold boots into the world, hour-long soaks, load
+and settings churn, clean exits, and every user save. H7-fault works on the kernel's share of hitches.
+integ22 = integ21 + cp-fault. Batch `strix:~/cp/integ-gates22.txt`, all green:
+- all 71 probes, `sigmask-gate`, the file-system and NFS gates;
+- unit 464/0, host 40/42, castscan, ARM, `exitgroup` ×3;
+- P2, P4, P5 ×3, P6, P7, thrstorm, k5probes;
+- P8 lavapipe ×2 and Venus at the menu (252 s, 253 s and 129 s).
+
+Those menu times ran while one of H6's game guests shared the host; integ21's ran with no other guest. The extra time
+is in the CPU-rendered intro, and there were no NFS stalls. H7's own tree reached the Venus menu in 109 s against
+integ21's 114 s.
+
+- **Fault cost (H7-01/02/04, `docs/cp-fault.md`).**
+  - Cause: 98 % of the ~1.9 M faults per fp720 boot are anonymous zero-fills, and each one zeroed its frame under the
+    single global irqsave `vm_lock`. In a P9 guest that first store is usually the host's first touch of
+    shmem-backed RAM (no THP), so every other faulting CPU spun behind a host page fault. The worst hold was 474 ms.
+  - A forward-walking frame allocator kept touching never-backed RAM: 940 MiB were zero-filled in the world phase
+    while the free pool shrank by only ~100 MiB.
+  - Console rows printed under the lock held it for 4–15 ms each.
+  - Fixes:
+    - a per-CPU stash of 4 frames zeroed before the lock (724a793a);
+    - frame reuse from a warm LIFO (2963d3da);
+    - no console rows under `vm_lock`; diagnostics use `vm_row` (d419ec9d);
+    - `vm_arch_reload_cr3` only flushes (4112438a). This was a latent unit-tier use-after-free that the stash
+      exposed (H7-03).
+  - fp720 A/B (5 base boots, 3 lane boots):
+    - fault time 22.1 → 13.7 s per boot;
+    - all-site `vm_lock` wait 10.3 → 1.6 s, and hold inside faults 18.4 → 0.9 s;
+    - `[AWAY]` T share of the audio-clock threads 33 → 22 %;
+    - fps and audio dropouts unchanged within the noise of a busy host.
+- **NFS resend pauses (H1-13 / H7-05).**
+  - A stall is either a lost reply, with one IP fragment never reaching reassembly, or a host stall that delays
+    every reply. The host dropped nothing.
+  - Every answered READ came back within 64 ms, and 99.96 % within 4 ms.
+  - Fix (1164f98f): the first wait is now 50 ms instead of 150 ms, and the original reply is used if it arrives after
+    the re-send. Each pause is now ~50 ms plus the resend.
+  - cpnfsbench with every 5th reply dropped: read 2974 → 1374 ms, mmap 2501 → 910 ms.
+  - The cause of the lost fragment is open. The suspect is the virtio-net RX re-queue order, now counted as
+    `rxq_reuse=`.
+- **New instruments:** `[PFK]/[PFH]/[PFL]/[PFI]/[PFT]/[PFX]` fault rows, `[NFSRTH]`/`[NFSRS]`, virtio-net TX full-ring and
+  RX re-queue counters, probes `pfstat` and `pfpar`, and `tools/cp/fault/`. They print about 1 KB every 10 s.
+- **Open from H7:**
+  - H7-07: TLB shootdowns, 5.2 s per boot, up to 740 ms each;
+  - H7-08: 14 µs per timer interrupt on user threads;
+  - H7-10: mprotect/mmap/JIT unmap holding `vm_lock` for 3–5.5 ms;
+  - the host first-touch cost. Hugepage- or prealloc-backed guest RAM would be a host setting, so it needs the
+    user's approval.
+
 ### 7.3 Frozen interfaces (binding)
 
 | # | Interface | Owner (sole writer) | Change protocol |
