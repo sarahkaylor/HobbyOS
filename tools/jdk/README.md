@@ -39,6 +39,7 @@ image looks exactly like an infinitely slow program.
 | Script | Does |
 |---|---|
 | `sdktest.sh` | the gate: version, javac, run, suite. `--no-build`, `--only=name` |
+| `nettest.sh` | java.net **TCP over the NIC**: starts an echo server on the host (the guest reaches it at `10.0.2.2` through slirp), runs `TcpProbe`, grades 6 checks. `--no-build`, `--stage-jdk`, `PORT=` |
 | `fetch-jdk.sh` | reproduces the pinned runtime: Temurin **27.0.1.1+4** (SHA-256 checked before unpack) -> `third_party/jdk-27`, plus `--glibc` for the 2.31 pin `stage.sh` needs |
 | `stage.sh` | rebuilds `disk.img`: `--jdk DIR`, `--dir SRC:/DEST`, `--probe SRC` (8.3 name from the source basename, so probe sources must be hyphen-free), `--wave "CMD ARG..."` |
 | `cycle.sh` | build + repack + boot in one step. **Use this, not hand-run make+boot** -- `boot.sh` loads `hobbyos.elf` from *inside* `disk.img`, so a kernel you did not repack is a kernel you did not test |
@@ -60,12 +61,26 @@ tools/jdk/stage.sh --dir obj/jdk/classes:/C --wave "JDK/bin/java -cp /C Base64Pr
 tools/jdk/boot.sh --timeout 420 --log obj/jdk/base64.log
 ```
 
+`tools/jdk/tests/TcpProbe.java` (+ `nettest.sh`) is the wire test: the suite's
+`sockets-loopback` only covers the in-kernel `127.0.0.1` pair, so this dials a
+host-side echo server at slirp's `10.0.2.2` and round-trips real segments
+(connect, 22 B line, 8192 B, reconnect, and a refused port).  It found two ABI
+bugs on its first run -- `TCP_NODELAY` rejected with `ENOPROTOOPT`, and
+`getsockname`/`getpeername` reporting `127.0.0.1` for a NIC connection -- both
+fixed in `fs.c`.  See `docs/java.md` for the table.
+
+```bash
+tools/jdk/nettest.sh --no-build
+```
+
 ## What the port actually needed from the kernel
 
 Each of these was a real failure with a real log, not a speculative patch.
 
 | Kernel change | Symptom it fixed |
 |---|---|
+| `fs.c`: `file_socket_setopt` accepts IPPROTO_TCP options (NODELAY/MAXSEG/KEEP*) as no-ops, and `getopt` answers them | every `java.net.Socket` threw `SocketException: Protocol not available`: NioSocketImpl sets `TCP_NODELAY`, which the ABI layer answered with `ENOPROTOOPT` (`tools/jdk/nettest.sh`) |
+| `fs.c`: `file_sockname` answers the pcb's real local/peer address (`ntohl`, `net_get_ip()` fallback) instead of a hardcoded `127.0.0.1` | `Socket.getLocalAddress()`/`getInetAddress()` reported `127.0.0.1` for a connection to `10.0.2.2` -- the value TLS hostname checks read |
 | `vm.h`: `VM_OBJ_MAX_BYTES` 64 MiB -> 4 GiB | `lib/modules` is a 140 MiB jimage mapped in one call; the JVM also reserves MaxHeapSize with one `MAP_NORESERVE` mmap. ENOMEM at VA 0x12E0C |
 | `fs.c`: `file_read_user()` bounce + `vm_kwrite` | a 4 MiB `pread` into a fresh `malloc` faulted **in kernel mode** (`[BADVEC] not-a-frame`) because `file_read` wrote through an unmapped user VA. Destinations are now copied through a 32 KiB per-CPU buffer |
 | `fs.c`: `file_pread_user`/`file_pwrite_user` | `pread` was seek-read-restore over a shared cursor; concurrent class loading read each other's offsets -> `ClassFormatError: Unknown constant tag 47` |
