@@ -1268,8 +1268,11 @@ def exit_settings(b, tally, a):
             # rows could not be placed again (h4-p11)
             away = r"1920\s*x\s*1080" if VIEW["xscreen"] == "1920x1080" else r"1024\s*x\s*768"
             r1 = video_set(b, "Resolution", away, "pqsa")
-            r2 = video_set(b, "Resolution", r"1280\s*x\s*720", "pqsb") if r1 else None
-            t0 = r2 or None
+            # back to 1280x720 only without a 1920x1080 screen: in the same Settings
+            # visit the row is not found again (h4-p11, h4-p14), and at 1080p the
+            # pause menu reads fine (h4-p14), so the quit follows the first apply
+            r2 = video_set(b, "Resolution", r"1280\s*x\s*720", "pqsb") if r1 and VIEW["xscreen"] != "1920x1080" else None
+            t0 = r1 if VIEW["xscreen"] == "1920x1080" else (r2 or None)
             log(f"PLAY exit settings: Resolution -> /{away}/ ({'applied' if r1 else 'NOT'}) -> 1280x720 "
                 f"({'applied' if r2 else 'NOT'})")
     elif a.exit_setting == "vsync":
