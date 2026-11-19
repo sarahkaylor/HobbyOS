@@ -1215,6 +1215,7 @@ void vm_arch_reload_cr3(struct addr_space *as) {
 static volatile uint64_t x64_tlb_root;
 static volatile uint32_t x64_tlb_pending[MAX_CPUS];
 uint32_t x64_tlb_console_owed; /* H6-09: flushes left owed to a console writer */
+static volatile uint64_t x64_tlb_owed_root[MAX_CPUS]; /* H6-09: the owed flush's root */
 
 /* H7-fault round 2 (H7-07): KVM's paravirtual TLB flush.
  *
@@ -1329,13 +1330,20 @@ static void x64_tlb_service(void) {
   uint32_t me = get_cpuid();
   if (me >= MAX_CPUS || !__atomic_load_n(&x64_tlb_pending[me], __ATOMIC_ACQUIRE))
     return;
-  /* H7-fault round 3 (H6-09): reload whatever CR3 holds.  A flush left owed
-     to a console writer can be settled after the next shootdown changed
-     x64_tlb_root, so the root no longer says which flush this is; a reload
-     of another AS's CR3 only drops entries that a switch dropped anyway. */
+  /* H7-fault round 3 (H6-09): a flush left owed to a console writer is for
+     the root recorded with it (x64_tlb_owed_root), which the next shootdown
+     may already have replaced in x64_tlb_root.  Reload only when CR3 is that
+     root.  (14bbf334 reloaded whatever CR3 held: a CPU still sitting on a
+     dead process's freed root then re-walked it, and the next LAPIC EOI
+     faulted -- kernel #PF in lapic_send_eoi from x64_tlb_service, P5 gate.) */
+  uint64_t root = __atomic_load_n(&x64_tlb_owed_root[me], __ATOMIC_ACQUIRE);
+  if (!root)
+    root = __atomic_load_n(&x64_tlb_root, __ATOMIC_ACQUIRE);
   uint64_t cr3;
   __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
-  __asm__ volatile("mov %0, %%cr3" ::"r"(cr3) : "memory");
+  if (root && (cr3 & X64_OA_MASK) == root)
+    __asm__ volatile("mov %0, %%cr3" ::"r"(cr3) : "memory");
+  __atomic_store_n(&x64_tlb_owed_root[me], 0, __ATOMIC_RELEASE);
   __atomic_store_n(&x64_tlb_pending[me], 0, __ATOMIC_RELEASE);
 }
 
@@ -1435,6 +1443,15 @@ void vm_arch_shootdown(struct addr_space *as) {
       __atomic_thread_fence(__ATOMIC_SEQ_CST);
       for (uint32_t c = 0; c < ncpu; c++)
         if ((left & (1u << c)) && __atomic_load_n(&x64_in_console[c], __ATOMIC_SEQ_CST)) {
+          __atomic_store_n(&x64_tlb_owed_root[c], root, __ATOMIC_SEQ_CST);
+          if (!__atomic_load_n(&x64_tlb_pending[c], __ATOMIC_SEQ_CST)) {
+            /* it flushed meanwhile: take the record back (unless it did) */
+            uint64_t exp = root;
+            __atomic_compare_exchange_n(&x64_tlb_owed_root[c], &exp, 0, 0, __ATOMIC_SEQ_CST,
+                                        __ATOMIC_SEQ_CST);
+            left &= ~(1u << c);
+            continue;
+          }
           owed |= 1u << c;
           left &= ~(1u << c);
           x64_tlb_console_owed++;
