@@ -8524,7 +8524,32 @@ int process_clone(struct process *caller, struct trap_frame *tf, uint64_t flags,
     if (linux_compat_sig_clone && (caller->abi_flags & PROC_FLAG_LINUX_ABI))
       linux_compat_sig_clone(caller, t);
   }
-  proc_mark_ready(t);
+  /* H8-02 (H8-root): publish only into a live group -- the GB-145 rule
+     process_thread_create already had.  This is the path musl's
+     pthread_create takes, and it published READY with no lock and no check:
+     a SIGKILL of the group landing while the new PCB was being filled
+     (process_kill_group_sig marks the members it can see THREAD_DONE; this
+     one was not READY yet) left a READY member of a dead group.  A CPU then
+     picked it after the teardown and vm_arch_switch loaded CR3 = 0 (the dead
+     AS's root_phys): the guest triple-faulted with no console row
+     (linux_probe_rootfree R3, 3 of 5 boots on the lane before this). */
+  {
+    struct process *grp = process_group(caller);
+    uint64_t f2 = spinlock_acquire_irqsave(&proc_lock);
+    if (grp->state == PROC_STATE_FREE || grp->state == PROC_STATE_EXITED ||
+        grp->state == PROC_STATE_THREAD_DONE || grp->teardown_done ||
+        (grp->as == 0 && grp->phys_block_idx < 0)) {
+      if (grp->live_threads > 0)
+        grp->live_threads--;
+      t->as = 0;
+      t->phys_block_idx = -1;
+      t->state = PROC_STATE_THREAD_DONE; /* tombstone: never ran, reclaimable */
+      spinlock_release_irqrestore(&proc_lock, f2);
+      return -EAGAIN;
+    }
+    proc_mark_ready(t);
+    spinlock_release_irqrestore(&proc_lock, f2);
+  }
   return t->pid;
 }
 #endif
