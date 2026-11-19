@@ -1598,6 +1598,53 @@ passed, with munmap max 2.5–3.6 ms. It goes with the host-load flakes in §7.2
   - `vn_probe_transport`'s check is stale.
   - H6-04 and H6-06 (above).
 
+#### Wave 10 H8-root (integ26)
+
+integ26 = integ25 + cp-root (23e21259, `docs/cp-root.md`) + 53d5e787 + 0d5aa2ae. Batch `strix:~/cp/integ-gates26.txt`,
+all green:
+- all 83 probes (H8 adds `rootfree`), including `shootwait` and `vmhold`;
+- the infra gates, unit 464/0, host 40/42, castscan, ARM;
+- P2, P4, P5 ×3, P6, P7, k5probes;
+- thrstorm ×3 (1137, 1139 and 1110 rounds, 0 faults);
+- P8 lavapipe ×2 and Venus at the menu (191 s, 190 s and 145 s);
+- the P9 cold boot (status 0, `wineserver -k` 221 ms, quiesce `extra=0`) and the P9 fp720 boot (world median 24.0 fps,
+  profiled stretch 29.3 fps; the GPU was shared with an H9 game guest);
+- 0 page-table assertion rows in any console.
+
+- **H8-01 (page tables freed under another CPU):**
+  - The killed threads' CPUs reap the group's slot from `schedule()` while still on its root, and the L85 refusal saw
+    only the lowest CPU on it.
+  - `vm_arch_teardown` now parks a root that any other CPU may be on, by bookkeeping or by real CR3, kept in one
+    64-byte record per CPU (`struct x64_as_pc`). It frees the root after every such CPU's next CR3 load, at the next
+    teardown or idle loop. Nothing waits.
+  - `linux_probe_rootfree`: integ25 completed 0/5 boots (the guest reset); the lane passes 5/5 with 0 unsafe frees.
+    About one race per Wine shutdown appeared in the integ22/23 gates.
+- **H8-02 (a thread published into a dying group):** `process_clone` published READY with no liveness check. A
+  SIGKILL racing it left a READY member that was switched to after the teardown with CR3 = 0, a silent guest reset. It
+  re-checks under `proc_lock` now. `vm_arch_switch` refuses a torn-down AS (`[ROOTSW0]`).
+- **ARM:** the same park, the ASID TLBI before the frames are freed, and a per-CPU ASID-generation flush.
+- **The paired P9 fp720 boots** (Venus, back to back, GPU shared with H9) show no fps change: world 26.6 fps lane vs
+  25.5 integ25, profiled stretch 30.8 vs 30.6.
+- **Integrator:**
+  - `t3_linux_probe.sh` fails any probe whose console has `[FREERACE] freeing root=`, `[ROOTSW0] cpu=` or a
+    `[ROOTFREE]` row with `unsafe` above 0 (53d5e787). Match the kernel rows' own text: the rootfree check's summary
+    "0 [FREERACE] row(s)" would otherwise match.
+  - The `[ROOTFREE] every64` and `[ROOTPARK]` rows print from teardown, possibly under `proc_lock` with interrupts off,
+    through a console that spin-waits on a stalled host. They are test-kernel only (9c4b48b9).
+  - `frame_test` image_reserved (0d5aa2ae): the walk "reaches the border" when no further 8 MiB run fits. The ARM
+    unit tier ended 7 MiB short of the frontier with that 7 MiB free and failed the exact-landing check
+    (`frame_test.c:326`, 437/1 → 437/0).
+- **Host-wide QEMU killers:** `run_desktop_test.py` and most `run_*_test.py` harnesses, `tools/evidence_rig.py`,
+  `tools/perf_game_cycle.py`, `tools/boot_arm.sh`, `t3_nullentry.sh` and `make clean` run `pkill -f qemu-system`. On a
+  shared host they kill every guest; one killed H9's game boot h4-p06. On strix run them only with
+  `PATH=$HOME/cp/safe-bin:$PATH`, whose `pkill` signals only qemu-system processes whose cwd is the calling tree.
+- **Open:**
+  - H8-05: `pthread_create` returns EAGAIN for a few ms while killed slots drain.
+  - The ARM `MODE=unit_tests` image is over its `.bss` placement window on main and on cyberpunk alike, so the ARM
+    unit tier does not link without relaxing the assertion.
+  - A parked root waits for the next teardown or idle loop (264 ms at most so far).
+  - `x64_tlb_last_targets[]` is still a packed per-CPU array.
+
 ### 7.3 Frozen interfaces (binding)
 
 | # | Interface | Owner (sole writer) | Change protocol |
