@@ -168,6 +168,111 @@ static inline uint64_t vm_zs_irqoff(void) {
 static inline void vm_zs_irqrestore(uint64_t f) {
   __asm__ volatile("push %0\n\tpopfq" : : "r"(f) : "memory", "cc");
 }
+/* H7-fault round 2 (H7-07, H7-01's rest): THE FIRST TOUCH HAPPENS OFF THE
+ * FAULTING THREAD.
+ *
+ * The stash moved the zero out of vm_lock, but a fault still zeroed its
+ * frame itself, and in a P9 guest that store is a host page fault: 7 us on
+ * average, 2-200 ms when the host is short of memory (linux_probe_pfpar).
+ * A #PF runs with interrupts off, so for that long the CPU also cannot take
+ * a TLB-shootdown IPI: linux_probe_shootwait's late targets were inside a
+ * fault (slow_infault=69 of 56 slow acks), and every other CPU's munmap /
+ * mprotect / COW waited for them.  A kernel task, vmzero, keeps a pool of
+ * VM_ZP_N zeroed frames (64 MiB) topped up -- recently freed frames first
+ * (the warm LIFO), so mostly cheap zeroes -- and the stash takes from the
+ * pool before zeroing inline.  The task is not part of any address space,
+ * so no shootdown ever waits for it; it naps when the pool is full and
+ * exits like the ext2 flusher once nothing else is alive.  Pool frames
+ * count as free (frame_parked). */
+#define VM_ZP_N 16384
+static uint64_t vm_zp[VM_ZP_N];
+static volatile int vm_zp_n;
+static volatile int vm_zp_lk;      /* a byte lock taken with interrupts off */
+static volatile int vm_zp_task;    /* 1 while the task runs (or starts) */
+volatile uint32_t vm_zp_hits, vm_zp_misses, vm_zp_made;
+static uint64_t vm_zp_pop(void) {
+  uint64_t f = vm_zs_irqoff(), fr = 0;
+  while (__atomic_exchange_n(&vm_zp_lk, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+  if (vm_zp_n > 0)
+    fr = vm_zp[--vm_zp_n];
+  __atomic_store_n(&vm_zp_lk, 0, __ATOMIC_RELEASE);
+  vm_zs_irqrestore(f);
+  if (fr) {
+    frame_parked_add(-1);
+    vm_zp_hits++;
+  } else {
+    vm_zp_misses++;
+  }
+  return fr;
+}
+static int vm_zp_push(uint64_t fr) {
+  uint64_t f = vm_zs_irqoff();
+  int ok = 0;
+  while (__atomic_exchange_n(&vm_zp_lk, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+  if (vm_zp_n < VM_ZP_N) {
+    vm_zp[vm_zp_n++] = fr;
+    ok = 1;
+  }
+  __atomic_store_n(&vm_zp_lk, 0, __ATOMIC_RELEASE);
+  vm_zs_irqrestore(f);
+  if (ok)
+    frame_parked_add(1);
+  return ok;
+}
+static void vm_zeroer_task(void *arg) {
+  (void)arg;
+  struct process *me = current_process();
+  int self = me ? me->pid : -1, seen_other = 0;
+  for (;;) {
+    for (int k = 0; k < 256 && vm_zp_n < VM_ZP_N; k++) {
+      uint64_t fr = frame_alloc_zeroed();
+      if (!fr)
+        break;
+      if (!vm_zp_push(fr)) {
+        frame_free(fr);
+        break;
+      }
+      vm_zp_made++;
+    }
+    extern int process_others_alive(int self);
+    int others = process_others_alive(self);
+    if (others)
+      seen_other = 1;
+    if (seen_other && !others) {
+      __atomic_store_n(&vm_zp_task, 0, __ATOMIC_SEQ_CST);
+      kernel_exit();
+      return;
+    }
+    if (vm_zp_n >= VM_ZP_N) {
+      uint64_t t0 = timer_get_ms();
+      while (timer_get_ms() - t0 < 2 && vm_zp_n >= VM_ZP_N / 2)
+        safe_wfi();
+    } else {
+      arch_yield(); /* a batch made: let everyone else run */
+    }
+  }
+}
+/* Syscall context (vm_mmap): start vmzero once per run. */
+static void vm_zeroer_start(void) {
+  if (__atomic_load_n(&vm_zp_task, __ATOMIC_ACQUIRE))
+    return;
+  int z = 0;
+  if (!__atomic_compare_exchange_n(&vm_zp_task, &z, 1, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
+    return;
+  int pid = process_create_kernel_nowait(vm_zeroer_task, 0);
+  if (pid <= 0) {
+    __atomic_store_n(&vm_zp_task, 0, __ATOMIC_SEQ_CST);
+    return;
+  }
+  struct process *zp = process_get_pcb(pid);
+  if (zp) {
+    const char *nm = "vmzero";
+    int i = 0;
+    for (; nm[i] && i < 31; i++) zp->name[i] = nm[i];
+    zp->name[i] = 0;
+  }
+}
+
 /* No lock held: fill this CPU's stash (bounded: VM_ZSTASH frames). */
 static void vm_zstash_fill(void) {
   for (int k = 0; k < VM_ZSTASH; k++) {
@@ -177,7 +282,9 @@ static void vm_zstash_fill(void) {
     vm_zs_irqrestore(f);
     if (full)
       return;
-    uint64_t fr = frame_alloc_zeroed();
+    uint64_t fr = vm_zp_pop(); /* zeroed by vmzero, or zero it here */
+    if (!fr)
+      fr = frame_alloc_zeroed();
     if (!fr)
       return;
     f = vm_zs_irqoff();
@@ -213,6 +320,7 @@ uint32_t vm_zstash_frames(void) { /* unit tests: frames parked in stashes */
   return n;
 }
 #else
+static inline void vm_zeroer_start(void) {}
 static inline void vm_zstash_fill(void) {}
 static inline uint64_t vm_zframe(void) { return frame_alloc_zeroed(); }
 uint32_t vm_zstash_frames(void) { return 0; }
@@ -4873,6 +4981,8 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
     return -EINVAL;
   if ((flags & VM_MAP_SHARED) && (flags & VM_MAP_PRIVATE))
     return -EINVAL;
+  if (as->layout == VM_LAYOUT_COMPAT)
+    vm_zeroer_start(); /* H7-fault round 2: the pre-zero pool (above) */
   len = (len + 0xFFF) & ~0xFFFULL;
   uint16_t p = mmap_prot_sanitize(prot);
   uint32_t fl2 = flags & (VM_MAP_SHARED | VM_MAP_PRIVATE | VM_MAP_FIXED |
