@@ -868,6 +868,10 @@ def main():
             if verdict in ("game-exited", "launcher-done") and st.get("exit_ok"):
                 verdict = "script-done"
             mark(f"play script ended: {verdict}")
+            if verdict in ("script-done", "script-stop") and "[P8] end game " not in seen:
+                # cp-hunt H6-05: the script ended with the game still up; QEMU is stopped under it
+                why = (why + "; " if why else "") + "the game was still running (no QUIT GAME)"
+                mark(f"verdict detail: {why}")
             if verdict == "game-exited":
                 e = p8grade.game_end("\n".join(glines))
                 why = "the game ended during the play script (after the menu)" + (": " + p8grade.describe(e) if e else "")

@@ -227,9 +227,19 @@ static int extra_procs(int print) {
 
 /* winep2.c's rule: between steps wait for every process the before-census
    lacked to exit (a lingering wineserver SIGKILLs a recycled pid). */
+static int keep_pid = -1;
+
 static __attribute__((unused)) void quiesce(const char *tag, int secs) {
   int extra = 0;
   for (int t = 0; t < secs * 4; t++) {
+    /* cp-hunt H6-03: reap the session keepalive once it has exited.  An
+       exited, unreaped keepalive counts as "extra" (vkcube.exe/N:s4) and held
+       every quiesce for its whole bound.  Only keep_pid is reaped, so no other
+       child's exit status is consumed here. */
+    if (keep_pid > 0) {
+      int rs;
+      if (waitpid(keep_pid, &rs, 1 /* WNOHANG */) > 0) keep_pid = -1;
+    }
     extra = extra_procs(0);
     if (extra == 0) break;
     usleep(250000);
@@ -285,7 +295,6 @@ static __attribute__((unused)) void sync_now(void) {
 
 /* Session warm-up (winep5.c, C4-x2's finding) + the D3D12 caps probe: the
    keepalive's wineserver first, then winprobe until the display driver loads. */
-static int keep_pid = -1;
 
 static __attribute__((unused)) void session_up(void) {
   char *a_idle[] = { (char *)"wine", (char *)"Z:\\CP\\P5\\VK\\vkcube.exe", (char *)"--idle",
