@@ -14,3 +14,13 @@
 # and waits for its parent p8launch's waitpid(), which only sweep() (the P8_LAUNCHES>1 repro loop) does.
 # The quiesce loop polls for extra == 0, so the single-launch path waits its whole 30 s bound:
 # game end 356.1 s -> sync done 386.9 s.  The same row in H1's round-2 serials (hunt2-logs): 4/4 with a serial copy.
+# The 30 s silent wait also trips trap.c's console watchdog in 8 of the 20 cold boots (the others' 30 s watchdog tick
+# fell outside the wait): every one between 'end kill' and 'quiesce after kill':
+h3-c01: [P8] end kill L9378, [WATCHDOG] console silent L9388, [P8] quiesce after kill L9399
+h3-c05: [P8] end kill L8871, [WATCHDOG] console silent L8881, [P8] quiesce after kill L8891
+h3-c07: [P8] end kill L9570, [WATCHDOG] console silent L9578, [P8] quiesce after kill L9589
+h3-c09: [P8] end kill L8838, [WATCHDOG] console silent L8846, [P8] quiesce after kill L8856
+h3-c10: [P8] end kill L9860, [WATCHDOG] console silent L9873, [P8] quiesce after kill L9895
+h3-c11: [P8] end kill L9976, [WATCHDOG] console silent L9989, [P8] quiesce after kill L9999
+h3-c12: [P8] end kill L9404, [WATCHDOG] console silent L9416, [P8] quiesce after kill L9426
+h3-c20: [P8] end kill L8763, [WATCHDOG] console silent L8774, [P8] quiesce after kill L8784

@@ -10,7 +10,8 @@ boot, so a grader verdict that disagrees with what happened shows up:
   load    LOAD GAME Enter -> PRESS ... TO CONTINUE (s) (`phase loading` -> `expect loaded`)
   world   the HUD seen after the load (expect inworld*)
   exit2t  EXIT TO MAIN MENU confirm -> the title screen (s), mq boots only
-  quit    the quit's confirm -> `[P8] end game` (s, guest-side ms in the serial)
+  quit    the pause menu's quit confirm -> `[P8] end game` (s); from the main menu
+          (no confirm dialog there) QUIT GAME's Enter -> `[P8] end game`
   clean   the game's status 0, wineserver -k status 0, 0 processes left after it,
           sync, `[P8] done` (classify.py's "clean exit")
   -k ms   how long `wineserver -k` took
@@ -70,7 +71,14 @@ def row(logs, run):
     clean = bool(g and g["status"] == "0" and k and k["status"] == "0" and q and not live and ses.get("done"))
     load = round(t["loaded_at"] - t["ph_loading"], 1) if "loaded_at" in t and "ph_loading" in t else None
     ex2t = round(t["title_at"] - t["ph_title"], 1) if "title_at" in t and "ph_title" in t else None
-    quit_s = round(t["end_at"] - t["quitc_at"], 1) if "end_at" in t and "quitc_at" in t else None
+    # pause menu: confirm dialog -> Enter -> exit; main menu: QUIT GAME's Enter exits at
+    # once, no dialog (h3-c07: "game process ended" 3 s after `phase quit`)
+    if "end_at" in t and "quitc_at" in t and t["quitc_at"] < t["end_at"]:
+        quit_s = round(t["end_at"] - t["quitc_at"], 1)
+    elif "end_at" in t and "ph_quit" in t and "ph_exitmain" in t:
+        quit_s = round(t["end_at"] - t["ph_quit"], 1)
+    else:
+        quit_s = None
     kf = sum(v[0] for v in j["classes"]["kfault"].values())
     ks = sum(v[0] for v in j["classes"]["kstall"].values())
     gaps = j.get("fps_gaps") or {}
