@@ -644,7 +644,7 @@ void vm_as_teardown(struct addr_space *as) {
   int arr_frames = region_frames_for(cap);
   for (int i = 0; i < arr_frames; i++)
     frame_free(arr + (uint64_t)i * FRAME_SIZE);
-  vm_arch_teardown_site(__builtin_return_address(0)); /* H8-root: [FREERACE] site= */
+  vm_arch_teardown_site(__builtin_return_address(0)); /* H8-root: [ROOTPARK] site= */
   vm_arch_teardown(root, asid);
 }
 
