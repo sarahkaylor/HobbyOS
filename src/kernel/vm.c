@@ -1225,6 +1225,8 @@ struct vm_tlb_batch {
   struct vm_object *obj[VTB_OBJS];
   int nobj;
   int flush;           /* a leaf changed: a shootdown is owed */
+  uint64_t ptchain;    /* H7-10: unhooked page tables, pages like `chain` */
+  int ptchain_n;
 };
 
 static void vtb_init(struct vm_tlb_batch *b);
@@ -5452,6 +5454,8 @@ static void vtb_init(struct vm_tlb_batch *b) {
   b->chain_n = 0;
   b->nobj = 0;
   b->flush = 0;
+  b->ptchain = 0;
+  b->ptchain_n = 0;
 }
 
 /* Park a frame for release after the shootdown.  Caller holds vm_lock. */
@@ -5503,7 +5507,43 @@ static void vtb_hold_objects_locked(struct vm_tlb_batch *b,
 }
 
 /* Shoot down, then release.  Caller holds NO spinlock. */
+#if defined(__x86_64__)
+static void vtb_rel_cb(void *ctx, uint64_t fr);
+/* H7-fault round 2 (H7-10): the page tables vm_arch_zap_range unhooked under
+   vm_lock.  Nothing can walk to them now, so their leaves are released here,
+   without the lock (each frame parked like any other, the table frame too),
+   and the counters are settled under one short hold.  Called before the
+   shootdown: until it, other CPUs may still translate through a table (and
+   set its A/D bits), and nothing is freed before it. */
+static void vtb_drain_tables(struct vm_tlb_batch *b, struct addr_space *as) {
+  int64_t leaves = 0, tables = 0;
+  int cnt = b->ptchain_n;
+  while (b->ptchain) {
+    uint64_t *w = (uint64_t *)phys_to_virt(b->ptchain);
+    uint64_t next = w[0];
+    for (int i = 0; i < cnt; i++) {
+      leaves += vm_arch_pt_drain(w[1 + i], vtb_rel_cb, b);
+      vtb_add(b, w[1 + i]);
+      tables++;
+    }
+    frame_free(b->ptchain); /* the list page itself: ours, never mapped */
+    b->ptchain = next;
+    cnt = VTB_PER_PAGE; /* every older page is full */
+  }
+  b->ptchain_n = 0;
+  b->flush = 1;
+  uint64_t fl = vm_lock_acq(__LINE__);
+  as->resident_frames -= leaves;
+  as->table_frames -= tables;
+  vm_lock_rel(fl);
+}
+#endif
+
 static void vtb_finish_site(struct vm_tlb_batch *b, struct addr_space *as, int site) {
+#if defined(__x86_64__)
+  if (b->ptchain)
+    vtb_drain_tables(b, as);
+#endif
   if (b->flush || b->n || b->chain) {
     pfstat_shoot_site(site);
     vm_arch_shootdown(as);
@@ -5527,12 +5567,32 @@ static void vtb_finish_site(struct vm_tlb_batch *b, struct addr_space *as, int s
 /* vm_zap_range with the releases parked in `b`.  Caller holds vm_lock. */
 #if defined(__x86_64__)
 static void vtb_rel_cb(void *ctx, uint64_t fr) { vtb_add((struct vm_tlb_batch *)ctx, fr); }
+/* Take an unhooked page table (vm_arch_zap_range): 1, or 0 when no list page
+   could be had (then the table is zapped in place). */
+static int vtb_pt_cb(void *ctx, uint64_t pt) {
+  struct vm_tlb_batch *b = (struct vm_tlb_batch *)ctx;
+  if (!b->ptchain || b->ptchain_n >= VTB_PER_PAGE) {
+    uint64_t pg = frame_alloc();
+    if (!pg)
+      return 0;
+    uint64_t *w = (uint64_t *)phys_to_virt(pg);
+    w[0] = b->ptchain;
+    b->ptchain = pg;
+    b->ptchain_n = 0;
+  }
+  ((uint64_t *)phys_to_virt(b->ptchain))[1 + b->ptchain_n++] = pt;
+  b->flush = 1;
+  return 1;
+}
 #endif
 static void vm_zap_range_defer(struct addr_space *as, uint64_t base,
                                uint64_t len, struct vm_tlb_batch *b) {
 #if defined(__x86_64__)
-  /* H7-fault round 2 (H7-10): one table walk per 2 MiB (mmu.c) */
-  as->resident_frames -= vm_arch_zap_range(as, base, base + len, vtb_rel_cb, b);
+  /* H7-fault round 2 (H7-10): one table walk per 2 MiB (mmu.c), and a whole
+     2 MiB table is unhooked with one store and drained after vm_lock
+     (vtb_drain_tables), so the hold no longer grows with the resident pages
+     of the span. */
+  as->resident_frames -= vm_arch_zap_range(as, base, base + len, vtb_rel_cb, b, vtb_pt_cb);
   return;
 #endif
   for (uint64_t a = base; a < base + len; a += FRAME_SIZE) {

@@ -935,9 +935,42 @@ uint64_t vm_arch_unmap_keep(struct addr_space *as, uint64_t va) {
    256 MiB (linux_probe_vmhold).  Here the page table is walked once per
    2 MiB and its entries are read in a row. */
 static void x64_tlb_service(void);
+
+/* The PD entry that maps the page table for `va` (2 MiB aligned), or 0 when
+   there is none or it is not an ordinary user page table (a 2 MiB leaf, the
+   kernel-image PD of a compat root).  Never allocates. */
+static uint64_t *x64_v2_pde_slot(struct addr_space *as, uint64_t va) {
+  if (!as->root_phys || as->layout != VM_LAYOUT_COMPAT || va >= 0x800000000000ULL)
+    return 0;
+  uint64_t *p4 = (uint64_t *)phys_to_virt(as->root_phys);
+  uint64_t e4 = p4[(va >> 39) & 0x1FF];
+  if (!(e4 & X64_PTE_P) || (e4 & 0x80))
+    return 0;
+  uint64_t *pdpt = (uint64_t *)phys_to_virt(e4 & X64_OA_MASK);
+  uint64_t e3 = pdpt[(va >> 30) & 0x1FF];
+  if (!(e3 & X64_PTE_P) || (e3 & 0x80) || x64_pd_is_kernel(e3 & X64_OA_MASK))
+    return 0;
+  uint64_t *pd = (uint64_t *)phys_to_virt(e3 & X64_OA_MASK);
+  uint64_t *pde = &pd[(va >> 21) & 0x1FF];
+  if (!(*pde & X64_PTE_P) || (*pde & 0x80))
+    return 0;
+  return pde;
+}
+
+/* The release rule of one cleared leaf (vm_arch_unmap_keep's): the frame, or
+   0 for a SHARED leaf or a COW frame another AS still maps. */
+static uint64_t x64_leaf_keep(uint64_t leaf) {
+  if (leaf & X64_PTE_SHARED)
+    return 0;
+  if ((leaf & X64_PTE_COW) && !vm_cow_frame_put(leaf & X64_OA_MASK))
+    return 0;
+  return leaf & X64_OA_MASK;
+}
+
 int vm_arch_zap_range(struct addr_space *as, uint64_t va, uint64_t end,
-                      void (*rel)(void *ctx, uint64_t fr), void *ctx) {
-  int n = 0;
+                      void (*rel)(void *ctx, uint64_t fr), void *ctx,
+                      int (*pt)(void *ctx, uint64_t pt_phys)) {
+  int n = 0, detached = 0;
   while (va < end) {
     uint64_t nx = vm_arch_skip_absent(as, va);
     if (nx != va) {
@@ -947,6 +980,21 @@ int vm_arch_zap_range(struct addr_space *as, uint64_t va, uint64_t end,
     uint64_t tend = (va | 0x1FFFFFULL) + 1;
     if (tend > end)
       tend = end;
+    if (pt && tend - va == 0x200000ULL) {
+      /* A whole page table inside the span: unhook it (one store) and let
+         the caller drain it after vm_lock (vm_arch_pt_drain).  No walk can
+         reach it any more; a CPU that still caches it is flushed by the
+         caller's shootdown before the table or its frames are freed. */
+      uint64_t *pde = x64_v2_pde_slot(as, va);
+      if (pde && pt(ctx, *pde & X64_OA_MASK)) {
+        *pde = 0;
+        detached++;
+        va = tend;
+        if ((detached & 63) == 0)
+          x64_tlb_service();
+        continue;
+      }
+    }
     uint64_t *pte = x64_v2_walk_alloc(as, va, 0);
     if (!pte) {
       va = tend;
@@ -960,17 +1008,26 @@ int vm_arch_zap_range(struct addr_space *as, uint64_t va, uint64_t end,
       if (n < 32)
         x64_invlpg(a);
       n++;
-      uint64_t fr = 0;
-      if (!(leaf & X64_PTE_SHARED) &&
-          (!(leaf & X64_PTE_COW) || vm_cow_frame_put(leaf & X64_OA_MASK)))
-        fr = leaf & X64_OA_MASK;
-      rel(ctx, fr);
+      rel(ctx, x64_leaf_keep(leaf));
     }
     va = tend;
     x64_tlb_service(); /* H7-07: interrupts are off under vm_lock */
   }
-  if (n >= 32)
+  if (n >= 32 || detached)
     vm_arch_reload_cr3(as); /* this CPU, if it runs the AS (a flush) */
+  return n;
+}
+
+int vm_arch_pt_drain(uint64_t pt_phys, void (*rel)(void *ctx, uint64_t fr), void *ctx) {
+  const uint64_t *pte = (const uint64_t *)phys_to_virt(pt_phys);
+  int n = 0;
+  for (int i = 0; i < 512; i++) {
+    uint64_t leaf = __atomic_load_n(&pte[i], __ATOMIC_RELAXED); /* A/D may still move */
+    if (!(leaf & X64_PTE_P))
+      continue;
+    n++;
+    rel(ctx, x64_leaf_keep(leaf));
+  }
   return n;
 }
 

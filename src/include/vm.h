@@ -720,9 +720,18 @@ uint64_t vm_arch_unmap_keep(struct addr_space *as, uint64_t va);
    time: each present leaf is cleared and rel(ctx, frame-or-0) called (0 for a
    shared or still-COW-shared frame, as unmap_keep returns).  This CPU's TLB is
    flushed (invlpg, or one CR3 reload past 32 leaves); other CPUs are the
-   caller's (shootdown).  Returns the leaves cleared. */
+   caller's (shootdown).  Returns the leaves cleared.
+   pt (may be 0): a page table wholly inside [va, end) is offered to
+   pt(ctx, table) instead; when it returns 1 the table is unhooked from its
+   PD entry and not walked (its leaves are not counted).  The caller then
+   drains it with vm_arch_pt_drain, without vm_lock, and frees the table
+   frame after the shootdown. */
 int vm_arch_zap_range(struct addr_space *as, uint64_t va, uint64_t end,
-                      void (*rel)(void *ctx, uint64_t fr), void *ctx);
+                      void (*rel)(void *ctx, uint64_t fr), void *ctx,
+                      int (*pt)(void *ctx, uint64_t pt_phys));
+/* Each present leaf of a table vm_arch_zap_range unhooked: rel(ctx, frame-or-0)
+   by the same rule; the table itself is left as it is.  Returns the leaves. */
+int vm_arch_pt_drain(uint64_t pt_phys, void (*rel)(void *ctx, uint64_t fr), void *ctx);
 /* C1-k4: munmap/mremap cores with the cross-CPU flush (vm.c). */
 void vm_zap_span(struct addr_space *as, uint64_t base, uint64_t len);
 int vm_unmap_span(struct addr_space *as, uint64_t base, uint64_t len);
