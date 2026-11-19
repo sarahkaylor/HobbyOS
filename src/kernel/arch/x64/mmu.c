@@ -7,6 +7,7 @@
 #include "display_mode.h" /* DISPLAY_STRIDE_BYTES/HEIGHT: full fb size (GB-065) */
 #include "kmem.h"
 #include "vm_pfstat.h" /* H7-fault */
+#include "console.h"   /* x64_in_console (H6-09) */
 
 extern uint32_t get_cpuid(void);
 extern void uart_puts(const char *s);
@@ -1343,7 +1344,8 @@ static void x64_tlb_service(void) {
   __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
   if (root && (cr3 & X64_OA_MASK) == root)
     __asm__ volatile("mov %0, %%cr3" ::"r"(cr3) : "memory");
-  __atomic_store_n(&x64_tlb_owed_root[me], 0, __ATOMIC_RELEASE);
+  if (__atomic_load_n(&x64_tlb_owed_root[me], __ATOMIC_RELAXED)) /* rare: no store per IPI */
+    __atomic_store_n(&x64_tlb_owed_root[me], 0, __ATOMIC_RELEASE);
   __atomic_store_n(&x64_tlb_pending[me], 0, __ATOMIC_RELEASE);
 }
 
@@ -1426,7 +1428,6 @@ void vm_arch_shootdown(struct addr_space *as) {
   if (!tsc_ms)
     tsc_ms = 3000000ULL;
   uint32_t owed = 0; /* H6-09: left to settle their flush in cons_hw_tx */
-  extern volatile uint8_t x64_in_console[MAX_CPUS];
   for (;;) {
     uint32_t left = 0;
     for (uint32_t c = 0; c < ncpu; c++)
@@ -1442,7 +1443,7 @@ void vm_arch_shootdown(struct addr_space *as) {
     if (x64_rdtsc() - t0 > tsc_ms) {
       __atomic_thread_fence(__ATOMIC_SEQ_CST);
       for (uint32_t c = 0; c < ncpu; c++)
-        if ((left & (1u << c)) && __atomic_load_n(&x64_in_console[c], __ATOMIC_SEQ_CST)) {
+        if ((left & (1u << c)) && __atomic_load_n(&x64_in_console[c].in, __ATOMIC_SEQ_CST)) {
           __atomic_store_n(&x64_tlb_owed_root[c], root, __ATOMIC_SEQ_CST);
           if (!__atomic_load_n(&x64_tlb_pending[c], __ATOMIC_SEQ_CST)) {
             /* it flushed meanwhile: take the record back (unless it did) */

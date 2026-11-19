@@ -55,6 +55,14 @@ void cons_user_write(uint64_t who, const char *s, int n);
                                     on by default in MODE=test kernels) */
 #define CONS_D_NCLASS 9
 #define CONS_D_ALL    0xFFFFFFFFu
+#ifdef __x86_64__
+/* H6-09: set while this CPU is inside cons_hw_tx (uart.c); read by the
+   TLB shooter (mmu.c vm_arch_shootdown). */
+struct x64_cons_mark {
+  volatile uint8_t in;
+} __attribute__((aligned(64)));
+extern struct x64_cons_mark x64_in_console[];
+#endif
 extern volatile uint32_t cons_diag_mask; /* bit set = class printed */
 /* Parse "all", "none"/"0", or a comma list of class names ("pub,mr"). */
 uint32_t cons_diag_parse(const char *s, int n);
