@@ -1,0 +1,17 @@
+# linux_probe_cpus (eded7bbd; work-count version), strix 2026-11-18 21:4x-22:1x, one slot, gate batch beside
+# disk = an ext2 data disk attached (CPDATA, 2G mkcpdata image; [EXT2] mounted /EXT), as in every P9 game boot
+# fault-i21 = integ21 (5f8c4b76) kernel; fault-chk = the lane tip (a3112535)
+cpus2 fault-i21 nodisk #1 rc=0 [LP] U1 1 thread 126274 blocks/s (before 125592, after 126955); 8 threads 985268 blocks/s: cpus_used=7.80 of 8 PASS
+cpus2 fault-i21 disk #1 rc=1 [LP] U1 1 thread 126280 blocks/s (before 126669, after 125891); 8 threads 865568 blocks/s: cpus_used=6.85 of 8 FAIL
+cpus2 fault-chk nodisk #1 rc=0 [LP] U1 1 thread 126117 blocks/s (before 125836, after 126398); 8 threads 979114 blocks/s: cpus_used=7.76 of 8 PASS
+cpus2 fault-chk disk #1 rc=1 [LP] U1 1 thread 125329 blocks/s (before 124527, after 126130); 8 threads 859967 blocks/s: cpus_used=6.86 of 8 FAIL
+cpus2 fault-i21 nodisk #2 rc=0 [LP] U1 1 thread 122978 blocks/s (before 118865, after 127091); 8 threads 962658 blocks/s: cpus_used=7.83 of 8 PASS
+cpus2 fault-i21 disk #2 rc=1 [LP] U1 1 thread 125785 blocks/s (before 126467, after 125103); 8 threads 871374 blocks/s: cpus_used=6.93 of 8 FAIL
+cpus2 fault-chk nodisk #2 rc=0 [LP] U1 1 thread 125463 blocks/s (before 125738, after 125187); 8 threads 974091 blocks/s: cpus_used=7.76 of 8 PASS
+cpus2 fault-chk disk #2 rc=1 [LP] U1 1 thread 124393 blocks/s (before 124066, after 124720); 8 threads 859217 blocks/s: cpus_used=6.91 of 8 FAIL
+-- an earlier version read the CPU-time clocks (chain6.txt): proc_ms=65412 over wall_ms=2003 for 8 threads, threads_ms=0 (both clocks unusable here)
+flusher-yield patch (check tree = tip + ext2-flusher-yield.patch) disk #1: [LP] U1 1 thread 123360 blocks/s (before 120816, after 125904); 8 threads 852214 blocks/s: cpus_used=6.91 of 8 FAIL
+flusher-yield patch (check tree = tip + ext2-flusher-yield.patch) disk #2: [LP] U1 1 thread 123698 blocks/s (before 122068, after 125328); 8 threads 951426 blocks/s: cpus_used=7.69 of 8 PASS
+flusher-yield patch (check tree = tip + ext2-flusher-yield.patch) disk #3: [LP] U1 1 thread 124783 blocks/s (before 123822, after 125744); 8 threads 962432 blocks/s: cpus_used=7.71 of 8 PASS
+flusher-yield patch (check tree = tip + ext2-flusher-yield.patch) disk #4: [LP] U1 1 thread 124027 blocks/s (before 123415, after 124639); 8 threads 968495 blocks/s: cpus_used=7.81 of 8 PASS
+flusher-yield patch (check tree = tip + ext2-flusher-yield.patch) disk #5: [LP] U1 1 thread 124237 blocks/s (before 121694, after 126781); 8 threads 969054 blocks/s: cpus_used=7.80 of 8 PASS

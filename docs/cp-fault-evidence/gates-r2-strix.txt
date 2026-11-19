@@ -1,0 +1,218 @@
+# H7-fault round 2 gates, strix 2026-11-18 (one or two slots; H6-hunt3 boots beside)
+
+## gates2.sh on ~/cp/lanes/fault-dev = 1f1c88db (stopped before P2: superseded)
+tree fault-dev start 20:43:06
+build rc=0 20:43:14
+unit rc=0 Tests run:    464 Tests failed: 0   reass=1
+rebuild rc=0 20:43:47
+avx rc=0 [LP] done rc=0
+away rc=0 [LP] done rc=0
+badelr rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+console rc=0 [LP] done rc=0lp_check_console: kernel rows intact 23832/23832, user rows intact 11937/11937, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+conswait rc=0 [LP] done rc=0
+cow rc=0 [LP] done rc=0
+e2churn rc=0 [LP] done rc=0
+e2fault rc=0 [LP] done rc=0
+e2stress rc=0 [LP] done rc=0
+epserver rc=0 [LP] done rc=0
+errnomap rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+execthr rc=0 [LP] done rc=0
+exitgroup rc=0 [LP] done rc=0
+exitrace rc=0 [LP] done rc=0
+ext2w rc=0 [LP] done rc=0
+fatcoh rc=0 [LP] done rc=0
+fatren rc=0 [LP] done rc=0
+fattrunc rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fdrace rc=0 [LP] done rc=0
+fdscale rc=0 [LP] done rc=0
+forkcow rc=0 [LP] done rc=0
+forkva rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+hrtimer rc=0 [LP] done rc=0
+ipclat rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+killgrp rc=0 [LP] done rc=0
+kstack rc=0 [LP] done rc=0
+loaccept rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+manythr rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+netlink rc=0 [LP] done rc=0
+ntsync rc=1 t3_linux_probe: FAIL — ntsync never printed '[LP] done rc=0' (tier rc=1)
+pemap rc=0 [LP] done rc=0
+pfpar rc=0 [LP] done rc=0
+pfstat rc=0 [LP] done rc=0
+pfx rc=0 [LP] done rc=0
+pipestorm rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+rusage rc=0 [LP] done rc=0
+shm rc=0 [LP] done rc=0
+shootwait rc=0 [LP] done rc=0
+sigfd rc=0 [LP] done rc=0
+siginfo rc=0 [LP] done rc=0
+sigint rc=0 [LP] done rc=0
+sigmask rc=0 [LP] done rc=0
+sigret rc=0 [LP] done rc=0
+snd rc=0 [LP] done rc=0
+sysc rc=0 [LP] done rc=0
+tcpconn rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tlb rc=0 [LP] done rc=0
+tlbstale rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+vmhold rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wfibound rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+probes end 21:04:49
+sigmask_gate rc=0 sigmask-gate: PASS (8/8)
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/fault-dev)
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 40/42 passed kconsole=kconsole_test: PASS (0 failures)
+castscan rc=1 src/kernel/vm.c	P2I	waiting = lock_wait_addr[c] == (uint64_t)&vm_lock;
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+panic_sink_allowlist rc=0 panic_sink_allowlist: PASS — every reference is accounted for
+pfx_gate rc=0 pfx_gate: PASS
+ext2w_gate rc=0 ext2w_gate: PASS
+infra end 23:03:23
+
+## earlier gates2 runs (stopped): on 1dbad3fe (hrtimer FAIL -> 9c032122) and on 9c032122 (vmhold FAIL -> 73895932..1f1c88db)
+gates2-partial-1dbad3fe.txt:hrtimer rc=1 t3_linux_probe: FAIL — hrtimer never printed '[LP] done rc=0' (tier rc=1)
+gates2-partial-9c032122.txt:hrtimer rc=0 [LP] done rc=0
+gates2-partial-9c032122.txt:vmhold rc=1 [LP] done rc=0
+
+## tip-rerun2.sh on ~/cp/lanes/fault-chk = a3112535 + eded7bbd + efb9e300 (thrstorm S3 FAIL -> 8649c0a3)
+tree fault-chk (tip) start 22:33:40
+build rc=0 22:33:47
+unit rc=0 Tests run:    464 Tests failed: 0  
+rebuild rc=0 22:34:11
+avx rc=0 [LP] done rc=0
+away rc=0 [LP] done rc=0
+badelr rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+console rc=0 [LP] done rc=0lp_check_console: kernel rows intact 24465/24465, user rows intact 11740/11740, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+conswait rc=0 [LP] done rc=0
+cow rc=0 [LP] done rc=0
+cpus rc=0 [LP] done rc=0
+e2churn rc=0 [LP] done rc=0
+e2fault rc=0 [LP] done rc=0
+e2stress rc=0 [LP] done rc=0
+epserver rc=0 [LP] done rc=0
+errnomap rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+execthr rc=0 [LP] done rc=0
+exitgroup rc=0 [LP] done rc=0
+exitrace rc=0 [LP] done rc=0
+ext2w rc=0 [LP] done rc=0
+fatcoh rc=0 [LP] done rc=0
+fatren rc=0 [LP] done rc=0
+fattrunc rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fdrace rc=0 [LP] done rc=0
+fdscale rc=0 [LP] done rc=0
+forkcow rc=0 [LP] done rc=0
+forkva rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+hrtimer rc=0 [LP] done rc=0
+ipclat rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+killgrp rc=0 [LP] done rc=0
+kstack rc=0 [LP] done rc=0
+loaccept rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+manythr rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+netlink rc=0 [LP] done rc=0
+ntsync rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0
+pfpar rc=0 [LP] done rc=0
+pfstat rc=0 [LP] done rc=0
+pfx rc=0 [LP] done rc=0
+pipestorm rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+rusage rc=0 [LP] done rc=0
+shm rc=0 [LP] done rc=0
+shootwait rc=0 [LP] done rc=0
+sigfd rc=0 [LP] done rc=0
+siginfo rc=0 [LP] done rc=0
+sigint rc=0 [LP] done rc=0
+sigmask rc=0 [LP] done rc=0
+sigret rc=0 [LP] done rc=0
+snd rc=0 [LP] done rc=0
+sysc rc=0 [LP] done rc=0
+tcpconn rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tlb rc=0 [LP] done rc=0
+tlbstale rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+vmhold rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wfibound rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+probes end 22:53:59
+castscan rc=0 castscan: 374 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+panic_sink_allowlist rc=0 panic_sink_allowlist: PASS — every reference is accounted for
+thrstorm rc=1 [TS] PASS T1 create (threads=256 why=0) [TS] PASS T1 start (started=256 toolhelp=257) [TS] PASS T2 storm (rounds=922 ms=60047) [TS] PASS T3 stop (bad=0 first=0)  23:25:36
+gate_p8_venus rc=0    +   154.9 s  23:28:44  main menu OCR at s010-t000130: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   160.5 s  23:28:49  main menu OCR at s011-t000136: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   162.4 s  23:28:51  verdict: main-menu; QEMU stopped, sl 23:28:51
+TIPDONE 23:28:51
+
+## 8649c0a3 on ~/cp/lanes/fault (vmzero exits with its users)
+S1 thrstorm done rc=0, exit 0        : PASS   ([K5] end thrstorm status=0 ms=61564 peak_processes=10)
+S2 storm >= 60s, rounds > 0          : PASS   (rounds/ms: 810 60047)
+S3 wineserver -k, nothing left        : PASS   ([K5] end kill status=0 ms=163; [K5] ps-extra count=0)
+S4 no fault line                      : PASS   (0 lines)
+hrtimer: t3_linux_probe: PASS — hrtimer reached its done marker 
+ntsync: t3_linux_probe: PASS — ntsync reached its done marker 
+cpus: t3_linux_probe: PASS — cpus reached its done marker 
+vmhold: t3_linux_probe: PASS — vmhold reached its done marker lp_check_vmhold: PASS -- 1 long fault row(s), 0 with lw >= 1000 us (max lw 0 us)
+pfpar: t3_linux_probe: PASS — pfpar reached its done marker lp_check_pfpar: PASS -- 0 long fault row(s), 0 with lw >= 1000 us (max lw 0 us)
+exitgroup: t3_linux_probe: PASS — exitgroup reached its done marker 
+shootwait: t3_linux_probe: PASS — shootwait reached its done marker lp_check_shootwait: PASS -- 2000 mprotect shootdowns, 0 slow target acks (0.0 %), total 128996 us, max 735 us
+conswait: t3_linux_probe: PASS — conswait reached its done marker lp_check_conswait: PASS -- 500 mprotect shootdowns, 1 slow target acks (0.2 per 100 shootdowns), total 47534 us, max 1869 us
+tlbstale: t3_linux_probe: PASS — tlbstale reached its done marker 
+
+## final-gates.sh on ~/cp/lanes/fault-dev = 8649c0a3 (final tip)
+tree fault-dev (final tip) start 23:31:29
+build rc=0 23:31:36
+unit rc=0 Tests run:    464 Tests failed: 0 
+rebuild rc=0 23:31:59
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/fault-dev)
+exec_gate rc=0 exec_gate: PASS
+ext2w_gate rc=0 ext2w_gate: PASS
+gate_p2#1 rc=0 G1 wine cmd /c echo hello prints hello : PASS ([P2] end echo|G2 winprobe.exe every marker + exit 0 : PASS ([P2] end winpr|G3 wineserver -k leaves no processes : PASS ([P2] end kill s| 23:34:56
+gate_p2#2 rc=0 G1 wine cmd /c echo hello prints hello : PASS ([P2] end echo|G2 winprobe.exe every marker + exit 0 : PASS ([P2] end winpr|G3 wineserver -k leaves no processes : PASS ([P2] end kill s| 23:35:31
+gate_p5#1 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 274 s; lock released 23:40:16
+FINALDONE 23:40:16
