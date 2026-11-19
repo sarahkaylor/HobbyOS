@@ -45,7 +45,8 @@ import boot_p9 as B9  # noqa: E402  (focus_in / canon_image / MENUS: what boot_p
 
 # the game picture's place: P9_XSCREEN and the game's own Resolution (the
 # settings boot changes the latter; Boot.view tracks it)
-VIEW = {"xscreen": os.environ.get("P9_XSCREEN", "1280x720") or "1920x1080", "game_res": "1280x720", "windowed": False}
+VIEW = {"xscreen": os.environ.get("P9_XSCREEN", "1280x720") or "1920x1080",
+        "game_res": os.environ.get("DRIVE_VIEW_RES", "1280x720"), "res": "1280x720", "windowed": False}
 
 SAVE_RX = re.compile(r"\b((?:Quick|Auto|Manual|Point\w*|End\w*)\s*S[ao]ve-\d+)", re.I)
 # the HUD after a load: the tracked quest + its objective (h3-ctl1..3 OCR), or
@@ -283,7 +284,12 @@ def list_name(path, fr):
 
 # VIDEO tab rows: label (x, top y) in a 1280x720 game picture at the origin (h3-ctl3)
 VIDEO_TABLE = {"Monitor": (332, 165), "VSync": (332, 205), "Maximum FPS": (332, 245),
-               "Windowed Mode": (330, 281), "Resolution": (332, 323), "HDR Mode": (330, 360)}
+               "Windowed Mode": (330, 281), "Resolution": (332, 323), "HDR Mode": (330, 360),
+               # fit-only rows: in Fullscreen (the panel at 1.5x over 1920x1080) tesseract
+               # read none of the rows above, only these (h3-set2)
+               "NVIDIA Reflex": (330, 399), "HOR Mode": (330, 360), "FSR Anti-Lag": (332, 478),
+               "FSR Anti-Log": (332, 478), "3D Mode": (331, 516), "30 Mode": (331, 516)}
+FIT_ROWS = ["NVIDIA Reflex", "HOR Mode", "FSR Anti-Lag", "FSR Anti-Log", "3D Mode", "30 Mode"]
 
 
 def table_fit(words, labels, table):
@@ -307,7 +313,7 @@ def row_value(path, row, labels=None, table=None):
     """OCR of one VIDEO row's value (the "< 1280x720 >" part right of its label)"""
     labels, table = labels or VIDEO_ROWS, table or VIDEO_TABLE
     words = ocr(path, scale=2, psm=11, tsv=True)
-    f = table_fit(words, labels, table)
+    f = table_fit(words, labels + [l for l in table if l not in labels], table)
     if not f:
         return ""
     sc, ox, oy = f
@@ -327,6 +333,21 @@ def row_value(path, row, labels=None, table=None):
                                            text=True, timeout=60).stdout.split()))
     finally:
         os.unlink(tf.name)
+    if row == "Resolution":
+        # the WxH text is ~8 px tall on a 1920x1080 screen: tesseract reads it
+        # only binarised and inverted at 5x, digits-only (h3-set2: "1280x720"
+        # where the plain passes gave "te0x720")
+        rb = (int(ox + sc * 640), max(0, int(oy + sc * (Y - 6))), int(ox + sc * 900), int(oy + sc * (Y + 18)))
+        x = ImageOps.autocontrast(Image.open(path).convert("L").crop(rb))
+        x = ImageOps.invert(x.resize((x.size[0] * 5, x.size[1] * 5), Image.LANCZOS).point(lambda v: 255 if v > 128 else 0))
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
+            x.save(tf.name)
+        try:
+            out.append(" ".join(subprocess.run(["tesseract", tf.name, "-", "--psm", "7", "-c",
+                                                "tessedit_char_whitelist=0123456789x"],
+                                               capture_output=True, text=True, timeout=60).stdout.split()))
+        finally:
+            os.unlink(tf.name)
     return " / ".join(out)
 
 
@@ -342,6 +363,7 @@ def set_row(path, labels, table=None):
     cb = column_boxes(words, labels)
     rows = {}
     if table:
+        cb = column_boxes(words, labels + [l for l in table if l not in labels])
         fit = [(table[l], (b[0], b[1])) for l, b in cb.items() if l in table]
         if len(fit) >= 2:
             (X0, Y0), (x0, y0) = min(fit, key=lambda f: f[0][1])
@@ -443,6 +465,9 @@ def open_list(b):
     return p is not None
 
 
+LIST_STEPS = [24]
+
+
 def list_pick(b, avoid, prefer=None, steps=24):
     """walk the list down from the top; return the first focused save whose
     name is not in AVOID (or is PREFER), with Enter not yet pressed"""
@@ -507,7 +532,7 @@ def load_in_world(b, avoid, k):
         return None
     b.shot(f"plr{k}", "key ret", "wait 3")
     open_list(b)
-    nm = list_pick(b, avoid)
+    nm = list_pick(b, avoid, steps=LIST_STEPS[0])
     if not nm:
         b.shot("bk", "key esc", "wait 3", "key esc", "wait 3")
         return None
@@ -610,7 +635,7 @@ def menu_loads(b, a):
     quit_game(b, "pause")
 
 
-VIDEO_ROWS = ["Monitor", "VSync", "Maximum FPS", "Windowed Mode", "Resolution", "HDR Mode"]
+VIDEO_ROWS = ["Monitor", "VSync", "Maximum FPS", "Windowed Mode", "Resolution", "HDR Mode", "NVIDIA Reflex"]
 
 
 TAB_RX = {
@@ -662,6 +687,35 @@ def settings_open(b, name):
     return False
 
 
+def read_value(b, name, row, labels=None, table=None):
+    """ROW's value read with the focus moved off it: the focused row's text is
+    too dim on its tint for tesseract at 1280x720-in-1920x1080 (h3-set2: 20
+    Enters, no value read), the unfocused one reads ("1280x720")"""
+    p = b.shot(name, "key down", "wait 1.0")
+    t = row_value(p, row, labels, table)
+    if row == "Resolution":
+        t += " // " + " ".join(re.findall(r"\d{3,4}\s*x\s*\d{3,4}", ocr(p, scale=2, psm=11)))
+    b.shot(name + "u", "key up", "wait 1.0")
+    return t
+
+
+def recover(b, name="rc"):
+    """back to the world from whatever menu or dialog is up: Esc (which also
+    cancels an apply prompt) until the HUD's input hints show"""
+    for i in range(6):
+        p = b.shot(f"{name}{i}", "wait 1")
+        t = boot_ocr(p)
+        if re.search(WORLD_RX, t, re.I | re.S) and not re.search(NOT_WORLD_RX + r"|RESUME|apply", t, re.I | re.S):
+            log(f"recover: in the world after {i} steps")
+            return True
+        if re.search(r"apply\s+these\s+changes", t, re.I):
+            log("recover: an apply prompt: CONFIRM (a throwaway data disk; Esc would only bring it back)")
+            b.shot(f"{name}y{i}", "key ret", "wait 4")
+            continue
+        b.shot(f"{name}e{i}", "key esc", "wait 3")
+    return False
+
+
 def video_set(b, row, value_rx, name, max_enter=20):
     """focus ROW on the VIDEO tab, press Enter until its value matches
     value_rx, then Esc + CONFIRM; -> (changed, seconds to the next good shot)"""
@@ -675,9 +729,7 @@ def video_set(b, row, value_rx, name, max_enter=20):
         return False
     seen = []
     for j in range(max_enter):
-        t = row_value(p, row)
-        if row == "Resolution":
-            t += " // " + " ".join(re.findall(r"\d{3,4}\s*x\s*\d{3,4}", ocr(p, scale=2, psm=11)))
+        t = read_value(b, f"{name}r{j}", row)
         seen.append(t)
         if re.search(value_rx, t, re.I):
             break
@@ -696,14 +748,25 @@ def video_set(b, row, value_rx, name, max_enter=20):
     # where the game picture is now (menu_focus's canon view)
     if row == "Resolution":
         m = re.search(r"(\d{3,4})\D{0,3}x\D{0,3}(\d{3,4})", value_rx.replace("\\s*", ""))
-        VIEW["game_res"] = f"{m.group(1)}x{m.group(2)}" if m else VIEW["game_res"]
+        VIEW["res"] = f"{m.group(1)}x{m.group(2)}" if m else VIEW["res"]
+        if not VIEW.get("fullscreen"):
+            VIEW["game_res"] = VIEW["res"]
     elif row == "Windowed Mode":
-        VIEW["windowed"] = not re.search(r"Borderless", value_rx)
+        VIEW["windowed"] = not re.search(r"Borderless|Fullscreen", value_rx.split("(?!")[0])
+        # Fullscreen scales the picture over the whole 1920x1080 X screen (h3-set2:
+        # the Settings panel at 1.5x), whatever the game's own resolution
+        VIEW["fullscreen"] = bool(re.search(r"Fullscreen", value_rx))
+        VIEW["game_res"] = "1920x1080" if VIEW["fullscreen"] else VIEW["res"]
     log(f"SET {row} -> /{value_rx}/ applied (view now {VIEW})")
     return t0
 
 
-GRAPHICS_ROWS = ["Quick Preset", "Texture Quality", "Field of View", "Resolution Scaling"]
+GRAPHICS_ROWS = ["Quick Preset", "Resolution Scaling", "Frame Generation"]
+# GRAPHICS tab rows (x, top y) in the 1280x720 game picture (h3-set2's shot at
+# 320,180 of 1920x1080).  "Quick Preset" is also the section title 44 px above
+# its row, so the row is placed from the other, unique labels
+GRAPHICS_TABLE = {"Quick Preset": (330, 163), "Resolution Scaling": (332, 205), "Frame Generation": (332, 245),
+                  "Crowd Density": (332, 494)}
 
 
 def graphics_preset(b, name):
@@ -715,35 +778,32 @@ def graphics_preset(b, name):
     if settings_tab(b, p) != "GRAPHICS":
         log("settings: GRAPHICS tab not where expected; closing")
         return None
-    for i in range(10):
-        p = b.shot(f"{name}gf{i}", "key down", "wait 1.2")
-        lab, sc = set_row(p, GRAPHICS_ROWS)
-        if lab == "Quick Preset":
-            break
-    else:
-        log(f"settings: Quick Preset not focused ({sc})")
-        return None
-    before = ocr(p, scale=2, psm=11)
+    # the tab opens with the focus already on its first row, Quick Preset
+    # (h3-set2: its band +8.4 over the others before any key; a Down scrolls
+    # the list and the table no longer fits), so Enter without moving
+    before = row_value(p, "Quick Preset", GRAPHICS_ROWS, GRAPHICS_TABLE)
     p = b.shot(name + "ge", "key ret", "wait 2")
-    after = ocr(p, scale=2, psm=11)
-    m = re.search(r"Quick\s+Preset\W+([A-Za-z][A-Za-z ]{2,30})", after)
+    after = row_value(p, "Quick Preset", GRAPHICS_ROWS, GRAPHICS_TABLE)
     pa, _ = b.until(name + "ga", r"apply\s+these\s+changes", 10, "key esc", "wait 2")
     if pa:
         b.shot(name + "gc", "key ret", "wait 5")
-    log(f"SET Quick Preset -> {m.group(1).strip() if m else '?'} ({'applied' if pa else 'no apply prompt'})")
-    return m.group(1).strip() if m else "?"
+    log(f"SET Quick Preset {before!r} -> {after!r} ({'applied' if pa else 'no apply prompt'})")
+    return after
 
 
 def settings(b, a):
     """item 4: resolution 720p <-> 1080p (needs P9_XSCREEN=1920x1080 so the
     game offers 1920x1080), Windowed Mode cycled and back, the graphics
     Quick Preset changed and back; between changes, walk and shoot"""
-    w = in_world(b, "w0_", 30)
-    if not w and not load_from_main(b, 0, "ManualSave-86"):
+    if a.in_world:
+        recover(b)
+    elif not in_world(b, "w0_", 30) and not load_from_main(b, 0, "ManualSave-86"):
         raise Ended("no world at the start")
     seqs = [("Resolution", r"1920\s*x\s*1080"), ("Resolution", r"1280\s*x\s*720"),
             ("Windowed Mode", r"\bFullscreen\b"), ("Windowed Mode", r"Windowed\s+Borderless"),
             ("Windowed Mode", r"\bWindowed\b(?!\s+Borderless)"), ("Windowed Mode", r"Windowed\s+Borderless")]
+    if a.seq:
+        seqs = [tuple(x.split("=", 1)) for x in a.seq.split(";") if "=" in x]
     for c in range(a.cycles):
         for k, (row, rx) in enumerate(seqs):
             if not settings_open(b, f"c{c}{k}"):
@@ -754,7 +814,7 @@ def settings(b, a):
             b.shot(f"c{c}{k}z", "key esc", "wait 3", "key esc", "wait 3")
             p = b.shot(f"c{c}{k}w", "hold w 3000", "look 300 0 10 16", "wait 3")
             log(f"after {row} -> /{rx}/ ({'ok' if r else 'FAILED'}): world OCR {boot_ocr(p)[:60]!r}")
-        for k in range(2):
+        for k in range(a.presets):
             g = graphics_preset(b, f"c{c}p{k}")
             b.shot(f"c{c}p{k}z", "key esc", "wait 3", "key esc", "wait 3")
             p = b.shot(f"c{c}p{k}w", "hold w 3000", "look 300 0 10 16", "wait 3")
@@ -776,8 +836,12 @@ def main():
     ap.add_argument("--in-world", action="store_true", help="the boot is in the world already (a restarted driver)")
     ap.add_argument("--avoid", nargs="*", help="saves already loaded (a restarted driver)")
     ap.add_argument("--max-s", type=int, default=3600, help="give up (and let the boot end) after this many s")
+    ap.add_argument("--list-steps", type=int, default=24, help="Down taps to walk the save list for one pick")
+    ap.add_argument("--seq", help="settings: ROW=REGEX;ROW=REGEX... instead of the default 720p/1080p/window cycle")
+    ap.add_argument("--presets", type=int, default=2, help="settings: Quick Preset changes per cycle")
     a = ap.parse_args()
     b = Boot(a.run, max_s=a.max_s)
+    LIST_STEPS[0] = a.list_steps
     try:
         if a.what == "churn":
             churn(b, a)

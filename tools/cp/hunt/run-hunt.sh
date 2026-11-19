@@ -150,8 +150,11 @@ if [ "$KIND" = drive ]; then
     done
     # shellcheck disable=SC2086
     python3 -I tools/cp/hunt/drive.py ${HUNT_DRIVE//,/ } "$RUN" >> "$D" 2>&1
-    echo "drive.py rc=$? $(date +%T)" >> "$D"
-    kill -0 "$BP" 2>/dev/null && echo done >> "$OUT/ctl.txt"
+    drc=$?
+    echo "drive.py rc=$drc $(date +%T)" >> "$D"
+    # a driver killed by hand (rc >= 128) is being restarted on the same boot:
+    # leave the boot up (h3-churn2 lost its session to this `done`)
+    [ "$drc" -lt 128 ] && kill -0 "$BP" 2>/dev/null && echo done >> "$OUT/ctl.txt"
   ) &
   DP=$!
 fi
