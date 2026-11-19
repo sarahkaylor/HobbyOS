@@ -874,11 +874,19 @@ def graphics_preset(b, name):
     # h3-set4: the first Down lands on the "Quick Preset" SECTION title, whose
     # Enter asks "Do you want to restore default settings for this section?"
     # (cancelled with Esc, 3/3); the row is the second Down
-    p = b.shot(name + "gd", "key down", "wait 1.2", "key down", "wait 1.2")
-    p = b.shot(name + "ge", "key ret", "wait 2")
-    if re.search(r"restore\s+def", boot_ocr(p), re.I):
-        log("settings: Enter opened the section's restore-defaults prompt: CANCEL")
-        b.shot(name + "gx", "key esc", "wait 2")
+    # h4-p06b: two Downs + Enter still opened the section's restore-defaults
+    # prompt (as in h3-set4/5): one Down at a time, Enter, and on that prompt
+    # cancel and go one row further (at most 4)
+    for i in range(4):
+        b.shot(name + f"gd{i}", "key down", "wait 1.2")
+        p = b.shot(name + f"ge{i}", "key ret", "wait 2")
+        if re.search(r"restore\s+def", boot_ocr(p), re.I):
+            log(f"settings: Down x{i + 1} + Enter opened the section's restore-defaults prompt: CANCEL")
+            b.shot(name + f"gx{i}", "key esc", "wait 2")
+            continue
+        log(f"settings: Down x{i + 1} + Enter: no prompt (the preset row, or a value row)")
+        break
+    else:
         return None
     after = row_value(p, "Quick Preset", GRAPHICS_ROWS, GRAPHICS_TABLE) + " // " + " ".join(
         re.findall(r"Quick\s+Preset\W{0,6}(\w[\w ]{2,30})", boot_ocr(p)))
