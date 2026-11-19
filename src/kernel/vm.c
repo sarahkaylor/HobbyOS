@@ -321,6 +321,14 @@ static uint64_t vm_zframe(void) {
     frame_parked_add(-1);
   return fr ? fr : frame_alloc_zeroed();
 }
+/* H7-fault round 2 (H7-10): a page-table frame, taken under vm_lock by the
+   x86 walk (x64_next_table): from vmzero's pool when it has one, so the
+   table's first touch -- a host page fault in a P9 guest, milliseconds under
+   host memory pressure -- is not paid while every other fault waits. */
+uint64_t vm_table_frame(void) {
+  uint64_t fr = vm_zp_pop();
+  return fr ? fr : frame_alloc_zeroed();
+}
 uint32_t vm_zstash_frames(void) { /* unit tests: frames parked in stashes */
   uint32_t n = 0;
   for (int c = 0; c < MAX_CPUS; c++)

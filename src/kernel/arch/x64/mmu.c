@@ -744,7 +744,8 @@ static uint64_t *x64_next_table(struct addr_space *as, uint64_t *tab, uint32_t e
   if (!(tab[e] & X64_PTE_P)) {
     if (!alloc)
       return 0;
-    uint64_t t = frame_alloc_zeroed();
+    extern uint64_t vm_table_frame(void); /* vm.c: vmzero's pool first */
+    uint64_t t = vm_table_frame();
     if (!t)
       return 0;
     tab[e] = t | X64_PTE_P | X64_PTE_RW | X64_PTE_US;
