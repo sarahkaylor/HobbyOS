@@ -98,13 +98,42 @@ static void com1_put(uint8_t c) {
   com1_room--;
 }
 
+/* H7-fault round 3 (cp-hunt H6-09): this CPU is inside cons_hw_tx.  A port
+   exit the host does not return from (a host I/O stall: QEMU's serial write
+   blocked; h3-d05 held the wire 2 s) cannot poll, so a shootdown targeting
+   this CPU waited out the stall ([TLBTIMEOUT]).  The shooter now leaves the
+   flush owed to a CPU that is in here (vm_arch_shootdown): nothing in here
+   touches a user mapping, and the flag is dropped BEFORE the last poll, so a
+   CPU seen in here still flushes before it leaves. */
+volatile uint8_t x64_in_console[MAX_CPUS];
+#ifdef KERNEL_MODE_TEST
+/* Test kernels: stall <ms> as a port exit the host does not return from --
+   inside the console window, interrupts off, no poll (kconsole.c calls it for
+   a user line "[LPSTALL] <ms>"; src/user/linux_probe_consstall.c). */
+uint64_t cons_hw_irqsave(void);
+void cons_hw_irqrestore(uint64_t f);
+void cons_hw_stall_ms(uint32_t ms) {
+  uint32_t me = get_cpuid();
+  uint64_t f = cons_hw_irqsave();
+  if (me < MAX_CPUS) __atomic_add_fetch(&x64_in_console[me], 1, __ATOMIC_SEQ_CST);
+  uint64_t t0 = timer_get_ms();
+  while (timer_get_ms() - t0 < ms) __asm__ volatile("pause");
+  if (me < MAX_CPUS) __atomic_sub_fetch(&x64_in_console[me], 1, __ATOMIC_SEQ_CST);
+  vm_arch_tlb_poll();
+  cons_hw_irqrestore(f);
+}
+#endif
 void cons_hw_tx(const char *s, int n) {
+  uint32_t me = get_cpuid();
+  if (me < MAX_CPUS) __atomic_add_fetch(&x64_in_console[me], 1, __ATOMIC_SEQ_CST);
   uart_last_activity_ms = timer_get_ms();
   for (int i = 0; i < n; i++) {
     if (s[i] == '\n')
       com1_put('\r');
     com1_put((uint8_t)s[i]);
   }
+  if (me < MAX_CPUS) __atomic_sub_fetch(&x64_in_console[me], 1, __ATOMIC_SEQ_CST);
+  vm_arch_tlb_poll(); /* after the flag: a flush owed to us is settled here */
 }
 
 uint64_t cons_hw_irqsave(void) {

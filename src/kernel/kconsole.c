@@ -595,7 +595,22 @@ static void cons_user_write1(uint64_t who, const char *s, int n);
  * threads' lines) waited the whole time (linux_probe_conslat: a one-line
  * write() beside an 8 KiB writer, p50 66 ms, max 545 ms).  Lines stay whole;
  * another writer's line may now land between two of ours. */
+#if defined(KERNEL_MODE_TEST) && defined(__x86_64__) && !defined(CONS_HOST_TEST)
+void cons_hw_stall_ms(uint32_t ms);
+#endif
 void cons_user_write(uint64_t who, const char *s, int n) {
+#if defined(KERNEL_MODE_TEST) && defined(__x86_64__) && !defined(CONS_HOST_TEST)
+  {
+    static const char k[] = "[LPSTALL] "; /* cp-hunt H6-09 repro (uart.c) */
+    int i = 0;
+    while (k[i] && i < n && s[i] == k[i]) i++;
+    if (!k[i]) {
+      uint32_t ms = 0;
+      while (i < n && s[i] >= '0' && s[i] <= '9') ms = ms * 10 + (uint32_t)(s[i++] - '0');
+      cons_hw_stall_ms(ms > 5000 ? 5000 : ms);
+    }
+  }
+#endif
   int off = 0;
   while (off < n) {
     int end = off;
