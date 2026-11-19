@@ -1,0 +1,42 @@
+# tools/cp/hunt/r4/cold-lvp-m86.p9 -- lane H9-hunt4 (docs/cp-hunt.md round 4): a
+# lavapipe cold boot (HUNT_GPU=lavapipe: the game on the CPU) as far as it gets:
+# main menu -> LOAD GAME -> ManualSave-86 -> loading -> the world -> a short
+# walk -> QUIT GAME from the pause menu.  cold-m86-pq.p9 with every timeout
+# stretched for CPU rendering; boot_p9's `phase` rows time each step
+# (menu, loadlist, loading, world, walk, quit).
+phase menu
+shot menu
+keytiming 300 1500
+seek menu-load main down 6 LOAD GAME
+key ret
+phase loadlist
+expect loadlist 120 LOAD\s*GAME|Expand\s*groups|Coll\w*\s*groups|Progression
+key 0
+wait 6
+listseek loadlist-focus down 8 509
+phase loading
+key ret
+expect loaded 2400 PRESS\b.{0,24}\bTO\s+CONTINUE
+key spc
+wait 20
+phase world
+expect inworld 900 RIPPERDOC|Jackie|Draw\s+Weapon
+shot world-start
+phase walk
+repeat 3
+hold w 6000
+look 350 0 15 30
+hold w 4000
+wait 6
+shot cw
+end
+phase quit
+key esc
+wait 15
+seek pause-quit pause down 9 QUIT GAME
+exit_ok
+key ret
+wait 8
+expect quit-confirm 60 sure.{0,20}quit
+key ret
+wait_exit 600

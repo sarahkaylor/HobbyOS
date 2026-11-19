@@ -1,0 +1,11 @@
+[KERNEL] boot
+[PFE] rip=0x00000010800A8480 page=0x00000010800A8000 base=0x000000108002A000+0x0000000000178000 prot=5 kind=7 flags=18 ooff=0x0000000000022000 obj=0x000000007694C7A0 objsz=0x00000000001EF818 present=0
+[PFE] rip=0x00000010800A7780 page=0x00000010800A7000 base=0x000000108002A000+0x0000000000178000 prot=5 kind=7 flags=18 ooff=0x0000000000022000 obj=0x000000007694C7A0 objsz=0x00000000001EF818 present=0
+[PFK] t=10000 n=5 us=100
+[NTSYNC] stats calls=11051 ns/call=2998 opens=1 sem/mutex/event=6/30/3229 live=847 max=848 any/all=2489/0 imm=728 parks=1635 tmo=159 eintr=202 alert=0 dead=0 wakes=2088 set/rel/unl/kill=6432/109/66/284 skip=0 stale=0
+[THRS] pid=93 live=40 gt=40 hw=40 slots=60/1023 regs=1400 anon=900 anon_mib=4000 big_mib=0 stk=40 res_mib=4500 pk_mib=0 Cyberpunk2077.e
+[NTSYNC] stats calls=123165 ns/call=11591 opens=1 sem/mutex/event=11/31/10007 live=849 max=918 any/all=31840/0 imm=12268 parks=18868 tmo=3112 eintr=207 alert=0 dead=0 wakes=28476 set/rel/unl/kill=85231/12764/67/569 skip=0 stale=0
+[CONS] lines=2392 user=1127 forced=0 broken=0 raw=0 stale=0 evicted=0 split=0 usurped=0 stalls=2 stolen_ms=310 diag-off: pub=12644 mr=4760 futex=0 alive=0 resume=28 blkd=11 pecow=10 anonf=237 pf=0 (CP_DIAG=all to print)
+[VENUS] fence stats (ctx_destroy) retired=474354 irq=139782 inline=334572 errors=0 waiter_tick_finds=5392 stale_skips=36075 posted=498116 post->retire_us <=25:0 >11000:3
+[FREERACE] freeing root=0x0000000215000000 while cpu 3 still on it
+[NTSYNC] stats calls=263165 ns/call=11495 opens=1 sem/mutex/event=11/31/17973 live=951 max=960 any/all=68719/0 imm=24612 parks=42423 tmo=6058 eintr=207 alert=0 dead=0 wakes=62409 set/rel/unl/kill=185227/29381/67/569 skip=0 stale=0
