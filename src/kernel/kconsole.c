@@ -75,7 +75,13 @@ extern int cpu_is_halted(uint32_t cpu);
 #define CONS_SUMMARY_US 60000000ULL   /* [CONS] row at most once a minute */
 
 #ifndef CP_DIAG_DEFAULT
+#ifdef KERNEL_MODE_TEST
+/* H7-fault round 3 (H7-12): test kernels keep the [PF*] detail rows on (the
+   probes' console checks read them); game kernels print the 60 s summary. */
+#define CP_DIAG_DEFAULT "pf"
+#else
 #define CP_DIAG_DEFAULT ""
+#endif
 #endif
 
 struct cons_slot {
@@ -306,7 +312,7 @@ static const struct cons_dtag cons_dtags[] = {
   {"[ANONF]", 0, CONS_D_ANONF},
 };
 static const char *const cons_dnames[CONS_D_NCLASS] = {
-  "pub", "mr", "futex", "alive", "resume", "blkd", "pecow", "anonf"};
+  "pub", "mr", "futex", "alive", "resume", "blkd", "pecow", "anonf", "pf"};
 
 static int cls_index(uint32_t cls) {
   int i = 0;

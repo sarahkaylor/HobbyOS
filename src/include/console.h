@@ -49,7 +49,11 @@ void cons_user_write(uint64_t who, const char *s, int n);
 #define CONS_D_BLKD   (1u << 5)  /* [BLKD] cc= completion rows          */
 #define CONS_D_PECOW  (1u << 6)  /* [PECOW]                             */
 #define CONS_D_ANONF  (1u << 7)  /* [ANONF]                             */
-#define CONS_D_NCLASS 8
+#define CONS_D_PF     (1u << 8)  /* H7-12: [PFH]/[PFI]/[PFS]/[PFR]/[PFT]/[PFX]
+                                    detail rows and the 10 s [PF*] cadence
+                                    (checked at the source, vm_pfstat.c;
+                                    on by default in MODE=test kernels) */
+#define CONS_D_NCLASS 9
 #define CONS_D_ALL    0xFFFFFFFFu
 extern volatile uint32_t cons_diag_mask; /* bit set = class printed */
 /* Parse "all", "none"/"0", or a comma list of class names ("pub,mr"). */

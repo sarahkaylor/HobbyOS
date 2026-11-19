@@ -14,6 +14,9 @@ export PATH=$HOME/.local/bin:$PATH MAKEFLAGS=-j16 TOOLS_SKIP=1
 export CP_WINE_STAGE=$HOME/cp/wine-cp2/stage/CP/WINE WINE_BUILD=$HOME/cp/wine-cp2
 export HUNT_LOGS="$L" HUNT_EXPORT="${FAULT_EXPORT:-/srv/nfs/cp-fault-$(basename "$ROOT")}"
 [ "${FAULT_AUDIO:-0}" = 1 ] && export HUNT_AUDIO=1
+# H7-fault round 3: the [PF*] detail rows and their 10 s cadence are the
+# console class "pf", off in game kernels; pfsum.py needs them.
+export CP_DIAG="${CP_DIAG:-pf}"
 case "$KIND" in p8*|win) D=cp-p8 ;; *) D=cp-p9 ;; esac
 bash tools/cp/fault/hostnet.sh "obj/$D/$RUN/" "$L/$RUN.hostnet.txt" &
 HP=$!
