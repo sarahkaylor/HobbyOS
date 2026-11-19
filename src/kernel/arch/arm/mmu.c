@@ -733,14 +733,34 @@ void vm_arch_restore_kernel(void) {
 /* Free every table frame this AS owns plus its private leaf frames, then
    the root.  Runs after the group is claim-drained (no CPU is executing
    in this AS), under proc_lock (design section 5.3). */
+/* H8-root: teardowns, and how many found another CPU's TTBR0 bookkeeping on
+   the root being freed (the x64 [ROOTFREE] row's arm counterpart). */
+static volatile uint64_t arm_rf_td, arm_rf_onroot;
+void vm_arch_teardown_site(const void *pc) { (void)pc; }
+void vm_arch_root_report(void) {
+  extern void uart_puts(const char *s);
+  extern void print_int(int v);
+  uart_puts("[ROOTFREE] final td=");
+  print_int((int)arm_rf_td);
+  uart_puts(" onroot=");
+  print_int((int)arm_rf_onroot);
+  uart_puts("\n");
+}
+
 void vm_arch_teardown(uint64_t root_phys, uint16_t asid) {
   if (!root_phys)
     return;
+  arm_rf_td++;
   /* P2.2 (S2): if THIS cpu is translating through the AS being freed,
      leave v2 mode first (the design's claim-drain guarantees no other
      CPU is executing in it). */
   if (v2_active_root[get_cpuid()] == root_phys)
     vm_arch_restore_kernel();
+  for (uint32_t c = 0; c < MAX_CPUS; c++)
+    if (c != get_cpuid() && v2_active_root[c] == root_phys) {
+      arm_rf_onroot++;
+      break;
+    }
   uint64_t *l1 = (uint64_t *)root_phys;
   for (uint64_t c = 64; c <= 95; c++) {
     uint64_t l2d = l1[c];

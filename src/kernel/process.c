@@ -3455,6 +3455,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
            console output the tier greps (not a hand-derived zero). */
         extern void lock_print_counters(void);
         lock_print_counters();
+        vm_arch_root_report(); /* H8-root: [ROOTFREE] final row */
         /* Lock-scope audit summary: the test tiers assert BLOCKHOLD/SELF/
          * CLASSERR are 0 and bound the worst IRQ-off window.  Printed here, on
          * CPU 0 before the halt, so it is real console output. */

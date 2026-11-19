@@ -784,6 +784,11 @@ int vm_arch_root_cpu(uint64_t root_phys);
    already there).  Called when a CPU stops running a v2 AS (v1 switch,
    idle entry) and by vm_arch_teardown before freeing tables. */
 void vm_arch_restore_kernel(void);
+/* H8-root: the end-of-run [ROOTFREE] row: teardowns, and how many found
+   another CPU still on the root being freed (docs/cp-root.md). */
+void vm_arch_root_report(void);
+/* H8-root: tag this CPU's next vm_arch_teardown with its caller (rows). */
+void vm_arch_teardown_site(const void *pc);
 void vm_arch_flush_va(struct addr_space *as, uint64_t va);
 
 /* M6/L59: architecturally complete local flush of `as` (CR3 reload).  INVLPG
