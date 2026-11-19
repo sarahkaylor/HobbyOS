@@ -1,0 +1,32 @@
+tree=/home/sarah/cp/lanes/wine2-gate rev=cbaa1c35 start=2026-11-15T14:17:14-06:00
+build rc=0
+probe avx rc=0 [LP] done rc=0 fails=0
+probe clock rc=0 [LP] done rc=0 fails=0
+probe cow rc=0 [LP] done rc=0 fails=0
+probe ext2 rc=1 t3_linux_probe: FAIL — ext2 never printed '[LP] done rc=0' (tier rc=1) fails=69
+probe ext2b rc=1 t3_linux_probe: FAIL — ext2b never printed '[LP] done rc=0' (tier rc=1) fails=65
+probe fd rc=0 [LP] done rc=0 fails=0
+probe fpu_sig rc=0 [LP] done rc=0 fails=0
+probe futex_sig rc=0 [LP] done rc=0 fails=0
+probe glibc rc=0 [LP] done rc=0 fails=0
+probe gs rc=0 [LP] done rc=0 fails=0
+probe hello rc=0 [LP] done rc=0 fails=0
+probe join rc=1 t3_linux_probe: FAIL — join never printed '[LP] done rc=0' (tier rc=1) fails=0
+probe lowva rc=0 [LP] done rc=0 fails=0
+probe mem rc=0 [LP] done rc=0 fails=0
+probe mmap_race rc=0 [LP] done rc=0 fails=0
+probe proc rc=0 [LP] done rc=0 fails=0
+probe redzone rc=0 [LP] done rc=0 fails=0
+probe timers rc=0 [LP] done rc=0 fails=0
+probe tmpfs rc=0 [LP] done rc=0 fails=0
+probe tramp_sig rc=0 [LP] done rc=0 fails=0
+probe vmcommit rc=0 [LP] done rc=0 fails=0
+probe wad rc=0 [LP] done rc=0 fails=0
+probe wsys rc=0 [LP] done rc=0 fails=0
+probe xwire rc=0 [LP] done rc=0 fails=0
+ext2_gate rc=0 boot 1: 75 ok rows; t3_linux_probe: PASS — ext2 reached its done marker boot 2: 14 ok rows; t3_linux_probe: PASS — ext2 reached its done marker boot 3: 124 main ok rows, 9 helper ok rows; t3_linux_probe: PASS — ext2b reached its done marker ext2_gate: PASS 
+unit rc=1 [TXT] PROBEGET off=0x0 -> the probe's own cache-bypassed read (second read agreed or was the zero replay); cache frame was POISONED, published the device's bytes (identity asserted) Tests run:    451 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244 
+host_tests rc=2 20 pass-lines; errors: make: *** [Makefile:4421: host_tests] Error 2 
+castscan rc=0 castscan: 359 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present 
+arm_build rc=0
+ALLDONE 2026-11-15T14:35:01-06:00

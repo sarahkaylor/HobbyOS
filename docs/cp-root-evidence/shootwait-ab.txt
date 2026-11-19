@@ -1,0 +1,9 @@
+# shootwait A/B, strix KVM, host load ~8 (H9 game boots alongside); A = integ25 (root-base), B = lane (root-lane2, 60503d3d+), interleaved
+A.1 lp_check_shootwait: FAIL -- 2000 mprotect shootdowns, 9 slow target acks (0.5 %), total 133504 us, max 27456 us
+B.1 lp_check_shootwait: FAIL -- 2000 mprotect shootdowns, 49 slow target acks (2.5 %), total 411037 us, max 167343 us
+A.2 lp_check_shootwait: FAIL -- 2000 mprotect shootdowns, 45 slow target acks (2.2 %), total 317762 us, max 79511 us
+B.2 lp_check_shootwait: FAIL -- 2000 mprotect shootdowns, 22 slow target acks (1.1 %), total 355017 us, max 59974 us
+A.3 lp_check_shootwait: FAIL -- 2000 mprotect shootdowns, 17 slow target acks (0.8 %), total 241042 us, max 129740 us
+B.3 lp_check_shootwait: PASS -- 2000 mprotect shootdowns, 1 slow target acks (0.1 %), total 71798 us, max 1571 us
+
+# the batch run (lane): lp_check_shootwait: FAIL -- 2000 mprotect shootdowns, 54 slow target acks (2.7 %), total 820197 us, max 225559 us

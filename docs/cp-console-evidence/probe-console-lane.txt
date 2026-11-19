@@ -1,0 +1,33 @@
+# linux_probe_console on this branch (863c79ae), strix (Zen 5, KVM, -smp 8 -m 12G)
+# LP_TIMEOUT=300 bash tools/cp/qemu-slot.sh bash tools/gate/t3_linux_probe.sh console
+
+qemu-slot: slot 1 of 4 held by pid 1731977 16:24:26
+t3_linux_probe: building /home/sarah/cp/lanes/console/obj/intel/probe_console.elf
+=== t3_linux_probe: console (deadline 300s, log /home/sarah/cp/lanes/console-ev/console.tier.log) ===
+--- probe rows ---
+[LP] console begin secs=60 stress=12 writers=4 ncpu=8
+[LP] console totals kernel=26862 user=12774 cpus=0xff ncpus=8 w0=1455 w1=1033 w2=9496 w3=790 secs=60.1
+[LP] done rc=0
+--- unhandled Linux syscalls (name the next handler) ---
+[LCOMPAT] argv argc=1 a0=PROBE.ELF execfn=PROBE.ELF
+--- faults / exits ---
+[EXITPC] pid=2 last_user_pc=0x100000468E code=0x0
+--- host-side check: lp_check_console.py ---
+lp_check_console: kernel rows intact 26861/26862, user rows intact 12774/12774, interleaved lines 0, torn rows 1, missing 1, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+  e.g. [CSTR] c=1 k=3 s=40
+lp_check_console: FAIL -- 1 torn row(s); 1 missing row(s)
+t3_linux_probe: FAIL — console reached its done marker but lp_check_console.py failed
+
+# re-checked with the final checker (it drops t3_tier.sh's own '=== T3 guest sample' note, which the
+# tier had appended mid-row at the [IDLESTUCK] marker: the one 'torn' row above), same console log:
+lp_check_console: kernel rows intact 26862/26862, user rows intact 12774/12774, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+lp_check_console: PASS -- clean
+
+# final kernel (afe7cb38 = head), batch + reruns:
+/home/sarah/cp/lanes/console-gates.txt:console rc=1 [LP] done rc=0lp_check_console: kernel rows intact 24864/24864, user rows intact 12278/12279, interleaved lines 0, torn rows 1, missing 1, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+/home/sarah/cp/lanes/console-rerun.txt:console#1 rc=0 lp_check_console: kernel rows intact 24714/24714, user rows intact 12163/12163, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+/home/sarah/cp/lanes/console-rerun.txt:console#2 rc=0 lp_check_console: kernel rows intact 25404/25404, user rows intact 12404/12404, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+# batch run: the one 'torn' user row is t3_tier.sh's two-write stall note with guest bytes between its writes;
+# re-checked with the final checker (593746b9) on the kept console:
+lp_check_console: kernel rows intact 24864/24864, user rows intact 12279/12279, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+lp_check_console: PASS -- clean

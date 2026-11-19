@@ -1,0 +1,96 @@
+Loaded L"C:\\windows\\Microsoft.NET\\Framework64\\v2.0.50727\\fusion.dll" at 00006FFFFCFC0000: builtin
+Loaded L"C:\\windows\\system32\\actxprxy.dll" at 00006FFFFDBB0000: builtin
+Loaded L"C:\\windows\\system32\\advapi32.dll" at 00006FFFFFBA0000: builtin
+Loaded L"C:\\windows\\system32\\bcrypt.dll" at 00006FFFFE6F0000: builtin
+Loaded L"C:\\windows\\system32\\cabinet.dll" at 00006FFFFDFA0000: builtin
+Loaded L"C:\\windows\\system32\\cfgmgr32.dll" at 00006FFFFF7E0000: builtin
+Loaded L"C:\\windows\\system32\\combase.dll" at 00006FFFFE750000: builtin
+Loaded L"C:\\windows\\system32\\comctl32.dll" at 00006FFFFDE70000: builtin
+Loaded L"C:\\windows\\system32\\coml2.dll" at 00006FFFFE720000: builtin
+Loaded L"C:\\windows\\system32\\crypt32.dll" at 00006FFFFE4D0000: builtin
+Loaded L"C:\\windows\\system32\\cryptbase.dll" at 00006FFFFF990000: builtin
+Loaded L"C:\\windows\\system32\\dbghelp.dll" at 00006FFFFD9E0000: builtin
+Loaded L"C:\\windows\\system32\\dinput8.dll" at 00006FFFFC610000: builtin
+Loaded L"C:\\windows\\system32\\dnsapi.dll" at 00006FFFFF340000: builtin
+Loaded L"C:\\windows\\system32\\drivers\\hidclass.sys" at 00006FFFFF290000: builtin
+Loaded L"C:\\windows\\system32\\drivers\\hidparse.sys" at 00006FFFFF2D0000: builtin
+Loaded L"C:\\windows\\system32\\drivers\\mountmgr.sys" at 00006FFFFF710000: builtin
+Loaded L"C:\\windows\\system32\\drivers\\ndis.sys" at 00006FFFFF3B0000: builtin
+Loaded L"C:\\windows\\system32\\drivers\\nsiproxy.sys" at 00006FFFFF3E0000: builtin
+Loaded L"C:\\windows\\system32\\drivers\\winebus.sys" at 00006FFFFF300000: builtin
+Loaded L"C:\\windows\\system32\\drivers\\winehid.sys" at 00006FFFFF2B0000: builtin
+Loaded L"C:\\windows\\system32\\drivers\\wineusb.sys" at 00006FFFFF270000: builtin
+Loaded L"C:\\windows\\system32\\DWMAPI.DLL" at 00006FFFFCCC0000: builtin
+Loaded L"C:\\windows\\system32\\DXGI.DLL" at 00006FFFFC800000: native
+Loaded L"C:\\windows\\system32\\explorer.exe" at 0000000140000000: builtin
+Loaded L"C:\\windows\\system32\\gdi32.dll" at 00006FFFFF4A0000: builtin
+Loaded L"C:\\windows\\system32\\hid.dll" at 00006FFFFC6A0000: builtin
+Loaded L"C:\\windows\\system32\\imagehlp.dll" at 00006FFFFE3E0000: builtin
+Loaded L"C:\\windows\\system32\\imm32.dll" at 00006FFFFF420000: builtin
+Loaded L"C:\\windows\\system32\\iphlpapi.dll" at 00006FFFFF370000: builtin
+Loaded L"C:\\windows\\system32\\kernel32.dll" at 00006FFFFFEB0000: builtin
+Loaded L"C:\\windows\\system32\\kernelbase.dll" at 00006FFFFFBF0000: builtin
+Loaded L"C:\\windows\\system32\\lsteamclient.dll" at 00006FFFFD770000: builtin
+Loaded L"C:\\windows\\system32\\mpr.dll" at 00006FFFFDCA0000: builtin
+Loaded L"C:\\windows\\system32\\mpr.dll" at 00006FFFFE040000: builtin
+Loaded L"C:\\windows\\system32\\msacm32.dll" at 00006FFFFCFF0000: builtin
+Loaded L"C:\\windows\\system32\\mscoree.dll" at 00006FFFFDA80000: builtin
+Loaded L"C:\\windows\\system32\\msi.dll" at 00006FFFFDFD0000: builtin
+Loaded L"C:\\windows\\system32\\mspatcha.dll" at 00006FFFFDE50000: builtin
+Loaded L"C:\\windows\\system32\\msvcrt.dll" at 00006FFFFFAE0000: builtin
+Loaded L"C:\\windows\\system32\\msxml3.dll" at 00006FFFFD550000: builtin
+Loaded L"C:\\windows\\system32\\nsi.dll" at 00006FFFFF320000: builtin
+Loaded L"C:\\windows\\system32\\ntdll.dll" at 00006FFFFFF30000: builtin
+Loaded L"C:\\windows\\system32\\ntoskrnl.exe" at 00006FFFFF740000: builtin
+Loaded L"C:\\windows\\system32\\odbccp32.dll" at 00006FFFFDE20000: builtin
+Loaded L"C:\\windows\\system32\\ole32.dll" at 00006FFFFE7C0000: builtin
+Loaded L"C:\\windows\\system32\\oleacc.dll" at 00006FFFFDAD0000: builtin
+Loaded L"C:\\windows\\system32\\oleaut32.dll" at 00006FFFFE2A0000: builtin
+Loaded L"C:\\windows\\system32\\openvr_api_dxvk.dll" at 00006FFFFC6C0000: native
+Loaded L"C:\\windows\\system32\\plugplay.exe" at 0000000140000000: builtin
+Loaded L"C:\\windows\\system32\\rpcrt4.dll" at 00006FFFFF8B0000: builtin
+Loaded L"C:\\windows\\system32\\rpcss.exe" at 0000000140000000: builtin
+Loaded L"C:\\windows\\system32\\rtworkq.dll" at 00006FFFFD520000: builtin
+Loaded L"C:\\windows\\system32\\sechost.dll" at 00006FFFFFAA0000: builtin
+Loaded L"C:\\windows\\system32\\services.exe" at 0000000140000000: builtin
+Loaded L"C:\\windows\\system32\\setupapi.dll" at 00006FFFFF820000: builtin
+Loaded L"C:\\windows\\system32\\SETUPAPI.dll" at 00006FFFFF820000: builtin
+Loaded L"C:\\windows\\system32\\shcore.dll" at 00006FFFFE890000: builtin
+Loaded L"C:\\windows\\system32\\shell32.dll" at 00006FFFFE920000: builtin
+Loaded L"C:\\windows\\system32\\shlwapi.dll" at 00006FFFFE8C0000: builtin
+Loaded L"C:\\windows\\system32\\steam.exe" at 0000000140000000: builtin
+Loaded L"C:\\windows\\system32\\svchost.exe" at 0000000140000000: builtin
+Loaded L"C:\\windows\\system32\\sxs.dll" at 00006FFFFDE00000: builtin
+Loaded L"C:\\windows\\system32\\tabtip.exe" at 0000000140000000: builtin
+Loaded L"C:\\windows\\system32\\ucrtbase.dll" at 00006FFFFF9B0000: builtin
+Loaded L"C:\\windows\\system32\\uiautomationcore.dll" at 00006FFFFDB20000: builtin
+Loaded L"C:\\windows\\system32\\urlmon.dll" at 00006FFFFDD70000: builtin
+Loaded L"C:\\windows\\system32\\user32.dll" at 00006FFFFF540000: builtin
+Loaded L"C:\\windows\\system32\\userenv.dll" at 00006FFFFF7C0000: builtin
+Loaded L"C:\\windows\\system32\\uxtheme.dll" at 00006FFFFDC10000: builtin
+Loaded L"C:\\windows\\system32\\version.dll" at 00006FFFFDC80000: builtin
+Loaded L"C:\\windows\\system32\\VERSION.dll" at 00006FFFFDC80000: builtin
+Loaded L"C:\\windows\\system32\\wevtsvc.dll" at 00006FFFFF400000: builtin
+Loaded L"C:\\windows\\system32\\win32u.dll" at 00006FFFFF450000: builtin
+Loaded L"C:\\windows\\system32\\wineboot.exe" at 0000000140000000: builtin
+Loaded L"C:\\windows\\system32\\winedevice.exe" at 0000000140000000: builtin
+Loaded L"C:\\windows\\system32\\wineopenxr.dll" at 00006FFFFC680000: builtin
+Loaded L"C:\\windows\\system32\\winevulkan.dll" at 00006FFFFC7A0000: builtin
+Loaded L"c:\\windows\\system32\\winex11.drv" at 00006FFFFDC60000: builtin
+Loaded L"C:\\windows\\system32\\winex11.drv" at 00006FFFFDC60000: builtin
+Loaded L"C:\\windows\\system32\\wininet.dll" at 00006FFFFDCD0000: builtin
+Loaded L"C:\\windows\\system32\\wininet.dll" at 00006FFFFE070000: builtin
+Loaded L"C:\\windows\\system32\\WINMM.dll" at 00006FFFFD020000: builtin
+Loaded L"C:\\windows\\system32\\wintrust.dll" at 00006FFFFE240000: builtin
+Loaded L"C:\\windows\\system32\\ws2_32.dll" at 00006FFFFF950000: builtin
+Loaded L"C:\\windows\\system32\\XInput1_4.dll" at 00006FFFFC670000: builtin
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Proton - Experimental\\files\\share\\wine\\mono\\wine-mono\\bin\\libmono-2.0-x86_64.dll" at 00006FFFFD100000: builtin
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Proton - Experimental\\files\\share\\wine\\mono\\wine-mono\\lib\\mono\\4.5\\Facades\\netstandard.dll" at 00000000036C0000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Proton - Experimental\\files\\share\\wine\\mono\\wine-mono\\lib\\mono\\4.5\\mscorlib.dll" at 0000000003070000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Proton - Experimental\\files\\share\\wine\\mono\\wine-mono\\lib\\mono\\gac\\System\\4.0.0.0__b77a5c561934e089\\System.dll" at 0000000004590000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Proton - Experimental\\files\\share\\wine\\mono\\wine-mono\\lib\\mono\\gac\\System.Core\\4.0.0.0__b77a5c561934e089\\System.Core.dll" at 0000000010000000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Proton - Experimental\\files\\share\\wine\\mono\\wine-mono\\lib\\mono\\gac\\System.Numerics\\4.0.0.0__b77a5c561934e089\\System.Numerics.dll" at 0000000004540000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Proton - Experimental\\files\\share\\xalia\\SDL3.dll" at 00006FFFFCCE0000: builtin
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Proton - Experimental\\files\\share\\xalia\\Superpower.dll" at 00000000036A0000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Proton - Experimental\\files\\share\\xalia\\Tmds.DBus.Protocol.dll" at 0000000005400000: native
+Loaded L"Z:\\mnt\\fast\\games\\steamapps\\common\\Proton - Experimental\\files\\share\\xalia\\xalia.exe" at 0000000000400000: native

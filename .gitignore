@@ -211,3 +211,18 @@ tools/rw/out/
 
 # macOS debug bundles from the host tests (*_host binaries)
 *.dSYM/
+
+# --- Cyberpunk track (docs/cyberpunk.md AD-12) -------------------------------
+# The game is proprietary (CD PROJEKT RED EULA): no artifact from the user's
+# copy may enter git.  cp-runtime holds fetched, sha256-pinned upstream
+# tarballs/debs (tools/cp/fetch-runtime.sh); the rest are staging / evidence
+# paths that could hold game files or multi-GB traces.
+/third_party/cp-runtime/
+/cyberpunk/
+/cp-game/
+/cp-nfs-export/
+tools/cp/out/
+*.archive
+Cyberpunk2077.exe
+REDprelauncher.exe
+setup_cyberpunk_2077*

@@ -1,0 +1,47 @@
+# Kernel hang reproduced by the C4-x smoke WITHOUT the prefault workaround
+# (XSMOKE_PREFAULT=0 behaviour; first in-OS run, 2026-11-15, linuxci, serial
+# log excerpt via grep -- unedited lines).  xsmoke loads every lib from
+# /CP/X11/lib, prints its first row, then XOpenDisplay never returns: CPU1 sits
+# at 0x700c166a (= memcpy, addr2line on obj/intel/hobbyos.boot.elf) with vec=14
+# (#PF), IF=0 (rflags 0x10046), cr2=0x10800b936c; libX11.so.6 is mapped at
+# 0x1080000000 (the stuck task's pc 0x1080037ba0 is libX11+0x37ba0 =
+# XQueryExtension, objdump), so cr2 = libX11+0xb936c, inside .rodata
+# [0xa6000,0x11f190) (readelf -S),
+# in syscall 20 (writev) -- for 285 s until the harness gave up.
+# See docs/cp-x11.md §4.2.
+elf loader: PT_INTERP mapped: interp_base=0x1008000000 exe_base=0x1000000000 exe_entry=0x1000003D30 start=0x1008001100
+v2 loader: PID=9 entry=0x1008001100 sp=0x1800000000 resident=71 tables=7 abi=0x1 native=0 interp=0x1008000000
+[XSESS] spawned /XSMOKE.ELF pid=9
+/CP/X11/lib/libX11.so.6
+/CP/X11/lib/libX11-xcb.so.1
+/CP/X11/lib/libxcb.so.1[PUB] who=img_pf va=0x10000B8000 off=0xB8000 prot=RWX priv=1 src=file zero=716 ver=1
+/CP/X11/lib/libxcb-present.so.0
+/CP/X11/lib/libxcb-dri3.so.0[PUB] who=img_pf va=0x1000138000 off=0x138000 prot=RWX priv=1 src=file zero=838 ver=1
+/CP/X11/lib/libxcb-composite.so.0[PUB] who=img_pf va=0x100015D000 off=0x15D000 prot=RWX priv=1 src=file zero=830 ver=1
+/CP/X11/lib/libxcb-damage.so.0[PUB] who=img_pf va=0x1000179000 off=0x179000 prot=RWX priv=1 src=file zero=727 ver=1
+/CP/X11/lib/libxcb-shm.so.0
+/CP/X11/lib/libxcb-sync.so.1[PUB] who=img_pf va=0x10001B3000 off=0x1B3000 prot=RWX priv=1 src=file zero=605 ver=1
+/CP/X11/lib/libXext.so.6[PUB] who=img_pf va=0x10001B9000 off=0x1B9000 prot=RWX priv=1 src=file zero=470 ver=1
+/CP/X11/lib/libXi.so.6[PUB] who=img_pf va=0x10001C0000 off=0x1C0000 prot=RWX priv=1 src=file zero=455 ver=1
+/CP/X11/lib/libXrandr.so.2[PUB] who=img va=0x10002B7000 off=0x2B7000 prot=RWX priv=1 src=file zero=784 ver=1
+/CP/X11/lib/libXrender.so.1[PUB] who=img va=0x10002B8000 off=0x2B8000 prot=RWX priv=1 src=file zero=441 ver=1
+/CP/X11/lib/libXfixes.so.3
+/CP/X11/lib/libXcursor.so.1[PUB] who=img_pf va=0x10001E7000 off=0x1E7000 prot=RWX priv=1 src=file zero=831 ver=1
+/CP/X11/lib/libXinerama.so.1[PUB] who=img_pf va=0x10001EF000 off=0x1EF000 prot=RWX priv=1 src=file zero=904 ver=1
+/CP/X11/lib/libxshmfence.so.1[PUB] who=img_pf va=0x10001F7000 off=0x1F7000 prot=RWX priv=1 src=file zero=823 ver=1
+/CP/X11/lib/libXau.so.6
+/CP/X11/lib/libXdmcp.so.6[PUB] who=img_pf va=0x1000230000 off=0x230000 prot=RWX priv=1 src=file zero=505 ver=1
+[X] [XS] xsmoke up pid=9 DISPLAY=:0 LD_LIBRARY_PATH=/LIB64
+  [NFSIO] bytes=0x0x0000000000000000 rpcs=0x0x0000000000000000 uptime_ms=0x0x000000000000a727
+  CPU0 rip=0x00000000700c14d6 rflags=0x0000000000000212 pid=-1 resume_pid=3 resume_sp=0x00000017fffffcc8 age_ms=0 syscall=76
+  CPU1 rip=0x00000000700c166a rflags=0x0000000000010046 vec=14 err=0x0000000000000000 cr2=0x00000010800b936c pid=9 resume_pid=9 resume_sp=0x00000017fffff948 age_ms=15392 syscall=20
+  CPU2 rip=0x00000000700c14d6 rflags=0x0000000000000212 pid=-1 resume_pid=6 resume_sp=0x00000017fffffb48 age_ms=10 syscall=67
+5556:  CPU1 rip=0x00000000700c166a rflags=0x0000000000010046 vec=14 err=0x0000000000000000 cr2=0x00000010800b936c pid=9 resume_pid=9 resume_sp=0x00000017fffff948 age_ms=285426 syscall=20
+[CPX11] screendump /home/sarah/cp/x11-build/smoke-run/xsmoke-window.ppm: sampled pixels green=0 blue=0 red=0
+[CPX11] FAIL: the client never drew its window
+[CPX11] FAIL: missing row: XOpenDisplay
+[CPX11] FAIL: missing row: XListExtensions
+[CPX11] FAIL: missing row: clean exit rc=0
+[CPX11] FAIL: libX11 was not resolved from /CP/X11/lib
+[CPX11] FAIL: window not in the screendump (green=0 blue=0)
+EXIT=1

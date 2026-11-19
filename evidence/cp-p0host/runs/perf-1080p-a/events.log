@@ -1,0 +1,19 @@
+1794715433172837736 waiting for /home/sarah/cp/measure.lock
+1794715433179061376 lock held=1
+1794715433278290407 nav start
+1794715468025300644 press-to-continue seen (n0022)
+1794715474300441137 press-to-continue seen (n0025)
+1794715478930750196 main menu seen (n0027)
+1794715488962786528 snapshot menu pid=50344 threads=92 fds=473
+1794715490481835480 mangohud log ON (menu)
+1794715520684927276 mangohud log OFF (menu)
+1794715523646104859 menu focus = LOAD GAME
+1794715525453834397 menu focus = SETTINGS
+1794715531938997746 settings tab (graphics_tab) benchmark-visible=False
+1794715532497798266 benchmark requested (b)
+1794715535814745381 benchmark confirm dialog answered (n0033)
+1794715576070382895 snapshot bench pid=50344 threads=90 fds=468
+1794715621291104145 benchmark result benchmark_2026-11-14_22-05-35
+1794715621340508672 snapshot postbench pid=50344 threads=90 fds=469
+1794715622508731651 nav done
+1794715630736016018 run end rc=0

@@ -10,6 +10,9 @@
 #include "timer.h"
 #include "frame.h"
 #include "vm.h"
+#include "linux_sigframe.h"
+#include "kmem.h"
+#include "vfs.h" /* cp/exec: VFS_PATH_MAX */
 
 
 extern struct process *process_get_pcb(int pid);
@@ -26,15 +29,19 @@ jmp_buf user_exit_context;
  * spawning/staying cwd, because Linux reports an absolute path here.  Called
  * after cwd is established on spawn, and with the already-resolved absolute
  * path on exec. */
-static void set_exe_path(struct process *p, const char *path) {
+_Static_assert(PROC_PATH_MAX == VFS_PATH_MAX,
+               "struct process cwd/exe_path must hold a whole VFS path");
+
+void set_exe_path(struct process *p, const char *path) {
   if (!p || !path) return;
+  const int cap = (int)sizeof p->exe_path;
   int n = 0;
   if (path[0] != '/') {
     const char *cwd = p->cwd[0] ? p->cwd : "/";
-    for (int i = 0; cwd[i] && n < 158; i++) p->exe_path[n++] = cwd[i];
+    for (int i = 0; cwd[i] && n < cap - 2; i++) p->exe_path[n++] = cwd[i];
     if (n == 0 || p->exe_path[n - 1] != '/') p->exe_path[n++] = '/';
   }
-  for (int i = 0; path[i] && n < 159; i++) p->exe_path[n++] = path[i];
+  for (int i = 0; path[i] && n < cap - 1; i++) p->exe_path[n++] = path[i];
   p->exe_path[n] = '\0';
 }
 
@@ -379,7 +386,7 @@ int load_and_run_program_in_scheduler_args(const char* filename, int stdin_fd, i
   uart_puts("\n");
 
   // Clean D-cache and invalidate I-cache so the loaded program executes correctly
-  __builtin___clear_cache((char*)phys_base, (char*)phys_base + bytes_read);
+  __builtin___clear_cache((char*)phys_to_virt(phys_base), (char*)phys_to_virt(phys_base) + bytes_read);
   uart_puts("Cache cleared.\n");
 
   fat16_close(&f);
@@ -628,7 +635,12 @@ static int spawn_ex_apply_fds(struct process *child, struct process *parent,
  * flat-string path already allows HO_EXEC_ARGV_LEN per element, so matching
  * that ceiling is the honest limit rather than a silent 16. */
 #define COMPAT_MAX_ARGV 128
-#define COMPAT_MAX_ENV 24
+/* C1-k5 (C8-game stop 1): 128 entries, was 24 (the excess was dropped
+   silently).  The env strings no longer pass through the 512-byte `s`
+   buffer either: they are copied straight from the PCB blob (HO_ENV_LEN),
+   so one entry may be as long as the blob.  More entries than this is
+   -E2BIG for the spawn.  Stack cost: envp[] 1 KiB + off[] 512 B. */
+#define COMPAT_MAX_ENV 128
 #define COMPAT_STR_MAX 512
 
 /* Write `s` (with its NUL) at the descending stack cursor and report its
@@ -642,6 +654,46 @@ static int compat_put_str(struct process *child, uint64_t *sp, const char *s,
   if (vm_kwrite(child, *sp, s, n + 1) != 0) return -EFAULT;
   *addr = *sp;
   return 0;
+}
+
+/* cp/exec: the compat auxv, shared by the spawn loader's startup block
+ * (compat_stack_block) and execve(2) (linux_exec.c) so the frozen contract
+ * (docs/rw-ldso-design.md section 3) has exactly one writer.  Fills `w` (at
+ * least COMPAT_AUXV_WORDS) and returns the number of words written, AT_NULL
+ * pair included.  The set and its order are unchanged from GB-164. */
+int compat_auxv_fill(uint64_t *w, uint64_t phdr, uint32_t phnum,
+                     uint64_t interp_base, uint64_t entry,
+                     uint64_t platform_addr, uint64_t rnd_addr,
+                     uint64_t execfn_addr) {
+  int k = 0;
+  w[k++] = 3;  w[k++] = phdr;          /* AT_PHDR   */
+  w[k++] = 4;  w[k++] = 56;            /* AT_PHENT  */
+  w[k++] = 5;  w[k++] = (uint64_t)phnum; /* AT_PHNUM */
+  w[k++] = 6;  w[k++] = 4096;          /* AT_PAGESZ */
+  w[k++] = 7;  w[k++] = interp_base;   /* AT_BASE (0 for a static image) */
+  w[k++] = 8;  w[k++] = 0;             /* AT_FLAGS  */
+  w[k++] = 9;  w[k++] = entry;         /* AT_ENTRY: the EXECUTABLE's entry */
+  w[k++] = 11; w[k++] = 0;             /* AT_UID    */
+  w[k++] = 12; w[k++] = 0;             /* AT_EUID   */
+  w[k++] = 13; w[k++] = 0;             /* AT_GID    */
+  w[k++] = 14; w[k++] = 0;             /* AT_EGID   */
+  w[k++] = 15; w[k++] = platform_addr; /* AT_PLATFORM -> "x86_64" */
+#ifdef __x86_64__
+  w[k++] = 16; w[k++] = arch_linux_hwcap(); /* AT_HWCAP: CPUID.1:EDX */
+#else
+  w[k++] = 16; w[k++] = 0;             /* AT_HWCAP  */
+#endif
+  w[k++] = 17; w[k++] = 100;           /* AT_CLKTCK */
+  w[k++] = 23; w[k++] = 0;             /* AT_SECURE */
+  w[k++] = 25; w[k++] = rnd_addr;      /* AT_RANDOM */
+  w[k++] = 26; w[k++] = 0;             /* AT_HWCAP2 */
+  w[k++] = 31; w[k++] = execfn_addr;   /* AT_EXECFN */
+#ifdef __x86_64__
+  w[k++] = LSF_AT_MINSIGSTKSZ;         /* AT_MINSIGSTKSZ (51) */
+  w[k++] = lsf_min_sigstksz(arch_fpu_sig_image_bytes());
+#endif
+  w[k++] = 0;  w[k++] = 0;             /* AT_NULL   */
+  return k;
 }
 
 /* Layer the SysV AMD64 process-initialization block on a COMPAT process's
@@ -684,30 +736,41 @@ static int compat_stack_block(struct process *child, int pid, uint64_t start,
   if (argc < 0) argc = 0;
   if (envc < 0) envc = 0;
   if (argc > COMPAT_MAX_ARGV) argc = COMPAT_MAX_ARGV;
-  if (envc > COMPAT_MAX_ENV) envc = COMPAT_MAX_ENV;
+  if (envc > COMPAT_MAX_ENV) return -E2BIG; /* C1-k5: no silent truncation */
 
   /* Strings first, highest address first, so the arrays below them can be laid
-     down front-to-back without tracking each string's end. */
+     down front-to-back without tracking each string's end.  C1-k5: each env
+     entry is copied straight from the PCB blob (no 512-byte bounce). */
   int have_ldpath = 0;
-  for (int i = envc - 1; i >= 0; i--) {
-    int n = sys_readenv(grp, i, s, (int)sizeof s);
-    if (n < 0) {
-      s[0] = '\0';
-      n = 0;
+  {
+    /* start offsets of the envc entries in grp->env */
+    static const char kEmpty[1] = {0};
+    int off[COMPAT_MAX_ENV];
+    int pos = 0;
+    for (int i = 0; i < envc; i++) {
+      off[i] = pos < HO_ENV_LEN ? pos : -1;
+      while (pos < HO_ENV_LEN && grp->env[pos]) pos++;
+      if (pos < HO_ENV_LEN) pos++;
     }
-    /* Does the parent already own the library path?  Compared byte-wise: the
-       kernel is freestanding (no strncmp). */
-    {
-      static const char kLd[] = "LD_LIBRARY_PATH=";
-      int is_ld = 1;
-      for (int j = 0; kLd[j]; j++) {
-        if (s[j] != kLd[j]) { is_ld = 0; break; }
+    for (int i = envc - 1; i >= 0; i--) {
+      const char *e = off[i] >= 0 ? &grp->env[off[i]] : kEmpty;
+      int n = 0;
+      while (off[i] >= 0 && off[i] + n < HO_ENV_LEN && e[n]) n++;
+      /* Does the parent already own the library path?  Compared byte-wise:
+         the kernel is freestanding (no strncmp). */
+      {
+        static const char kLd[] = "LD_LIBRARY_PATH=";
+        int is_ld = 1;
+        for (int j = 0; kLd[j]; j++) {
+          if (j >= n || e[j] != kLd[j]) { is_ld = 0; break; }
+        }
+        if (is_ld) have_ldpath = 1;
       }
-      if (is_ld) have_ldpath = 1;
+      sp -= (uint64_t)n + 1;
+      if (n > 0 && vm_kwrite(child, sp, e, n) != 0) return -EFAULT;
+      if (vm_kwrite(child, sp + (uint64_t)n, kEmpty, 1) != 0) return -EFAULT;
+      envp[i] = sp;
     }
-    sp -= (uint64_t)n + 1;
-    if (vm_kwrite(child, sp, s, n + 1) != 0) return -EFAULT;
-    envp[i] = sp;
   }
   /* F3 (plan Appendix A, docs/rw-ldso-design.md): the frozen DSO resolution
      order is DT_RUNPATH -> LD_LIBRARY_PATH -> /LIB64, and /LIB64 is where the
@@ -801,7 +864,7 @@ static int compat_stack_block(struct process *child, int pid, uint64_t start,
    * (argv and DISPLAY arrived); with argc=1 the guest read argv[0] == NULL and
    * an empty environment, and Doom then asked libXau for $HOME and died.
    * Computing argv_base first makes the layout independent of the counts. */
-  uint64_t w[40];                  /* 18 pairs + AT_NULL; see below */
+  uint64_t w[44];                  /* 20 pairs + AT_NULL; see below */
   uint64_t rnd_addr = (sp - 16) & ~(uint64_t)0xF;
   uint64_t arrays = (uint64_t)(argc + 1) * 8 + (uint64_t)(envc + 1) * 8;
 
@@ -813,31 +876,23 @@ static int compat_stack_block(struct process *child, int pid, uint64_t start,
    *   AT_ENTRY                   where to transfer after relocation;
    *   AT_SECURE/AT_UID..EGID     credential/secure-mode queries;
    *   AT_PLATFORM                hwcaps subdirectory name;
-   *   AT_HWCAP (0)               baseline x86_64 (SSE2) — never a guess at
-   *                              optional ISA bits the kernel has not probed;
+   *   AT_HWCAP                   CPUID.1:EDX, exactly what Linux x86_64
+   *                              reports (ELF_HWCAP); measured by the
+   *                              kernel, never a guess (glibc 2.31 overwrites
+   *                              it with HWCAP_X86_64 and reads CPUID itself);
    *   AT_CLKTCK (100)            sysconf(_SC_CLK_TCK);
    *   AT_RANDOM                  stack-guard seed (16 bytes);
-   *   AT_EXECFN                  the program path for diagnostics. */
-  int k = 0;
-  w[k++] = 3;  w[k++] = phdr;          /* AT_PHDR   */
-  w[k++] = 4;  w[k++] = 56;            /* AT_PHENT  */
-  w[k++] = 5;  w[k++] = (uint64_t)phnum; /* AT_PHNUM */
-  w[k++] = 6;  w[k++] = 4096;          /* AT_PAGESZ */
-  w[k++] = 7;  w[k++] = interp_base;   /* AT_BASE (0 for a static image) */
-  w[k++] = 8;  w[k++] = 0;             /* AT_FLAGS  */
-  w[k++] = 9;  w[k++] = entry;         /* AT_ENTRY: the EXECUTABLE's entry */
-  w[k++] = 11; w[k++] = 0;             /* AT_UID    */
-  w[k++] = 12; w[k++] = 0;             /* AT_EUID   */
-  w[k++] = 13; w[k++] = 0;             /* AT_GID    */
-  w[k++] = 14; w[k++] = 0;             /* AT_EGID   */
-  w[k++] = 15; w[k++] = platform_addr; /* AT_PLATFORM -> "x86_64" */
-  w[k++] = 16; w[k++] = 0;             /* AT_HWCAP  */
-  w[k++] = 17; w[k++] = 100;           /* AT_CLKTCK */
-  w[k++] = 23; w[k++] = 0;             /* AT_SECURE */
-  w[k++] = 25; w[k++] = rnd_addr;      /* AT_RANDOM */
-  w[k++] = 26; w[k++] = 0;             /* AT_HWCAP2 */
-  w[k++] = 31; w[k++] = execfn_addr;   /* AT_EXECFN */
-  w[k++] = 0;  w[k++] = 0;             /* AT_NULL   */
+   *   AT_HWCAP2 (0)              no HWCAP2_FSGSBASE: CR4.FSGSBASE stays off,
+   *                              so ring 3 must use arch_prctl for FS/GS;
+   *   AT_EXECFN                  the program path for diagnostics;
+   *   AT_MINSIGSTKSZ             cp P1 / F2: the signal frame this kernel
+   *                              really plants (lsf_min_sigstksz: 1536 with
+   *                              XSAVE/AVX, 1216 without), as Linux 5.14+
+   *                              reports it -- glibc 2.34+ sysconf(
+   *                              _SC_MINSIGSTKSZ) and Wine size altstacks by
+   *                              it. */
+  int k = compat_auxv_fill(w, phdr, phnum, interp_base, entry, platform_addr,
+                            rnd_addr, execfn_addr);
 
   /* argv[0] must sit 8 mod 16 (so %rsp = &argc is 16-aligned).  The auxv is
    * derived from envp's end below, so no alignment hole can separate it from
@@ -985,7 +1040,7 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
     parent = process_group(parent);
   if (parent) {
     child->parent_pid = parent->pid;
-    for (int i = 0; i < 128; i++)
+    for (int i = 0; i < (int)sizeof child->cwd; i++)
       child->cwd[i] = parent->cwd[i];
     vdisp_inherit(child, parent); /* icewm.md §9 */
     /* P6.3: a spawned child inherits the group's environment blob (set
@@ -1158,7 +1213,7 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
       /* dest is a physical address integer; &magicw is a stack VA == phys
          (kernel direct map), so the read lands in the local. */
       if (fat16_read_direct_pos(f.fat16.entry.start_cluster, fsize,
-                                (uint64_t)&magicw, 4, 0) == 4) {
+                                virt_to_phys(&magicw), 4, 0) == 4) {
         uint8_t *mb = (uint8_t *)&magicw; /* little-endian: bytes 0..3 = magic */
         is_elf = (mb[0] == 0x7f && mb[1] == 'E' && mb[2] == 'L' && mb[3] == 'F');
       }
@@ -1193,6 +1248,12 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
       lflags = ELF_LOAD_NATIVE;
     else
       lflags = ELF_LOAD_COMPAT_INTERP;
+    /* P1 (S7, docs/cp-address-space.md open question 3: every Linux-ABI
+       process, not only Wine): the compat track gets the compat address
+       space before its image is mapped, so a low-linked ET_EXEC and any low
+       MAP_FIXED are legal.  CP_COMPAT_AS=0 keeps the native layout. */
+    if (CP_COMPAT_AS && native != 1 && vm_as_set_layout(as, VM_LAYOUT_COMPAT) != 0)
+      uart_puts("v2 loader: compat layout refused; staying native\n");
 #else
     lflags = ELF_LOAD_NATIVE;
 #endif
@@ -1203,7 +1264,7 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
                                     lflags, &elf_info);
     if (vfs_rc == 1) {
       for (uint32_t i = 0; i < vfs_pages; i++)
-        frame_free((uint64_t)(uintptr_t)vfs_img + (uint64_t)i * FRAME_SIZE);
+        frame_free(virt_to_phys(vfs_img) + (uint64_t)i * FRAME_SIZE);
       vfs_img = 0;
     } else {
       fat16_close(&f);
@@ -1253,7 +1314,7 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
      * only FAT16 has.  Say so instead of trying an uninitialised struct file. */
     uart_puts("v2 loader: flat .bin images are FAT16-only (use an ELF on NFS)\n");
     for (uint32_t i = 0; i < vfs_pages; i++)
-      frame_free((uint64_t)(uintptr_t)vfs_img + (uint64_t)i * FRAME_SIZE);
+      frame_free(virt_to_phys(vfs_img) + (uint64_t)i * FRAME_SIZE);
     process_free(pid);
     return -ENOEXEC;
   } else if (v2_map_image(as, &f, fsize) != 0) {
@@ -1362,11 +1423,13 @@ static int load_v2_internal(const char* filename, int stdin_fd, int stdout_fd,
       process_set_entry(pid, elf_entry, USER_MAIN_STK_TOP_V2);
     } else
 #endif
-    if (compat_stack_block(child, pid, elf_entry, elf_exe_entry, elf_phdr,
-                           elf_phnum, elf_interp_base, filename) != 0) {
-      uart_puts("v2 loader: startup block write failed\n");
+    int sbr = compat_stack_block(child, pid, elf_entry, elf_exe_entry, elf_phdr,
+                                 elf_phnum, elf_interp_base, filename);
+    if (sbr != 0) {
+      uart_puts(sbr == -E2BIG ? "v2 loader: startup block: env has more than COMPAT_MAX_ENV entries (E2BIG)\n"
+                              : "v2 loader: startup block write failed\n");
       process_free(pid);
-      return -EFAULT;
+      return sbr == -E2BIG ? -E2BIG : -EFAULT;
     }
   } else if (is_elf) {
     /* Native track (static ET_DYN or PT_INTERP): arguments come from the PCB
@@ -1553,6 +1616,7 @@ int process_exec_current(struct trap_frame *tf, const char *path,
      threads keep the old image (documented P1 divergence, as for v1). */
   if (grp->as) {
     vm_arch_restore_kernel();
+    process_vfork_release(grp); /* C1-thr: a vfork child gives the memory back */
     struct addr_space *old = grp->as;
     grp->as = 0;
     vm_as_teardown(old);
@@ -1601,6 +1665,13 @@ int process_exec_current(struct trap_frame *tf, const char *path,
        the new image (observed: mkdir killed writing errno=EEXIST at
        0x100002C3D0 after fork+exec from the shell). */
     grp->tls_base = 0;
+#ifdef __x86_64__
+    /* cp P1: and the user GS base (Linux exec starts the image with gsbase
+       0).  The caller is the running thread, so clear the live
+       KERNEL_GS_BASE as well -- the image is entered from this trap. */
+    grp->gs_base = 0;
+    (void)process_set_user_gs(cur, 0);
+#endif
     /* P5 (D3.1-D3.3): the same success-path apply as the v1 tail --
        environment, signal-state reset, FD_CLOEXEC sweep. */
     process_exec_apply(grp, env, envc);
@@ -1642,15 +1713,15 @@ int process_exec_current(struct trap_frame *tf, const char *path,
   /* Zero image + bss [0, MAX_PROGRAM_SIZE) so the new program starts
      with clean bss (spawn gets a freshly-allocated region; exec reuses).
      The stack lives near the TOP of the 32MB region, untouched here. */
-  volatile uint8_t *zp = (volatile uint8_t *)base;
+  volatile uint8_t *zp = (volatile uint8_t *)phys_to_virt(base);
   for (uint32_t z = 0; z < MAX_PROGRAM_SIZE; z++)
     zp[z] = 0;
 
-  int n = fat16_read(&f, (void *)base, MAX_PROGRAM_SIZE);
+  int n = fat16_read(&f, phys_to_virt(base), MAX_PROGRAM_SIZE);
   fat16_close(&f);
   if (n <= 0)
     return -ENOENT;
-  __builtin___clear_cache((char *)base, (char *)base + n);
+  __builtin___clear_cache((char *)phys_to_virt(base), (char *)phys_to_virt(base) + n);
 
   int i;
   for (i = 0; new_name && new_name[i] && i < 31; i++)
@@ -1666,6 +1737,9 @@ int process_exec_current(struct trap_frame *tf, const char *path,
      register: a fork-inherited foreign TP would defeat the new image's
      lazy/crt0 TLS install (same 0x2C3D0-class errno-hole as the v2 path). */
   grp->tls_base = 0;
+#ifdef __x86_64__
+  grp->gs_base = 0; /* cp P1: v1 images are native; never a user GS */
+#endif
   grp->heap_brk = USER_HEAP_BASE;
   grp->anon_map_count = 0;
   for (int i = 0; i < USER_ANON_MAX_REGS; i++) {

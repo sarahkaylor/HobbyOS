@@ -1,0 +1,10 @@
+# ARM unit tier (run_unit_tests.sh, ARCH=arm, QEMU TCG) on strix, linker.ld .bss assert relaxed to 0x4F600000 in scratch copies only
+# (MODE=unit_tests ARM, lane: __bss_end=0x4579a060 > 0x45600000, 1.6 MB over; the lane adds 7.2 KB of arm .bss, so integ25 is over too: the tier does not link unmodified on either)
+== lane (16054105 + 60503d3d sources, ~/cp/lanes/root-arm)
+EXPECT_EQ FAILED: (seen_high + RUN * FRAME_SIZE >= frontier) == 1 at src/kernel/frame_test.c:326
+Tests run:    437
+Tests failed: 1
+== integ25 (f888a274, ~/cp/lanes/root-armb)
+EXPECT_EQ FAILED: (seen_high + RUN * FRAME_SIZE >= frontier) == 1 at src/kernel/frame_test.c:326
+Tests run:    437
+Tests failed: 1

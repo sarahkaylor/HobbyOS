@@ -1,0 +1,179 @@
+# P8 run14-venus-vndebug -- Venus: Z:\GAME vanished mid-boot (ENOENT): another lane's copy of run-p8.sh removed the shared game export (stop 10, harness fixed)
+# host strix (Ryzen AI MAX+ 395, Zen 5, KVM), guest -cpu host -smp 8 -m 12288M; tree cp-game = integ6 merged + harness; P8_GPU=venus; VN_DEBUG=result
+# generated 2026-11-17T03:38:07-06:00 from obj/cp-p8/run14-venus-vndebug (serial.log, run-p8.log, timeline.txt); no game content beyond file names
+
+## harness log (run-p8.log, the == rows and the boot watcher)
+== run-p8 gpu=venus phase=game run=run14-venus-vndebug 2026-11-17T03:31:51-06:00 host=sarahpc tree=/home/sarah/cp/lanes/game
+== build: kernel + disk (intel, desktop/icewm), P8.BIN, PFXSYNC.ELF, PE warm-up client
+== p8caps.exe 77824 B sha256 e65f4c8cb17cc4df
+== staging export: /srv/nfs/cp-game-p8 (WINE, X11, VK, P5/VK)
+== Vulkan ICDs in the export: virtio_icd.x86_64.json (Venus only)
+== exports.sh: add /srv/nfs/cp-game-p8 ok (non-cp lines unchanged)
+== game copy before: 156 files, 66820176214 bytes, newest mtime 1794714264
+== game copy before: modes of the top dir and bin/x64: dr-xr-xr-x dr-xr-xr-x
+== exports.sh: add /srv/nfs/cp-game ok (non-cp lines unchanged)
+== stage (a copy of disk.img): glibc 2.31, /P8.BIN, /PFXSYNC.ELF, XHOBBY.BIN, XSESSION.ENV, /XSTART.TXT
+== X server: the tree's own XHOBBY.BIN, sha256 9b161eded42374e0
+== data disk: a copy of /home/sarah/cp/lanes/game/obj/cp-p8/pfx-seeded.img
+== boot (deadline 3600s; one QEMU slot for the boot only)
+[P8W] waiting for a QEMU slot (tools/cp/qemu-slot.sh semantics)
+[P8W] +     0.0 s  03:31:59  slot 2 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 1
+[P8W] qemu pid 323214
+[P8W] +     7.3 s  03:32:06  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
+[P8W] +    24.4 s  03:32:23  warm-up result: [P8] warm-up: display driver loaded
+[P8W] +    28.4 s  03:32:27  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8W] +    28.4 s  03:32:27  dri nodes at game launch: qemu-system-x86/323214: /dev/dri/renderD129
+[P8W] +    28.4 s  03:32:27  dri nodes at game launch: virgl_render_se/323528: -
+[P8W] +    28.4 s  03:32:27  dri nodes at game launch: virgl-2-gpu_ren/329777: /dev/dri/renderD129
+[P8W] +    28.5 s  03:32:27  baseline screendump 1920x1080 (desktop before the game's window)
+[P8W] +    29.6 s  03:32:28  game process ended: [P8] end game status=53 ms=565
+[P8W] +    59.9 s  03:32:59  sync done: [P8] sync done
+[P8W] +    59.9 s  03:32:59  launcher done: [P8] done
+[P8W] +    64.2 s  03:33:03  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 1
+== e2fsck -fn after the boot: rc=0 (cpdata: 1034/1048576 files (0.6% non-contiguous), 135257/4194304 blocks)
+== game copy after: 156 files, 66820176214 bytes, newest mtime 1794714264
+== game copy after: modes of the top dir and bin/x64: dr-xr-xr-x dr-xr-xr-x
+== game copy unchanged (count, bytes, newest mtime)
+== caches on ext2 after the boot (debugfs, sizes only)
+   /pfx/drive_c/vc              0 entries, 0 bytes
+   /mc                          0 entries, 0 bytes
+== verdict: launcher-done
+== timeline:
+== exports.sh: remove /srv/nfs/cp-game-p8 ok (non-cp lines unchanged)
+== removed /srv/nfs/cp-game-p8
+
+## timeline (host wall clock)
++     0.0 s  03:31:59  slot 2 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 1
++     7.3 s  03:32:06  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
++    24.4 s  03:32:23  warm-up result: [P8] warm-up: display driver loaded
++    28.4 s  03:32:27  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
++    28.4 s  03:32:27  dri nodes at game launch: qemu-system-x86/323214: /dev/dri/renderD129
++    28.4 s  03:32:27  dri nodes at game launch: virgl_render_se/323528: -
++    28.4 s  03:32:27  dri nodes at game launch: virgl-2-gpu_ren/329777: /dev/dri/renderD129
++    28.5 s  03:32:27  baseline screendump 1920x1080 (desktop before the game's window)
++    29.6 s  03:32:28  game process ended: [P8] end game status=53 ms=565
++    59.9 s  03:32:59  sync done: [P8] sync done
++    59.9 s  03:32:59  launcher done: [P8] done
++    64.2 s  03:33:03  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 1
+
+## NFS: no-reply rows=0 [NFSHARD] retry=0 GIVE UP=0 NFLK rc=-1=0
+
+## rows that matter (tools/cp/p8/rows.sh: launcher rows, Wine output except loaddll, kernel faults, ENOSYS)
+[P8] p8launch (C8-game) phase 2
+[P8] env entries=14 bytes=419 (HobbyOS keeps <= 512 bytes / 24 entries per process)
+[P8] mount 10.0.2.2:/srv/nfs/cp-game-p8 -> /CP ok
+[P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
+[P8] begin keepalive (background) : wine Z:\CP\P5\VK\vkcube.exe --idle 86400
+[P8] keepalive pid=16
+[X] 002c:err:winediag:getaddrinfo Failed to resolve your host name IP
+[X] 002c:err:wineboot:process_run_key Error running cmd L"C:\\windows\\system32\\winemenubuilder.exe -a -r" (126).
+[X] 00a4:err:ntoskrnl:ZwLoadDriver failed to create driver L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\winebth": c00000e5
+[P8] begin winprobe01 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+[X] [VK] idle: keepalive pid 32, desktop 0000000000010020, 86400 s
+[X] [VK] winprobe: CreateWindowEx -> 0000000000010056 in 114 ms (display driver loaded)
+[P8] end winprobe01 status=0 ms=2220
+[P8] warm-up: display driver loaded
+[P8] begin d3d12caps : wine Z:\CP\P8\p8caps.exe
+[X] [P8CAPS] start (C8-game)
+[X] [P8CAPS] module d3d12.dll      C:\windows\system32\d3d12.dll
+[X] [P8CAPS] module d3d12core.dll  C:\windows\system32\d3d12core.dll
+[X] [P8CAPS] module dxgi.dll       C:\windows\system32\dxgi.dll
+[X] info:  Game: p8caps.exe
+[X] info:  DXVK: v3.1.1
+[X] info:  Build: x86_64 gcc 16.2.0
+[X] info:  Vulkan: Found vkGetInstanceProcAddr in winevulkan.dll @ 0x7ffffeb63b60
+[X] info:  Extension providers:
+[X] info:    Platform WSI
+[X] info:    OpenVR
+[X] info:  OpenVR: could not open registry key, status 2
+[X] info:  OpenVR: Failed to locate module
+[X] info:    OpenXR
+[X] info:  Enabled instance extensions:
+[X] info:    VK_KHR_get_surface_capabilities2
+[X] info:    VK_KHR_surface
+[X] info:    VK_KHR_surface_maintenance1
+[X] info:    VK_KHR_win32_surface
+[X] info:  Found device: Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201)) (venus 26.2.6)
+[X] [P8CAPS] adapter: "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" vendor 0x1002 device 0x7550 dedicated 16304 MiB shared 48093 MiB
+[X] warn:  DxgiAdapter::QueryInterface: Unknown interface query
+[X] warn:  f0db4c7f-fe5a-42a2-bd62-f2a6cf6fc83e
+[X]  27.025:011c:0120:info:vkd3d-proton:vkd3d_instance_apply_application_workarounds: Detected SteamAppID 1091500
+[X]  27.035:011c:0120:info:vkd3d-proton:vkd3d_instance_deduce_config_flags_from_environment: shader_cache is used, global_pipeline_cache is enforced.
+[X]  27.035:011c:0120:info:vkd3d-proton:vkd3d_config_flags_init_once: VKD3D_CONFIG=''.
+[X]  27.080:011c:0120:info:vkd3d-proton:vkd3d_get_vk_version: vkd3d-proton - applicationVersion: 3.1.0.
+[X]  27.080:011c:0120:info:vkd3d-proton:vkd3d_instance_init: vkd3d-proton - build: 4522cc1a8b1347f.
+[X]  27.267:011c:0120:info:vkd3d-proton:vkd3d_init_device_caps: Not all relevant pipeline stages are supported by EXT_dgc. Skipping.
+[X]  27.447:011c:0120:info:vkd3d-proton:d3d12_device_init_workarounds: Detected Linux kernel version 6.1.0
+[X]  27.447:011c:0120:info:vkd3d-proton:d3d12_device_init_workarounds: Broken NULL PRT with SMEM detected, per-game workarounds may apply.
+[X]  27.488:011c:0120:info:vkd3d-proton:vkd3d_memory_info_decide_hvv_usage: Topology: No more than 1 device local heap, HVV access is viable.
+[X]  27.488:011c:0120:info:vkd3d-proton:vkd3d_memory_info_upload_hvv_memory_properties: Topology: HVV usage is allowed, using DEVICE_LOCAL | HOST_COHERENT for UPLOAD.
+[X]  27.488:011c:0120:info:vkd3d-proton:vkd3d_memory_info_init_budgets: Applying resizable BAR budget to memory types: 0x218.
+[X]  27.511:011c:0120:info:vkd3d-proton:vkd3d_bindless_state_get_bindless_flags: Device supports VK_EXT_mutable_descriptor_type.
+[X]  27.573:011c:0120:info:vkd3d-proton:d3d12_device_caps_init_shader_model: Enabling support for SM 6.6.
+[X]  27.573:011c:0120:info:vkd3d-proton:d3d12_device_caps_init_shader_model: Enabling support for SM 6.7.
+[X]  27.573:011c:0120:info:vkd3d-proton:d3d12_device_caps_init_shader_model: Enabling support for SM 6.8.
+[X]  27.576:011c:0120:fixme:vkd3d-proton:d3d12_device_caps_init_feature_options1: TotalLaneCount = 2048, may be inaccurate.
+[X]  27.579:011c:0120:info:vkd3d-proton:d3d12_device_determine_ray_tracing_tier: DXR support enabled.
+[X]  27.579:011c:0120:info:vkd3d-proton:d3d12_device_determine_ray_tracing_tier: DXR 1.1 support enabled.
+[X]  27.588:011c:0120:info:vkd3d-proton:vkd3d_pipeline_library_init_disk_cache: Remapping VKD3D_SHADER_CACHE to: C:\vc\vkd3d-proton.p8caps.exe.cache.
+[X]  27.588:011c:0120:info:vkd3d-proton:vkd3d_pipeline_library_init_disk_cache: Attempting to load disk cache from: C:\vc\vkd3d-proton.p8caps.exe.cache.
+[X] [P8CAPS] D3D12CreateDevice(FL 12_0) hr=0x00000000
+[X]  27.609:011c:0128:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Performing async setup of stream archive ...
+[X]  27.614:011c:0128:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_merge: No write cache exists. No need to merge any disk caches.
+[X]  27.618:011c:0128:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Merging pipeline libraries took 5.000 ms.
+[X]  27.622:011c:0128:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Failed to map read-only cache: C:\vc\vkd3d-proton.p8caps.exe.cache.
+[X]  27.622:011c:0128:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Done performing async setup of stream archive.
+[X]  27.774:011c:0120:info:vkd3d-proton:vkd3d_get_vk_version: vkd3d-proton - applicationVersion: 3.1.0.
+[X]  27.774:011c:0120:info:vkd3d-proton:vkd3d_instance_init: vkd3d-proton - build: 4522cc1a8b1347f.
+[X]  27.922:011c:0120:info:vkd3d-proton:vkd3d_init_device_caps: Not all relevant pipeline stages are supported by EXT_dgc. Skipping.
+[X]  27.939:011c:0120:info:vkd3d-proton:d3d12_device_init_workarounds: Detected Linux kernel version 6.1.0
+[X]  27.939:011c:0120:info:vkd3d-proton:d3d12_device_init_workarounds: Broken NULL PRT with SMEM detected, per-game workarounds may apply.
+[X]  27.958:011c:0120:info:vkd3d-proton:vkd3d_memory_info_decide_hvv_usage: Topology: No more than 1 device local heap, HVV access is viable.
+[X]  27.958:011c:0120:info:vkd3d-proton:vkd3d_memory_info_upload_hvv_memory_properties: Topology: HVV usage is allowed, using DEVICE_LOCAL | HOST_COHERENT for UPLOAD.
+[X]  27.972:011c:0120:info:vkd3d-proton:d3d12_device_caps_init_shader_model: Enabling support for SM 6.6.
+[X]  27.972:011c:0120:info:vkd3d-proton:d3d12_device_caps_init_shader_model: Enabling support for SM 6.7.
+[X]  27.972:011c:0120:info:vkd3d-proton:d3d12_device_caps_init_shader_model: Enabling support for SM 6.8.
+[X]  27.976:011c:0120:fixme:vkd3d-proton:d3d12_device_caps_init_feature_options1: TotalLaneCount = 2048, may be inaccurate.
+[X]  27.976:011c:0120:info:vkd3d-proton:d3d12_device_determine_ray_tracing_tier: DXR support enabled.
+[X]  27.976:011c:0120:info:vkd3d-proton:d3d12_device_determine_ray_tracing_tier: DXR 1.1 support enabled.
+[X]  27.976:011c:0120:info:vkd3d-proton:vkd3d_pipeline_library_init_disk_cache: Remapping VKD3D_SHADER_CACHE to: C:\vc\vkd3d-proton.p8caps.exe.cache.
+[X]  27.976:011c:0120:info:vkd3d-proton:vkd3d_pipeline_library_init_disk_cache: Attempting to load disk cache from: C:\vc\vkd3d-proton.p8caps.exe.cache.
+[X] [P8CAPS] D3D12CreateDevice(FL 11_0) hr=0x00000000 in 249 ms
+[X]  27.985:011c:0130:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Performing async setup of stream archive ...
+[X]  27.986:011c:0130:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_merge: No write cache exists. No need to merge any disk caches.
+[X] [P8CAPS] max feature level 0xc100
+[X] [P8CAPS] highest shader model 0x67 (hr=0x00000000)
+[X] [P8CAPS] options: ResourceBindingTier 3 TiledResourcesTier 4 ResourceHeapTier 2 ConservativeRaster 3 ROVs 1 TypedUAVLoadAdditionalFormats 1
+[X] [P8CAPS] options1: WaveOps 1 WaveLaneCount 32..64 Int64ShaderOps 1
+[X]  27.987:011c:0130:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Merging pipeline libraries took 2.000 ms.
+[X] [P8CAPS] options5: RaytracingTier 11 RenderPassesTier 0
+[X] [P8CAPS] options7: MeshShaderTier 0 SamplerFeedbackTier 90
+[X]  27.993:011c:0130:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Failed to map read-only cache: C:\vc\vkd3d-proton.p8caps.exe.cache.
+[X]  27.998:011c:0130:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Done performing async setup of stream archive.
+[X] [P8CAPS] done rc=0
+[P8] end d3d12caps status=0 ms=3931
+[P8] chdir /GAME/bin/x64 rc=-1 errno=2
+[P8] fd headroom before the game (cap 600):
+[X] [P8MEM] frames_free=2868277 free_mib=11204 (bsize 4096)
+[P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8] game pid=89
+[X] wine: failed to open "Z:\\GAME\\bin\\x64\\Cyberpunk2077.exe"
+[P8] end game status=53 ms=565
+[P8] census after-game t=0s procs: vkcube.exe/16:s5 wineserver/18:s5 services.exe/24:s5 winedevice.exe/27:s5 plugplay.exe/36:s5 svchost.exe/42:s5 winedevice.exe/48:s5 explorer.exe/63:s5 rpcss.exe/69:s5 (n=9)
+[X] [P8MEM] frames_free=2868772 free_mib=11206 (bsize 4096)
+[P8] begin kill : wineserver -k
+[P8] end kill status=0 ms=443
+[P8] quiesce after kill: extra=1 left: vkcube.exe/16:s4
+[P8] begin sync : pfxsync
+[X] [PFX] sync rc=0 errno=0
+[P8] end sync status=0 ms=22
+[P8] sync done
+[P8] done
+
+## fd headroom rows (src/user/cp/p8fdcount.c), in order with the census rows
+[P8] fd headroom before the game (cap 600):
+[X] [P8FD] cap=600 opened=600 first_errno=0
+[P8] census after-game t=0s (n=9)
+[X] [P8FD] cap=24 opened=24 first_errno=0
+
+## modules the game process tree loaded after launch (WINEDEBUG +loaddll; names only)

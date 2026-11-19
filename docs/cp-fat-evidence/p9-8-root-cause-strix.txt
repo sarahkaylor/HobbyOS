@@ -1,0 +1,88 @@
+# C3-fat: P9-8 (fat_lock wedge) root cause, reproducer and A/B.  Host: strix (Zen 5, KVM, -smp 8 -m 12G guests)
+# Branch cp-fat: first from integ9 adb81ee4 (all A/B below up to "integ10" ran there), final on integ10 49e83499.  Probe: src/user/linux_probe_fatren.c via tools/gate/t3_linux_probe.sh (FAT-only boot,
+# 30 s of traffic); QMP register/stack sampler: T3_MONITOR=1 + a side script dumping `info registers` + 48 stack words per vCPU
+# on the first [YLOCK-WEDGE].
+
+## Verdict
+P9-8 is NOT a FAT lock-order bug and NOT the kernel-stack sharing race.  It is a lost wakeup in the NVMe single-in-flight
+device token (virtio_blk.c blk_token_acquire), made fatal by the x86 tick topology:
+
+ 1. A FAT directory / FAT-sector / page-in operation holds fat_lock (or fat_wr_lock) across device I/O, so it waits for the
+    device token while holding the lock.  The ext2 side does the same under ext2_lock (the token is shared by namespace 1,
+    FAT, and namespace 2, the cp/ext2 data disk).
+ 2. The token wait was `safe_wfi()` ("sti; hlt") in a loop; it re-checks only when SOME interrupt arrives, and
+    blk_token_release() woke nobody.
+ 3. An AP has no periodic interrupt of its own (timer.c: the AP LVT is not armed; C1-k6's 0x84 one-shot fires only for a
+    covered park deadline).  Its only periodic wake is CPU 0's PIT tick, which broadcasts 0x81.
+ 4. CPU 0 stops broadcasting whenever it runs with IF=0, and syscall entry masks IF (SFMASK 0x47700), so a CPU-0 thread
+    spinning in ylock_acquire on the lock the halted waiter holds spins with interrupts OFF.
+ => the token is released, the halted holder is never woken, nothing moves: [YLOCK-OWNER] ost=3 (RUNNING) on a CPU in HLT,
+    no [BLKQ] row, token free.  Same shape as C3-ext2w's ext2_lock "lost holder" (its F5 dump: CPU#0 RFL=0x97, i.e. IF=0,
+    spinning on ext2_lock; the holder's CPU#3 in safe_wfi).
+
+P9-8's own row `osys=23` is the holder's LAST syscall as a LINUX number: 23 = select, not SYS_RENAME (the play lane's
+report says rename).  IceWM's last console row was a fontconfig rename, but at the wedge it was inside select -- most likely
+a page fault on a FAT-backed mapping taking fat_lock in the page-in path (the sampler's second spinner was under
+fat16_read_direct_locked).  Not proven; the mechanism is the same either way.
+
+## Decisive sample (kstack-fix A/B run 2: integ9 + cp-fat FAT fixes + diag + C1-k6's kstack fix, token wait still a halt)
+[YLOCK-OWNER] fat_lock pid=5 cpu=3 pcb_live=1 ost=3 osys=2
+[BLKTOK] at-ylock-wedge in_use=0 inside=0 holder pid=-1 cpu=-1 site=0x700D7128 on_cpu=-1 me pid=6 cpu=4 holds=- long_waits=0
+cpu_current_pids = 8 3 4 5 6 7 -1 -1        <- pid 5 IS on CPU 3 (not lost, just never woken)
+cpu 0  RIP=spin_pause  RFL=0x97 (IF=0) HLT=0  -- spinning on fat_lock, interrupts off: no PIT tick, no 0x81 broadcast
+cpu 1  RIP=spin_pause  RFL=0x97 (IF=0) HLT=0
+cpu 3  RIP=safe_wfi    RFL=0x246 (IF=1) HLT=1 -- the owner
+cpu 4  RIP=spin_pause  RFL=0x97 (IF=0) HLT=0
+cpu 5  RIP=spin_pause  RFL=0x97 (IF=0) HLT=0
+CPU 3 stack words, innermost first: blk_token_acquire (virtio_blk.c:2026) < virtio_blk_write_raw < virtio_blk_write_sector
+< alloc_entry_in_dir_locked (fat16.c:959): a create under fat_lock, halted in the token wait, token free.
+Same picture in the pre-fix runs (fatren-3: CPU 0 RFL=0x97 spinning on fat_wr_lock, the owner pid 6 on CPU 2 HLT=1, in_use=0).
+
+## A/B (linux_probe_fatren, one boot each, LP_TIMEOUT 160-300 s)
+variant                                                   boots  wedged  FAT-correct
+integ9 adb81ee4 (+ probe)                                     2       1       0 of 1 that ran to the end (V1 gen=1, ENOENT)
+integ9 + [BLKTOK] diag only (fatren-1, probe v1)              1       0       no (R1 ENOENT g=100/85, V1 gen=1)
++ FAT fixes, token wait still a halt (fatren-2/3/4)           3       3       -
++ FAT fixes + C1-k6 kstack fix a0235c57 (scratch branch)      3       2       yes in the 1 that ran
++ FAT fixes + token pause-POLL (dropped commit)               5       0       5/5 PASS
++ token spin-50us-then-halt + IPI waker, first cut ("ipi")   5       0       5/5 PASS
+  same, release TAKES the sleeper set ("ipi2")                3       0       3/3 PASS
+  same, with /EXT ext2 writers (CPDATA) ("ipiext", v1)        2       2       -   see "ext2 inversion" below
++ kernel tasks never halt ("ipi3")                           2       0       2/2 PASS
+  same, with /EXT ext2 writers ("ipi3ext")                    3       0       3/3 PASS
+--- integ10 49e83499 + cp-fat + C1-k6's 9d47b051 (1 ms bound on every task halt; k6-bound-ab-strix.txt) ---
+  token wait = plain safe_wfi, bound alone ("kA", +ext)       6       0       6/6 PASS
+  + release wake + 50 us spin ("kB", +ext)                    6       0       6/6 PASS
+  + release wake, no spin, first cut ("kC")                   4       0       4/4 PASS (but see G rows)
+  FINAL cp-fat 0cd94906 + 9d47b051 ("kF2")                    4       0       4/4 PASS
+--- integ10 49e83499 + cp-fat alone (no 9d47b051) ---
+  first no-spin cut ("G")                                     4       4       -   a user waiter's first failed check
+                                                                                  halted UNREGISTERED: nothing woke it
+  FINAL cp-fat 0cd94906 ("F1", 2 of them with /EXT)           4       0       4/4 PASS
+The bound alone ends the wedge.  The release wake is kept for latency (open/read throughput ~2x under this load, a
+halted wait 10 us - 1 ms instead of >= 1 ms); the pause-poll and the spin phase are gone.  cp-fat also stands alone.
+(per-run rows: fatren-ab-rows-strix.txt; final wait stats: token-wait-stats-strix.txt)
+
+## ext2 inversion found on the way (ipiext v1, fixed for the token wait; the general hazard is C1-k6's)
+[YLOCK-OWNER] ext2_lock pid=1 cpu=0 pcb_live=1 ost=2 osys=-1      <- the ext2 flusher (kernel task), READY, not running
+The first IPI cut also halted KERNEL tasks in the token wait.  0x81 on a kernel task is a reschedule, so the wake
+preempted the flusher while it held ext2_lock; every other CPU was in an unpreemptible syscall spinning with IF=0, so
+nobody ran it again.  The same run also lost a user waiter's wake (two CPUs halted in blk_token_acquire, token free): a
+preempted kernel task resumed on another CPU and cleared a sleeper bit that was no longer its own.  Kernel tasks now
+poll (no halt, no bit).  The tick can still preempt a kernel task holding a ylock, exactly as before this branch: that
+part is pre-existing and listed for C1-k6 in wfi-sites-for-c1k6.txt.  (Final code: kernel tasks halt in plain
+safe_wfi(), bounded by 9d47b051, and never register for the release wake.)
+
+## The two FAT bugs the reproducer found on fontconfig's exact path (fixed in 59e26be9)
+ - rename(".NEW" -> final) compared 8.3 names to decide "destination is a different entry"; all fontconfig cache names
+   truncate to the same 8.3 form, so the old final was never unlinked and kept answering lookups (V1: final holds
+   generation 1 after 99 updates) and a stale entry was added per update.
+ - a VFAT run that did not fit in the sector holding the 0x00 end marker was placed behind that marker (next/new
+   cluster), invisible to every lookup: create OK, then rename TMP->NEW ENOENT at generation ~100.
+Both reproduce in-kernel too: test_fat16_rename_fontconfig_cache (unit tier).
+
+## Gates (gates-batch-strix.txt)
+cp-fat 0cd94906 on integ10: build, all probes (fatren included, + 2 reruns), ext2_gate, exec_gate, both NFS guards,
+unit (463 run, only virtio_gpu_test.c:214/:244), host 38/40, castscan, ARM, pfx_gate, ext2w_gate PASS, reg_gate PASS,
+exitgroup x3, Gate P2 G1-G3 PASS, Gate P4 G1-G3 PASS (IceWM/X on the FAT root).  console: torn 1 / missing 5 in the
+batch -- the same counts as integ10's own batch (integ-gates13) -- and 2 clean reruns.

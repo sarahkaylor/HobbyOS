@@ -1,0 +1,53 @@
+# xprobe X1-X5 in-guest (tools/cp/p4/xprobe.py), strix KVM -smp 8 -m 4096M, tree cp-x3 4975323b-equivalent (MIT-SHM server 9b161ede...), HB_SECOND_SCREEN=0
+# command: bash tools/cp/qemu-slot.sh python3 tools/cp/p4/xprobe.py --out obj/p4/xprobe-shm1   (CP_X11_WORK default ~/cp/x11-build-x2)
+# screendumps: evidence/cp-x3/xprobe-shm-pattern.png, xprobe-randr-1280x720.png
+qemu-slot: slot 3 of 4 held by pid 1447509 05:53:46
+[XPG] qemu pid 1447537
+[XPG] shm screendump: 0 of 1456 sampled pattern pixels differ
+[XPG] randr screendump: red bbox (0, 0, 1279, 719, 921574); non-black samples outside the mode: 0
+  [XP] screens=1 XINERAMA=yes Composite=yes
+  [XP] extensions n=20: Generic Event Extension SHAPE MIT-SHM XInputExtension XTEST BIG-REQUESTS SYNC XKEYBOARD XC-MISC XFIXES RENDER RANDR XINERAMA Composite DAMAGE MIT-SCREEN-SAVER DOUBLE-BUFFER RECORD Present X-Resource
+  [XP] MIT-SHM listed=yes
+  [XP] shm version 1.1 sharedPixmaps=1 pixmapFormat=2
+  [XP] shm up: shmid=256 addr=0x10803e8000 bpl=1024 XShmAttach=1 xerr=0
+  [XP] shm down: shmid=257 addr=0x1080418000 bpl=1024 XShmAttach=1 xerr=0
+  [XP] shm pixmap: XShmPutImage+XShmGetImage status=1 xerr=0
+  [XP] shm pixmap ShmGetImage: match (0 of 49152 pixels differ)
+  [XP] shm pixmap XGetImage: match (0 of 49152 pixels differ)
+  [XP] shm roundtrip ok
+  [XP] shm ShmCreatePixmap XGetImage: match (0 of 49152 pixels differ)
+  [XP] shm pixmap-shared ok xerr=0
+  [XP] shm window ShmGetImage: match (0 of 49152 pixels differ)
+  [XP] shm window ok
+  [XP] shm hold 4000 ms (pattern 256x192 at 64,64)
+  [XP] shm detached
+  [XP] xi2 device 2 "Virtual core pointer" use=1 valuators relative=2 absolute=0
+  [XP] xi2 device 4 "Virtual core XTEST pointer" use=3 valuators relative=2 absolute=0
+  [XP] xi2 device 6 "HobbyOS pointer" use=3 valuators relative=0 absolute=2
+  [XP] xi2 device 7 "HobbyOS relative pointer" use=3 valuators relative=2 absolute=0
+  [XP] raw ready
+  [XP] raw DeviceChanged device=2 source=7 reason=1 master valuators 0/1: relative=2 absolute=0
+  [XP] raw total source=7 events=55 dx=4050 dy=25
+  [XP] randr modes=12 current=1920x1080 mode1280x720=yes
+  [XP] randr refused-offset status=3 (RRSetConfigFailed=3 expected)
+  [XP] randr set status=0 xerr=0 crtc=1280x720 root=1280x720
+  [XP] randr hold 5000 ms (red window 1280x720 at 0,0)
+  [XP] randr restore status=0 root=1920x1080
+  [XP] done rc=0
+  [X] hobbyos: one screen: :0.0 depth 24 (HB_SECOND_SCREEN=0: no :0.1; Composite and RandR's Xinerama can be advertised)
+  [SHM] get pid=14 a=0 b=0x0x30000 -> 256
+  [SHM] at pid=14 a=256 b=0x0x10803E8000 -> 196608
+  [SHM] at pid=3 a=256 b=0x0x1080000000 -> 196608
+  [SHM] rmid pid=14 a=256 b=0x0x0 -> 0
+  [SHM] get pid=14 a=0 b=0x0x30000 -> 257
+  [SHM] at pid=14 a=257 b=0x0x1080418000 -> 196608
+  [SHM] at pid=3 a=257 b=0x0x1080030000 -> 196608
+  [SHM] rmid pid=14 a=257 b=0x0x0 -> 0
+  [X] hobbyos: randr: refusing crtc 1280x720+16+16 rot 1 (only 0,0, unrotated, <= 1920x1080)
+  [X] hobbyos: randr: crtc mode 1280x720 on screen 1920x1080
+  [X] hobbyos: randr: screen 0 now 1280x720 (339x191 mm)
+  [X] hobbyos: randr: screen 0 now 1920x1080 (508x286 mm)
+  [X] hobbyos: randr: crtc mode 1920x1080 on screen 1920x1080
+[XPG] PASS
+
+# strix host reference (Xvfb :93 1024x768x24, host libX11, XP_NO_RAW=1): same X5 rows, MIT-SHM 1.2 (Xvfb has fd passing)

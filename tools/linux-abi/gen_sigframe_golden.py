@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+"""tools/linux-abi/gen_sigframe_golden.py — Linux ground truth for F2.
+
+F2 (docs/cyberpunk.md §7.3) is the x86_64 signal frame's FP/XSAVE state: the
+struct _fpstate_64 / _fpx_sw_bytes / _xstate layout, the FP_XSTATE_MAGIC words,
+UC_FP_XSTATE and the auxv numbers AT_HWCAP2 / AT_MINSIGSTKSZ.  Wine's ntdll
+parses this frame, so the numbers in src/include/linux_sigframe.h must be the
+kernel's, not remembered ones.  This script compiles small programs against the
+LINUX UAPI headers (<asm/sigcontext.h>, <asm/ucontext.h>, <linux/auxvec.h>) and
+writes tests/fixtures/abi/linux_sigframe.golden; src/host/linux_sigframe_test.c
+asserts the header against it.
+
+Kept separate from gen_abi_golden.py so regenerating F2 never rewrites the
+shared syscall/errno/layout goldens.  Regenerating needs a Linux x86_64 host
+with a C compiler and the kernel UAPI headers; running the test does not.
+
+  python3 tools/linux-abi/gen_sigframe_golden.py [--check]
+"""
+import argparse
+import os
+import subprocess
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
+OUT = os.path.join(REPO, "tests", "fixtures", "abi", "linux_sigframe.golden")
+
+O = "offsetof"
+# (golden name, C expression, include group)
+ROWS = [
+    ("fpstate.size", "sizeof(struct _fpstate_64)", "sc"),
+    ("fpstate.mxcsr", O + "(struct _fpstate_64, mxcsr)", "sc"),
+    ("fpstate.mxcsr_mask", O + "(struct _fpstate_64, mxcsr_mask)", "sc"),
+    ("fpstate.xmm_space", O + "(struct _fpstate_64, xmm_space)", "sc"),
+    ("fpstate.sw_reserved", O + "(struct _fpstate_64, sw_reserved)", "sc"),
+    ("fpx_sw.size", "sizeof(struct _fpx_sw_bytes)", "sc"),
+    ("fpx_sw.magic1", O + "(struct _fpx_sw_bytes, magic1)", "sc"),
+    ("fpx_sw.extended_size", O + "(struct _fpx_sw_bytes, extended_size)", "sc"),
+    ("fpx_sw.xfeatures", O + "(struct _fpx_sw_bytes, xfeatures)", "sc"),
+    ("fpx_sw.xstate_size", O + "(struct _fpx_sw_bytes, xstate_size)", "sc"),
+    ("fpx_sw.padding", O + "(struct _fpx_sw_bytes, padding)", "sc"),
+    ("header.size", "sizeof(struct _header)", "sc"),
+    ("ymmh.size", "sizeof(struct _ymmh_state)", "sc"),
+    ("xstate.size", "sizeof(struct _xstate)", "sc"),
+    ("xstate.xstate_hdr", O + "(struct _xstate, xstate_hdr)", "sc"),
+    ("xstate.ymmh", O + "(struct _xstate, ymmh)", "sc"),
+    ("FP_XSTATE_MAGIC1", "FP_XSTATE_MAGIC1", "sc"),
+    ("FP_XSTATE_MAGIC2", "FP_XSTATE_MAGIC2", "sc"),
+    ("FP_XSTATE_MAGIC2_SIZE", "FP_XSTATE_MAGIC2_SIZE", "sc"),
+    ("UC_FP_XSTATE", "UC_FP_XSTATE", "uc"),
+    ("AT_HWCAP2", "AT_HWCAP2", "ax"),
+    ("AT_MINSIGSTKSZ", "AT_MINSIGSTKSZ", "ax"),
+]
+GROUPS = {
+    "sc": ["<stddef.h>", "<asm/sigcontext.h>"],
+    # asm-generic/ucontext.h needs stack_t/sigset_t from <signal.h> first
+    "uc": ["<stddef.h>", "<signal.h>", "<asm/ucontext.h>"],
+    "ax": ["<linux/auxvec.h>"],
+}
+
+
+def measure():
+    cc = os.environ.get("CC", "cc")
+    out = {}
+    with tempfile.TemporaryDirectory() as d:
+        for g, incs in GROUPS.items():
+            rows = [r for r in ROWS if r[2] == g]
+            src = "#include <stdio.h>\n" + "".join(f"#include {i}\n" for i in incs)
+            src += "int main(void){\n"
+            for name, expr, _ in rows:
+                src += f'  printf("%s %lu\\n", "{name}", (unsigned long)({expr}));\n'
+            src += "  return 0;\n}\n"
+            c, exe = os.path.join(d, g + ".c"), os.path.join(d, g)
+            open(c, "w").write(src)
+            r = subprocess.run([cc, "-o", exe, c], capture_output=True, text=True)
+            if r.returncode != 0:
+                print(f"compile of group {g} failed:\n{r.stderr}", file=sys.stderr)
+                raise SystemExit(3)
+            for line in subprocess.run([exe], check=True, capture_output=True,
+                                       text=True).stdout.splitlines():
+                n, v = line.split()
+                out[n] = int(v)
+    return out
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--check", action="store_true")
+    a = p.parse_args()
+    if os.uname().sysname != "Linux" or os.uname().machine != "x86_64":
+        print("gen_sigframe_golden.py must run on a Linux x86_64 host", file=sys.stderr)
+        return 2
+    rows = measure()
+    if a.check:
+        cur = {}
+        for line in open(OUT, encoding="utf-8"):
+            if line.startswith("#") or not line.strip():
+                continue
+            k, v = line.split()
+            cur[k] = int(v)
+        bad = [f"{k}: golden={cur.get(k)} linux={v}" for k, v in sorted(rows.items())
+               if cur.get(k) != v]
+        if bad:
+            print("\n".join(bad))
+            return 1
+        print(f"linux_sigframe.golden matches this Linux box ({len(rows)} rows)")
+        return 0
+    uname = subprocess.run(["uname", "-srm"], capture_output=True, text=True).stdout.strip()
+    body = ("# generated by tools/linux-abi/gen_sigframe_golden.py from the Linux x86_64\n"
+            f"# UAPI headers on {os.uname().nodename} ({uname}); values are the kernel's.\n"
+            "# F2 (docs/cyberpunk.md 7.3): src/include/linux_sigframe.h must match.\n"
+            "# Regenerate on a Linux x86_64 host; never hand-edit.\n")
+    body += "".join(f"{k} {v}\n" for k, v in sorted(rows.items()))
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    open(OUT, "w", encoding="utf-8").write(body)
+    print(f"wrote {OUT} ({len(rows)} rows)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

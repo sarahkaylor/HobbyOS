@@ -1,0 +1,34 @@
+info:vkd3d-proton:vkd3d_instance_apply_application_workarounds: Detected SteamAppID 1091500
+info:vkd3d-proton:vkd3d_instance_deduce_config_flags_from_environment: shader_cache is used, global_pipeline_cache is enforced.
+info:vkd3d-proton:vkd3d_config_flags_init_once: VKD3D_CONFIG=''.
+info:vkd3d-proton:vkd3d_get_vk_version: vkd3d-proton - applicationVersion: 3.2.0.
+info:vkd3d-proton:vkd3d_instance_init: vkd3d-proton - build: 2576c0b4adfae4a.
+info:vkd3d-proton:vkd3d_physical_device_info_init_maint9: Implementation supports eliding QFOT for non-compressed optimal images.
+info:vkd3d-proton:vkd3d_physical_device_info_init_maint10: Implementation can copy depth aspect on compute queue.
+info:vkd3d-proton:vkd3d_physical_device_info_init_maint10: Implementation can copy stencil aspect on compute queue.
+info:vkd3d-proton:d3d12_device_init_workarounds: Detected Linux kernel version 7.0.0
+info:vkd3d-proton:d3d12_device_init_workarounds: Broken NULL PRT with SMEM detected, per-game workarounds may apply.
+info:vkd3d-proton:d3d12_device_init_workarounds: Nooping SV_ShadingRate on RDNA4 due to unknown HW quirk causing hangs.
+info:vkd3d-proton:d3d12_device_init_vendor_hacks: Loaded amdxc64.dll successfully.
+info:vkd3d-proton:vkd3d_memory_info_decide_hvv_usage: Topology: No more than 1 device local heap, HVV access is viable.
+info:vkd3d-proton:vkd3d_memory_info_upload_hvv_memory_properties: Topology: HVV usage is allowed, using DEVICE_LOCAL | HOST_COHERENT for UPLOAD.
+info:vkd3d-proton:vkd3d_memory_info_init_budgets: Applying resizable BAR budget to memory types: 0x218.
+info:vkd3d-proton:vkd3d_bindless_state_get_bindless_flags: Enabling fast paths for advanced ExecuteIndirect() graphics and compute (EXT_dgc).
+info:vkd3d-proton:vkd3d_bindless_state_get_bindless_flags: Device supports VK_EXT_mutable_descriptor_type.
+info:vkd3d-proton:vkd3d_bindless_state_get_bindless_flags: Device supports ultra-fast path for descriptor copies.
+info:vkd3d-proton:vkd3d_bindless_state_add_binding: Device supports VK_EXT_descriptor_buffer!
+info:vkd3d-proton:vkd3d_bindless_state_add_binding: Device supports VK_EXT_descriptor_buffer!
+info:vkd3d-proton:vkd3d_bindless_state_add_binding: Device supports VK_EXT_descriptor_buffer!
+info:vkd3d-proton:d3d12_device_caps_init_shader_model: Enabling support for SM 6.6.
+info:vkd3d-proton:d3d12_device_caps_init_shader_model: Enabling support for SM 6.7.
+info:vkd3d-proton:d3d12_device_caps_init_shader_model: Enabling support for SM 6.8.
+info:vkd3d-proton:d3d12_device_determine_ray_tracing_tier: DXR support enabled.
+info:vkd3d-proton:d3d12_device_determine_ray_tracing_tier: DXR 1.1 support enabled.
+info:vkd3d-proton:d3d12_device_caps_init_feature_level: DX Ultimate supported!
+info:vkd3d-proton:vkd3d_pipeline_library_init_disk_cache: Remapping VKD3D_SHADER_CACHE to: vkd3d-proton.cache.
+info:vkd3d-proton:vkd3d_pipeline_library_init_disk_cache: Attempting to load disk cache from: vkd3d-proton.cache.
+info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Performing async setup of stream archive ...
+info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_merge: No write cache exists. No need to merge any disk caches.
+info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Merging pipeline libraries took 0.209 ms.
+info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Failed to map read-only cache: vkd3d-proton.cache.
+info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Done performing async setup of stream archive.

@@ -1,0 +1,19 @@
+# C1-k5: linux_probe_fdscale on the LANE kernel (4ac5ee27, cp-k5)
+# host: strix (Zen 5), guest intel MODE=test, 8 vCPU KVM, 12 GiB, under tools/cp/qemu-slot.sh
+# cmd: LP_TIMEOUT=600 bash tools/cp/qemu-slot.sh bash tools/gate/t3_linux_probe.sh fdscale
+
+[LP] info F1 initial soft=1024 hard=4096
+[LP] PASS F1 rlimit (80 ms)
+[LP] PASS F2 soft_limit (67 ms)
+[LP] info F3 3000 pipes live, parent maxfd=4005
+[LP] PASS F3 pipes3000 (356 ms)
+[LP] PASS F4 poll2000 (363 ms)
+[LP] PASS F5 epoll2000 (370 ms)
+[LP] PASS F6 select_big (333 ms)
+[LP] PASS F7 fd_kinds (69 ms)
+[LP] PASS F8 dup_high (63 ms)
+[LP] info F9 spinner=359ms self=361ms child=387ms nvcsw=0->5
+[LP] PASS F9 rusage (988 ms)
+[LP] PASS F10 wine_shape (618 ms)
+[LP] done rc=0
+t3_linux_probe: PASS — fdscale reached its done marker

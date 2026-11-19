@@ -1,0 +1,58 @@
+# Gate P6 step 3 -- kernel transport probe (src/user/cp/vn_probe_transport.c) on the Venus recipe
+# strix (Ryzen AI MAX+ 395, RX 9070 XT; QEMU 10.2.1, virglrenderer 1.2.0), 2026-11-17, guest -m 12G -smp 8 KVM
+# command: bash tools/cp/venus/run_probe.sh src/user/cp/vn_probe_transport.c 2000
+# note: ring 0 is the CPU ring; QEMU retires it from its 10 ms virgl fence poll, so the FENCE row is the
+#       poll period, not a VkQueue fence.  The VkQueue fence benchmark is vn_fence (Vulkan).
+
+[VIRGL3D] shm id=1 bar=4 base=0x0000380800000000 len=0x0000000200000000
+[VIRGL3D] feat offered lo=0x000000003000001B virgl=1 edid=1 uuid=0 blob=1 ctx_init=1
+[VIRGL3D] feat virgl=1 ctx_init=1 blob=1
+[VIRGL3D] capset index=0 id=1 (virgl) maxver=1 maxsize=308
+[VIRGL3D] capset index=1 id=2 (virgl2) maxver=2 maxsize=1408
+[VIRGL3D] capset index=2 id=4 (venus) maxver=0 maxsize=160
+[VENUS] transport blob=1 ctx_init=1 window_mib=8192 fence_slots=32
+[VIRGL3D] irq line=10 vector=42 (fences retired by INTx)
+[LCOMPAT] argv argc=2 a0=PROBE.ELF a1=2000 execfn=PROBE.ELF
+[LP] tsc 2.994 GHz (calibrated against CLOCK_MONOTONIC)
+[LP] ok   open /dev/gpu fd=3 errno=0
+[LP] ok   param abi_version=2 rc=0
+[LP] ok   param features=0x1f (virgl=1 blob=1 ctx_init=1 host_visible=1 fence_irq=1)
+[LP] ok   param host_visible_mib=8192 num_capsets=3
+[LP] ok   param unknown -> EINVAL
+[LP] capset index=0 id=1 maxver=1 maxsize=308 rc=0
+[LP] capset index=1 id=2 maxver=2 maxsize=1408 rc=0
+[LP] capset index=2 id=4 maxver=0 maxsize=160 rc=0
+[LP] ok   venus capset present (id 4) index=2 size=160
+[LP] ok   capset index past the table -> EINVAL
+[VENUS] capset id=4 ver=0 len=160 resp=0x0000000000001103
+[LP] ok   venus capset len=160 wire_format=1 vk_xml=0x404133 venus_protocol=3 blob_id_0=1 wait_syncs=1 multi_timelines=1 rc=0
+[VENUS] ctx_create2 ctx=2 capset=4 rings=64 resp=0x0000000000001100
+[LP] ok   ctx_create2 capset=4 rings=64 ctx=2 rc=0
+[LP] ok   second ctx on the fd -> EBUSY
+[VENUS] blob_create res=4097 ctx=2 flags=1 blob_id=0 size=1024K resp=0x0000000000001100
+[LP] ok   blob_create host3d mappable blob_id=0 1MiB res=4097 rc=0
+[VENUS] map res=4097 off=0x0000000000000000 size_k=1024 map_info=1 resp=0x0000000000001106
+[VENUS] user map res=4097 size_k=1024 map_info=1 mode=0 va=0x0000700000000000
+[LP] ok   map_blob va=0x700000000000 size=1048576 map_info=1 rc=0
+[LP] ok   window write/read 1MiB mismatches=0
+[LP] ok   map_blob again -> same va rc=0
+[LP] window bandwidth write=199145 MB/s read=36637 MB/s (map_info=1)
+[VENUS] blob_create res=4098 ctx=2 flags=0 blob_id=0 size=4K resp=0x0000000000001200
+[LP] note non-mappable blob_id=0 create rc=-5 (host refused; skipped)
+[LP] ok   guest blob -> EINVAL (not in v2)
+[LP] ok   submit2 fenced ring=0 seqno=0x100000001 rc=0
+[LP] ok   fence_wait2 ring=0 rc=0
+[LP] ok   fence_wait2 poll after retire -> 0
+[LP] ok   wait on a seqno never issued -> EINVAL
+[LP] ok   wait on ring 64 -> EINVAL
+[LP] ok   submit2 ring 64 -> EINVAL
+[LP] ok   scanout_blob reserved -> ENOSYS
+[LP] ok   burst of 100 fenced submits (> 32 slots) retired rc=0
+[LP] ok   fence loop 2000/2000 completed in 19992 ms
+[LP] FENCE ring=0 n=2000 submit_us p50=14.2 p99=28.9 | submit->signal_us p50=10000.9 p90=10023.7 p99=10065.1 max=13179.7
+[LP] ok   unmap_blob
+[LP] ok   unref blob
+[LP] ok   ctx_destroy
+[LP] done rc=0
+--- qemu stderr
+virtio_gpu_virgl_process_cmd: ctrl 0x10c, error 0x1200

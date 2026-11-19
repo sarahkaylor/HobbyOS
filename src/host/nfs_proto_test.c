@@ -17,6 +17,7 @@
 #include <string.h>
 #include <stdint.h>
 
+#include <string.h>
 #include "nfs.h"
 #include "nfs_fixtures.h"
 
@@ -409,6 +410,129 @@ static void test_reply_envelope_rules(void) {
         "oversized verifier is malformed");
 }
 
+/* cp/exec: READLINK3 reply parsing + the symlink path join/canonicalize. */
+static void build_post_op_attr_lnk(struct xdr_w *w, uint64_t size) {
+  xdr_w_u32(w, 1);             /* attributes_follow */
+  xdr_w_u32(w, NF3LNK);        /* type */
+  xdr_w_u32(w, 0777);          /* mode */
+  xdr_w_u32(w, 1); xdr_w_u32(w, 0); xdr_w_u32(w, 0); /* nlink uid gid */
+  xdr_w_u64(w, size); xdr_w_u64(w, size);            /* size used */
+  xdr_w_u32(w, 0); xdr_w_u32(w, 0);                  /* rdev */
+  xdr_w_u64(w, 0x1234); xdr_w_u64(w, 0x5678);        /* fsid fileid */
+  xdr_w_u32(w, 1); xdr_w_u32(w, 0);                  /* atime */
+  xdr_w_u32(w, 2); xdr_w_u32(w, 0);                  /* mtime */
+  xdr_w_u32(w, 3); xdr_w_u32(w, 0);                  /* ctime */
+}
+
+static void test_readlink_and_join(void) {
+  printf("-- cp/exec: READLINK3 parse + symlink path join\n");
+  uint8_t msg[256];
+  struct xdr_w w;
+  xdr_w_init(&w, msg, sizeof msg);
+  xdr_w_u32(&w, 0);                 /* status NFS3_OK */
+  build_post_op_attr_lnk(&w, 4);
+  xdr_w_string(&w, "wine");         /* the link target */
+  check(w.err == 0, "READLINK reply encodes");
+  char tgt[256];
+  int n = nfs_parse_readlink_reply(msg, w.len, tgt, sizeof tgt);
+  check(n == 4 && strcmp(tgt, "wine") == 0, "READLINK target is 'wine'");
+
+  /* a server-status error is -2, not a bogus path */
+  xdr_w_init(&w, msg, sizeof msg);
+  xdr_w_u32(&w, 2);                 /* NFS3ERR_NOENT */
+  n = nfs_parse_readlink_reply(msg, w.len, tgt, sizeof tgt);
+  check(n == -2, "READLINK status error -> -2");
+
+  char out[256];
+  /* relative target resolves against the link's parent (Wine's case) */
+  check(nfs_symlink_join("/bin/wineboot", "wine", out, sizeof out) == 0 &&
+        strcmp(out, "/bin/wine") == 0, "join relative: /bin/wineboot + wine");
+  /* absolute target replaces the path */
+  check(nfs_symlink_join("/a/b/link", "/c/d", out, sizeof out) == 0 &&
+        strcmp(out, "/c/d") == 0, "join absolute: /c/d");
+  /* .. and . folded, relative to parent */
+  check(nfs_symlink_join("/x/y/l", "../z/./w", out, sizeof out) == 0 &&
+        strcmp(out, "/x/z/w") == 0, "join ..//. folds to /x/z/w");
+  /* .. above the root stays at root */
+  check(nfs_symlink_join("/l", "../../up", out, sizeof out) == 0 &&
+        strcmp(out, "/up") == 0, "join .. above root clamps");
+  /* a chain target that is itself a bare name in the root */
+  check(nfs_symlink_join("/wineboot", "wine", out, sizeof out) == 0 &&
+        strcmp(out, "/wine") == 0, "join at root: /wineboot + wine");
+}
+
+/* cp/nfs: FSINFO3 parse + the READ size policy. */
+static void test_fsinfo_and_rsize(void) {
+  printf("-- cp/nfs: FSINFO3 parse + rsize policy\n");
+  uint8_t msg[256];
+  struct xdr_w w;
+  xdr_w_init(&w, msg, sizeof msg);
+  xdr_w_u32(&w, 0);          /* NFS3_OK */
+  xdr_w_u32(&w, 0);          /* obj_attributes: not present */
+  xdr_w_u32(&w, 1048576);    /* rtmax */
+  xdr_w_u32(&w, 32768);      /* rtpref */
+  xdr_w_u32(&w, 4096);       /* rtmult */
+  xdr_w_u32(&w, 1048576); xdr_w_u32(&w, 32768); xdr_w_u32(&w, 4096);
+  xdr_w_u32(&w, 32768);      /* dtpref */
+  xdr_w_u64(&w, 0xFFFFFFFFFFFFULL);
+  xdr_w_u32(&w, 0); xdr_w_u32(&w, 1);
+  xdr_w_u32(&w, 0x1b);       /* properties */
+  uint32_t mx = 0, pf = 0;
+  check(w.err == 0 && nfs_parse_fsinfo_reply(msg, w.len, &mx, &pf) == 0 &&
+        mx == 1048576 && pf == 32768, "FSINFO: rtmax 1 MiB, rtpref 32 KiB");
+  check(nfs_parse_fsinfo_reply(msg, w.len - 4, &mx, &pf) == -1,
+        "FSINFO: a truncated reply is refused");
+  xdr_w_init(&w, msg, sizeof msg);
+  xdr_w_u32(&w, 10001);      /* NFS3ERR_BADHANDLE */
+  check(nfs_parse_fsinfo_reply(msg, w.len, &mx, &pf) == -2, "FSINFO: status error -> -2");
+  check(nfs_pick_rsize(1048576, 32768) == 32768, "rsize: rtpref 32 KiB");
+  check(nfs_pick_rsize(1048576, 1048576) == NFS_READ_RSIZE_MAX, "rsize: capped at 32 KiB");
+  check(nfs_pick_rsize(8192, 32768) == 8192, "rsize: never above rtmax");
+  check(nfs_pick_rsize(65536, 0) == 32768, "rsize: rtpref 0 -> rtmax, capped");
+  check(nfs_pick_rsize(0, 0) == NFS_READ_RSIZE, "rsize: no answer -> single-frame");
+  check(nfs_pick_rsize(1024, 1024) == NFS_READ_RSIZE, "rsize: never below single-frame");
+  check(nfs_pick_rsize(20000, 20000) == 16384, "rsize: rounded down to 4 KiB");
+  /* cp/nfsguard: the 32 KiB READ size has been lost to merges more than once.
+     These rows use LITERALS on purpose: a row written against
+     NFS_READ_RSIZE_MAX would still pass after someone set it back to 1344.
+     The source scan (tools/cp/nfs/rsize_scan.py) and the boot guard
+     (tools/cp/nfs/rsize_guard.sh) cover the call sites; docs/cp-nfs.md. */
+  check(NFS_READ_RSIZE_MAX >= 32768, "guard: NFS_READ_RSIZE_MAX is at least 32 KiB");
+  check(NFS_RPC_RBIG >= NFS_READ_RSIZE_MAX + 128,
+        "guard: a READ reply buffer holds a 32 KiB reply plus RPC/NFS overhead");
+  check(nfs_pick_rsize(32768, 32768) == 32768,
+        "guard: a server offering 32 KiB gets 32 KiB READs, not 1344");
+  check(nfs_pick_rsize(1048576, 1048576) == 32768,
+        "guard: a server offering 1 MiB gets 32 KiB READs");
+}
+
+/* cp/nfs2: fattr3 keeps all three times (fstat reported mtime 0) and a
+ * 64-bit size (a > 4 GiB file must not wrap). */
+static void test_fattr3_times_and_size(void) {
+  printf("-- cp/nfs2: fattr3 times + 64-bit size\n");
+  uint8_t msg[256];
+  struct xdr_w w;
+  xdr_w_init(&w, msg, sizeof msg);
+  xdr_w_u32(&w, 0);                                   /* GETATTR3 status OK */
+  xdr_w_u32(&w, NF3REG); xdr_w_u32(&w, 0644);
+  xdr_w_u32(&w, 1); xdr_w_u32(&w, 0); xdr_w_u32(&w, 0);
+  xdr_w_u64(&w, 0x140003039ULL);                      /* 5 GiB + 12345 */
+  xdr_w_u64(&w, 0x140003039ULL);
+  xdr_w_u32(&w, 0); xdr_w_u32(&w, 0);
+  xdr_w_u64(&w, 0x1234); xdr_w_u64(&w, 0x5678);
+  xdr_w_u32(&w, 1700000001); xdr_w_u32(&w, 7);        /* atime */
+  xdr_w_u32(&w, 1600000002); xdr_w_u32(&w, 8);        /* mtime */
+  xdr_w_u32(&w, 1650000003); xdr_w_u32(&w, 9);        /* ctime */
+  check(w.err == 0, "GETATTR reply encodes");
+  struct nfs_attr a;
+  memset(&a, 0, sizeof a);
+  check(nfs_parse_getattr_reply(msg, w.len, &a) == 0, "GETATTR parses");
+  check(a.size == 0x140003039ULL, "size keeps all 64 bits (5 GiB + 12345)");
+  check(a.atime == 1700000001u, "atime seconds");
+  check(a.mtime == 1600000002u, "mtime seconds");
+  check(a.ctime == 1650000003u, "ctime seconds");
+}
+
 int main(void) {
   printf("=== nfs_proto host tests (real nfsd fixtures) ===\n");
 
@@ -417,6 +541,9 @@ int main(void) {
   test_truncation_never_succeeds();
   test_writer_and_reader();
   test_reply_envelope_rules();
+  test_readlink_and_join();
+  test_fsinfo_and_rsize();
+  test_fattr3_times_and_size();
 
   printf("\n=== Results: %d checks run, %d failed ===\n",
          checks_run, checks_failed);

@@ -32,23 +32,23 @@ SYMBOLS = re.compile(r"\b(panic_puts2?|panic_putc2?|panic_print_hex2?)\b")
 ALLOW = {
     # ---- the sink itself: definitions + the violation reporter ----
     "src/kernel/arch/x64/uart.c": (26, "definitions, panic_claim/enter/leave, violation + claim-loser + GB-204 suppressed reports + GB-209 COM2 record + one COM1 summary"),
-    "src/kernel/arch/arm/uart.c": (16, "arm definitions; arm has no COM2 violation channel (15->16 in f89a8177: rsp=/live=/lr in the arm fault dump)"),
+    "src/kernel/arch/arm/uart.c": (15, "arm definitions; arm has no COM2 violation channel (15->16 in f89a8177: rsp=/live=/lr in the arm fault dump; 16->15 in C0-console: a comment naming the sink went with the raw body)"),
     "src/host/locksteal_test.c": (1, "host-test shim that stands in for the sink"),
 
     # ---- non-returning diagnostics: they end in halt/reboot by construction ----
     "src/kernel/ssp.c": (3, "SEC-4 canary panic: __stack_chk_fail/ssp_fail_c never returns; two call sites (x64 panic-claimed record, arm branch) + the declaration; a smasher may hold uart_lock (GB-246)"),
-    "src/kernel/arch/x64/trap.c": (333, "fatal dump, stall watchdog, spinlock scream, KPFLOOP, GB-146-A [BADVEC] record + DR0 writer watchpoint + pid-keyed stamp lookup, GB-234 armed-slot set, GB-238 live DR0/DR7 + per-CPU last-#DB timeline, GB-233 [TORNFRAME-STAMP] handoff, GB-101 [USERFAULT] no-process classifier, GB-244 [BADVEC] writer-row helper, GB-247 not-a-frame guard + one-line report (314->326->328->333)"),
+    "src/kernel/arch/x64/trap.c": (348, "fatal dump, stall watchdog, spinlock scream, KPFLOOP, GB-146-A [BADVEC] record + DR0 writer watchpoint + pid-keyed stamp lookup, GB-234 armed-slot set, GB-238 live DR0/DR7 + per-CPU last-#DB timeline, GB-233 [TORNFRAME-STAMP] handoff, GB-101 [USERFAULT] no-process classifier, GB-244 [BADVEC] writer-row helper, GB-247 not-a-frame guard + one-line report (314->326->328->333), P1 [IDMAP-TRIP] tag inside the claimed kernel-fault record (333->341), GB-308 per-CPU kernel_stack rows printed before the not-a-frame halt (main, merged by cp-sync; 341->348)"),
     "src/kernel/arch/x64/locks.c": (13, "spinlock scream paths: printed while the lock is wedged"),
     "src/kernel/arch/arm/locks.c": (36, "same, arm"),
 
     # ---- RETURNING paths: these are the GB-097 residue, not an endorsement ----
-    "src/kernel/arch/x64/mmu.c": (7, "FREERACE diagnostic inside v2 free -- RETURNS (GB-097 residue)"),
     "src/kernel/main.c": (9, "hex/decimal helpers -- RETURN (GB-097 residue; 11->9 in f89a8177)"),
     "src/kernel/process.c": (39, "resume-RETURNED / spawn diagnostics -- RETURN (GB-097 residue)"),
 }
 
-RESIDUE = {"src/kernel/arch/x64/mmu.c",
-           "src/kernel/main.c", "src/kernel/process.c"}
+# (x64 mmu.c's 7 FREERACE references went in H8-root: the row is a kline
+#  record now, printed from a returning path through the locked console.)
+RESIDUE = {"src/kernel/main.c", "src/kernel/process.c"}
 
 
 def scan(root):

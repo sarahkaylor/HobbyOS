@@ -1,0 +1,88 @@
+=================== F5 hand-back run f5a (strix): Linux vkcubex fullscreen 1920x1080 + tools/cp/venus/p7occlude 20 beside it
+Mesa ~/cp/p7work/venus-p7 (async present on, present_wait on); VENUS_VNC=1; screendumps evidence/cp-p7/f5a/f5-*.png (VNC = the glass)
+[P5X] staged: /LIB64 glibc 2.31, /CP/X11 (39 libs), /CP/VK (x11 variant), /VKCUBEX.ELF; XSTART: /VKCUBEX.ELF 55 fs 1080 fifo
+[P5X] venus: F5 probe staged: /P7OCC.ELF 20
+[P5X] F5 screendump before: 1920x1080 (VNC, the glass)
+[P5X] F5 screendump occluded: 1920x1080 (VNC, the glass)
+[P5X] F5 screendump uncovered: 1920x1080 (VNC, the glass)
+[P5X] F5 screendump mode1280: 1920x1080 (VNC, the glass)
+[P5X] F5 screendump mode1920: 1920x1080 (VNC, the glass)
+[P5X] F5 screendump exit: 1920x1080 (VNC, the glass)
+[VK] RESULT frames=2817 wall=55008.3 ms fps=51.21 | per-frame total median 19.92 p90 29.66 worst(after frame 0) 541.47 ms | swapchain 1920x1080 4 images FIFO | recreated=0 suboptimal=0
+  [XSESS] XSTART: /VKCUBEX.ELF
+  [XSESS] XSTART: /P7OCC.ELF
+  [POK] off=[XSESS] XSTART: spawned 2 program(s)
+[P5X] FAIL: RESULT wall=55008.3 frames=2817 (< 60 s or no frames)
+(the harness FAIL on wall < 60 s is this run's --secs 55, not a probe failure)
+--- serial: [OCC] steps, X fullscreen reports, kernel [P7] transitions, [HBP] (scanout vs putimage per 2 s)
+[X] hobbyos: fullscreen window 0x0 0x0
+[X] hobbyos: fullscreen window 0x6000af 1920x1080
+[P7] scanout X fullscreen window/size 0 0 seq=0
+[X] hobbyos: fullscreen window 0x0 0x0
+[X] [OCC] p7occlude: screen 1920x1080, occluder at t=20 s
+[P7] scanout X fullscreen window/size [X] [VK] x11: ext DRI3     absent
+[X] [VK] x11: window 0xa00000 1920x1080 mapped (fullscreen, override-redirect)
+[X] hobbyos: fullscreen window 0xa00000 1920x1080
+[P7] scanout taken res/window 4099 10485760 seq=1
+[X] [HBP] pid=14 n=119 fps=59.1 path=scanout acq=1/5 sub=13266/29999 wait=6/56 flip=9118/17765 geom=0/0 set=94 flush=8808 us scanout=119 putimage=0 refused=0 total=119
+[X] [HBP] pid=14 n=105 fps=52.3 path=scanout acq=1/26 sub=16058/39043 wait=6/46 flip=10356/18229 geom=0/0 set=96 flush=10183 us scanout=105 putimage=0 refused=0 total=224
+[X] [HBP] pid=14 n=103 fps=51.3 path=scanout acq=1/8 sub=17104/29360 wait=5/19 flip=10070/15962 geom=0/0 set=78 flush=9926 us scanout=103 putimage=0 refused=0 total=327
+[X] [HBP] pid=14 n=110 fps=54.5 path=scanout acq=1/7 sub=16220/34783 wait=5/12 flip=9387/14301 geom=0/0 set=112 flush=9184 us scanout=110 putimage=0 refused=0 total=437
+[X] [HBP] pid=14 n=112 fps=55.4 path=scanout acq=1/2 sub=15863/38051 wait=8/339 flip=9086/13717 geom=0/0 set=86 flush=8924 us scanout=112 putimage=0 refused=0 total=549
+[X] [HBP] pid=14 n=168 fps=83.6 path=scanout acq=1/7 sub=9104/36730 wait=5/29 flip=7238/13441 geom=0/0 set=69 flush=7110 us scanout=168 putimage=0 refused=0 total=717
+[X] [HBP] pid=14 n=110 fps=55.0 path=scanout acq=1/3 sub=16176/30076 wait=7/48 flip=9984/14559 geom=0/0 set=101 flush=9804 us scanout=110 putimage=0 refused=0 total=827
+[X] [OCC] shot before
+[X] [HBP] pid=14 n=110 fps=54.5 path=scanout acq=1/2 sub=15904/28520 wait=6/51 flip=9642/17364 geom=0/0 set=86 flush=9419 us scanout=110 putimage=0 refused=0 total=937
+[X] [OCC] mapped 480x320+200+200 (override-redirect, on top)
+[P7] scanout X fullscreen window/size 0 0 seq=1007
+[P7] scanout back (X revoked) 4102 0 seq=1007
+[X] hobbyos: fullscreen window 0x0 0x0
+[X] [HBP] pid=14 n=85 fps=42.1 path=mixed acq=3835/49827 sub=18156/49975 wait=430/32976 flip=16010/66017 geom=1/1 set=80 flush=9787 us scanout=70 putimage=15 refused=15 total=1022
+[X] [HBP] pid=14 n=37 fps=18.4 path=putimage acq=40672/511517 sub=42288/511817 wait=27/82 flip=54400/512086 geom=1/2 set=0 flush=0 us scanout=0 putimage=37 refused=37 total=1059
+[X] [OCC] shot occluded
+[X] [HBP] pid=14 n=50 fps=24.9 path=putimage acq=27674/46851 sub=28006/47002 wait=31/327 flip=40134/52442 geom=1/2 set=0 flush=0 us scanout=0 putimage=50 refused=50 total=1109
+[X] [OCC] unmapped
+[P7] scanout X fullscreen window/size 10485760 125830200 seq=1007
+[X] hobbyos: fullscreen window 0xa00000 1920x1080
+[P7] scanout taken res/window 4102 10485760 seq=1008
+[X] [HBP] pid=14 n=78 fps=38.7 path=mixed acq=11724/53778 sub=19868/53935 wait=168/11546 flip=21761/55285 geom=2/34 set=90 flush=8750 us scanout=45 putimage=33 refused=33 total=1187
+[X] [HBP] pid=14 n=111 fps=55.5 path=scanout acq=2/13 sub=15380/36996 wait=8/44 flip=9510/14986 geom=0/0 set=322 flush=8980 us scanout=111 putimage=0 refused=0 total=1298
+[X] [OCC] shot uncovered
+[X] [HBP] pid=14 n=110 fps=54.5 path=scanout acq=1/5 sub=16453/30362 wait=7/45 flip=9618/15902 geom=0/0 set=149 flush=9309 us scanout=110 putimage=0 refused=0 total=1408
+[X] hobbyos: randr: crtc mode 1280x720 on screen 1920x1080
+[P7] scanout X fullscreen window/size 0 0 seq=1341
+[P7] scanout back (X revoked) 4103 0 seq=1341
+[X] hobbyos: fullscreen window 0x0 0x0
+[X] hobbyos: randr: screen 0 now 1280x720 (338x190 mm)
+[P7] scanout X fullscreen window/size 10485760 83886800 seq=1341
+[X] hobbyos: fullscreen window 0xa00000 1280x720
+[X] [OCC] mode 1280x720 status=0
+[X] [HBP] pid=14 n=94 fps=46.5 path=mixed acq=5632/48543 sub=18034/49445 wait=13/195 flip=14709/61758 geom=1/1 set=127 flush=9298 us scanout=68 putimage=26 refused=26 total=1502
+[X] [HBP] pid=14 n=89 fps=44.3 path=putimage acq=16499/27135 sub=17009/42913 wait=32/278 flip=22472/43419 geom=1/2 set=0 flush=0 us scanout=0 putimage=89 refused=89 total=1591
+[X] [OCC] shot mode1280
+[X] [HBP] pid=14 n=87 fps=43.2 path=putimage acq=16586/31959 sub=16810/32212 wait=43/687 flip=23100/40743 geom=1/2 set=0 flush=0 us scanout=0 putimage=87 refused=87 total=1678
+[X] [HBP] pid=14 n=85 fps=42.2 path=putimage acq=17833/28062 sub=18597/39995 wait=154/6889 flip=23419/30297 geom=1/2 set=0 flush=0 us scanout=0 putimage=85 refused=85 total=1763
+[X] hobbyos: randr: screen 0 now 1920x1080 (508x285 mm)
+[P7] scanout X fullscreen window/size 0 0 seq=1341
+[X] hobbyos: fullscreen window 0x0 0x0
+[X] hobbyos: randr: crtc mode 1920x1080 on screen 1920x1080
+[P7] scanout [X] [OCC] mode 1920x1080 status=0
+[X] hobbyos: fullscreen window 0xa00000 1920x1080
+[P7] scanout taken res/window 4102 10485760 seq=1342
+[X] [HBP] pid=14 n=96 fps=47.9 path=mixed acq=9668/66746 sub=17113/67171 wait=106/8497 flip=16920/67393 geom=1/2 set=94 flush=8313 us scanout=45 putimage=51 refused=51 total=1859
+[X] [HBP] pid=14 n=112 fps=55.9 path=scanout acq=1/3 sub=15620/29637 wait=5/29 flip=9716/14377 geom=0/0 set=94 flush=9552 us scanout=112 putimage=0 refused=0 total=1971
+[X] [HBP] pid=14 n=159 fps=79.5 path=scanout acq=1/3 sub=10353/37963 wait=6/31 flip=7364/14337 geom=0/0 set=74 flush=7226 us scanout=159 putimage=0 refused=0 total=2130
+[X] [OCC] shot mode1920
+[X] [OCC] done
+[X] [HBP] pid=14 n=108 fps=54.0 path=scanout acq=1/6 sub=16580/23632 wait=6/21 flip=9680/15050 geom=0/0 set=82 flush=9522 us scanout=108 putimage=0 refused=0 total=2238
+[X] [HBP] pid=14 n=109 fps=54.5 path=scanout acq=1/27 sub=15968/35357 wait=6/24 flip=9745/14131 geom=0/0 set=88 flush=9580 us scanout=109 putimage=0 refused=0 total=2347
+[X] [HBP] pid=14 n=109 fps=54.3 path=scanout acq=1/19 sub=16595/34765 wait=5/24 flip=9793/14235 geom=0/0 set=85 flush=9635 us scanout=109 putimage=0 refused=0 total=2456
+[X] [HBP] pid=14 n=98 fps=48.5 path=scanout acq=2/6 sub=18830/377890 wait=7/20 flip=9012/16221 geom=0/0 set=146 flush=8721 us scanout=98 putimage=0 refused=0 total=2554
+[X] [HBP] pid=14 n=121 fps=59.9 path=scanout acq=1/15 sub=14453/25105 wait=7/60 flip=8541/13689 geom=0/0 set=175 flush=8258 us scanout=121 putimage=0 refused=0 total=2675
+[X] [HBP] pid=14 n=106 fps=52.7 path=scanout acq=1/10 sub=16816/29540 wait=6/68 flip=9879/17647 geom=0/0 set=91 flush=9727 us scanout=106 putimage=0 refused=0 total=2781
+[P7] scanout back (blob freed) 4099 0 seq=2344
+[X] [VK] done rc=0
+[P7] scanout X fullscreen window/size 0 0 seq=2344
+[X] hobbyos: fullscreen window 0x0 0x0
+--- refused rows (first 8 printed by the kernel):
+8

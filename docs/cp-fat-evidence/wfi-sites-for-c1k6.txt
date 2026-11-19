@@ -1,0 +1,38 @@
+# NOTE: written against integ9; C1-k6's 9d47b051 now bounds every task halt (safe_wfi) to 1 ms, which turns every T row
+# below into 'woken within 1 ms' for task context.  The idle loop is left to the IPIs that hand it work.
+# x86_64 halt ("sti; hlt" = safe_wfi) wait sites at cp-fat, and what ends each halt.
+# Context: an AP has NO periodic interrupt of its own (timer.c: AP LVT not armed;
+# C1-k6's 0x84 one-shot fires only for a covered park deadline).  The only
+# periodic wake is CPU 0's PIT tick, which broadcasts 0x81.  CPU 0 stops
+# broadcasting whenever it runs with IF=0 -- in particular while it spins in
+# ylock_acquire inside a syscall (SFMASK 0x47700 masks IF at entry).  A halt
+# whose only waker is "some interrupt" is therefore unbounded while CPU 0 spins
+# on a lock the halted CPU holds (or on anything that waits for it).
+#
+# waker: R = a real, directed waker exists; T = relies on the broadcast tick
+# (or another incidental interrupt); D = bounded by a deadline, but the
+# deadline is only checked after a wake, so it is NOT a bound without one.
+#
+# site                                   function                         waker  holds a lock others spin on?
+virtio_blk.c  blk_token_acquire          NVMe device token (FAT+ext2)     R now  YES (fat_lock, fat_wr_lock, ext2_lock) -- P9-8.  cp-fat: user waiters halt with a directed 0x81 from blk_token_release (interrupts-off registration, no lost wake); kernel tasks never register (0x81 on a kernel task is a reschedule) and halt in plain safe_wfi -- bounded by C1-k6's 9d47b051.
+virtio_blk.c  blk_token_try_acquire      bounded token (stress probe)     -      polls to its deadline now (cp-fat); was T/D
+virtio_blk.c  stress_delay_ms            RW_BLK_STRESS probe thread        T/D    no (builds with RW_BLK_STRESS only)
+virtio_blk.c  virtio_blk_read/write_raw  ARM section only                  -      ARM has a per-core timer tick: not this hazard
+ext2_vfs.c    flusher_task 50 ms poll    ext2 flusher kernel task          T/D    no lock held while it halts; a stalled poll delays commits only
+virtio_gpu.c  gpu_wait_completed         virtio-gpu ctrl-queue completion  T (+the device IRQ; armed by main.c, whose comment assumes a per-core tick)  YES if a caller holds a lock (the gpu command lock) another CPU spins on; the comment assumes "the local tick bounds any residual race to ~10 ms", which an AP does not have
+net.c         net_socket_connect         kernel TCP connect                 T/D (net_socket_tick each wake)  caller-dependent
+net.c         net_socket_recv (loopback) peer write/close                   T      no directed wake from the peer's send
+net.c         net_socket_recv (wire)     RX ring / 5 s timeout              T/D (net_rx_pump each wake; NIC IRQ on CPU 0)  NFS RPC paths run under NFS locks: same class as P9-8 if CPU 0 spins on one
+net.c         net_socket_lo_send         loopback backpressure              T      no directed wake from the reader's drain
+process.c     schedule() no-process loop scheduler tail                     T      idle only
+process.c     process_exit group drain   group_kick_members every 50 ms     T/D    proc-level claims
+process.c     exec_terminate_siblings    sibling claim drain (256 wakes)    T/D    count-bounded by WAKES, not time
+process.c     process_sleep (no proc)    early boot                         T      -
+process.c     start_scheduler idle (x3)  idle CPU                           R (sched_wake_idle_cpu / sched_kick_idle_cpus IPIs) + T
+process.c     process_thread_exit drain  group claims (32 wakes)            T/D    count-bounded by wakes
+arch/x64/trap.c  panic/halt loops       for(;;) hlt                        -      terminal
+
+# Related hazard (not a halt): a KERNEL TASK preempted by the tick while it holds a ylock (the ext2 flusher holding
+# ext2_lock, measured once under linux_probe_fatren + /EXT: [YLOCK-OWNER] ext2_lock pid=1 ost=2 = READY) is never run
+# again if every CPU is in an unpreemptible syscall spinning with IF=0 -- the spinners include the one it would need.
+# Policy question for C1-k6 (preempt-disable while a kernel task holds a ylock, or let ylock spinners take interrupts).

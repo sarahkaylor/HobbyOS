@@ -1,0 +1,50 @@
+# Stop P9-8 (integ9 adb81ee4 + cp-play, strix): the X session wedges on fat_lock before the game (warm-up), 2 of 5 integ9 boots (r2-fps-scan3, r2-fps-scan5)
+# both with XSESSION.ENV HB_SCREEN_SIZE=1280x720; scan1/2/4 (same config) passed
+
+## r2-fps-scan5: kernel rows
+[YLOCK-STALL] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x4 extra=0x100000 cpu=0
+[YLOCK-WEDGE] site=fat_lock lock=fat_lock addr=0x7028EAD0 pc=0x4 extra=0x2 cpu=0
+[YLOCK-OWNER] fat_lock pid=10 cpu=4 pcb_live=1 ost=3 osys=23
+
+## launcher rows
+[P8] mount 10.0.2.2:/srv/nfs/cp-play-p9 -> /CP ok
+[P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
+[P8] begin keepalive (background) : wine Z:\CP\P5\VK\vkcube.exe --idle 86400
+[P8] keepalive pid=17
+
+## last Wine trace row before the stall
+[X]  15.961:002c:trace:process:NtQueryInformationProcess (0xffffffffffffffff,0x00000007,0x7ffffe1ff968,0x00000008,(nil))
+[X]  15.966:002c:trace:process:NtQueryInformationProcess (0xffffffffffffffff,0x0000001a,0x7ffffe1feea0,0x00000008,(nil))
+
+## what IceWM (pid 10) was doing just before: FAT reads of its theme files, then the fullscreen report
+/ICEWM/ledclock/PERCENT.XPM
+/ICEWM/ledclock/P.XPM
+/ICEWM/ledclock/SLASH.XPM
+/ICEWM/ledclock/SPACE.XPM
+[P7] scanout X fullscreen window/size 2097327 83886800 seq=0
+[X] hobbyos: fullscreen window 0x2000af 1280x720
+
+## guest PC sample of the stall (boot_p9 prof-prestall: QMP info registers -a + kernel stack words, 4 Hz x 20 s)
+== obj/cp-p9/r2-fps-scan5/prof-prestall.txt: 640 vCPU samples
+   idle (HLT)      480   75.0 %
+   kernel          160   25.0 %
+== per vCPU (idle / kernel / user %)
+   cpu0:    0 /  100 /    0
+   cpu1:  100 /    0 /    0
+   cpu2:  100 /    0 /    0
+   cpu3:    0 /  100 /    0
+   cpu4:  100 /    0 /    0
+   cpu5:  100 /    0 /    0
+   cpu6:  100 /    0 /    0
+   cpu7:  100 /    0 /    0
+== kernel, top symbols (% of all samples)
+    25.0 %  ylock_acquire
+== user buckets (% of all samples)
+== kernel stack words (rough callers, innermost first) for the top leaves
+   ylock_acquire:
+         80  uart_puts < fat16_read_direct_locked < lock_audit_held_pop < spin_release_raw
+         80  find_entry_in_root < uart_puts < vfs_abs_path < vfs_open_routed
+
+## r2-fps-scan3 (no YLOCK row printed; Wine froze 14.35 s after boot, right after explorer.exe /desktop loaded winex11.drv/uxtheme; vCPU 7 at 100 % host CPU for 8 min, the others idle)
+[X]  14.125:00d8:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\winex11.drv" at 00007FFFFF710000: builtin
+[X]  14.352:00d8:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\uxtheme.dll" at 00007FFFFF6D0000: builtin

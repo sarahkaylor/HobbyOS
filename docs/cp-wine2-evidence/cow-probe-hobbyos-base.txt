@@ -1,0 +1,26 @@
+t3_linux_probe: building /home/sarah/cp/lanes/wine2-base/obj/intel/probe_cow.elf
+=== t3_linux_probe: cow (deadline 300s, log /tmp/w2/g2-base/cow.tier) ===
+[LP] PASS C1 memfd 4 pages (0)
+[LP] FAIL C1 mmap memfd MAP_PRIVATE RW (95)
+[LP] PASS C5 memfd with code (0)
+[LP] FAIL C5 mmap PROT_READ|PROT_EXEC MAP_PRIVATE (95)
+[LP] PASS C6 create tmpmap file (0)
+[LP] PASS C6 grow_file(fd, 1) (95)
+[LP] FAIL C6 1-page PROT_READ|PROT_EXEC MAP_PRIVATE of a /tmp file (95)
+[LP] PASS C7 /tmp file 3 pages (0)
+[LP] FAIL C7 private + shared views of the unlinked file (95)
+[LP] FAIL C8 mmap (95)
+[LP] FAIL C9 mmap (95)
+[LP] FAIL C10 mmap (95)
+[LP] PASS C11 F_SEAL_WRITE (95)
+[LP] FAIL C11 sealed MAP_SHARED RW -> EPERM (12)
+[LP] FAIL C11 sealed MAP_PRIVATE RW maps (95)
+[LP] FAIL C12 mmap (95)
+[LP] FAIL C13 256 x 64-page private map/write/unmap (0)
+[LP] PASS C13 object pages intact after the churn (97)
+[LP] FAIL C15 touch past the shrunk end is a fatal signal (1005)
+[LP] FAIL C15 mmap (95)
+[LP] FAIL C16 mmap (95)
+[LP] SKIP C14 ext2: /EXT absent
+[LP] done rc=14
+t3_linux_probe: FAIL — cow never printed '[LP] done rc=0' (tier rc=1)

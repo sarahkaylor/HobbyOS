@@ -1,0 +1,105 @@
+H2-early gate batch, strix, lane tree ~/cp/lanes/early at 4f0da178 (the NFS listing-cache fix + graders + repro loop), script ~/cp/lanes/early-gates.sh (from ~/cp/integ-gates16.sh: ~/cp/integ -> the lane tree, cp-integ-* -> cp-early-* exports; P4/P6/P7/thrstorm/k5probes dropped), Wine stage ~/cp/wine-cp, results ~/cp/lanes/early-gates.txt, logs ~/cp/lanes/early-ev/gates/
+(the first row's 'tree' line is the strix tree's stale .git, see wave8-overrides)
+
+tree 5eea3712 plan v4: wave 4 lanes -- C3-nfs2, C3-pfx, C1-k4, C4-x2, C5-vk2 (§7.2d) start 03:49:37
+build rc=0 03:50:52
+avx rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+console rc=1 [LP] done rc=0lp_check_console: kernel rows intact 23249/23307, user rows intact 10957/10993, interleaved lines 1, torn rows 11, missing 94, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+cow rc=0 [LP] done rc=0
+e2churn rc=0 [LP] done rc=0
+e2fault rc=0 [LP] done rc=0
+e2stress rc=0 [LP] done rc=0
+epserver rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+execthr rc=0 [LP] done rc=0
+exitgroup rc=0 [LP] done rc=0
+ext2w rc=0 [LP] done rc=0
+fatcoh rc=0 [LP] done rc=0
+fatren rc=0 [LP] done rc=0
+fattrunc rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fdrace rc=0 [LP] done rc=0
+fdscale rc=0 [LP] done rc=0
+forkcow rc=0 [LP] done rc=0
+forkva rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+hrtimer rc=0 [LP] done rc=0
+ipclat rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+killgrp rc=0 [LP] done rc=0
+kstack rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+manythr rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+netlink rc=0 [LP] done rc=0
+ntsync rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0
+pfx rc=0 [LP] done rc=0
+pipestorm rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+rusage rc=0 [LP] done rc=0
+shm rc=0 [LP] done rc=0
+sigfd rc=0 [LP] done rc=0
+siginfo rc=0 [LP] done rc=0
+snd rc=0 [LP] done rc=0
+sysc rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tlb rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wfibound rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+probes end 06:05:02
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/early)
+unit rc=0 Tests run:    463 Tests failed: 0   reass=1
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host  kconsole=
+castscan rc=0 castscan: 373 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+panic_sink_allowlist rc=0 panic_sink_allowlist: PASS — every reference is accounted for
+pfx_gate rc=0 pfx_gate: PASS
+ext2w_gate rc=0 ext2w_gate: PASS
+reg_gate rc=0 == removed /srv/nfs/cp-early-reg
+ext2_test_host rc=0 ext2_test: PASS
+exitgroup#1 rc=0 [LP] done rc=0
+exitgroup#2 rc=0 [LP] done rc=0
+exitgroup#3 rc=0 [LP] done rc=0
+infra end 07:18:18
+gate_p2#1 rc=0 G1 wine cmd /c echo hello prints hello : PASS ([P2] end echo|G2 winprobe.exe every marker + exit 0 : PASS ([P2] end winpr|G3 wineserver -k leaves no processes : PASS ([P2] end kill s| 07:20:55
+gate_p5#1 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 335 s; lock released serial=288901 07:27:22
+gate_p5#2 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 273 s; lock released serial=287695 07:32:30
+p8_pfx rc=0 == exports.sh: remove /srv/nfs/cp-early-p8 ok (non-cp lines unchanged) == removed /srv/nfs/cp-early-p8  07:33:08
+gate_p8_lavapipe#1 rc=0    +   250.7 s  07:37:34  main menu OCR at s013-t000207: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   256.2 s  07:37:40  main menu OCR at s014-t000213: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   258.0 s  07:37:42  verdict: main-menu; QEMU stopped, sl 07:37
+gate_p8_lavapipe#2 rc=0    +   230.9 s  07:41:45  main menu OCR at s011-t000191: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   236.5 s  07:41:51  main menu OCR at s012-t000197: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   238.2 s  07:41:53  verdict: main-menu; QEMU stopped, sl 07:41
+gate_p8_venus rc=0    +   131.7 s  07:44:20  main menu OCR at s008-t000099: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   138.5 s  07:44:26  main menu OCR at s009-t000106: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   141.1 s  07:44:29  verdict: main-menu; QEMU stopped, sl 07:44:29
+ALLDONE 07:44:29
+
+host row: the batch's host_tests stopped at t4_compat_selftest, which runs git status on src/host/compat.c (that fails because the strix tree's .git is stale), so no summary line printed. Rerun in ~/cp/lanes/early-b (same source) with GIT_DIR=/nonexistent:
+self-test: OK — counter can fail, stays 0 on clean, and refuses a missing log
+self-test: OK — flipping ho_open FAILs (rc=0 clean pass), restoring passes
+kconsole_test: PASS (0 failures)
+  FAIL  tools/board/sync_gaming_md_test.py  (FileNotFoundError: [Errno 2] No such file or directory: 'gaming.md')
+  FAIL  tools/swarm/resume_guard_test.py  (RESUME_GUARD_TEST: FAIL (2 failure(s)))
+  FAIL  tools/t5/roadmap_doc_test.py  (FileNotFoundError: [Errno 2] No such file or directory: 'gaming.md')
+[host-tests] done: 38/41 passed
+resume_guard_test fails only under GIT_DIR=/nonexistent; run plainly it gives: RESUME_GUARD_TEST: PASS - one startup error for a dead cwd, normal resume succee
+=> 39/41, the two known gaming.md tests (integ16: 39/41).
+
+integ16 (parity reference, ~/cp/integ-gates16.txt) non-zero rows: ext2w_gate rc=1 FAIL (2); gate_p5#1 rc=1 (services.exe memory fault row).  The lane has neither.

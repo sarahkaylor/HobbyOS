@@ -1,0 +1,432 @@
+/dev/dri/renderD128
+/dev/dri/renderD128
+/dev/dri/renderD128
+/dev/dri/renderD128
+/dev/dri/renderD129
+/dev/dri/renderD129
+/dev/dri/renderD129
+/dev/dri/renderD129
+/dev/null
+/dev/null
+/dev/shm/wine-450bc57-fsync
+/dev/udmabuf
+/dev/udmabuf
+/dev/udmabuf
+/dev/urandom
+/dmabuf:
+/dmabuf:
+/dmabuf:
+/dmabuf:
+/dmabuf:
+/dmabuf:
+/dmabuf:
+/home/sarah/cp/p0host/cwd
+/home/sarah/cp/p0host/cwd/Cyberpunk2077.exe-20261114-221550-316-320.txt
+/home/sarah/cp/p0host/pfx-proton/1091500/pfx/drive_c/ProgramData/NVIDIA Corporation/GfnRuntimeSdk/GfnRuntimeSdk.log
+/home/sarah/cp/p0host/runs/cold-720p/plog/steam-1091500.log
+/memfd:allocation fd (deleted)
+/memfd:allocation fd (deleted)
+/memfd:allocation fd (deleted)
+/memfd:lp_dma_buf (deleted)
+/memfd:lp_dma_buf (deleted)
+/memfd:lp_dma_buf (deleted)
+/memfd:pulseaudio (deleted)
+/memfd:wine-mapping (deleted)
+/memfd:wine-mapping (deleted)
+/memfd:wine-mapping (deleted)
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/audio_1_general.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/audio_2_soundbanks.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/basegame_1_engine.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/basegame_2_mainmenu.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/basegame_3_nightcity.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/basegame_3_nightcity_gi.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/basegame_3_nightcity_terrain.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/basegame_4_animation.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/basegame_4_appearance.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/basegame_4_gamedata.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/basegame_5_video.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/lang_ar_text.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/lang_cs_text.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/lang_de_text.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/lang_en_text.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/lang_en_voice.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/lang_es-es_text.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/lang_es-mx_text.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/lang_fr_text.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/lang_hu_text.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/lang_it_text.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/lang_ja_text.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/lang_ko_text.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/lang_pl_text.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/lang_pt_text.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/lang_ru_text.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/lang_th_text.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/lang_tr_text.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/lang_ua_text.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/lang_zh-cn_text.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/lang_zh-tw_text.archive
+/mnt/fast/games/steamapps/common/Cyberpunk 2077/archive/pc/content/memoryresident_1_general.archive
+/mnt/fast/games/steamapps/shadercache/1091500/mesa_shader_cache_sf/9503a19b9f59af70b73ad24fba8d4622/AMD RADV GFX1201/foz_cache.foz
+/mnt/fast/games/steamapps/shadercache/1091500/mesa_shader_cache_sf/9503a19b9f59af70b73ad24fba8d4622/AMD RADV GFX1201/foz_cache.foz
+/mnt/fast/games/steamapps/shadercache/1091500/mesa_shader_cache_sf/9503a19b9f59af70b73ad24fba8d4622/AMD RADV GFX1201/foz_cache.foz
+/mnt/fast/games/steamapps/shadercache/1091500/mesa_shader_cache_sf/9503a19b9f59af70b73ad24fba8d4622/AMD RADV GFX1201/foz_cache_idx.foz
+/mnt/fast/games/steamapps/shadercache/1091500/mesa_shader_cache_sf/9503a19b9f59af70b73ad24fba8d4622/AMD RADV GFX1201/foz_cache_idx.foz
+/mnt/fast/games/steamapps/shadercache/1091500/mesa_shader_cache_sf/9503a19b9f59af70b73ad24fba8d4622/AMD RADV GFX1201/foz_cache_idx.foz
+/mnt/fast/games/steamapps/shadercache/1091500/mesa_shader_cache_sf/9503a19b9f59af70b73ad24fba8d4622/AMD RADV STRIX_HALO/foz_cache.foz
+/mnt/fast/games/steamapps/shadercache/1091500/mesa_shader_cache_sf/9503a19b9f59af70b73ad24fba8d4622/AMD RADV STRIX_HALO/foz_cache.foz
+/mnt/fast/games/steamapps/shadercache/1091500/mesa_shader_cache_sf/9503a19b9f59af70b73ad24fba8d4622/AMD RADV STRIX_HALO/foz_cache.foz
+/mnt/fast/games/steamapps/shadercache/1091500/mesa_shader_cache_sf/9503a19b9f59af70b73ad24fba8d4622/AMD RADV STRIX_HALO/foz_cache_idx.foz
+/mnt/fast/games/steamapps/shadercache/1091500/mesa_shader_cache_sf/9503a19b9f59af70b73ad24fba8d4622/AMD RADV STRIX_HALO/foz_cache_idx.foz
+/mnt/fast/games/steamapps/shadercache/1091500/mesa_shader_cache_sf/9503a19b9f59af70b73ad24fba8d4622/AMD RADV STRIX_HALO/foz_cache_idx.foz
+/proc/58056/pagemap
+/run/user/1000/gamescope-limiter-XXHlLuCV
+anon_inode:[eventfd]
+anon_inode:[eventfd]
+anon_inode:[eventpoll]
+anon_inode:[eventpoll]
+anon_inode:[eventpoll]
+anon_inode:[eventpoll]
+anon_inode:[userfaultfd]
+anon_inode:sync_file
+anon_inode:sync_file
+anon_inode:sync_file
+anon_inode:syncobj_file
+anon_inode:syncobj_file
+anon_inode:syncobj_file
+anon_inode:syncobj_file
+anon_inode:syncobj_file
+anon_inode:syncobj_file
+anon_inode:syncobj_file
+anon_inode:syncobj_file
+pipe:[385950]
+pipe:[397287]
+pipe:[397288]
+pipe:[397288]
+pipe:[402323]
+pipe:[407276]
+pipe:[407277]
+pipe:[407277]
+pipe:[407278]
+pipe:[407279]
+pipe:[407280]
+pipe:[407280]
+pipe:[407284]
+pipe:[407285]
+pipe:[407285]
+pipe:[408347]
+pipe:[408348]
+pipe:[408351]
+pipe:[408356]
+pipe:[408357]
+pipe:[408357]
+pipe:[408508]
+pipe:[408509]
+pipe:[408509]
+pipe:[408512]
+pipe:[408513]
+pipe:[408513]
+pipe:[409299]
+pipe:[409300]
+pipe:[409300]
+pipe:[409311]
+pipe:[409312]
+pipe:[409312]
+pipe:[411225]
+pipe:[411226]
+pipe:[411227]
+pipe:[411228]
+pipe:[411229]
+pipe:[411230]
+pipe:[411247]
+pipe:[411248]
+pipe:[411248]
+pipe:[411253]
+pipe:[411254]
+pipe:[411254]
+pipe:[412391]
+pipe:[412392]
+pipe:[412392]
+pipe:[412393]
+pipe:[412394]
+pipe:[412394]
+pipe:[412395]
+pipe:[412396]
+pipe:[412396]
+pipe:[412402]
+pipe:[412403]
+pipe:[412403]
+pipe:[412406]
+pipe:[412413]
+pipe:[412414]
+pipe:[412414]
+pipe:[412417]
+pipe:[412417]
+pipe:[414393]
+pipe:[414394]
+pipe:[414394]
+pipe:[414410]
+pipe:[415339]
+pipe:[415340]
+pipe:[417581]
+pipe:[417582]
+pipe:[417582]
+pipe:[417590]
+pipe:[417591]
+pipe:[417591]
+pipe:[417594]
+pipe:[417595]
+pipe:[417595]
+pipe:[417596]
+pipe:[417597]
+pipe:[417598]
+pipe:[417598]
+pipe:[418442]
+pipe:[418443]
+pipe:[418443]
+pipe:[418444]
+pipe:[419540]
+pipe:[419541]
+pipe:[419541]
+pipe:[419611]
+pipe:[419612]
+pipe:[419612]
+pipe:[419614]
+pipe:[419615]
+pipe:[419615]
+pipe:[419616]
+pipe:[419617]
+pipe:[419617]
+pipe:[419618]
+pipe:[419619]
+pipe:[420362]
+pipe:[420363]
+pipe:[420363]
+pipe:[420371]
+pipe:[420372]
+pipe:[420373]
+pipe:[420374]
+pipe:[420374]
+pipe:[420377]
+pipe:[421351]
+pipe:[421352]
+pipe:[421352]
+pipe:[421530]
+pipe:[421540]
+pipe:[421541]
+pipe:[422334]
+pipe:[422335]
+pipe:[422336]
+pipe:[422339]
+pipe:[422344]
+pipe:[422345]
+pipe:[422345]
+pipe:[423653]
+pipe:[423654]
+pipe:[423654]
+pipe:[425449]
+pipe:[425450]
+pipe:[425451]
+pipe:[425451]
+pipe:[425455]
+pipe:[425456]
+pipe:[425457]
+pipe:[425457]
+pipe:[425459]
+pipe:[425699]
+pipe:[425700]
+pipe:[425701]
+pipe:[425702]
+pipe:[425703]
+pipe:[425704]
+pipe:[425705]
+pipe:[425706]
+pipe:[426396]
+pipe:[426397]
+pipe:[426397]
+pipe:[426401]
+pipe:[426402]
+pipe:[426402]
+pipe:[427280]
+pipe:[427281]
+pipe:[427281]
+pipe:[427301]
+pipe:[428452]
+pipe:[428455]
+pipe:[428456]
+pipe:[428457]
+pipe:[428458]
+pipe:[428458]
+pipe:[428459]
+pipe:[428460]
+pipe:[428460]
+pipe:[428461]
+pipe:[428462]
+pipe:[428462]
+pipe:[428465]
+pipe:[428466]
+pipe:[428466]
+pipe:[428479]
+pipe:[430773]
+pipe:[430774]
+pipe:[430774]
+pipe:[430779]
+pipe:[430780]
+pipe:[430781]
+pipe:[430782]
+pipe:[430782]
+pipe:[430793]
+pipe:[431683]
+pipe:[431684]
+pipe:[431684]
+pipe:[431685]
+pipe:[431686]
+pipe:[431686]
+pipe:[431687]
+pipe:[431688]
+pipe:[431688]
+pipe:[432538]
+pipe:[432539]
+pipe:[432539]
+pipe:[432545]
+pipe:[432546]
+pipe:[432546]
+pipe:[432552]
+pipe:[432553]
+pipe:[432684]
+pipe:[432685]
+pipe:[432685]
+pipe:[432686]
+pipe:[432687]
+pipe:[432687]
+pipe:[432688]
+pipe:[432689]
+pipe:[432689]
+pipe:[433598]
+pipe:[433598]
+pipe:[433604]
+pipe:[433604]
+pipe:[433615]
+pipe:[433616]
+pipe:[433616]
+pipe:[434434]
+pipe:[434435]
+pipe:[434435]
+pipe:[434438]
+pipe:[434439]
+pipe:[434439]
+pipe:[435562]
+pipe:[435566]
+pipe:[435567]
+pipe:[435567]
+pipe:[435572]
+pipe:[436532]
+pipe:[436533]
+pipe:[436533]
+pipe:[436534]
+pipe:[436535]
+pipe:[436535]
+pipe:[436560]
+pipe:[436561]
+pipe:[436561]
+pipe:[436708]
+pipe:[436709]
+pipe:[436709]
+pipe:[436710]
+pipe:[436711]
+pipe:[436711]
+pipe:[436712]
+pipe:[436713]
+pipe:[436713]
+pipe:[436715]
+pipe:[436716]
+pipe:[436716]
+pipe:[437450]
+pipe:[437451]
+pipe:[437451]
+pipe:[437454]
+pipe:[437455]
+pipe:[437455]
+pipe:[438439]
+pipe:[438440]
+pipe:[438440]
+pipe:[438455]
+pipe:[438456]
+pipe:[438456]
+pipe:[438466]
+pipe:[438467]
+pipe:[438468]
+pipe:[438562]
+pipe:[438563]
+pipe:[438563]
+pipe:[439322]
+pipe:[439453]
+pipe:[439454]
+pipe:[439454]
+pipe:[440569]
+pipe:[440570]
+pipe:[440571]
+pipe:[440572]
+pipe:[440573]
+pipe:[440573]
+pipe:[440574]
+pipe:[440575]
+pipe:[440575]
+pipe:[440576]
+pipe:[440577]
+pipe:[440577]
+pipe:[440578]
+pipe:[440579]
+pipe:[440579]
+pipe:[440582]
+pipe:[440583]
+pipe:[440583]
+pipe:[440584]
+pipe:[440587]
+pipe:[440588]
+pipe:[440589]
+pipe:[440590]
+pipe:[440593]
+pipe:[440594]
+pipe:[440596]
+pipe:[440597]
+pipe:[440598]
+pipe:[440598]
+pipe:[440831]
+pipe:[440832]
+pipe:[440991]
+pipe:[441414]
+pipe:[441415]
+socket:[408538]
+socket:[408539]
+socket:[411351]
+socket:[414399]
+socket:[415204]
+socket:[415205]
+socket:[417601]
+socket:[418314]
+socket:[418315]
+socket:[419530]
+socket:[420378]
+socket:[423655]
+socket:[424902]
+socket:[424903]
+socket:[426528]
+socket:[426529]
+socket:[427304]
+socket:[428486]
+socket:[430795]
+socket:[430797]
+socket:[431691]
+socket:[432558]
+socket:[432563]
+socket:[433605]
+socket:[433608]
+socket:[433609]
+socket:[435683]
+socket:[437436]
+socket:[439340]
+socket:[439452]
+socket:[440558]
+socket:[440841]
+socket:[440842]
+socket:[443393]

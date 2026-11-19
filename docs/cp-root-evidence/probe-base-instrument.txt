@@ -1,0 +1,28 @@
+# linux_probe_rootfree on the instrument-only kernel (d25cd54e = integ25 + the per-CPU record and counters, frames still freed), strix KVM, 5 boots
+# per boot: [FREERACE] rows, the last probe row reached, the last [ROOTFREE] totals
+A.1 freerace=15 last="[LP] R4 two exit_group children at once         " onroot=10 unsafe=10 cons=0 irq=15 sw=0 stale=0 idle=0 thr=0 other=0
+A.2 freerace=13 last="[LP] R4 two exit_group children at once         " onroot=5 unsafe=5 cons=0 irq=13 sw=0 stale=0 idle=0 thr=0 other=0
+A.3 freerace=12 last="[LP] R4 two exit_group children at once         " onroot=4 unsafe=4 cons=0 irq=11 sw=0 stale=0 idle=0 thr=1 other=0
+A.4 freerace=3 last="[LP] R4 two exit_group children at once         " onroot=2 unsafe=2 cons=0 irq=3 sw=0 stale=0 idle=0 thr=0 other=0
+A.5 freerace=0 last="[LP] R3 the parent SIGKILLs the group           " onroot=0 unsafe=0 cons=0 irq=0 sw=0 stale=0 idle=0 thr=0 other=0
+
+# first rows of A.1 (R5: SIGKILL while every thread spins; site = proc_release_mem_locked)
+[FREERACE] freeing root=0x21D72C000 while cpu=2 still translates through it why=irq root=1 cr3=1 tgid=148 site=0x700C4D6E
+[ROOTFREE] race td=751 self=9 onroot=1 unsafe=1 cons=0 irq=1 sw=0 stale=0 idle=0 thr=0 other=0
+[FREERACE] freeing root=0x21D81F000 while cpu=2 still translates through it why=irq root=1 cr3=1 tgid=157 site=0x700C4D6E
+[ROOTFREE] race td=753 self=10 onroot=2 unsafe=2 cons=0 irq=2 sw=0 stale=0 idle=0 thr=0 other=0
+[FREERACE] freeing root=0x21D645000 while cpu=4 still translates through it why=irq root=1 cr3=1 tgid=166 site=0x700C4D6E
+[ROOTFREE] race td=755 self=11 onroot=3 unsafe=3 cons=0 irq=3 sw=0 stale=0 idle=0 thr=0 other=0
+
+# A.1..A.4 die in R5 after these frees, A.5 in R3 (H8-02); -no-reboot ends QEMU at the reset, so the console just stops:
+[ROOTFREE] race td=775 self=21 onroot=10 unsafe=10 cons=0 irq=15 sw=0 stale=0 idle=0 thr=0 other=0
+
+=== T3 guest sample: SKIPPED — no monitor attached (T3_MONITOR not set; run ended without a halt marker) ===
+
+# the first instrument boots (rf-base1, without -no-reboot): the guest reset twice in R3 and re-ran the wave:
+10:BdsDxe: starting Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1
+153:[LCOMPAT] argv argc=1 a0=PROBE.ELF execfn=PROBE.ELF
+2406:BdsDxe: starting Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0
+2548:[LCOMPAT] argv argc=1 a0=PROBE.ELF execfn=PROBE.ELF
+4799:BdsDxe: starting Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0
+4941:[LCOMPAT] argv argc=1 a0=PROBE.ELF execfn=PROBE.ELF

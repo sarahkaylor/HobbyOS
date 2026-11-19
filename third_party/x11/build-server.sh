@@ -103,7 +103,7 @@ _sv_xserver_meson_args() {
     -Dhal=false -Dsystemd_logind=false -Dvgahw=false -Ddpms=true -Dxf86bigfont=false \
     -Dscreensaver=true -Dxres=true -Dxace=true -Dxselinux=false -Dxinerama=true \
     -Dxcsecurity=false -Dxv=false -Dxvmc=false -Ddga=false -Dlinux_apm=false \
-    -Dlinux_acpi=false -Dmitshm=false -Dagp=false -Dsha1=libsha1 \
+    -Dlinux_acpi=false -Dmitshm=true -Dagp=false -Dsha1=libsha1 \
     -Dxf86-input-inputtest=false -Ddri1=false -Ddri2=false -Ddri3=false -Ddrm=false \
     -Dlibunwind=false -Ddocs=false -Ddevel-docs=false -Ddocs-pdf=false -Ddtrace=false
 }

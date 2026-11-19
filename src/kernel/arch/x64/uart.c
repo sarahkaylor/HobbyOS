@@ -1,11 +1,13 @@
 #include "lock.h"
 #include "kline.h"
+#include "console.h"
+#include "process.h"
 #include <stdint.h>
 
-/** The single console lock, shared with the arch-independent print
-    helpers in main.c (they serialize against uart_puts/uart_putc so the
-    whole UART has exactly one lock — previously uart_puts used this lock
-    while print_int used a second one, which let bytes interleave). */
+/** C0-console: no longer taken by anything.  The console's one lock is the
+    private wire word in src/kernel/kconsole.c (a bounded wait, never a
+    spinlock_t, so the lock screams can print through it).  The symbol stays
+    so an out-of-tree caller still links; docs/cp-console.md. */
 spinlock_t uart_lock;
 
 #define COM1_PORT 0x3F8
@@ -38,9 +40,10 @@ void uart_init(void) {
   outb(COM1_PORT + 4, 0x0B);    // IRQs enabled, RTS/DSR set
   com2_init();
 
-  /* Print the lock's address once (raw MMIO — uart_puts itself needs the
-     lock and isn't available this early): [LOCKFOREVER] screams report raw
-     lock addresses, so matching them is trivial when debugging a pileup. */
+  /* Print the lock's address once (raw port I/O, one CPU, before the
+     console layer is set up): [LOCKFOREVER] screams report raw lock
+     addresses.  Since C0-console the console lock is not a spinlock_t at
+     all, so no scream can name it; the row stays for the log's shape. */
   {
     static const char hx[] = "0123456789abcdef";
     static const char pre[] = "[UART] lock @ 0x";
@@ -50,6 +53,7 @@ void uart_init(void) {
     outb(COM1_PORT, '\r');
     outb(COM1_PORT, '\n');
   }
+  cons_init();
 }
 
 /**
@@ -65,38 +69,143 @@ extern uint64_t timer_get_ms(void);
    reads this to detect silent hangs during the test wave. */
 volatile uint64_t uart_last_activity_ms = 0;
 
-/**
- * Lock-free UART write body.  This is the ONLY function that touches the
- * COM1 registers.  It deliberately takes no lock: deadlock diagnostics
- * (spinlock screams, stall watchdog) run while the console lock itself may
- * be wedged and MUST still reach the wire.
- *
- * uart_putc / uart_puts serialize with uart_lock around this body, which
- * gives the whole console ONE lock.  (Previously uart_puts took uart_lock
- * while print_int/uart_print_hex took a separate print_lock, so two cores
- * could interleave bytes inside one logical write — the byte-soup
- * "[CONSOLE] " / "I0nsi0de" interleaves seen under SMP.)
- */
-static void uart_putc_body(char c) {
-  uart_last_activity_ms = timer_get_ms();
-  if (c == '\n') {
-    while (!is_transmit_empty()) {
-      // Spin
-    }
-    outb(COM1_PORT, '\r');
-  }
-  while (!is_transmit_empty()) {
-    // Spin
+/* ---- the wire (C0-console) ----------------------------------------------
+   cons_hw_tx() is the ONLY code that touches the COM1 registers after boot.
+   It takes no lock: src/kernel/kconsole.c calls it with the console's wire
+   lock held (or, past that lock's bound, tagged "[CONS!] ").
+
+   The 16550's transmit FIFO is enabled (FCR 0xC7), and THRE (LSR bit 5) set
+   means the FIFO is EMPTY, so one THRE observation admits 16 bytes.  Polling
+   LSR before every byte cost one extra port exit per byte under KVM. */
+#define COM1_FIFO 16
+static int com1_room;
+
+/* H7-fault round 2 (H7-07/H7-08, docs/cp-fault.md §12): a console write runs
+   with interrupts off, and each byte is a port exit that QEMU serves in user
+   space (10-50 us on a loaded host), so a 2-8 KiB write() keeps this CPU deaf
+   to the 0x82 shootdown IPI for tens to hundreds of milliseconds.  Settle an
+   owed TLB flush every FIFO refill and while waiting for the wire. */
+extern void vm_arch_tlb_poll(void);
+
+static void com1_put(uint8_t c) {
+  if (com1_room <= 0) {
+    vm_arch_tlb_poll();
+    for (uint32_t spin = 0; !is_transmit_empty() && spin < 10000000u; spin++)
+      __asm__ volatile("pause");
+    com1_room = COM1_FIFO;
   }
   outb(COM1_PORT, c);
+  com1_room--;
 }
 
-/* GB-206: lock-free writer for debug instruments that may be called with
-   uart_lock already held (the release path is reached from inside a console
-   print).  It takes no lock and does no panic accounting; a caller that wants
-   a whole record in one piece buffers it first. */
+/* H7-fault round 3 (cp-hunt H6-09): this CPU is inside cons_hw_tx.  A port
+   exit the host does not return from (a host I/O stall: QEMU's serial write
+   blocked; h3-d05 held the wire 2 s) cannot poll, so a shootdown targeting
+   this CPU waited out the stall ([TLBTIMEOUT]).  The shooter now leaves the
+   flush owed to a CPU that is in here (vm_arch_shootdown): nothing in here
+   touches a user mapping, and the flag is dropped BEFORE the last poll, so a
+   CPU seen in here still flushes before it leaves. */
+/* One cache-line record per CPU (C1-k7 invariant: every console write sets
+   and clears its own CPU's mark, so a packed byte array would bounce one
+   line between all CPUs). */
+struct x64_cons_mark x64_in_console[MAX_CPUS];
+#ifdef KERNEL_MODE_TEST
+/* Test kernels: stall <ms> as a port exit the host does not return from --
+   inside the console window, interrupts off, no poll (kconsole.c calls it for
+   a user line "[LPSTALL] <ms>"; src/user/linux_probe_consstall.c). */
+uint64_t cons_hw_irqsave(void);
+void cons_hw_irqrestore(uint64_t f);
+void cons_hw_stall_ms(uint32_t ms) {
+  uint32_t me = get_cpuid();
+  uint64_t f = cons_hw_irqsave();
+  if (me < MAX_CPUS) __atomic_add_fetch(&x64_in_console[me].in, 1, __ATOMIC_SEQ_CST);
+  uint64_t t0 = timer_get_ms();
+  while (timer_get_ms() - t0 < ms) __asm__ volatile("pause");
+  if (me < MAX_CPUS) __atomic_sub_fetch(&x64_in_console[me].in, 1, __ATOMIC_SEQ_CST);
+  vm_arch_tlb_poll();
+  cons_hw_irqrestore(f);
+}
+#endif
+void cons_hw_tx(const char *s, int n) {
+  uint32_t me = get_cpuid();
+  if (me < MAX_CPUS) __atomic_add_fetch(&x64_in_console[me].in, 1, __ATOMIC_SEQ_CST);
+  uart_last_activity_ms = timer_get_ms();
+  for (int i = 0; i < n; i++) {
+    if (s[i] == '\n')
+      com1_put('\r');
+    com1_put((uint8_t)s[i]);
+  }
+  if (me < MAX_CPUS) __atomic_sub_fetch(&x64_in_console[me].in, 1, __ATOMIC_SEQ_CST);
+  vm_arch_tlb_poll(); /* after the flag: a flush owed to us is settled here */
+}
+
+uint64_t cons_hw_irqsave(void) {
+  uint64_t f;
+  __asm__ volatile("pushfq; pop %0; cli" : "=r"(f) : : "memory");
+  return f;
+}
+
+void cons_hw_irqrestore(uint64_t f) {
+  if (f & 0x200)
+    __asm__ volatile("sti" : : : "memory");
+}
+
+int cons_hw_irqs_on(uint64_t f) { return (f & 0x200) != 0; }
+
+const void *cons_hw_ctx(uint32_t cpu) {
+  return cpu < MAX_CPUS ? (const void *)cpu_locals[cpu].current_proc : 0;
+}
+
+void cons_hw_relax(void) {
+  __asm__ volatile("pause");
+  vm_arch_tlb_poll(); /* H7-07: waiting for the wire with interrupts off */
+}
+
+/* fw_cfg (QEMU, legacy port interface): opt/hobbyos/diag, the boot-time
+   diagnostic knob (-fw_cfg name=opt/hobbyos/diag,string=all). */
+static uint16_t fwcfg_be16(const uint8_t *b) { return (uint16_t)((b[0] << 8) | b[1]); }
+static uint32_t fwcfg_be32(const uint8_t *b) {
+  return ((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16) | ((uint32_t)b[2] << 8) | b[3];
+}
+static void fwcfg_sel(uint16_t k) { __asm__ volatile("outw %0, %1" : : "a"(k), "Nd"((uint16_t)0x510)); }
+static uint8_t fwcfg_rd(void) { return inb(0x511); }
+
+int cons_hw_bootarg(char *buf, int cap) {
+  static const char want[] = "opt/hobbyos/diag";
+  uint8_t sig[4];
+  fwcfg_sel(0x0000);
+  for (int i = 0; i < 4; i++) sig[i] = fwcfg_rd();
+  if (sig[0] != 'Q' || sig[1] != 'E' || sig[2] != 'M' || sig[3] != 'U')
+    return 0;
+  fwcfg_sel(0x0019);
+  uint8_t h[4];
+  for (int i = 0; i < 4; i++) h[i] = fwcfg_rd();
+  uint32_t count = fwcfg_be32(h);
+  for (uint32_t f = 0; f < count && f < 256; f++) {
+    uint8_t e[64];
+    for (int i = 0; i < 64; i++) e[i] = fwcfg_rd();
+    int match = 1;
+    for (int i = 0; i < (int)sizeof want; i++)
+      if (e[8 + i] != (uint8_t)want[i]) { match = 0; break; }
+    if (!match)
+      continue;
+    uint32_t size = fwcfg_be32(e);
+    fwcfg_sel(fwcfg_be16(e + 4));
+    int n = 0;
+    for (uint32_t i = 0; i < size; i++) {
+      char c = (char)fwcfg_rd();
+      if (n < cap && c) buf[n++] = c;
+    }
+    return n;
+  }
+  return 0;
+}
+
+/* GB-206: writer for debug instruments that may be called from inside a
+   console print.  Since C0-console it is line-buffered like every other
+   kernel writer (kconsole.c): the bytes reach the wire as whole lines. */
 void uart_putc_dbg(char c) {
-  uart_putc_body(c);
+  cons_kputc(c);
 }
 
 /* ---- GB-097: the raw sink is for NON-RETURNING paths only.
@@ -126,6 +235,8 @@ static volatile int panic_claim_word = 0;
 void panic_puts2(const char *s); /* COM2 sink, defined below */
 void panic_putc2(char c);
 void print_int_raw2(int val);
+
+int cons_hw_in_panic(void) { return panic_depth > 0; }
 
 int panic_claim(void) {
   if (__atomic_exchange_n(&panic_claim_word, 1, __ATOMIC_ACQ_REL) != 0) {
@@ -184,19 +295,14 @@ static void panic_sink_violation(const char *what, const char *s) {
      here (see above).  The old "byte-wise here can itself shred one line,
      accepted" comment is gone: that acceptance was the defect (GB-097-V2). */
   if (__atomic_exchange_n(&panic_sink_summarized, 1, __ATOMIC_ACQ_REL) == 0) {
-    const char *pre = "[PANIC-SINK-VIOLATION] ";
-    for (const char *p = pre; *p; p++) uart_putc_body(*p);
-    for (const char *p = what; *p; p++) uart_putc_body(*p);
-    const char *mid = " from a returning path (suppressed=";
-    for (const char *p = mid; *p; p++) uart_putc_body(*p);
-    char buf[12];
-    int n = 0;
-    int v = d;
-    if (v == 0) buf[n++] = '0';
-    while (v > 0 && n < (int)sizeof(buf)) { buf[n++] = (char)('0' + v % 10); v /= 10; }
-    while (n > 0) uart_putc_body(buf[--n]);
-    uart_putc_body(')');
-    uart_putc_body('\n');
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[PANIC-SINK-VIOLATION] ");
+    kl_s(&kl, what);
+    kl_s(&kl, " from a returning path (suppressed=");
+    kl_i(&kl, d);
+    kl_s(&kl, ")\n");
+    kl_emit(&kl); /* C0-console: one line through the line-atomic console */
   }
   panic_sink_violations++;
   __atomic_store_n(&panic_sink_claim, 0, __ATOMIC_RELEASE);
@@ -205,7 +311,7 @@ static void panic_sink_violation(const char *what, const char *s) {
 /** Raw single character — lock-free, for NON-RETURNING paths only (GB-097). */
 void panic_putc(char c) {
   if (!panic_depth) panic_sink_violation("panic_putc", 0);
-  uart_putc_body(c);
+  cons_kputc(c);
   if (c == '\n') panic_sink_record_open = 0;   /* GB-209: record boundary */
 }
 
@@ -284,34 +390,26 @@ void print_int_raw2(int val) {
 void panic_puts(const char *s) {
   if (!panic_depth) panic_sink_violation("panic_puts", s);
   const char *p = s;
-  while (*p != '\0') {
-    uart_putc_body(*p);
+  while (*p != '\0')
     p++;
-  }
+  cons_kwrite(s, (int)(p - s));
   if (p > s && p[-1] == '\n') panic_sink_record_open = 0;   /* GB-209: record boundary */
 }
 
 /**
- * Outputs a single character to the COM1 serial port, serialized against
- * all other console output.
+ * One character into this CPU's line slot (src/kernel/kconsole.c); it reaches
+ * COM1 with the rest of its line.
  */
 void uart_putc(char c) {
-  uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
-  uart_putc_body(c);
-  spinlock_release_irqrestore(&uart_lock, flags);
+  cons_kputc(c);
 }
 
 /**
- * Outputs a null-terminated string to the serial port.
- * Uses a spinlock to ensure atomic serial printing from multiple cores.
+ * A string into this CPU's line slot: every complete line in it is written
+ * under one console lock hold, a trailing partial waits for its newline.
  */
 void uart_puts(const char *s) {
-  uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
-  while (*s != '\0') {
-    uart_putc_body(*s);
-    s++;
-  }
-  spinlock_release_irqrestore(&uart_lock, flags);
+  cons_kwrite(s, -1);
 }
 
 #ifdef PANIC_IPI_TEST

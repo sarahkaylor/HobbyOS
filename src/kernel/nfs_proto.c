@@ -237,11 +237,11 @@ int nfs_parse_fattr3(struct xdr_r *r, struct nfs_attr *a) {
   (void)xdr_r_u32(r);                 /* rdev.minor */
   (void)xdr_r_u64(r);                 /* fsid */
   (void)xdr_r_u64(r);                 /* fileid */
-  (void)xdr_r_u32(r);                 /* atime.seconds */
+  tmp.atime = xdr_r_u32(r);           /* atime.seconds (cp/nfs2: kept) */
   (void)xdr_r_u32(r);                 /* atime.nseconds */
   tmp.mtime = xdr_r_u32(r);           /* mtime.seconds */
   (void)xdr_r_u32(r);                 /* mtime.nseconds */
-  (void)xdr_r_u32(r);                 /* ctime.seconds */
+  tmp.ctime = xdr_r_u32(r);           /* ctime.seconds (cp/nfs2: kept) */
   (void)xdr_r_u32(r);                 /* ctime.nseconds */
   if (!xdr_r_ok(r)) return -1;
   if (a) *a = tmp;
@@ -356,6 +356,65 @@ int nfs_parse_read_reply(const uint8_t *body, int len, uint8_t *data,
   return 0;
 }
 
+/* cp/exec: canonicalize `base`'s parent joined with the link `target` into
+ * `out` (an absolute mount-relative path, "/..." ).  An absolute target
+ * replaces the whole path (NFS has no chroot here: relative to the mount
+ * root); a relative one resolves against the directory holding `base`.
+ * "." and ".." are folded; a ".." above the root is dropped (stays at root).
+ * Returns 0, or -1 when it does not fit. */
+int nfs_symlink_join(const char *base, const char *target, char *out,
+                            int cap) {
+  char work[NFS_PATH_MAX * 4];
+  int n = 0;
+  if (target[0] == '/') {
+    for (int i = 0; target[i] && n < (int)sizeof work - 1; i++) work[n++] = target[i];
+  } else {
+    /* parent of base */
+    int bl = 0;
+    while (base[bl]) bl++;
+    while (bl > 0 && base[bl - 1] != '/') bl--;
+    if (bl > 1) bl--; /* drop the trailing slash, keep a leading "/" */
+    for (int i = 0; i < bl && n < (int)sizeof work - 1; i++) work[n++] = base[i];
+    if (n == 0 || work[n - 1] != '/') { if (n < (int)sizeof work - 1) work[n++] = '/'; }
+    for (int i = 0; target[i] && n < (int)sizeof work - 1; i++) work[n++] = target[i];
+  }
+  work[n] = '\0';
+  /* canonicalize into out */
+  int o = 0;
+  if (cap < 2) return -1;
+  out[o++] = '/';
+  int i = 0;
+  while (work[i]) {
+    while (work[i] == '/') i++;
+    int s = i;
+    while (work[i] && work[i] != '/') i++;
+    int len = i - s;
+    if (len == 0) break;
+    if (len == 1 && work[s] == '.') continue;
+    if (len == 2 && work[s] == '.' && work[s + 1] == '.') {
+      while (o > 1 && out[o - 1] != '/') o--; /* drop the last component */
+      if (o > 1) o--;                          /* and its separating slash */
+      continue;
+    }
+    if (o > 1) { if (o >= cap - 1) return -1; out[o++] = '/'; }
+    for (int k = 0; k < len; k++) { if (o >= cap - 1) return -1; out[o++] = work[s + k]; }
+  }
+  out[o] = '\0';
+  return 0;
+}
+
+int nfs_parse_readlink_reply(const uint8_t *body, int len, char *out, int cap) {
+  struct xdr_r r;
+  xdr_r_init(&r, body, len);
+  uint32_t status;
+  if (parse_status(&r, &status) != 0) return -1;
+  if (status != 0) return -2;
+  if (nfs_parse_post_op_attr(&r, 0, 0) != 0) return -1; /* symlink_attributes */
+  int n = xdr_r_string(&r, out, cap);                   /* nfspath3 (data) */
+  if (n < 0 || !xdr_r_ok(&r)) return -1;
+  return n;
+}
+
 int nfs_parse_fsstat_reply(const uint8_t *body, int len, uint64_t *total,
                            uint64_t *avail) {
   struct xdr_r r;
@@ -375,6 +434,38 @@ int nfs_parse_fsstat_reply(const uint8_t *body, int len, uint64_t *total,
   if (total) *total = t;
   if (avail) *avail = f ? f : a;      /* prefer free, fall back to available */
   return 0;
+}
+
+int nfs_parse_fsinfo_reply(const uint8_t *body, int len, uint32_t *rtmax,
+                           uint32_t *rtpref) {
+  struct xdr_r r;
+  xdr_r_init(&r, body, len);
+  uint32_t status;
+  if (parse_status(&r, &status) != 0) return -1;
+  if (status != 0) return -2;
+  if (nfs_parse_post_op_attr(&r, 0, 0) != 0) return -1; /* obj_attributes */
+  uint32_t mx = xdr_r_u32(&r);                            /* rtmax */
+  uint32_t pf = xdr_r_u32(&r);                            /* rtpref */
+  (void)xdr_r_u32(&r);                                    /* rtmult */
+  (void)xdr_r_u32(&r); (void)xdr_r_u32(&r); (void)xdr_r_u32(&r); /* wt* */
+  (void)xdr_r_u32(&r);                                    /* dtpref */
+  (void)xdr_r_u64(&r);                                    /* maxfilesize */
+  (void)xdr_r_u32(&r); (void)xdr_r_u32(&r);               /* time_delta */
+  (void)xdr_r_u32(&r);                                    /* properties */
+  if (!xdr_r_ok(&r)) return -1;
+  if (rtmax) *rtmax = mx;
+  if (rtpref) *rtpref = pf;
+  return 0;
+}
+
+uint32_t nfs_pick_rsize(uint32_t rtmax, uint32_t rtpref) {
+  if (rtmax == 0) return NFS_READ_RSIZE;
+  uint32_t v = rtpref ? rtpref : rtmax;
+  if (v > rtmax) v = rtmax;
+  if (v > NFS_READ_RSIZE_MAX) v = NFS_READ_RSIZE_MAX;
+  v &= ~(uint32_t)4095;
+  if (v < NFS_READ_RSIZE) v = NFS_READ_RSIZE;
+  return v;
 }
 
 int nfs_parse_mount_reply(const uint8_t *body, int len, struct nfs_fh *fh,

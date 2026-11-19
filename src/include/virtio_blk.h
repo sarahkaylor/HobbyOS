@@ -65,6 +65,12 @@ int virtio_blk_write_sector(uint64_t sector, const void* buf, uint32_t count);
  * initialised.
  */
 void virtio_blk_diag_row(void);
+/* cp-fat (P9-8): one [BLKTOK] row naming the single-in-flight device token's
+ * holder (pid, CPU, held_ms, state, whether it is on a CPU).  Printed by a
+ * token waiter past 2 s and by the ylock wedge report. */
+void blk_token_diag_row(const char *why);
+/* cp-fat: [BLKTOKW] token wait-time distribution (printed when it changed). */
+void blk_token_wait_row(void);
 
 /**
  * L75: log every observable controller state change.
@@ -129,6 +135,24 @@ extern volatile uint64_t blk_dev_epoch;
 
 /* Number of transfers discarded because they overlapped a device event. */
 extern volatile uint32_t blk_untrusted;
+
+/**
+ * cp/ext2 (docs/cp-ext2.md): the optional writable DATA disk.  On x86_64 it is
+ * NVMe namespace 2 of the boot controller (QEMU: `-device nvme-ns,nsid=2`,
+ * attached by the Makefile's CPDATA hook); ARM has none.  512-byte sectors,
+ * never routed through the block cache.  Read/write return 0 or -1.
+ */
+int blk_data_present(void);
+uint64_t blk_data_sectors(void);
+int blk_data_read(uint64_t sector, void *buf, uint32_t count);
+int blk_data_write(uint64_t sector, const void *buf, uint32_t count);
+/* cp/ext2w: `nbuf` buffers of `nsec_each` sectors each, to/from consecutive
+ * sectors from `sector`, in multi-block NVMe commands (PRP lists, up to the
+ * controller's MDTS).  0 or -1. */
+int blk_data_rw_vec(uint64_t sector, void *const *bufs, uint32_t nbuf,
+                    uint32_t nsec_each, int wr);
+/* cp/ext2w diagnostics: namespace-2 commands issued and sectors moved. */
+void blk_data_stats(uint64_t *cmds, uint64_t *sectors, uint32_t *max_sectors);
 
 #ifdef KERNEL_MODE_UNIT_TEST
 /**

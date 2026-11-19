@@ -1,0 +1,56 @@
+ext2_test: tools /usr/sbin/mke2fs /usr/sbin/e2fsck /usr/sbin/debugfs, scratch /tmp/cp-ext2-host-bk6GRd
+scenario read bs=1024 
+  mounted: bs=1024 blocks=98304 free=87073 inodes=24576 ifree=24254 groups=12 isz=256 ro filetype dir_index(linearised-on-write) large_file
+scenario read bs=2048 
+  mounted: bs=2048 blocks=49152 free=44066 inodes=24576 ifree=24254 groups=3 isz=256 ro filetype dir_index(linearised-on-write) large_file
+scenario read bs=4096 -O ^dir_index
+  mounted: bs=4096 blocks=24576 free=21923 inodes=24576 ifree=24254 groups=1 isz=256 ro filetype large_file
+scenario write bs=1024  cache=64
+  free blocks 121283 -> 119995, dev reads 9778 writes 125105
+  e2fsck -fn after writes: rc=0  /tmp/cp-ext2-host-bk6GRd/w1024.img: 234/32768 files (0.4% non-contiguous), 11077/131072 blocks
+  e2fsck -fn after cleanup: rc=0  /tmp/cp-ext2-host-bk6GRd/w1024.img: 31/32768 files (0.0% non-contiguous), 9811/131072 blocks
+scenario write bs=2048 -O ^dir_index cache=16
+  free blocks 61225 -> 59960, dev reads 26211 writes 73570
+  e2fsck -fn after writes: rc=0  /tmp/cp-ext2-host-bk6GRd/w2048.img: 234/32768 files (0.4% non-contiguous), 5576/65536 blocks
+  e2fsck -fn after cleanup: rc=0  /tmp/cp-ext2-host-bk6GRd/w2048.img: 31/32768 files (0.0% non-contiguous), 4329/65536 blocks
+scenario write bs=4096 -O ^dir_index cache=512
+  free blocks 30701 -> 29960, dev reads 118 writes 30934
+  e2fsck -fn after writes: rc=0  /tmp/cp-ext2-host-bk6GRd/w4096.img: 234/32768 files (1.3% non-contiguous), 2808/32768 blocks
+  e2fsck -fn after cleanup: rc=0  /tmp/cp-ext2-host-bk6GRd/w4096.img: 31/32768 files (3.2% non-contiguous), 2083/32768 blocks
+scenario write bs=4096  cache=8
+  free blocks 30701 -> 29960, dev reads 61293 writes 61616
+  e2fsck -fn after writes: rc=0  /tmp/cp-ext2-host-bk6GRd/w4096.img: 234/32768 files (1.3% non-contiguous), 2808/32768 blocks
+  e2fsck -fn after cleanup: rc=0  /tmp/cp-ext2-host-bk6GRd/w4096.img: 31/32768 files (3.2% non-contiguous), 2083/32768 blocks
+scenario htree: /hdir flags=0x1000 (INDEX_FL=0x1000)
+  e2fsck -fn htree modified: rc=0  /tmp/cp-ext2-host-bk6GRd/h.img: 413/16384 files (0.2% non-contiguous), 5847/65536 blocks
+scenario setattr bs=1024 inode=128
+  e2fsck -fn setattr: rc=0  /tmp/cp-ext2-host-bk6GRd/sa1024.img: 15/8192 files (0.0% non-contiguous), 1437/32768 blocks
+  debugfs /sa/f: Mode 0751 User 70000 Group 1001 atime 0x3b9aca00 mtime 0x499602d2
+  debugfs /sa/d: Mode 03775 mtime 0xfffeae80
+scenario setattr bs=4096 inode=256
+  e2fsck -fn setattr: rc=0  /tmp/cp-ext2-host-bk6GRd/sa4096.img: 15/8192 files (0.0% non-contiguous), 526/8192 blocks
+  debugfs /sa/f: Mode 0751 User 70000 Group 1001 atime 0x3b9aca00 mtime 0x499602d2
+  debugfs /sa/d: Mode 03775 mtime 0xfffeae80
+scenario longpath (EXT2_PATH_MAX=1024)
+  long path length 637
+  e2fsck -fn longpath: rc=0  /tmp/cp-ext2-host-bk6GRd/lp.img: 24/4096 files (0.0% non-contiguous), 279/4096 blocks
+scenario large-file bs=1024 (large_file initially off)
+  e2fsck -fn 1k large: rc=0  /tmp/cp-ext2-host-bk6GRd/l1k.img: 12/12288 files (0.0% non-contiguous), 3900/49152 blocks
+  debugfs bmap /huge 9437184 -> 748 match
+  debugfs bmap /huge 9437185 -> 749 match
+  debugfs bmap /huge 9437186 -> 750 match
+scenario corrupt
+scenario crash bs=1024 ORDERED commit, 6 batches, cache 512
+  e2fsck -fn after crash batches: rc=0  /tmp/cp-ext2-host-bk6GRd/crash1024.img: 33/6144 files (12.1% non-contiguous), 1795/24576 blocks
+  crash prefixes checked=234 clean=106 leak-only=128 DANGER=0 midop=0 evictwb=0
+scenario crash bs=4096 ORDERED commit, 12 batches, cache 512
+  e2fsck -fn after crash batches: rc=0  /tmp/cp-ext2-host-bk6GRd/crash4096.img: 33/6144 files (9.1% non-contiguous), 420/6144 blocks
+  crash prefixes checked=345 clean=144 leak-only=201 DANGER=0 midop=0 evictwb=0
+scenario crash bs=4096 ORDERED commit, 6 batches, cache 12
+  e2fsck -fn after crash batches: rc=0  /tmp/cp-ext2-host-bk6GRd/crash4096.img: 21/6144 files (0.0% non-contiguous), 405/6144 blocks
+  crash prefixes checked=173 clean=101 leak-only=72 DANGER=0 midop=0 evictwb=11
+scenario crash bs=4096 plain-order (pre-ext2w) commit, 8 batches, cache 512
+  e2fsck -fn after crash batches: rc=0  /tmp/cp-ext2-host-bk6GRd/crash4096.img: 23/6144 files (8.7% non-contiguous), 409/6144 blocks
+  crash prefixes checked=156 clean=28 leak-only=84 DANGER=44 midop=0 evictwb=0  first: batch 1 write 3/27: Directory inode 16, block #0, offset 0: directory corrupted
+ext2_test: 1712 checks, 0 failures
+ext2_test: PASS

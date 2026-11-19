@@ -1,0 +1,19 @@
+# strix, 2026-11-15, cp-ext2b tree
+$ MAKEFLAGS=-j16 make ARCH=arm TOOLS_SKIP=1 hobbyos.elf     -> arm=0
+FP/SIMD-operand instructions (llvm-objdump, obj/arm/*.o):
+ext2=0 ext2_vfs=0 ext2_obj=0 ext2_compat=0 vfs=0 vfs_lock=0 vfs_compat=0 fs=0 vm=0 elf_loader=0
+control_libc_math=1269   (userland object built with FP: the scan does find SIMD)
+
+# glibc static-pie control (open item, docs/cp-ext2b.md section 5)
+# With R_X86_64_IRELATIVE accepted by elf_apply_relocations (an experiment, reverted),
+# the same hs from the FAT16 root (one-member wave HS.ELF):
+[WAVE-TRY] HS.ELF
+[LCOMPAT] argv argc=2 a0=HS.ELF a1=static execfn=HS.ELF
+[ARRIVED] HS.ELF rc>0
+[KERNEL] pid=2 (HS.ELF) memory fault VA=0x0000000000000000 PC=0x0000000000000000 rw=rx in=HOLE region=NONE rsp=0x00000017FFFFFCC8 ... sys=12 ... rdi=0x0000001040000820 rsi=0x00000010000C7DA0 -> killed
+# from /EXT/lpx/bin/hs in the same experiment: identical fault (rsp=...FCB8, sys=12, rdi/rsi identical).
+# The call at hs+0x32e6b (__libc_setup_tls) goes through .iplt -> *0xce278, a still-zero IFUNC slot.
+# On Linux (gdb, same binary) the slot is written inside _dl_relocate_static_pie:
+#   Old value = 0 / New value = 140737353956864 / 0x00007ffff7ff3ab9 in _dl_relocate_static_pie ()
+# With the tree as committed (IRELATIVE refused), boot 3 shows:
+#   v2 loader: ELF load refused rc=-8 size=914592 file=/EXT/lpx/bin/hs

@@ -1,0 +1,75 @@
+# reg_gate loops at cp-ext2w3 edb0f175 (kernel with the flusher stack watch); strix trees ~/cp/lanes/ext2w3 (loop c) and ~/cp/lanes/ext2w3b (loop d)
+# c run 1 booted a STALE kernel (ext2_vfs.o older than its rsynced source mtime; gft_static at the old address, so lockname shows field+1212 = old pos_lock): not counted
+# c run 2: fat_wr_lock wedge in boot 2, serial silent 11 min, QEMU killed by me (by PID); e2fsck clean
+c run 1 rc=0 == removed /srv/nfs/cp-ext2w3-c | [HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x704E3ECC gft_static+0x106ec = global file slot 51 field+1212;0x704E43DC gft_static+0x10bfc = global file slot 52 field+1212;| 13:49
+c run 2 rc=1 == removed /srv/nfs/cp-ext2w3-c | [HOST] FAIL boot 2: the value is not there|[HOST] FAIL reg query exit status|[HOST] FAIL boot 2: the HKLM value is not there|[HOST] FAIL boot 2: race rounds finished: 0 of 4|[HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x7028EB24 fat_wr_lock+0x0;|[HOST] FAIL serial-b2: [YLOCK-WEDGE]: [YLOCK-WEDGE] site=fat_wr_lock lock=fat_wr_lock addr=0x7028EB24 pc=0x1 extra=0x1 cpu=0 [YLOCK-OWNER] fat_wr_lock pid=68 cpu=1 pcb_live=1 ost=3 osys=257 | 14:02
+c run 3 rc=0 == removed /srv/nfs/cp-ext2w3-c | [HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x704E48FC gft_static+0x1111c = global file slot 53 pos_lock;0x704E5D3C gft_static+0x1255c = global file slot 57 pos_lock;| 14:07
+c run 4 rc=0 == removed /srv/nfs/cp-ext2w3-c | [HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x704E7B9C gft_static+0x143bc = global file slot 63 pos_lock;| 14:10
+c run 5 rc=0 == removed /srv/nfs/cp-ext2w3-c | [HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x704D6F4C gft_static+0x376c = global file slot 10 pos_lock;0x704E43EC gft_static+0x10c0c = global file slot 52 pos_lock;0x704E5D3C gft_static+0x1255c = global file slot 57 pos_lock;| 14:13
+ALLDONE
+d run 1 rc=0 == removed /srv/nfs/cp-ext2w3-d | [HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x704E43EC gft_static+0x10c0c = global file slot 52 pos_lock;0x70548DCC gft_static+0x755ec = global file slot 370 pos_lock;| 13:59
+d run 2 rc=0 == removed /srv/nfs/cp-ext2w3-d | [HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x704E768C gft_static+0x13eac = global file slot 62 pos_lock;| 14:03
+d run 3 rc=0 == removed /srv/nfs/cp-ext2w3-d | [HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x704E3EDC gft_static+0x106fc = global file slot 51 pos_lock;0x704E43EC gft_static+0x10c0c = global file slot 52 pos_lock;0x704E768C gft_static+0x13eac = global file slot 62 pos_lock;0x704E7B9C gft_static+0x143bc = global file slot 63 pos_lock;| 14:05
+d run 4 rc=0 == removed /srv/nfs/cp-ext2w3-d | [HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x704DA6FC gft_static+0x6f1c = global file slot 21 pos_lock;| 14:09
+d run 5 rc=0 == removed /srv/nfs/cp-ext2w3-d | [HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x7055074C gft_static+0x7cf6c = global file slot 394 pos_lock;| 14:12
+d run 6 rc=0 == removed /srv/nfs/cp-ext2w3-d | [HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x704E5D3C gft_static+0x1255c = global file slot 57 pos_lock;| 14:15
+ALLDONE
+--- c run 2 serial-b2 tail
+/tmp/.local/SHARE/ICONS/HICOLOR/48X48/APPS/application-x-wine-extension-chm.png
+/tmp/.local/SHARE/ICONS/HICOLOR/16X16/APPS/application-x-wine-extension-chm.png
+[KERNEL] Process 67: start.exe exited unexpectedly or gracefully.
+[EXEC] load pid=68 /CP/WINE/lib/wine/x86_64-unix/wine-preloader 7 14
+[EXITPC] pid=67 last_user_pc=0x1080143146 code=0x0
+[EXEC] enter pid=68 /CP/WINE/lib/wine/x86_64-unix/wine-preloader 0 4096
+/lib64/ld-linux-x86-64.so.2
+/tmp/.local/SHARE/MIME/PACKAGES/x-wine-extension-chm.xml
+/LIB64/libdl.so.2
+[YLOCK-STALL] site=fat_wr_lock lock=fat_wr_lock addr=0x7028EB24 pc=0x1 extra=0x100000 cpu=0
+[YLOCK-WEDGE] site=fat_wr_lock lock=fat_wr_lock addr=0x7028EB24 pc=0x1 extra=0x1 cpu=0
+[YLOCK-OWNER] fat_wr_lock pid=68 cpu=1 pcb_live=1 ost=3 osys=257
+--- c run 2 grader
+[HOST] ok   reg add exit 0
+[HOST] ok   wineserver -k exit 0 in 69 ms (Wine SIGKILLs the server at 10.5 s)
+[HOST] ok   boot 1 halted
+[HOST] ok   e2fsck -fn after b1 rc=0 (cpdata: 1023/524288 files (0.2% non-contiguous), 91198/2097152 blocks)
+[HOST] ok   pfx/user.reg on the disk holds [Software\\CpTest] "X"="Y" (23191 bytes)
+[HOST] ok   pfx/system.reg on the disk holds the HKLM key (1811981 bytes)
+[HOST] ok   HKLM reg add exit 0
+[HOST] ok   no reg*.tmp left in pfx/
+[HOST] FAIL boot 2: the value is not there
+[HOST] FAIL reg query exit status
+[HOST] FAIL boot 2: the HKLM value is not there
+[HOST] FAIL boot 2: race rounds finished: 0 of 4
+[HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x7028EB24 fat_wr_lock+0x0;
+[HOST] FAIL serial-b2: [YLOCK-WEDGE]: [YLOCK-WEDGE] site=fat_wr_lock lock=fat_wr_lock addr=0x7028EB24 pc=0x1 extra=0x1 cpu=0 [YLOCK-OWNER] fat_wr_lock pid=68 cpu=1 pcb_live=1 ost=3 osys=257 
+[HOST] ok   e2fsck -fn after b2 rc=0 (cpdata: 1023/524288 files (0.2% non-contiguous), 91198/2097152 blocks)
+reg_gate: FAIL (5)
+--- round-3 earlier loops at 256188da (loop a in ext2w3, loop b in ext2w3b)
+a run 1 rc=0 == removed /srv/nfs/cp-ext2w3-a | [HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x704E4DFC gft_static+0x1162c = global file slot 54 pos_lock;0x704E5D2C gft_static+0x1255c = global file slot 57 pos_lock;0x704E623C gft_static+0x12a6c = global file slot 58 pos_lock;| 13:08
+a run 2 rc=0 == removed /srv/nfs/cp-ext2w3-a | [HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x704D744C gft_static+0x3c7c = global file slot 11 pos_lock;0x704E3ECC gft_static+0x106fc = global file slot 51 pos_lock;0x704E8FCC gft_static+0x157fc = global file slot 67 pos_lock;0x705539DC gft_static+0x8020c = global file slot 404 pos_lock;| 13:09
+a run 3 rc=0 == removed /srv/nfs/cp-ext2w3-a | [HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x704E3ECC gft_static+0x106fc = global file slot 51 pos_lock;| 13:11
+a run 4 rc=0 == removed /srv/nfs/cp-ext2w3-a | [HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x704D8D9C gft_static+0x55cc = global file slot 16 pos_lock;0x704E43DC gft_static+0x10c0c = global file slot 52 pos_lock;0x704E623C gft_static+0x12a6c = global file slot 58 pos_lock;| 13:13
+a run 5 rc=0 == removed /srv/nfs/cp-ext2w3-a |  13:19
+ALLDONE
+b run 1 rc=2 reg_gate: /srv/nfs/cp-ext2w3-b already exists: not this run's to reuse or delete |  13:19
+b run 2 rc=2 reg_gate: /srv/nfs/cp-ext2w3-b already exists: not this run's to reuse or delete |  13:19
+# note: loop b's file was overwritten by a duplicate loop instance (export already exists, rc=2); the real b run 1 is the stack-smash wedge in r3-wedge-b1-boot2-serial-excerpt-strix.txt
+--- loop e (ext2w3b, c4d06c59: + wedge dump) and loop f (ext2w3b, c4d06c59)
+e run 1 rc=0 == removed /srv/nfs/cp-ext2w3-e | [HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x704E43EC gft_static+0x10c0c = global file slot 52 pos_lock;0x704E5D3C gft_static+0x1255c = global file slot 57 pos_lock;| 14:22
+e run 2 rc=0 == removed /srv/nfs/cp-ext2w3-e |  14:32
+e run 3 rc=0 == removed /srv/nfs/cp-ext2w3-e | [HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x704E3EDC gft_static+0x106fc = global file slot 51 pos_lock;0x704E531C gft_static+0x11b3c = global file slot 55 pos_lock;| 14:34
+e run 4 rc=0 == removed /srv/nfs/cp-ext2w3-e |  14:40
+e run 5 rc=0 == removed /srv/nfs/cp-ext2w3-e |  14:47
+e run 6 rc=0 == removed /srv/nfs/cp-ext2w3-e | [HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x704E5D3C gft_static+0x1255c = global file slot 57 pos_lock;0x704E768C gft_static+0x13eac = global file slot 62 pos_lock;0x704E8FDC gft_static+0x157fc = global file slot 67 pos_lock;| 14:51
+ALLDONE
+f run 1 rc=0 == removed /srv/nfs/cp-ext2w3-f | [HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x704E3EDC gft_static+0x106fc = global file slot 51 pos_lock;0x704E5D3C gft_static+0x1255c = global file slot 57 pos_lock;| 14:58
+f run 2 rc=0 == removed /srv/nfs/cp-ext2w3-f | [HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x704E4E0C gft_static+0x1162c = global file slot 54 pos_lock;0x704E531C gft_static+0x11b3c = global file slot 55 pos_lock;0x704E5D3C gft_static+0x1255c = global file slot 57 pos_lock;0x704E6C6C gft_static+0x1348c = global file slot 60 pos_lock;0x704E7B9C gft_static+0x143bc = global file slot 63 pos_lock;0x704E9F0C gft_static+0x1672c = global file slot 70 pos_lock;| 15:01
+f run 3 rc=0 == removed /srv/nfs/cp-ext2w3-f | [HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x704D8DAC gft_static+0x55cc = global file slot 16 pos_lock;0x704E5D3C gft_static+0x1255c = global file slot 57 pos_lock;| 15:04
+f run 4 rc=0 == removed /srv/nfs/cp-ext2w3-f | [HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x704E43EC gft_static+0x10c0c = global file slot 52 pos_lock;0x704E768C gft_static+0x13eac = global file slot 62 pos_lock;| 15:06
+f run 5 rc=1 == removed /srv/nfs/cp-ext2w3-f | [HOST] FAIL boot 2: race rounds finished: 0 of 4|[HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x7028E9EC g_lock+0x0;|[HOST] FAIL serial-b2: [YLOCK-WEDGE]: [YLOCK-WEDGE] site=ext2_lock lock=ext2_lock addr=0x7028E9EC pc=0x3 extra=0x6 cpu=6 [YLOCK-OWNER] ext2_lock pid=7 cpu=3 pcb_live=1 ost=3 osys=257 |[HOST] FAIL serial-b2: [E2W] ext2_lock wait 2000 ms: holder pid=7 site=0x7001479A held_ms=2003 waiter site=0x70014B17|[HOST] FAIL wedge-regs-serial-b2: serial silent 300 s, vCPU registers dumped|[HOST] info wedge-regs-serial-b2: CPU#0 rip=0x000000007007c23b ylock_tryacquire|[HOST] info  15:15
+f run 6 rc=0 == removed /srv/nfs/cp-ext2w3-f | [HOST] info serial-b1: [YLOCK-STALL] contention rows on: 0x704F31DC gft_static+0x1f9fc = global file slot 99 pos_lock;0x704F36EC gft_static+0x1ff0c = global file slot 100 pos_lock;|[HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x704E3EDC gft_static+0x106fc = global file slot 51 pos_lock;0x704E5D3C gft_static+0x1255c = global file slot 57 pos_lock;0x704E768C gft_static+0x13eac = global file slot 62 pos_lock;| 15:17
+f run 7 rc=0 == removed /srv/nfs/cp-ext2w3-f | [HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x704E114C gft_static+0xd96c = global file slot 42 pos_lock;0x704E207C gft_static+0xe89c = global file slot 45 pos_lock;0x704E5D3C gft_static+0x1255c = global file slot 57 pos_lock;0x704E768C gft_static+0x13eac = global file slot 62 pos_lock;| 15:20
+f run 8 rc=0 == removed /srv/nfs/cp-ext2w3-f | [HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x704E4E0C gft_static+0x1162c = global file slot 54 pos_lock;0x704E531C gft_static+0x11b3c = global file slot 55 pos_lock;0x704E5D3C gft_static+0x1255c = global file slot 57 pos_lock;0x704E80AC gft_static+0x148cc = global file slot 64 pos_lock;| 15:23
+ALLDONE
+--- the batch's own reg_gate (ext2w3, c4d06c59): rc=0
+# tally on the edb0f175 kernel: c2-c5 3/4, d 6/6, e 6/6, f 7/8, batch 1/1 = 23/25; failures: c2 fat_wr_lock wedge, f5 ext2_lock wedge (holder wineserver pid 7 lost; r3-wedge-f5-ext2lock-strix.txt)

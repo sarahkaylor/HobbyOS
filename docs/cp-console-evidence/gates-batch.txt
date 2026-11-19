@@ -1,0 +1,179 @@
+# C0-console gate batch on strix (Zen 5, KVM): tree afe7cb38 (kernel identical to the branch head; later commits touch graders/Makefile/t3_tier only).
+# script: console-gates.sh (below), a copy of strix:~/cp/integ-gates10.sh + integ10-rerun.sh for strix:~/cp/lanes/console, own exports /srv/nfs/cp-console-*.
+# parity reference: strix:~/cp/integ-gates10.txt + integ10-rerun.txt (integ7, cyberpunk 8c1007cb).
+
+tree afe7cb38 cp-console: the tick never pushes out the row of the thread it interrupted start 10:35:53
+build rc=0 10:35:54
+avx rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+console rc=1 [LP] done rc=0lp_check_console: kernel rows intact 24864/24864, user rows intact 12278/12279, interleaved lines 0, torn rows 1, missing 1, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+cow rc=0 [LP] done rc=0
+e2churn rc=0 [LP] done rc=0
+e2fault rc=0 [LP] done rc=0
+e2stress rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+execthr rc=0 [LP] done rc=0
+exitgroup rc=0 [LP] done rc=0
+ext2w rc=0 [LP] done rc=0
+fatcoh rc=0 [LP] done rc=0
+fattrunc rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fdscale rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+manythr rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+netlink rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0
+pfx rc=0 [LP] done rc=0
+pipestorm rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+shm rc=0 [LP] done rc=0
+siginfo rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tlb rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+probes end 10:55:17
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/console)
+unit rc=1 Tests failed! Tests run:    461 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 38/40 passed kconsole=
+castscan rc=0 castscan: 364 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+panic_sink_allowlist rc=0 panic_sink_allowlist: PASS — every reference is accounted for
+pfx_gate rc=0 pfx_gate: PASS
+ext2w_gate rc=0 ext2w_gate: PASS
+reg_gate rc=1 == removed /srv/nfs/cp-console-reg
+ext2_test_host rc=0 ext2_test: PASS
+exitgroup#1 rc=0 [LP] done rc=0
+exitgroup#2 rc=0 [LP] done rc=0
+exitgroup#3 rc=0 [LP] done rc=0
+infra end 11:56:30
+gate_p2#1 rc=0 G1 wine cmd /c echo hello prints hello : PASS ([P2] end echo|G2 winprobe.exe every marker + exit 0 : PASS ([P2] end winpr|G3 wineserver -k leaves no processes : PASS ([P2] end kill s| 11:57:14
+gate_p2#2 rc=0 G1 wine cmd /c echo hello prints hello : PASS ([P2] end echo|G2 winprobe.exe every marker + exit 0 : PASS ([P2] end winpr|G3 wineserver -k leaves no processes : PASS ([P2] end kill s| 11:57:59
+gate_p4#1 rc=0 [P4G] qemu pid 2637277 [P4G] clip row: [RI] phase clip total n=70 rel=70 abs=0 dx=850 dy=25 lastabs=0,0 cursor=835,428 inside=1 [P4G] modes: fullscreen (magenta) window bbox on the glass (0, 0, 127
+gate_p4#2 rc=0 [P4G] qemu pid 2661474 [P4G] clip row: [RI] phase clip total n=70 rel=70 abs=0 dx=850 dy=25 lastabs=0,0 cursor=835,428 inside=1 [P4G] modes: fullscreen (magenta) window bbox on the glass (0, 0, 127
+gate_p5#1 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12, fullscr each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 326 s; lock released serial=290344 12:10:52
+gate_p5#2 rc=1  [P5W] boot finished after 174 s; lock released serial=244031 12:13:57
+gate_p6_venus#1 rc=1 [P5W] vkcube vkcube-t20s.ppm: clear=243664 saturated=64084 bbox=(44, 70, 682, 548) hash=6b08e861296b9685 [P5W] vkcube vkcube-t50s.ppm: clear=248820 saturated=58928 bbox=(44, 70, 682, 548) hash=922c67b3b8e5e1a9 [P5W] vkcube: PASS [P5W] d3d11 d3d11-t50s.ppm: clear=237260 saturated=48260 bbox=(724, 70, 1362, 548) hash=490510e576bb8a40 [P5W] d3d11: FAIL [P5W] d3d12 d3d12-t20s.ppm: clear=237308 saturat [P5W] boot finished after 270 s; lock released serial=263880 12:21:29
+gate_p6_venus#2 rc=0 [P5W] vkcube vkcube-t20s.ppm: clear=247116 saturated=60620 bbox=(44, 70, 682, 548) hash=ecc67c9e20831854 [P5W] vkcube vkcube-t50s.ppm: clear=243764 saturated=64016 bbox=(44, 70, 682, 548) hash=a407e2d7350515f0 [P5W] vkcube: PASS [P5W] d3d11 d3d11-t20s.ppm: clear=237268 saturated=48216 bbox=(724, 70, 1362, 548) hash=e5e3f39919287ab3 [P5W] d3d11 d3d11-t50s.ppm: clear=237252 saturated=48280 bbox=(724 [P5W] boot finished after 274 s; lock released serial=278190 12:28:41
+thrstorm rc=0 [TS] PASS T1 create (threads=256 why=0) [TS] PASS T1 start (started=256 toolhelp=257) [TS] PASS T2 storm (rounds=320 ms=60253) [TS] PASS T3 stop (bad=0 first=0)  12:37:09
+k5probes rc=0 [P8ENV] E1 execve env: 40/40 entries intact -> PASS [P8ENV] E2 malformed entries: 0 -> PASS [P8ENV] E3 spawn_ex env: 40/40 entries intact -> PASS [P8ENV] E4 malformed entries: 0 -> PASS [K5P] E5 spawn_ex env > HO_ENV_LEN: rc=-1 errno=7 -> PASS [P8SCM] S1 recvmsg ret=4 errno=0 -> PASS [P8SCM] S2 MSG_CTRUNC=1 fd_delivered=-1 -> PASS [P8SCM] S3 second recvmsg ret=-1 errno=11 -> PASS PASS  E5 spawn_ex env > HO_ENV_LEN 
+p8_pfx rc=0 == exports.sh: remove /srv/nfs/cp-console-p8 ok (non-cp lines unchanged) == removed /srv/nfs/cp-console-p8  12:38:35
+gate_p8_lavapipe#1 rc=0 == verdict: launcher-done    +    48.1 s  12:40:45  game process ended: [P8] end game status=0 ms=23606    +    86.2 s  12:41:23  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 2  12:41:24
+gate_p8_lavapipe#2 rc=0    +   283.4 s  12:46:24  main menu OCR at s014-t000256: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   289.0 s  12:46:30  main menu OCR at s015-t000262: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   291.3 s  12:46:32  verdict: main-menu; QEMU stopped, sl 12:46:32
+ALLDONE 12:46:32
+
+# reruns (console-rerun.sh, strix:~/cp/lanes/console-b = the same kernel, graders at the branch head, incl. the P5 screendump-trigger fix):
+build rc=0
+console#1 rc=0 lp_check_console: kernel rows intact 24714/24714, user rows intact 12163/12163, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+console#2 rc=0 lp_check_console: kernel rows intact 25404/25404, user rows intact 12404/12404, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+gate_p5#3 rc=1 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] FAIL: 1 fault line(s): [KERNEL] pid=166 (explorer.exe) memory fault VA=0x0000001080057804 PC=0x0000001080329A93 rw=r  in=V1 region=0x0000001080054000+0x0000000000006000 prot=1 kind=7   [P5W] boot finished after 304 s; lock released serial=287093 12:43:40
+gate_p5#4 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12, fullscr each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 310 s; lock released serial=285962 12:49:22
+gate_p6_venus#3 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 269 s; lock released serial=267942 12:53:56
+DONE
+
+# reg_gate A/B after the batch's reg_gate FAIL (console-regab.sh; lane = console-b, base = 058fd3d5 + the probe commit):
+lane1 rc=0 == removed /srv/nfs/cp-console-regab  pf=obj/reg-lane1/serial-b1.txt:0 obj/reg-lane1/serial-b2.txt:0  12:01
+lane2 rc=1 == removed /srv/nfs/cp-console-regab [HOST] FAIL boot 2: ylock stall/wedge rows: [YLOCK-STALL] site=? lock=? addr=0x704E8FCC pc=0x2 extra=0x100000 cpu=3 [YLOCK-STALL] site=? lock=? addr=0x704E5D2C pc=0x5 extra=0x100000 cpu=1 |reg_gate: FAIL (1)| pf=obj/reg-lane2/serial-b1.txt:0 obj/reg-lane2/serial-b2.txt:0  12:03
+lanediag rc=1 == removed /srv/nfs/cp-console-regab [HOST] FAIL boot 2: ylock stall/wedge rows: [YLOCK-STALL] site=? lock=? addr=0x704E1B5C pc=0x1 extra=0x100000 cpu=4 |reg_gate: FAIL (1)| pf=obj/reg-lanediag/serial-b1.txt:0 obj/reg-lanediag/serial-b2.txt:0  12:05
+base1 rc=1 == removed /srv/nfs/cp-console-regab [HOST] FAIL boot 2: ylock stall/wedge rows: [YLOCK-STALL] site=? lock=? addr=0x704E8FCC pc=0x1 extra=0x100000 cpu=5 |reg_gate: FAIL (1)| pf=obj/reg-base1/serial-b1.txt:0 obj/reg-base1/serial-b2.txt:0  12:10
+DONE
+
+# integ7 reference rows for the same gates:
+/home/sarah/cp/integ-gates10.txt:clock rc=0 [LP] done rc=0
+/home/sarah/cp/integ-gates10.txt:unit rc=1 Tests failed! Tests run:    461 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+/home/sarah/cp/integ-gates10.txt:host [host-tests] done: 38/40 passed
+/home/sarah/cp/integ-gates10.txt:ext2w_gate rc=1 ext2w_gate: FAIL (1)
+/home/sarah/cp/integ-gates10.txt:reg_gate rc=0 == removed /srv/nfs/cp-ext2w-reg
+/home/sarah/cp/integ-gates10.txt:gate_p2 rc=0 G3 wineserver -k leaves no processes   : PASS   ([P2] end kill status=0 ms=412; [P2] ps-extra count=0)
+/home/sarah/cp/integ-gates10.txt:gate_p4 rc=0 
+/home/sarah/cp/integ-gates10.txt:gate_p5 rc=1 [P5W] waiting for a QEMU slot (tools/cp/qemu-slot.sh semantics) [P5W] slot 1 acquired 06:00:02; boot: -smp 8 -m 12288M -cpu host (KVM) [P5W] qemu pid 1212289 [P5W] +0 s: (no [P5] row yet) [P5W] screendump d3d11-t20s.ppm at +161 s; QEMU guests on the host
+/home/sarah/cp/integ-gates10.txt:thrstorm rc=0 [TS] PASS T1 create (threads=256 why=0) [TS] PASS T1 start (started=256 toolhelp=257) [TS] PASS T2 storm (rounds=261 ms=60130) [TS] PASS T3 stop (bad=0 first=0) 
+/home/sarah/cp/integ-gates10.txt:k5probes rc=0 [P8ENV] E1 execve env: 40/40 entries intact -> PASS [P8ENV] E2 malformed entries: 0 -> PASS [P8ENV] E3 spawn_ex env: 40/40 entries intact -> PASS [P8ENV] E4 malformed entries: 0 -> PASS [K5P] E5 spawn_ex env > HO_ENV_LEN: rc=-1 errno=7 -> PASS [P8SCM] S
+/home/sarah/cp/integ-gates10.txt:gate_p6_venus rc=0 [P5W] vkcube vkcube-t20s.ppm: clear=239472 saturated=68260 bbox=(44, 70, 682, 548) hash=ff992d564f3e459b [P5W] vkcube vkcube-t50s.ppm: clear=245808 saturated=61908 bbox=(44, 70, 682, 548) hash=781f0582c4678bd2 [P5W] vkcube: PASS [P5W] d3d11 d3d11-t
+/home/sarah/cp/integ-gates10.txt:p8_pfx rc=0 == exports.sh: remove /srv/nfs/cp-game-p8 ok (non-cp lines unchanged) == removed /srv/nfs/cp-game-p8 
+/home/sarah/cp/integ-gates10.txt:gate_p8_lavapipe rc=0    +   312.2 s  06:19:57  main menu OCR at s014-t000284: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   317.9 s  06:20:02  main menu OCR at s015-t000290: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   
+/home/sarah/cp/integ-gates10.txt:gate_p8_venus rc=0 [P8W] +    82.6 s  06:21:35  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 0    +    46.8 s  06:20:59  game process ended: [P8] end game status=0 ms=20049    +    82.6 s  06:21:35  verdict: launcher-done; QEMU stopped
+/home/sarah/cp/integ10-rerun.txt:gate_p5#2 rc=1 [P5W] vkcube: PASS [P5W] d3d11: FAIL [P5W] d3d12: FAIL [P5W] fullscr: FAIL [P5W] FAIL: d3d11: no RESULT row [P5W] FAIL: d3d11: no '[D3D11] done rc=0' [P5W] FAIL: d3d11: launcher end row (none) [P5W] FAIL: d3d11: no module row for d3d11.dll [P5W] FAIL: 
+/home/sarah/cp/integ10-rerun.txt:gate_p8_venus#2 rc=0    +   205.0 s  08:03:23  main menu OCR at s011-t000177: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   241.4 s  08:04:00  main menu OCR at s012-t000214: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   2
+/home/sarah/cp/integ10-rerun.txt:gate_p8_venus#3 rc=0    +   189.3 s  08:07:15  main menu OCR at s009-t000161: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   225.8 s  08:07:51  main menu OCR at s010-t000198: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   2
+
+# ---- console-gates.sh ----
+#!/usr/bin/env bash
+# C0-console gate batch: strix:~/cp/integ-gates10.sh + integ10-rerun.sh for the lane tree,
+# own export names, P2/P4/P5(fullscr)/P6-venus/P8-lavapipe twice each.
+export TOOLS_SKIP=1 MAKEFLAGS=-j16 LO_ON_DISK= PATH=$HOME/.local/bin:$PATH
+cd ~/cp/lanes/console; rm -f hobbyos.elf; O=~/cp/lanes/console-gates.txt; : > $O; E=~/cp/lanes/console-logs; mkdir -p $E
+ts() { date +%H:%M:%S; }
+echo "tree $(cat ~/cp/lanes/console-rev.txt 2>/dev/null) start $(ts)" >> $O
+make ARCH=intel MODE=test hobbyos.elf disk.img > $E/build.log 2>&1; echo "build rc=$? $(ts)" >> $O
+for f in src/user/linux_probe_*.c; do p=$(basename $f .c); p=${p#linux_probe_}
+  case $p in x11|ext2|ext2b) continue;; esac
+  x=""; [ $p = fpu_sig ] && x="PROBE.ELF nest"
+  LP_TIMEOUT=300 LP_WAVE_EXTRA="$x" bash tools/cp/qemu-slot.sh bash tools/gate/t3_linux_probe.sh $p > $E/$p.gate 2>&1
+  echo "$p rc=$? $(grep -a "\[LP\] done" $E/$p.gate | tail -1)$( [ $p = console ] && grep -a "lp_check_console: kernel" $E/$p.gate | cut -c1-200)" >> $O
+done
+echo "probes end $(ts)" >> $O
+GLIBC_SYSROOT=$HOME/cp/sysroot-glibc231 LP_TIMEOUT=600 GATE_DIR=$PWD/obj/ext2-gate bash tools/cp/ext2_gate.sh > $E/ext2gate.log 2>&1; echo "ext2_gate rc=$? $(tail -1 $E/ext2gate.log)" >> $O
+LP_TIMEOUT=420 bash tools/cp/exec/exec_gate.sh > $E/exec_gate.log 2>&1; echo "exec_gate rc=$? $(tail -1 $E/exec_gate.log)" >> $O
+bash tools/cp/nfs/rsize_guard.sh > $E/rsize_guard.log 2>&1; echo "rsize_guard rc=$? $(tail -1 $E/rsize_guard.log)" >> $O
+rm -f hobbyos.elf
+bash tools/cp/qemu-slot.sh env UNIT_TESTS_TIMEOUT=900 bash ./run_unit_tests_intel.sh > $E/unit.log 2>&1; echo "unit rc=$? $(grep -aE "Tests (run|failed)" $E/unit.log | tr "\n" " ") $(grep -a "EXPECT.*FAILED" $E/unit.log | sed "s/.*at //" | tr "\n" " ") reass=$(grep -ac "test_net_ipv4_reassembly" $E/unit.log)" >> $O
+make nfs_proto_test_host > $E/nfsproto.log 2>&1 && ./nfs_proto_test_host >> $E/nfsproto.log 2>&1; echo "nfs_proto_test rc=$? $(tail -1 $E/nfsproto.log)" >> $O
+make -k host_tests > $E/host.log 2>&1; echo "host $(grep -a "host-tests\] done" $E/host.log) kconsole=$(grep -a "kconsole_test:" $E/host.log)" >> $O
+SCAN_JOBS=8 bash tools/cp/mmu/castscan_check.sh > $E/castscan.log 2>&1; echo "castscan rc=$? $(tail -1 $E/castscan.log)" >> $O
+make ARCH=arm TOOLS_SKIP=1 hobbyos.elf > $E/arm.log 2>&1; echo "arm rc=$?" >> $O
+rm -f hobbyos.elf
+make -s nfs_rsize_scan > $E/rsize_scan.log 2>&1; echo "rsize_scan rc=$? $(tail -1 $E/rsize_scan.log)" >> $O
+python3 tools/gate/panic_sink_allowlist_test.py > $E/panic_allow.log 2>&1; echo "panic_sink_allowlist rc=$? $(tail -1 $E/panic_allow.log)" >> $O
+bash tools/cp/pfx/pfx_gate.sh > $E/pfx_gate.log 2>&1; echo "pfx_gate rc=$? $(tail -1 $E/pfx_gate.log)" >> $O
+LP_TIMEOUT=900 bash tools/cp/ext2w/ext2w_gate.sh bench crash > $E/ext2w_gate.log 2>&1; echo "ext2w_gate rc=$? $(tail -1 $E/ext2w_gate.log)" >> $O
+REG_EXPORT=/srv/nfs/cp-console-reg bash tools/cp/ext2w/reg_gate.sh > $E/reg_gate.log 2>&1; echo "reg_gate rc=$? $(tail -1 $E/reg_gate.log)" >> $O
+make ext2_test_host > $E/ext2host.log 2>&1 && ./ext2_test_host >> $E/ext2host.log 2>&1; echo "ext2_test_host rc=$? $(tail -1 $E/ext2host.log)" >> $O
+for i in 1 2 3; do LP_TIMEOUT=300 bash tools/cp/qemu-slot.sh bash tools/gate/t3_linux_probe.sh exitgroup > $E/exitgroup.$i.gate 2>&1; echo "exitgroup#$i rc=$? $(grep -a "\[LP\] done" $E/exitgroup.$i.gate | tail -1)" >> $O; done
+echo "infra end $(ts)" >> $O
+for i in 1 2; do
+  WINE_EXPORT=/srv/nfs/cp-console-p2 bash tools/cp/run-wine-p2.sh > $E/p2.$i.log 2>&1; echo "gate_p2#$i rc=$? $(grep -aE "^G[123] " $E/p2.$i.log | sed 's/  */ /g' | cut -c1-60 | tr "\n" "|") $(ts)" >> $O
+  cp obj/wine-p2/serial.log $E/p2.$i.serial 2>/dev/null
+done
+rm -f hobbyos.elf
+for i in 1 2; do
+  CP_WINE_STAGE=$HOME/cp/wine-build-x/stage/CP/WINE CP_X11_STAGE=$HOME/cp/x11-build-x2/stage/CP/X11 WINE_EXPORT=/srv/nfs/cp-console-p4 P4_WINEDEBUG="err+all,fixme-all,+loaddll" P4_OUT=$HOME/cp/lanes/console/obj/p4/console$i bash tools/cp/p4/run-p4.sh > $E/p4.$i.log 2>&1; echo "gate_p4#$i rc=$? $(grep -a "\[P4G\]" $E/p4.$i.log | tr "\n" " ") $(ts)" >> $O
+  cp obj/p4/console$i/serial.log $E/p4.$i.serial 2>/dev/null
+done
+for i in 1 2; do
+  CP_WINE_STAGE=$HOME/cp/wine-build-x/stage/CP/WINE WINE_BUILD=$HOME/cp/wine-build-x CP_VK_WORK=$HOME/cp/vk2-build CP_X11_WORK=$HOME/cp/x11-build-x2 CP_P5_PE=$HOME/cp/vk2-pe P5_EXPORT=/srv/nfs/cp-console-p5 P5_PROBES="vkcube d3d11 d3d12 fullscr" P5_XSESSION_ENV="HB_SECOND_SCREEN=0" bash tools/cp/p5/run-wine-p5.sh > $E/p5.$i.log 2>&1; echo "gate_p5#$i rc=$? $(grep -aE "\[P5W\] (vkcube|d3d11|d3d12|fullscr): |\[P5W\] (PASS|FAIL)" $E/p5.$i.log | tr "\n" " " | cut -c1-300) $(grep -a "boot finished" $E/p5.$i.log) serial=$(stat -c %s obj/cp-p5/wine/serial.log) $(ts)" >> $O
+  cp obj/cp-p5/wine/serial.log $E/p5.$i.serial 2>/dev/null; mkdir -p $E/p5shots.$i; cp obj/cp-p5/wine/*.png $E/p5shots.$i/ 2>/dev/null
+done
+for i in 1 2; do
+  CP_WINE_STAGE=$HOME/cp/wine-build-x/stage/CP/WINE WINE_BUILD=$HOME/cp/wine-build-x CP_VK_WORK=$HOME/cp/vk2-build CP_X11_WORK=$HOME/cp/x11-build-x2 CP_P5_PE=$HOME/cp/vk2-pe P5_EXPORT=/srv/nfs/cp-console-p6 P5_XSESSION_ENV="HB_SECOND_SCREEN=0" P5_PROBES="vkcube d3d11 d3d12" bash tools/cp/venus/run-wine-venus.sh > $E/p6venus.$i.log 2>&1; echo "gate_p6_venus#$i rc=$? $(grep -aE "\[P5W\] (vkcube|d3d11|d3d12|PASS|FAIL)" $E/p6venus.$i.log | tr "\n" " " | cut -c1-400) $(grep -a "boot finished" $E/p6venus.$i.log) serial=$(stat -c %s obj/cp-p5/venus/serial.log) $(ts)" >> $O
+  cp obj/cp-p5/venus/serial.log $E/p6venus.$i.serial 2>/dev/null
+done
+K5_EXPORT=/srv/nfs/cp-console-ts K5_OUT=$HOME/cp/lanes/console/obj/cp-k5/console-ts TIMEOUT_S=2400 bash tools/cp/k5/run-thrstorm.sh > $E/thrstorm.log 2>&1; echo "thrstorm rc=$? $(grep -aE "\[TS\] (PASS|FAIL)" $E/thrstorm.log | tr "\n" " ") $(ts)" >> $O
+K5_OUT=$HOME/cp/lanes/console/obj/cp-k5/console-probes bash tools/cp/k5/run-k5probes.sh > $E/k5probes.log 2>&1; echo "k5probes rc=$? $(grep -aE "(PASS|FAIL)" $E/k5probes.log | grep -aE "P8SCM|P8ENV|E5" | tr "\n" " " | cut -c1-600)" >> $O
+P8_EXPORT=/srv/nfs/cp-console-p8 P8_PHASE=pfx TIMEOUT_S=2400 bash tools/cp/p8/run-p8.sh > $E/p8-pfx.log 2>&1; echo "p8_pfx rc=$? $(tail -2 $E/p8-pfx.log | tr "\n" " " | cut -c1-200) $(ts)" >> $O
+for i in 1 2; do
+  P8_EXPORT=/srv/nfs/cp-console-p8 P8_RUN=console-lvp$i TIMEOUT_S=5400 P8_STALL_S=600 P8_GAME_S=5000 bash tools/cp/p8/run-p8.sh > $E/p8-lvp.$i.log 2>&1; echo "gate_p8_lavapipe#$i rc=$? $(grep -aiE "main menu OCR|end game|verdict" $E/p8-lvp.$i.log | tail -3 | tr "\n" " " | cut -c1-300) $(ts)" >> $O
+  cp obj/cp-p8/console-lvp$i/serial.log $E/p8-lvp.$i.serial 2>/dev/null
+done
+echo "ALLDONE $(ts)" >> $O

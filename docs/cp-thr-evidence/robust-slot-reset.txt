@@ -1,0 +1,26 @@
+# R3 robust-pid-reuse, cp-thr2 (base cyberpunk 9ee3e0ff), strix QEMU/KVM -cpu host
+
+## reference kernel (strix Linux 7.0, same ELF), 3 runs
+[LP] R3 robust-pid-reuse killed=1593369,1593370 status=0x9 threads=8 reused_dead_pid=0 stale_heads=0 ok
+[LP] R3 robust-pid-reuse killed=1593418,1593419 status=0x9 threads=8 reused_dead_pid=0 stale_heads=0 ok
+[LP] R3 robust-pid-reuse killed=1593536,1593537 status=0x9 threads=8 reused_dead_pid=0 stale_heads=0 ok
+
+## BEFORE the fix (9ee3e0ff kernel + the new row): both dead pids reused, both carry the killed process's robust head
+[LP] R3 robust-pid-reuse killed=1,3 status=0x9 threads=8 reused_dead_pid=2 stale_heads=2 FAIL
+[LP] done rc=1
+
+## R3 alone x25 (src/user/linux_probe_r3loop.c, not committed), BEFORE the park guard (97d35757): 17/25 ok, 8 FAIL
+## waitpid=0 errno=0: the SIGKILLed child never became reapable; ALIVE-SET shows it parked again (st=8 FUTEX, parent=2)
+[LP] R3 robust-pid-reuse killed=3,1 status=0xffffffff waitpid=0 errno=0 threads=8 reused_dead_pid=1 stale_heads=0 FAIL
+[LP] R3 robust-pid-reuse killed=1,4 status=0xffffffff waitpid=0 errno=0 threads=8 reused_dead_pid=1 stale_heads=0 FAIL
+[LP] R3 robust-pid-reuse killed=4,5 status=0xffffffff waitpid=0 errno=0 threads=8 reused_dead_pid=1 stale_heads=0 FAIL
+[LP] R3 robust-pid-reuse killed=5,6 status=0xffffffff waitpid=0 errno=0 threads=8 reused_dead_pid=1 stale_heads=0 FAIL
+[LP] done rc=8
+     12   [ALIVE-SET] slot=1 pid=1 st=8 parent=2 claimed_by=-1 pc=0x1000001a0e mod=0x1000000000+0x1a0e PROBE.ELF
+     14   [ALIVE-SET] slot=3 pid=3 st=8 parent=2 claimed_by=-1 pc=0x1000001a0e mod=0x1000000000+0x1a0e PROBE.ELF
+     11   [ALIVE-SET] slot=4 pid=4 st=8 parent=2 claimed_by=-1 pc=0x1000001a0e mod=0x1000000000+0x1a0e PROBE.ELF
+
+## AFTER the park guard: R3 alone x25
+r3loop rc=0 R3ok=25/25 [LP] done rc=0
+r3loop rc=0 R3ok=25/25 [LP] done rc=0
+thr rc=0  [LP] done rc=0

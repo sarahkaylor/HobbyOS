@@ -1,0 +1,125 @@
+# H7-fault gate batch: ~/cp/lanes/fault-gates/gates.sh (= ~/cp/integ-gates21.sh pointed at ~/cp/lanes/fault-dev: 1164f98f + f258ad62, with 1dc4aa02/df28d9ca staged during the probe phase; P8 Venus built the tip), strix 2026-11-18
+tree fault-dev start 15:58:09
+build rc=0 15:58:17
+unit rc=0 Tests run:    464 Tests failed: 0   reass=1
+rebuild rc=0 15:58:42
+avx rc=0 [LP] done rc=0
+away rc=0 [LP] done rc=0
+badelr rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+console rc=0 [LP] done rc=0lp_check_console: kernel rows intact 23886/23886, user rows intact 11228/11228, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+cow rc=0 [LP] done rc=0
+e2churn rc=0 [LP] done rc=0
+e2fault rc=0 [LP] done rc=0
+e2stress rc=0 [LP] done rc=0
+epserver rc=0 [LP] done rc=0
+errnomap rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+execthr rc=0 [LP] done rc=0
+exitgroup rc=0 [LP] done rc=0
+exitrace rc=0 [LP] done rc=0
+ext2w rc=0 [LP] done rc=0
+fatcoh rc=0 [LP] done rc=0
+fatren rc=0 [LP] done rc=0
+fattrunc rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fdrace rc=0 [LP] done rc=0
+fdscale rc=0 [LP] done rc=0
+forkcow rc=0 [LP] done rc=0
+forkva rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+hrtimer rc=0 [LP] done rc=0
+ipclat rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+killgrp rc=0 [LP] done rc=0
+kstack rc=0 [LP] done rc=0
+loaccept rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+manythr rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+netlink rc=0 [LP] done rc=0
+ntsync rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0
+pfpar rc=0 [LP] done rc=0
+pfstat rc=0 [LP] done rc=0
+pfx rc=0 [LP] done rc=0
+pipestorm rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+rusage rc=0 [LP] done rc=0
+shm rc=0 [LP] done rc=0
+sigfd rc=0 [LP] done rc=0
+siginfo rc=0 [LP] done rc=0
+sigint rc=0 [LP] done rc=0
+sigmask rc=0 [LP] done rc=0
+sigret rc=0 [LP] done rc=0
+snd rc=0 [LP] done rc=0
+sysc rc=0 [LP] done rc=0
+tcpconn rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tlb rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wfibound rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+probes end 16:21:37
+sigmask_gate rc=0 sigmask-gate: PASS (8/8)
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/fault-dev)
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 40/42 passed kconsole=kconsole_test: PASS (0 failures)
+castscan rc=0 castscan: 373 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+panic_sink_allowlist rc=0 panic_sink_allowlist: PASS — every reference is accounted for
+pfx_gate rc=0 pfx_gate: PASS
+ext2w_gate rc=0 ext2w_gate: PASS
+infra end 16:30:23
+gate_p2#1 rc=0 G1 wine cmd /c echo hello prints hello : PASS ([P2] end echo|G2 winprobe.exe every marker + exit 0 : PASS ([P2] end winpr|G3 wineserver -k leaves no processes : PASS ([P2] end kill s| 16:30:55
+gate_p2#2 rc=0 G1 wine cmd /c echo hello prints hello : PASS ([P2] end echo|G2 winprobe.exe every marker + exit 0 : PASS ([P2] end winpr|G3 wineserver -k leaves no processes : PASS ([P2] end kill s| 16:31:28
+gate_p5#1 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 275 s; lock released serial=322547 16:36:31
+waiting for the A/B chain before P8 Venus 16:36:31
+P8 held by HOLD-P8 17:34:02
+gate_p8_venus rc=0    +   140.0 s  17:37:06  main menu OCR at s009-t000114: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   175.9 s  17:37:42  main menu OCR at s010-t000150: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   177.9 s  17:37:44  verdict: main-menu; QEMU stopped, sl 17:37:44
+ALLDONE 17:37:44
+
+# tip rerun: ~/cp/lanes/fault-gates/tip-rerun.sh in ~/cp/lanes/fault-chk (df28d9ca + docs)
+tree fault-chk start 16:36:49
+build rc=0 16:36:56
+unit rc=0 Tests run:    464 Tests failed: 0  
+rebuild rc=0 16:37:23
+pfstat rc=0 [LP] done rc=0lp_check_pfstat: PASS -- anon >= 4160:ok, cow >= 256:ok, file >= 8:ok, zeroed >= 4096:ok, vml > 0:ok, #PF traps >= 4096:ok, rows consistent:ok
+pfpar rc=0 [LP] done rc=0lp_check_pfpar: PASS -- 38 long fault row(s), 0 with lw >= 1000 us (max lw 3 us)
+console rc=0 [LP] done rc=0lp_check_console: PASS -- clean
+exitgroup rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+netlink rc=0 [LP] done rc=0
+loaccept rc=0 [LP] done rc=0
+tcpconn rc=0 [LP] done rc=0
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/fault-chk)
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 40/42 passed
+castscan rc=0 castscan: 373 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+panic_sink_allowlist rc=0 panic_sink_allowlist: PASS — every reference is accounted for
+TIPDONE 16:41:16
+
+# P8 Venus: the menu rows
+[P8W] +   134.3 s  17:37:01  main menu OCR at s008-t000109: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   140.0 s  17:37:06  main menu OCR at s009-t000114: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   175.9 s  17:37:42  main menu OCR at s010-t000150: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   177.9 s  17:37:44  verdict: main-menu; QEMU stopped, slot released; guests on the host now: 1

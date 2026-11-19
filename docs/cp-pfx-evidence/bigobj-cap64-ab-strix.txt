@@ -1,0 +1,18 @@
+## A/B: base with VM_OBJ_MAX_BYTES set back to 64 MiB (the pre-cp/sys value; temporary edit, reverted)
+[LP] bigobj probe (C3-pfx): 200 MiB objects, root=/EXT
+[LP] FAIL B5 memfd 64 MiB + 1 page (22)
+[LP] PASS B1 memfd_create (0)
+[LP] FAIL B1 ftruncate 200 MiB (22)
+[LP] FAIL B2 mmap 200 MiB MAP_SHARED|MAP_ANONYMOUS (12)
+[LP] PASS B3 ext2 file 200 MiB written (0)
+[LP] FAIL B3 ext2 mmap 200 MiB MAP_SHARED RO (12)
+[LP] FAIL B3 ext2 mmap 200 MiB MAP_PRIVATE RW (12)
+[LP] FAIL B3 ext2 mmap 200 MiB MAP_SHARED RW (12)
+[LP] PASS B4 ext2 file of Cyberpunk2077.exe's size (66,704,848 B) (0)
+[LP] PASS B4 PROT_NONE reservation (0)
+[LP] PASS B4 MAP_PRIVATE|MAP_FIXED RW view at 0x397a000 + 3,166,208 (0)
+[LP] PASS B4 every page of the view = the file at its offset (0)
+[LP] PASS B4 relocation-style writes stay private (773)
+[LP] done rc=6
+pfx_gate: bigobj probe rc=1 PASS rows=7 skips=0; e2fsck -fn rc=0 (cpdata: 11/131072 files (0.0% non-contiguous), 9004/524288 blocks)
+pfx_gate: FAIL (1)

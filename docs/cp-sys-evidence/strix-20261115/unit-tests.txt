@@ -1,0 +1,12 @@
+=== /home/sarah/cp/lanes/sys/obj/unit_intel.log
+Tests failed!
+EXPECT_EQ FAILED: gpu_abi_pages_for(64ull * 1024 * 1024 + 1) == 0 at src/kernel/virtio_gpu_test.c:213
+EXPECT_EQ FAILED: gpu_abi_res_ok(&r) == 0 at src/kernel/virtio_gpu_test.c:243
+Tests run:    448
+Tests failed: 2
+=== /home/sarah/cp/base/obj/unit_intel_sys.log
+Tests failed!
+EXPECT_EQ FAILED: gpu_abi_pages_for(64ull * 1024 * 1024 + 1) == 0 at src/kernel/virtio_gpu_test.c:213
+EXPECT_EQ FAILED: gpu_abi_res_ok(&r) == 0 at src/kernel/virtio_gpu_test.c:243
+Tests run:    448
+Tests failed: 2

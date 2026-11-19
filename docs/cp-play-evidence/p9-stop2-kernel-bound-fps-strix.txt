@@ -1,0 +1,208 @@
+# Stop P9-2: in-world frame rate is bounded by the guest kernel (proc_lock) -- strix, gateA4 (Gate P9 boot A)
+# guest PC sampler: boot_p9.py prof (QMP info registers -a, 10 Hz x 8 vCPUs, 20 s), symbolized with nm hobbyos.elf
+# (tools/cp/p9/prof.py).  The sampler pauses vCPUs briefly; those 20 s are phase prof-* and excluded from fps.
+
+== obj/cp-p9/gateA4/prof-world-start.txt: 1544 vCPU samples
+   kernel         1000   64.8 %
+   idle (HLT)      417   27.0 %
+   user            127    8.2 %
+== per vCPU (idle / kernel / user %)
+   cpu0:   73 /   27 /    0
+   cpu1:    6 /   87 /    7
+   cpu2:   12 /   75 /   12
+   cpu3:   11 /   74 /   15
+   cpu4:   19 /   70 /   10
+   cpu5:   28 /   65 /    7
+   cpu6:   33 /   60 /    7
+   cpu7:   34 /   59 /    7
+== kernel, top symbols (% of all samples)
+    31.5 %  spin_acquire_raw
+     7.3 %  get_cpuid
+     2.8 %  uart_puts
+     2.2 %  schedule
+     2.1 %  sched_wake_idle_cpu
+     1.4 %  vm_arch_shootdown
+     1.4 %  safe_wfi
+     1.2 %  linux_compat_dispatch
+     1.1 %  lock_audit_irqoff_end
+     0.9 %  lock_audit_irqoff_begin
+     0.8 %  timer_get_ms
+     0.7 %  spin_release_raw
+     0.6 %  virtio_blk_watch_mmio
+     0.6 %  gpu_m2_fence_wait2
+     0.6 %  lock_audit_held_push
+     0.5 %  virtio_gpu_x64_kick
+
+== obj/cp-p9/gateA4/prof-world-mid.txt: 1528 vCPU samples
+   kernel          857   56.1 %
+   idle (HLT)      507   33.2 %
+   user            164   10.7 %
+== per vCPU (idle / kernel / user %)
+   cpu0:   76 /   24 /    0
+   cpu1:   16 /   72 /   12
+   cpu2:   15 /   68 /   17
+   cpu3:   28 /   57 /   15
+   cpu4:   25 /   61 /   14
+   cpu5:   30 /   59 /   11
+   cpu6:   31 /   58 /   10
+   cpu7:   43 /   50 /    7
+== kernel, top symbols (% of all samples)
+    28.1 %  spin_acquire_raw
+     6.2 %  get_cpuid
+     2.6 %  uart_puts
+     1.7 %  sched_wake_idle_cpu
+     1.7 %  schedule
+     1.5 %  virtio_gpu_x64_transact_ex
+     1.4 %  safe_wfi
+     1.3 %  linux_compat_dispatch
+     0.9 %  virtio_gpu_x64_kick
+     0.9 %  spin_release_raw
+     0.7 %  lock_audit_irqoff_begin
+     0.6 %  lock_audit_held_push
+     0.6 %  virtio_blk_watch_mmio
+     0.6 %  general_interrupt_inner
+     0.5 %  lock_audit_irqoff_end
+     0.5 %  timer_get_ms
+
+== obj/cp-p9/gateA4/prof-world-end.txt: 1544 vCPU samples
+   kernel          890   57.6 %
+   idle (HLT)      510   33.0 %
+   user            144    9.3 %
+== per vCPU (idle / kernel / user %)
+   cpu0:   76 /   24 /    0
+   cpu1:   17 /   70 /   13
+   cpu2:   22 /   68 /    9
+   cpu3:   23 /   65 /   12
+   cpu4:   25 /   62 /   13
+   cpu5:   30 /   59 /   11
+   cpu6:   37 /   55 /    8
+   cpu7:   35 /   57 /    8
+== kernel, top symbols (% of all samples)
+    29.9 %  spin_acquire_raw
+     5.7 %  get_cpuid
+     2.8 %  uart_puts
+     1.7 %  sched_wake_idle_cpu
+     1.4 %  schedule
+     1.4 %  linux_compat_dispatch
+     1.2 %  virtio_gpu_x64_transact_ex
+     1.2 %  safe_wfi
+     1.0 %  lock_audit_held_push
+     0.9 %  general_interrupt_inner
+     0.9 %  lock_audit_irqoff_begin
+     0.8 %  spin_release_raw
+     0.8 %  lock_audit_irqoff_end
+     0.8 %  lock_audit_held_pop
+     0.6 %  virtio_gpu_x64_kick
+     0.6 %  gpu_m2_fence_wait2
+
+## the spun-on lock: [LOCKDIAG] rows in the same serial log, lock address -> symbol
+     89 lock=0x0000000074D4E948
+      2 lock=0x00000000768A7608
+      1 lock=0x000000007673AEF4
+74d4e948 B proc_lock
+
+## world fps (winevulkan +fps rows, gateA4 phase world, 250 rows over 480 s)
+menu               9         143-156     40.6    32.9     8.8    50.4    38.7
+loading           83         158-289     40.5    16.0     1.5    70.0    38.1
+world            250         312-792     13.8     7.2     0.4    21.7    13.2
+map               18         329-595     27.2    12.3     2.4    36.6    23.4
+
+## gateB5 (reload boot): the same sampler with kernel stack words (prof reload-stack stack, 4 Hz, 30 s)
+## callers are rough: every word on the stack that looks like kernel text is listed, stale ones included
+== obj/cp-p9/gateB5/prof-reload-stack.txt: 720 vCPU samples
+   kernel          353   49.0 %
+   idle (HLT)      294   40.8 %
+   user             73   10.1 %
+== per vCPU (idle / kernel / user %)
+   cpu0:   81 /   19 /    0
+   cpu1:   23 /   62 /   14
+   cpu2:   23 /   59 /   18
+   cpu3:   28 /   59 /   13
+   cpu4:   34 /   56 /   10
+   cpu5:   42 /   48 /   10
+   cpu6:   44 /   48 /    8
+   cpu7:   50 /   42 /    8
+== kernel, top symbols (% of all samples)
+    24.0 %  spin_acquire_raw
+     6.0 %  get_cpuid
+     2.5 %  uart_puts
+     1.5 %  linux_compat_dispatch
+     1.4 %  sched_wake_idle_cpu
+     1.2 %  safe_wfi
+     1.2 %  schedule
+     1.1 %  virtio_gpu_x64_transact_ex
+     1.0 %  spin_release_raw
+     1.0 %  general_interrupt_inner
+     0.7 %  vmmouse_drain_nolock
+     0.6 %  gpu_m2_fence_wait2
+     0.6 %  virtio_gpu_x64_kick
+     0.4 %  virtio_blk_watch_mmio
+     0.4 %  x64_v2_walk_alloc
+     0.4 %  lock_audit_held_push
+     0.4 %  syscall_entry
+     0.4 %  lock_audit_irqoff_end
+     0.4 %  vm_arch_switch
+== user buckets (% of all samples)
+     6.7 %  user: game exe (Cyberpunk2077.exe image)
+     3.2 %  user: unix .so (glibc, Wine unix side, Mesa Venus, X11)
+== kernel stack words (rough callers, innermost first) for the top leaves
+   spin_acquire_raw:
+         25  schedule < spinlock_acquire_irqsave < uart_puts
+         11  file_select_words < spinlock_acquire_irqsave < uart_puts < lock_audit_held_pop < spin_release_raw
+         11  process_others_alive < spinlock_acquire_irqsave < uart_puts < flusher_task
+          9  uart_puts < enter_user_space < schedule < spin_acquire_raw < lock_audit_held_push
+          9  file_select_words < spinlock_acquire_irqsave < uart_puts < lock_audit_held_pop
+          7  schedule < uart_puts < spinlock_acquire_irqsave < l_proc_rt_sigprocmask
+          7  wd_dump_proc_table < spinlock_acquire < uart_puts < watchdog_tick
+          7  schedule < spinlock_acquire_irqsave < uart_puts < l_proc_rt_sigprocmask < sched_wake_idle_cpu
+   get_cpuid:
+          3  spin_acquire_raw < vm_touch < spinlock_acquire_irqsave < uart_puts < lock_audit_held_pop
+          2  uart_puts < sync_lower_handler_c < watchdog_tick < general_interrupt_inner
+          2  sync_lower_handler_c < uart_puts < watchdog_tick < general_interrupt_inner < vm_touch
+          2  enter_user_space
+          2  general_interrupt_handler < common_trap_wrapper
+          2  uart_puts
+          1  common_trap_wrapper < uart_puts < spinlock_acquire_irqsave < spin_acquire_raw
+          1  spin_acquire_raw < uart_puts < spin_release_raw
+   uart_puts:
+          6  uart_puts < futex_trace_dump_locked
+          3  uart_puts < schedule < lock_audit_held_push < mmu_init < spin_acquire_raw
+          1  uart_puts < schedule < watchdog_tick < lock_audit_held_push < spinlock_acquire_irqsave
+          1  uart_puts < schedule < spin_acquire_raw < watchdog_tick < lock_audit_held_push
+          1  uart_puts < start_scheduler
+          1  uart_puts < rw_thr_sample < spin_acquire_raw < virtio_gpu_x64_handle_irq < lock_audit_held_pop
+          1  uart_puts < vm_pub_note < lock_audit_held_push < spinlock_acquire_irqsave < spin_acquire_raw
+          1  uart_puts < schedule < spin_acquire_raw < lock_audit_held_pop < lock_audit_held_push
+   linux_compat_dispatch:
+          6  uart_puts < spin_acquire_raw < vm_touch < spinlock_acquire_irqsave < lock_audit_held_pop
+          3  uart_puts < sys_poll < sync_lower_handler_c
+          1  uart_puts < sched_wake_idle_cpu < pipe_read_ex < file_read_user < sys_read
+          1  uart_puts < vm_range_ok < sys_select < sync_lower_handler_c
+
+## fps-smp4 (fpsprobe.p9, -smp 4 -m 12G): world fps and profile
+== fps (winevulkan trace:fps 'approx' rows) in /home/sarah/cp/lanes/play/obj/cp-p9/fps-smp4
+phase           rows          game s   median     p10     min     max    mean
+launch            52          46-127     38.3    27.5     0.0    62.4    38.0
+menu              10         128-142     37.9    31.5    29.2    47.0    38.2
+loading           96         143-296     38.4    14.0     2.4    55.1    37.3
+world             53         297-382      9.2     6.3     1.6    14.6     9.2
+prof-fp-world     12         387-404     13.3    10.6    10.3    14.7    13.1
+== frame pool free MiB ([P8MEM]) by phase: first / min / last
+== obj/cp-p9/fps-smp4/prof-fp-world.txt: 772 vCPU samples
+   kernel          454   58.8 %
+   idle (HLT)      188   24.4 %
+   user            130   16.8 %
+== per vCPU (idle / kernel / user %)
+   cpu0:   79 /   21 /    0
+   cpu1:    5 /   74 /   21
+   cpu2:    8 /   67 /   25
+   cpu3:    5 /   73 /   22
+== kernel, top symbols (% of all samples)
+    17.0 %  spin_acquire_raw
+    11.3 %  get_cpuid
+     4.1 %  uart_puts
+     3.8 %  sched_wake_idle_cpu
+     2.6 %  virtio_gpu_x64_transact_ex
+     2.5 %  linux_compat_dispatch
+     2.1 %  virtio_gpu_x64_kick
+     1.4 %  schedule

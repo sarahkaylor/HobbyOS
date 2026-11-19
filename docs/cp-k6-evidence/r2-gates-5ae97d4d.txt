@@ -1,0 +1,88 @@
+# C1-k6 round-2 gate batch (host: strix; tree k6 = cp-k6 5ae97d4d round-2 kernel, before the kstack commits; script ~/cp/lanes/k6-gates2.sh, derived from integ-gates12)
+# parity reference: integrator's integ9 adb81ee4 batch strix:~/cp/integ-gates12.txt (ext2w_gate FAIL (1) there too)
+
+tree  start 14:22:17
+build rc=0 14:22:21
+avx rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+console rc=1 [LP] done rc=0lp_check_console: kernel rows intact 22765/22794, user rows intact 10691/10694, interleaved lines 1, torn rows 3, missing 32, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+cow rc=0 [LP] done rc=0
+e2churn rc=0 [LP] done rc=0
+e2fault rc=0 [LP] done rc=0
+e2stress rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+execthr rc=0 [LP] done rc=0
+exitgroup rc=0 [LP] done rc=0
+ext2w rc=0 [LP] done rc=0
+fatcoh rc=0 [LP] done rc=0
+fattrunc rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fdrace rc=0 [LP] done rc=0
+fdscale rc=0 [LP] done rc=0
+forkcow rc=0 [LP] done rc=0
+forkva rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+hrtimer rc=0 [LP] done rc=0
+ipclat rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+killgrp rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+manythr rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+netlink rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0
+pfx rc=0 [LP] done rc=0
+pipestorm rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+rusage rc=0 [LP] done rc=0
+shm rc=0 [LP] done rc=0
+sigfd rc=0 [LP] done rc=0
+siginfo rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tlb rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+probes end 14:55:01
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/k6)
+unit rc=1 Tests failed! Tests run:    462 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244  reass=1
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 38/40 passed kconsole=kconsole_test: PASS (0 failures)
+castscan rc=0 castscan: 368 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+panic_sink_allowlist rc=0 panic_sink_allowlist: PASS — every reference is accounted for
+pfx_gate rc=0 pfx_gate: PASS
+ext2w_gate rc=1 ext2w_gate: FAIL (2)
+reg_gate rc=0 == removed /srv/nfs/cp-k6-reg
+ext2_test_host rc=0 ext2_test: PASS
+exitgroup#1 rc=0 [LP] done rc=0
+exitgroup#2 rc=0 [LP] done rc=0
+exitgroup#3 rc=0 [LP] done rc=0
+infra end 15:34:26
+gate_p2#1 rc=0 G1 wine cmd /c echo hello prints hello : PASS ([P2] end echo|G2 winprobe.exe every marker + exit 0 : PASS ([P2] end winpr|G3 wineserver -k leaves no processes : PASS ([P2] end kill s| 15:35:12
+gate_p4#1 rc=0 [P4G] qemu: qemu-system-x86_64 -M q35,vmport=on -enable-kvm -cpu host -smp 8 -m 12288M -drive if=pflash,format=raw,readonly=on,file=/home/sarah/cp/lanes/k6/obj/p4/integ12-1/ovmf.fd -display none -serial file:/home/sarah/cp/lanes/k6/obj/p4/integ12-1/serial.log -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=/home/sarah/cp/lanes/k6/obj/p4/integ12-1/disk.img,format=raw,i
+gate_p5#1 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12, fullscr each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 279 s; lock released serial=259447 15:43:48
+venus_mesa rc=0 cp-venus-mesa: audit: ok (1910408 bytes)
+gate_p6_venus#1 rc=0 [P5W] vkcube vkcube-t20s.ppm: clear=240568 saturated=67184 bbox=(44, 70, 682, 548) hash=a3369ba77a0c44bd [P5W] vkcube vkcube-t50s.ppm: clear=238964 saturated=68816 bbox=(44, 70, 682, 548) hash=2db7b2ed81620de3 [P5W] vkcube: PASS [P5W] d3d11 d3d11-t20s.ppm: clear=237248 saturated=48264 bbox=(724, 70, 1362, 548) hash=9f2a6ba84f961385 [P5W] d3d11 d3d11-t50s.ppm: clear=237256 satu
+thrstorm rc=0 [TS] PASS T1 create (threads=256 why=0) [TS] PASS T1 start (started=256 toolhelp=257) [TS] PASS T2 storm (rounds=878 ms=60103) [TS] PASS T3 stop (bad=0 first=0)  15:50:13
+k5probes rc=0 [P8ENV] E1 execve env: 40/40 entries intact -> PASS [P8ENV] E2 malformed entries: 0 -> PASS [P8ENV] E3 spawn_ex env: 40/40 entries intact -> PASS [P8ENV] E4 malformed entries: 0 -> PASS [K5P] E5 spawn_ex env > HO_ENV_LEN: rc=-1 errno=7 -> PASS [P8SCM] S1 recvmsg ret=4 errno=0 -> PASS [P8SCM] S2 MSG_CTRUNC=1 fd_delivered=-1 -> PASS [P8SCM] S3 second recvmsg ret=-1 errno=11 -> PASS PAS
+gate_p7_fullscreen rc=0 [P5W] vkcube vkcube-t20s.ppm: clear=1736372 saturated=337228 bbox=(0, 0, 1918, 1078) hash=78c0d373ec2c9ab2 [P5W] vkcube vkcube-t50s.ppm: clear=1769376 saturated=304224 bbox=(0, 0, 1918, 1078) hash=993dcb565b30ede2 [P5W] vkcube: PASS [P5W] d3d12 d3d12-t20s.ppm: clear=1601864 saturated=309988 bbox=(0, 0, 1918, 1078) hash=5db2984bdd26d29c [P5W] d3d12 d3d12-t50s.ppm: clear=1601
+p8_pfx rc=0 == exports.sh: remove /srv/nfs/cp-k6-p8 ok (non-cp lines unchanged) == removed /srv/nfs/cp-k6-p8  15:54:48
+gate_p8_venus rc=0    +   175.0 s  16:01:30  main menu OCR at s011-t000146: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   180.6 s  16:01:36  main menu OCR at s012-t000152: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   182.9 s  16:01:38  verdict: main-menu; QEMU stopped, sl 16:01:38
+ALLDONE 16:01:38

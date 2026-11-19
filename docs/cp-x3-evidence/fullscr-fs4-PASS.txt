@@ -1,0 +1,70 @@
+# fullscr run fs4: IceWM patch 0005 + fullscr.exe watch rows, tree ~/cp/lanes/x3-dbg (= cp-x3 a11d96ec + patch 0005), strix KVM; screendumps evidence/cp-x3/fs4-*.png
+# command: CP_WINE_STAGE=$HOME/cp/wine-build-x/stage/CP/WINE WINE_BUILD=$HOME/cp/wine-build-x CP_VK_WORK=$HOME/cp/vk2-build CP_X11_WORK=$HOME/cp/x11-build-x2 CP_P5_PE=$HOME/cp/vk2-pe P5_EXPORT=/srv/nfs/cp-x3-fs4 P5_PROBES=fullscr P5_XSESSION_ENV=HB_SECOND_SCREEN=0 PATH=$HOME/.local/bin:$PATH MAKEFLAGS=-j16 TOOLS_SKIP=1 bash tools/cp/p5/run-wine-p5.sh
+== X server: the tree's ::/XHOBBY.BIN, sha256 9b161eded42374e06415d4033a35763aff8f6a061d8f34b5a0eebff95cbafa07
+[P5W] waiting for a QEMU slot (tools/cp/qemu-slot.sh semantics)
+[P5W] slot 2 acquired 00:22:23; boot: -smp 8 -m 12288M -cpu host (KVM)
+[P5W] qemu pid 1754346
+[P5W] +0 s: (no [P5] row yet)
+[P5W] screendump fs-M3-1280x720.ppm at +72 s
+[P5W] screendump fs-M4-1920x1080.ppm at +82 s
+[P5W] screendump fs-M5-1280x720.ppm at +91 s
+[P5W] screendump fs-restored.ppm at +102 s
+[P5W] guests on the host at the end of the run: 2 (incl. none of ours)
+[P5W] boot finished after 126 s; lock released
+[P5W] --- [P5] rows and probe rows (serial) ---
+[P5] winep5 launcher (C5-vk2)
+[P5] mount 10.0.2.2:/srv/nfs/cp-x3-fs4 -> /CP ok
+[P5] begin wineboot : wineboot -i
+[P5] end wineboot status=0 ms=39056
+[P5] quiesce after wineboot: extra=0
+[P5] begin keepalive (background) : wine Z:\CP\P5\VK\vkcube.exe --idle 7200
+[P5] keepalive pid=110
+[P5] begin winprobe01 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+[P5] end winprobe01 status=0 ms=13777
+[P5] warm-up: display driver loaded
+[P5] begin fullscr : wine Z:\CP\P5\FS\fullscr.exe run 6000
+[FS] fullscr probe (C4-x3) mode=run pid=288
+[FS] M1 modes=36 has1280x720=1 has1920x1080=1 current=1920x1080 registry=1920x1080
+[FS] M2 ChangeDisplaySettingsEx 1280x720 rc=0 in 1589 ms metrics=1280x720 current=1280x720
+[FS] M3 window rect=0,0,1280,720 client=1280x720 fg=1 settled_ms=108
+[FS] hold M3 1280x720 6000 ms
+[FS] M4 ChangeDisplaySettingsEx 1920x1080 rc=0 in 135 ms metrics=1920x1080 current=1920x1080
+[FS] M4 window rect=0,0,1920,1080 client=1920x1080 fg=1 settled_ms=100
+[FS] hold M4 1920x1080 6000 ms
+[FS] M5 ChangeDisplaySettingsEx 1280x720 rc=0 in 115 ms metrics=1280x720 current=1280x720
+[FS] M5 window rect=0,0,1280,720 client=1280x720 fg=1 settled_ms=100
+[FS] hold M5 1280x720 6000 ms
+[FS] M5 exit without restoring (desktop mode was 1920x1080)
+[FS] done rc=0
+[P5] end fullscr status=0 ms=30837
+[P5] begin fscheck : wine Z:\CP\P5\FS\fullscr.exe check 30000
+[FS] fullscr probe (C4-x3) mode=check pid=296
+[FS] M6 check current=1920x1080 registry=1920x1080 metrics=1920x1080 after 1863 ms
+[FS] done rc=0
+[P5] end fscheck status=0 ms=3135
+[P5] fullscr restored-desktop shot
+[P5] begin kill : wineserver -k
+[P5] end kill status=256 ms=230
+[P5] quiesce after kill: extra=1
+[P5] done
+[P5W] fullscr fs-M3-1280x720: glass 1920x1080, markers ok, non-black outside the mode: 0
+[P5W] fullscr fs-M4-1920x1080: glass 1920x1080, markers ok, non-black outside the mode: 0
+[P5W] fullscr fs-M5-1280x720: glass 1920x1080, markers ok, non-black outside the mode: 0
+[P5W] fullscr fs-restored: glass 1920x1080, (8,8)=f9f5f0 (1271,8)=505078 (1910,1070)=6c605d -> pattern gone
+[P5W] fullscr: PASS
+[P5W] NFS: no-reply rows=0 [NFSHARD] retry rows=0 longest waited_ms=0 GIVE UP=0 NFLK rc=-1=0
+[P5W] FAIL: 1 fault line(s): [KERNEL] pid=110 (vkcube.exe) memory fault VA=0x00007FFFFFB506CC PC=0x00006FFFFFF6F449 rw=w  in=PROT region=0x00007FFFFFB50000+0x0000000000001000 prot=1 kind=3 
+
+# fs3 (before the IceWM patch, WINEDEBUG +event,+x11drv): the M5 refusal
+[FS] M5 ChangeDisplaySettingsEx 1280x720 rc=0 in 98 ms metrics=1280x720 current=1280x720
+[FS] M5 rect changed at +408 ms -> 0,0,1920,1080
+[FS] M5 window rect=0,0,1920,1080 client=1920x1080 fg=1 settled_ms=100
+[FS] M5 exit without restoring (desktop mode was 1920x1080)
+# fs3 trace (WINEDEBUG=+event,+x11drv; excerpt copied from that run's serial log, window 0x3002a/200003):
+#  013c:trace:x11drv:window_set_config window 0x3002a/200003, requesting config (0,0)-(1280,720) mask 0xc above 0, serial 146
+#  013c:trace:event:call_event_handler 148 ConfigureNotify for hwnd/window 0x3002a/200003
+#  013c:trace:x11drv:host_window_configure_child host win 0x10404557a0/600366, window 200003, rect (0,0)-(1920,1080), root_coords 1
+#  013c:warn:x11drv:handle_state_change window 0x3002a/200003 mismatch config (0,0)-(1920,1080)/148, expected (0,0)-(1280,720)/146
+#  013c:trace:x11drv:window_update_client_config window 0x3002a/200003 config changed (0,0)-(1280,720) -> (0,0)-(1920,1080), flags 0x416
+#  [FS] M5 rect changed at +408 ms -> 0,0,1920,1080
+# => the window manager (IceWM) answered Wine's 1280x720 request with its stale 1920x1080 fullscreen geometry; fixed by patches/icewm/0005.

@@ -1,0 +1,17 @@
+build=0
+pfx_gate: e2churn probe rc=0 PASS rows=4 skips=0; e2fsck -fn rc=0 (cpdata: 29/131072 files (3.4% non-contiguous), 13053/524288 blocks)
+pfx_gate: e2stress probe rc=0 PASS rows=5 skips=0; e2fsck -fn rc=0 (cpdata: 58/131072 files (0.0% non-contiguous), 9631/524288 blocks)
+pfx_gate: e2fault probe rc=0 PASS rows=4 skips=0; e2fsck -fn rc=0 (cpdata: 12/131072 files (0.0% non-contiguous), 9021/524288 blocks)
+pfx_gate: PASS
+obj/rr2-1/e2fault.console.log
+pfx_gate: e2churn probe rc=0 PASS rows=4 skips=0; e2fsck -fn rc=0 (cpdata: 29/131072 files (3.4% non-contiguous), 13053/524288 blocks)
+pfx_gate: e2stress probe rc=0 PASS rows=5 skips=0; e2fsck -fn rc=0 (cpdata: 55/131072 files (0.0% non-contiguous), 9631/524288 blocks)
+pfx_gate: e2fault probe rc=0 PASS rows=4 skips=0; e2fsck -fn rc=0 (cpdata: 12/131072 files (0.0% non-contiguous), 9021/524288 blocks)
+pfx_gate: PASS
+obj/rr2-2/e2fault.console.log
+pfx_gate: e2churn probe rc=0 PASS rows=4 skips=0; e2fsck -fn rc=0 (cpdata: 29/131072 files (3.4% non-contiguous), 13053/524288 blocks)
+pfx_gate: e2stress probe rc=0 PASS rows=5 skips=0; e2fsck -fn rc=0 (cpdata: 56/131072 files (0.0% non-contiguous), 9624/524288 blocks)
+pfx_gate: e2fault probe rc=0 PASS rows=4 skips=0; e2fsck -fn rc=0 (cpdata: 12/131072 files (0.0% non-contiguous), 9021/524288 blocks)
+pfx_gate: PASS
+obj/rr2-3/e2fault.console.log
+ALLDONE

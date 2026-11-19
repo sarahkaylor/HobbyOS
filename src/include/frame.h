@@ -2,6 +2,7 @@
 #define FRAME_H
 
 #include <stdint.h>
+#include "kmem.h" /* P1: frames are reached through phys_to_virt() */
 
 /*
  * P2.2 (docs/browser/p2-vm-design.md section 2): the 4 KiB frame
@@ -37,13 +38,11 @@
 #define FRAME_EXT0_TOP  0x70000000ULL
 #define FRAME_EXT1_BASE 0x100000000ULL
 #define FRAME_EXT1_TOP  0x200000000ULL
-/* The two 2 MiB kernel MMIO windows sit at VA 0x1FC000000 (NVMe, PD7[480])
- * and 0x1FE000000 (virtio-gpu, PD7[496..497]).  PD7 is an identity map, so
- * installing a window there removes the identity mapping of the same
- * physical 2 MiB: a frame allocated in that range would be reachable only
- * through the window, i.e. it would BE the device.  Reserved by frame_init. */
-#define FRAME_MMIO_SHADOW_LO 0x1FC000000ULL
-#define FRAME_MMIO_SHADOW_HI 0x200000000ULL
+/* P1 (S4): the NVMe and virtio-gpu BAR windows used to re-point identity
+ * PD7[480] / PD7[496..497], which made the RAM at 0x1FC000000-0x200000000
+ * unreachable (a frame there would have BEEN the device) and needed a
+ * reservation.  They live in the ioremap area now (kmem.h), so that RAM is
+ * ordinary pool memory again. */
 #else
 #define FRAME_EXT0_BASE 0x70000000ULL
 #define FRAME_EXT0_TOP  0x240000000ULL
@@ -97,6 +96,10 @@ uint64_t frame_alloc_contig(int n);
 
 int frame_total_count(void);
 int frame_free_count(void);
+/* H7-fault: vm.c's zeroed-frame stashes, counted as free (frame.c). */
+void frame_parked_add(int delta);
+/* C1-k6: frees of an already-free frame seen so far ([FRAME-DFREE] rows). */
+int frame_dfree_count(void);
 int frame_used_count(void);
 int frame_high_water(void);
 /* L75: frames handed out at a physical address that is not RAM (the 32-bit
@@ -109,6 +112,12 @@ int frame_hole_allocs(void);
  * success, -1 for an index this arch does not have.  Exists so
  * test_frame_pool_is_ram_only can pin "no extent intersects the PCI hole". */
 int frame_extent_bounds(int idx, uint64_t *lo, uint64_t *hi);
+
+/* P1 (S3b): frames handed out above 8 GiB so far (proof the pool uses RAM
+ * past the old cap), and "is this physical address in the pool?" (the
+ * BAR-in-pool tripwire the NVMe probe prints). */
+uint64_t frame_hi_allocs(void);
+int frame_phys_in_pool(uint64_t phys);
 
 /* --- 32 MiB block layer (v1 process regions) ------------------------- */
 

@@ -1,0 +1,29 @@
+[LP] info ext2w mode=bench vol=/EXT
+[LP] perf cold4k bytes=4194304 ops=1024 ms=9 KBps=455111 ops_per_s=113777
+[LP] perf cold4k+fsync bytes=4194304 ops=1024 ms=11 KBps=372363 ops_per_s=93090
+[LP] perf seq4k bytes=4194304 ops=1024 ms=6 KBps=682666 ops_per_s=170666
+[LP] perf seq4k+fsync bytes=4194304 ops=1024 ms=8 KBps=512000 ops_per_s=128000
+[LP] perf seq4k32m bytes=33554432 ops=8192 ms=60 KBps=546133 ops_per_s=136533
+[LP] perf seq4k32m+fsync bytes=33554432 ops=8192 ms=60 KBps=546133 ops_per_s=136533
+[LP] perf seq1m bytes=33554432 ops=32 ms=49 KBps=668734 ops_per_s=653
+[LP] perf seq1m+fsync bytes=33554432 ops=32 ms=49 KBps=668734 ops_per_s=653
+[LP] perf read64k bytes=33554432 ops=512 ms=64 KBps=512000 ops_per_s=8000
+[LP] perf rand4k bytes=2097152 ops=512 ms=3 KBps=682666 ops_per_s=170666
+[LP] perf fsync4k bytes=2097152 ops=512 ms=133 KBps=15398 ops_per_s=3849
+[LP] perf smallfile bytes=409600 ops=200 ms=36 KBps=11111 ops_per_s=5555
+[LP] perf unlink bytes=0 ops=20 ms=1 KBps=0 ops_per_s=20000
+[LP] perf churn bytes=0 ops=300 ms=38 KBps=0 ops_per_s=7894
+[LP] perf unlink32m bytes=0 ops=1 ms=1 KBps=0 ops_per_s=1000
+[LP] done rc=0
+bench: 25 PASS rows, rc=0
+[E2W] sync commits=7 timer=0 sync=3 closewb=0 press=3 midop=0 evictwb=0 blk_w=7222 blk_r=14 cmds=113 ra=0 nopre=0 sync_n=1 kcyc/sync obj=0 commit=1066 cmds/sync*10=70 write_n=1048 kcyc/write pf=5 lock=0 core=8 note=0 unlock=31
+[E2W] sync commits=533 timer=0 sync=520 closewb=500 press=11 midop=0 evictwb=500 blk_w=28199 blk_r=17062 cmds=4807 ra=11285 nopre=0 sync_n=2 kcyc/sync obj=9 commit=1953 cmds/sync*10=105 write_n=11821 kcyc/write pf=2 lock=0 core=1 note=0 unlock=9
+[E2W] flusher idle exit commits=535 timer=1 sync=520 closewb=517 press=11 midop=0 evictwb=517 blk_w=29339 blk_r=17069 cmds=4856 ra=11285 nopre=0 sync_n=2 kcyc/sync obj=9 commit=1953 cmds/sync*10=105 write_n=12918 kcyc/write pf=2 lock=0 core=1 note=0 unloc[HALT-CD] cpu=2 free=512 alloc=0 exited=0 running=0 blocked=0 other=0 as_col=0 as_recl=0 as_noas=0
+[HOST] ok   bench: e2fsck -fn rc=0 (cpdata: 32/524288 files (0.0% non-contiguous), 40170/2097152 blocks)
+[LP] info ext2w mode=verify vol=/EXT
+[LP] PASS V1 every persist file survived the reboot byte for byte (0)
+[LP] PASS V1 the rename survived (old name gone) (0)
+[LP] PASS V1 seq4k.bin holds B3's rewrites (not all key 1) (0)
+[LP] done rc=0
+[HOST] ok   verify: e2fsck -fn rc=0 (cpdata: 32/524288 files (0.0% non-contiguous), 40170/2097152 blocks)
+ext2w_gate: PASS

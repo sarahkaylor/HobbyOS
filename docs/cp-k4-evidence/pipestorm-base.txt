@@ -1,0 +1,40 @@
+# linux_probe_pipestorm on BASE (cyberpunk 5eea3712), strix QEMU/KVM 8 vCPUs; guest rebooted at R11 every pass (rows repeat after each reboot)
+[LP] PASS R1 thr_pingpong (201 ms)
+[LP] PASS R2 proc_pingpong (450 ms)
+[LP] PASS R3 poll_fanin (526 ms)
+[LP] PASS R4 select_fanin (787 ms)
+[LP] info row 65: epoll_ctl ADD #32 fd=133 errno=28
+[LP] FAIL R5 epoll_fanin(48) HANG: no finish in 30000 ms (lost wakeup or a blocked non-blocking call)
+[LP] info row 115: server ch=18 k=0 reply writev=576 want=586 errno=3
+[LP] FAIL R6 wine_proto status=0x100 1 server ch=18 k=0 reply writev=576 want=586 errno=3 (523 ms)
+[LP] info row 146: write(100000) returned 512
+[LP] FAIL R7 bigwrite status=0x100 1 write(100000) returned 512 (65 ms)
+[LP] FAIL R8 nonblock HANG: no finish in 30000 ms (lost wakeup or a blocked non-blocking call)
+[LP] PASS R9 unix_pingpong (222 ms)
+[LP] FAIL R10 efd_pingpong HANG: no finish in 30000 ms (lost wakeup or a blocked non-blocking call)
+[LP] PASS R1 thr_pingpong (213 ms)
+[LP] PASS R2 proc_pingpong (501 ms)
+[LP] PASS R3 poll_fanin (682 ms)
+[LP] PASS R4 select_fanin (540 ms)
+[LP] info row 65: epoll_ctl ADD #32 fd=133 errno=28
+[LP] FAIL R5 epoll_fanin(48) HANG: no finish in 30000 ms (lost wakeup or a blocked non-blocking call)
+[LP] info row 115: server ch=16 k=0 reply writev=512 want=528 errno=3
+[LP] FAIL R6 wine_proto status=0x100 1 server ch=16 k=0 reply writev=512 want=528 errno=3 (595 ms)
+[LP] info row 146: write(100000) returned 512
+[LP] FAIL R7 bigwrite status=0x100 1 write(100000) returned 512 (87 ms)
+[LP] FAIL R8 nonblock HANG: no finish in 30000 ms (lost wakeup or a blocked non-blocking call)
+[LP] PASS R9 unix_pingpong (238 ms)
+[LP] FAIL R10 efd_pingpong HANG: no finish in 30000 ms (lost wakeup or a blocked non-blocking call)
+[LP] PASS R1 thr_pingpong (203 ms)
+[LP] PASS R2 proc_pingpong (451 ms)
+[LP] PASS R3 poll_fanin (415 ms)
+[LP] PASS R4 select_fanin (281 ms)
+[LP] info row 65: epoll_ctl ADD #32 fd=133 errno=28
+[LP] FAIL R5 epoll_fanin(48) HANG: no finish in 30000 ms (lost wakeup or a blocked non-blocking call)
+[LP] info row 115: server ch=16 k=0 reply writev=512 want=528 errno=3
+[LP] FAIL R6 wine_proto status=0x100 1 server ch=16 k=0 reply writev=512 want=528 errno=3 (437 ms)
+[LP] info row 146: write(100000) returned 512
+[LP] FAIL R7 bigwrite status=0x100 1 write(100000) returned 512 (64 ms)
+[LP] FAIL R8 nonblock HANG: no finish in 30000 ms (lost wakeup or a blocked non-blocking call)
+[LP] PASS R9 unix_pingpong (198 ms)
+t3_linux_probe: FAIL — pipestorm never printed '[LP] done rc=0' (tier rc=1)

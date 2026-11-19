@@ -1,10 +1,11 @@
 #include "lock.h"
 #include "process.h"
 #include "arch/cpu.h"
+#include "kmem.h"
 
 #define LAPIC_BASE 0xFEE00000
-#define LAPIC_ICR_LOW  ((volatile uint32_t*)(LAPIC_BASE + 0x300))
-#define LAPIC_ICR_HIGH ((volatile uint32_t*)(LAPIC_BASE + 0x310))
+#define LAPIC_ICR_LOW  ((volatile uint32_t*)phys_to_virt(LAPIC_BASE + 0x300))
+#define LAPIC_ICR_HIGH ((volatile uint32_t*)phys_to_virt(LAPIC_BASE + 0x310))
 
 extern uint64_t smp_temp_stack;
 extern uint64_t smp_temp_cpu;
@@ -19,12 +20,13 @@ volatile int smp_core_ready = 0;
  * Initializes and powers on secondary CPU cores using standard Local APIC IPIs.
  */
 void smp_init(void) {
+  int acked = 1; /* C1-k6: this core plus every AP that acknowledges */
   uart_puts("[KERNEL] Activating secondary cores via LAPIC IPIs...\n");
 
   // Copy trampoline code to physical address 0x7000
   extern uint8_t trampoline_start[];
   extern uint8_t trampoline_end[];
-  uint8_t *dest = (uint8_t*)0x7000;
+  uint8_t *dest = (uint8_t*)phys_to_virt(0x7000);
   uint8_t *src = trampoline_start;
   uint32_t len = (uint32_t)(trampoline_end - trampoline_start);
 
@@ -69,8 +71,13 @@ void smp_init(void) {
     print_int(i);
     if (smp_core_ready) {
       uart_puts(" power-on acknowledged.\n");
+      acked++;
     } else {
       uart_puts(" power-on timeout!\n");
     }
   }
+  /* C1-k6: get_cpuid() switches to its one-load path once this many CPUs
+     have set GS_BASE (an AP acknowledges before its per-CPU init). */
+  extern volatile uint32_t x64_gs_expected;
+  x64_gs_expected = (uint32_t)acked;
 }

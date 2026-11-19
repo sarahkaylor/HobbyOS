@@ -1,0 +1,17 @@
+1794717241170641733 waiting for /home/sarah/cp/measure.lock
+1794717241177157934 lock held=1
+1794717241229263091 nav start
+1794717270748321948 press-to-continue seen (n0021)
+1794717345360737933 press-to-continue seen (n0067)
+1794717349533956293 main menu seen (n0069)
+1794717359809654560 snapshot menu pid=71289 threads=90 fds=465 run_processes=16 run_threads=182
+1794717361333077729 menu focus = LOAD GAME
+1794717362915728062 menu focus = SETTINGS
+1794717369095646797 settings tab (graphics_tab) benchmark-visible=False
+1794717369657718553 benchmark requested (b)
+1794717372181169509 benchmark confirm dialog answered (n0073)
+1794717419537337009 snapshot bench pid=71289 threads=95 fds=467 run_processes=16 run_threads=187
+1794717464272886527 benchmark result benchmark_2026-11-14_22-36-11
+1794717464570402136 snapshot postbench pid=71289 threads=95 fds=468 run_processes=16 run_threads=187
+1794717465490589921 nav done
+1794717482203897153 run end rc=0

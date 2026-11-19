@@ -1,0 +1,145 @@
+# per boot, world phase: [HBV]/[HBP] per frame and [THRW] (tools/cp/present/hbv_summary.py); integ11 boots use the old (kernel-biased) [THRW] attribution
+#### k7b-1 (k7-base)
+== world          frames   2373  fps 26.1  [HBP] sub 4.25 ms flip 3.02 ms (avg/frame)
+   ring 0.31/0.06ms  tls 0.00/0.00ms  space 1.34/0.24ms  slpR 0.26/0.05ms  slpO 1.12/0.24ms  yield 38.08/0.00ms  ntf 3.16/0.04ms  subF 24.76/0.28ms  subU 27.93/0.29ms  wait 58.58/16.25ms  fwait 17.55/15.56ms  qsub 24.63/5.05ms  pwait 0.00/0.00ms
+   threads (per frame: wait n/ms, submit n/ms, present-wait n/ms): t165 w4.0/4.1 q4.0/4.3 p0.00/0.0  t121 w40.0/7.4 q0.0/0.0 p0.00/0.0  t162 w1.0/3.9 q0.0/0.0 p0.00/0.0  t122 w2.3/0.0 q12.9/0.5 p0.00/0.0  t123 w5.7/0.3 q0.0/0.0 p0.00/0.0  t125 w0.5/0.1 q0.0/0.0 p0.00/0.0
+== prof-fp-world  frames    558  fps 27.5  [HBP] sub 3.74 ms flip 3.04 ms (avg/frame)
+== world          pid19:wineserver                   rows  18  run 0.30 ready 0.08 futex 0.00 kern 0.27 trap 0.09
+   blk 232:0.61
+   ksys 232:0.09 1:0.06 96:0.01 228:0.00 20:0.00 46:0.00 257:0.00 234:0.00
+   top (run/ready/kern/trap %) t19 29/7/26/9%(232=8,1=6,96=0,228=0,20=0,46=0)
+== world          pid92:Cyberpunk2077.e              rows  18  run 2.27 ready 0.26 futex 27.42 kern 0.90 trap 0.18
+   blk 0:12.01 23:4.92 16:0.07 7:0.01 230:0.01 1:0.00
+   ksys 16:0.37 202:0.17 14:0.05 228:0.03 1:0.02 0:0.01 20:0.01 47:0.00
+   top (run/ready/kern/trap %) t96 86/4/15/3%(202=5,14=2,228=0,1=0,0=0,9=0,16=0,230=0,20=0) t92 82/6/20/6%(202=6,1=0,14=0,228=0,0=0,47=0,20=0,16=0) t121 17/0/17/0%(16=16,202=0) t95 1/0/1/1%(14=0,47=0,1=0,72=0)
+== prof-fp-world  pid19:wineserver                   rows   4  run 0.26 ready 0.08 futex 0.00 kern 0.23 trap 0.09
+#### k7l-1 (k6)
+#### k7l-2 (k6)
+== world          frames   2331  fps 25.6  [HBP] sub 13.04 ms flip 5.19 ms (avg/frame)
+   ring 0.28/0.07ms  tls 0.00/0.00ms  space 3.76/0.81ms  slpR 0.32/0.06ms  slpO 3.57/0.80ms  yield 43.75/0.00ms  ntf 3.49/0.03ms  subF 24.74/0.22ms  subU 28.23/0.23ms  wait 58.52/43.38ms  fwait 26.56/42.86ms  qsub 24.62/13.67ms  pwait 0.00/0.00ms
+   threads (per frame: wait n/ms, submit n/ms, present-wait n/ms): t165 w4.0/13.0 q4.0/13.1 p0.00/0.0  t121 w40.0/14.9 q0.0/0.0 p0.00/0.0  t162 w1.0/12.4 q0.0/0.0 p0.00/0.0  t123 w7.7/2.2 q0.0/0.0 p0.00/0.0  t125 w0.6/0.3 q0.0/0.0 p0.00/0.0  t122 w1.9/0.0 q10.8/0.3 p0.00/0.0
+== prof-fp-world  frames    699  fps 31.5  [HBP] sub 12.67 ms flip 5.80 ms (avg/frame)
+== world          pid19:wineserver                   rows  18  run 0.26 ready 0.08 futex 0.00 kern 0.23 trap 0.03
+   blk 232:0.65
+   ksys 1:0.08 232:0.07 0:0.03 96:0.00 46:0.00 20:0.00 228:0.00 233:0.00
+   top (run/ready/kern/trap %) t19 25/8/23/3%(1=8,232=6,0=2,96=0,20=0,46=0,228=0,233=0)
+== world          pid92:Cyberpunk2077.e              rows  18  run 2.44 ready 0.28 futex 26.79 kern 1.06 trap 0.12
+   blk 0:12.01 23:4.94 16:0.46 230:0.03 7:0.02 1:0.00
+   ksys 16:0.62 0:0.14 202:0.08 1:0.03 228:0.01 14:0.00 20:0.00 47:0.00
+   top (run/ready/kern/trap %) t96 83/4/12/5%(202=2,0=1,1=0,228=0,9=0,20=0,14=0,16=0) t92 78/8/16/4%(0=4,202=2,1=1,228=0,47=0,186=0,14=0,7=0,20=0,98=0) t121 25/0/25/0%(16=24,202=0) t95 2/0/2/0%(0=2,1=0,14=0,47=0)
+== prof-fp-world  pid19:wineserver                   rows   5  run 0.16 ready 0.06 futex 0.00 kern 0.14 trap 0.02
+#### k7b-2 (k7-base)
+== world          frames   2650  fps 25.0  [HBP] sub 6.29 ms flip 3.02 ms (avg/frame)
+   ring 0.28/0.05ms  tls 0.00/0.00ms  space 0.90/3.68ms  slpR 0.21/0.04ms  slpO 2.38/3.67ms  yield 36.55/0.00ms  ntf 3.13/0.05ms  subF 24.96/1.09ms  subU 28.08/0.30ms  wait 58.97/23.79ms  fwait 19.61/23.11ms  qsub 24.79/7.90ms  pwait 0.00/0.00ms
+   threads (per frame: wait n/ms, submit n/ms, present-wait n/ms): t165 w4.0/6.2 q4.0/6.3 p0.00/0.0  t121 w40.0/10.9 q0.0/0.0 p0.00/0.0  t162 w1.0/6.0 q0.0/0.0 p0.00/0.0  t122 w2.3/0.0 q12.9/1.3 p0.00/0.0  t123 w5.7/0.3 q0.0/0.0 p0.00/0.0  t125 w0.4/0.1 q0.0/0.0 p0.00/0.0
+== prof-fp-world  frames    635  fps 25.0  [HBP] sub 4.79 ms flip 2.97 ms (avg/frame)
+== world          pid19:wineserver                   rows  21  run 0.31 ready 0.09 futex 0.00 kern 0.28 trap 0.09
+   blk 232:0.60
+   ksys 232:0.10 1:0.06 96:0.01 228:0.00 20:0.00 233:0.00 46:0.00 257:0.00
+   top (run/ready/kern/trap %) t19 30/8/27/9%(232=10,1=6,96=0,228=0,46=0,20=0,257=0)
+== world          pid92:Cyberpunk2077.e              rows  21  run 2.37 ready 0.23 futex 27.39 kern 1.08 trap 0.29
+   blk 0:11.94 23:4.94 16:0.07 230:0.02 7:0.01 1:0.00
+   ksys 16:0.42 202:0.17 14:0.07 228:0.03 1:0.02 0:0.01 20:0.01 47:0.00
+   top (run/ready/kern/trap %) t96 85/4/19/4%(202=6,14=3,228=0,9=0,1=0,186=0,0=0,20=0,16=0) t92 81/6/22/8%(202=6,14=1,1=0,228=0,47=0,0=0,20=0,16=0,24=0,98=0) t121 17/0/16/0%(16=16,202=0) t95 7/0/7/7%(14=0,1=0,47=0,3=0)
+== prof-fp-world  pid92:Cyberpunk2077.e              rows   5  run 2.46 ready 0.41 futex 27.19 kern 1.25 trap 0.29
+#### k7l-3 (k6)
+== world          frames   1830  fps 20.0  [HBP] sub 8.19 ms flip 4.10 ms (avg/frame)
+   ring 0.41/0.11ms  tls 0.00/0.00ms  space 2.52/1.42ms  slpR 0.52/0.10ms  slpO 3.52/1.41ms  yield 59.91/0.00ms  ntf 4.17/0.07ms  subF 25.14/0.35ms  subU 29.31/0.30ms  wait 59.32/31.06ms  fwait 23.53/30.40ms  qsub 24.94/9.05ms  pwait 0.00/0.00ms
+   threads (per frame: wait n/ms, submit n/ms, present-wait n/ms): t165 w4.0/8.1 q4.0/8.2 p0.00/0.0  t121 w40.0/13.4 q0.0/0.0 p0.00/0.0  t162 w1.0/7.6 q0.0/0.0 p0.00/0.0  t123 w6.2/0.8 q0.0/0.0 p0.00/0.0  t122 w1.4/0.0 q7.7/0.4 p0.00/0.0  t125 w0.6/0.3 q0.0/0.0 p0.00/0.0
+== prof-fp-world  frames    445  fps 18.2  [HBP] sub 7.52 ms flip 4.89 ms (avg/frame)
+== world          pid19:wineserver                   rows  18  run 0.29 ready 0.09 futex 0.00 kern 0.26 trap 0.04
+   blk 232:0.61
+   ksys 1:0.11 232:0.08 0:0.01 96:0.00 20:0.00 228:0.00 46:0.00 257:0.00
+   top (run/ready/kern/trap %) t19 29/8/25/3%(1=10,232=7,0=1,96=0,20=0,228=0,46=0)
+== world          pid92:Cyberpunk2077.e              rows  18  run 2.33 ready 0.29 futex 27.25 kern 0.89 trap 0.14
+   blk 0:11.98 23:4.92 16:0.18 230:0.02 7:0.01 1:0.00
+   ksys 16:0.41 0:0.15 202:0.08 1:0.03 228:0.02 20:0.01 14:0.01 9:0.00
+   top (run/ready/kern/trap %) t96 86/4/12/5%(202=1,0=1,1=0,228=0,9=0,14=0,20=0,186=0,16=0,230=0) t92 81/7/16/4%(0=3,202=2,1=1,228=0,14=0,47=0,20=0,230=0,98=0,24=0) t121 17/0/17/0%(16=16,202=0) t95 3/0/3/0%(0=3,47=0,3=0,1=0)
+== prof-fp-world  pid19:wineserver                   rows   5  run 0.23 ready 0.11 futex 0.00 kern 0.20 trap 0.03
+#### k7b-3 (k7-base)
+== world          frames   2917  fps 31.4  [HBP] sub 4.36 ms flip 2.97 ms (avg/frame)
+   ring 0.21/0.05ms  tls 0.00/0.00ms  space 0.57/0.52ms  slpR 0.22/0.04ms  slpO 1.02/0.52ms  yield 27.10/0.00ms  ntf 2.64/0.03ms  subF 24.43/0.33ms  subU 27.08/0.26ms  wait 57.94/17.00ms  fwait 17.77/16.42ms  qsub 24.36/5.15ms  pwait 0.00/0.00ms
+   threads (per frame: wait n/ms, submit n/ms, present-wait n/ms): t165 w4.0/4.3 q4.0/4.4 p0.00/0.0  t121 w40.0/7.8 q0.0/0.0 p0.00/0.0  t162 w1.0/3.9 q0.0/0.0 p0.00/0.0  t122 w2.6/0.0 q14.5/0.5 p0.00/0.0  t123 w7.9/0.3 q0.0/0.0 p0.00/0.0  t125 w0.3/0.1 q0.0/0.0 p0.00/0.0
+== prof-fp-world  frames    831  fps 37.6  [HBP] sub 4.04 ms flip 3.00 ms (avg/frame)
+== world          pid19:wineserver                   rows  19  run 0.25 ready 0.08 futex 0.00 kern 0.23 trap 0.08
+   blk 232:0.66
+   ksys 232:0.08 1:0.05 96:0.00 228:0.00 46:0.00 20:0.00 233:0.00 257:0.00
+   top (run/ready/kern/trap %) t19 25/7/23/7%(232=7,1=5,96=0,228=0,46=0,20=0,233=0,257=0)
+== world          pid92:Cyberpunk2077.e              rows  19  run 2.37 ready 0.22 futex 27.33 kern 0.97 trap 0.18
+   blk 0:12.00 23:4.94 16:0.09 7:0.01 230:0.01 1:0.00
+   ksys 16:0.44 202:0.17 14:0.05 228:0.03 1:0.02 0:0.02 20:0.01 47:0.00
+   top (run/ready/kern/trap %) t96 88/3/16/3%(202=6,14=2,228=0,9=0,0=0,98=0,16=0,230=0,1=0,20=0,186=0) t92 84/5/20/6%(202=5,228=0,14=0,1=0,47=0,0=0,98=0,20=0,16=0,7=0) t121 18/0/18/0%(16=18,202=0) t95 4/0/4/4%(72=0,14=0,0=0,1=0,20=0,47=0,3=0)
+== prof-fp-world  pid19:wineserver                   rows   4  run 0.17 ready 0.05 futex 0.00 kern 0.14 trap 0.06
+#### k7l-4 (k6)
+== world          frames   2714  fps 29.3  [HBP] sub 4.68 ms flip 2.93 ms (avg/frame)
+   ring 0.29/0.06ms  tls 0.00/0.00ms  space 0.69/0.23ms  slpR 0.26/0.05ms  slpO 0.95/0.23ms  yield 36.10/0.00ms  ntf 2.91/0.03ms  subF 24.84/0.23ms  subU 27.75/0.23ms  wait 58.73/17.50ms  fwait 18.48/17.03ms  qsub 24.71/5.33ms  pwait 0.00/0.00ms
+   threads (per frame: wait n/ms, submit n/ms, present-wait n/ms): t165 w4.0/4.6 q4.0/4.7 p0.00/0.0  t121 w40.0/7.7 q0.0/0.0 p0.00/0.0  t162 w1.0/4.4 q0.0/0.0 p0.00/0.0  t122 w2.2/0.0 q12.5/0.4 p0.00/0.0  t123 w5.6/0.3 q0.0/0.0 p0.00/0.0  t125 w0.5/0.1 q0.0/0.0 p0.00/0.0
+== prof-fp-world  frames    663  fps 32.9  [HBP] sub 4.22 ms flip 2.98 ms (avg/frame)
+== world          pid19:wineserver                   rows  18  run 0.25 ready 0.08 futex 0.00 kern 0.22 trap 0.03
+   blk 232:0.66
+   ksys 1:0.09 232:0.07 0:0.01 46:0.00 96:0.00 228:0.00 20:0.00 233:0.00
+   top (run/ready/kern/trap %) t19 25/7/22/3%(1=9,232=7,0=0,46=0,228=0,20=0,96=0,233=0)
+== world          pid92:Cyberpunk2077.e              rows  18  run 2.35 ready 0.24 futex 27.34 kern 0.85 trap 0.13
+   blk 0:12.00 23:4.94 16:0.09 7:0.01 230:0.01 1:0.00
+   ksys 16:0.42 0:0.12 202:0.08 1:0.02 228:0.02 14:0.00 23:0.00 20:0.00
+   top (run/ready/kern/trap %) t96 88/4/11/5%(202=2,0=0,228=0,1=0,9=0,230=0,14=0,20=0) t92 83/6/16/4%(0=4,202=2,1=0,228=0,47=0,20=0,14=0,7=0) t121 19/0/18/0%(16=18,202=0) t95 2/0/2/0%(0=2,47=0,14=0,1=0,20=0)
+== prof-fp-world  pid19:wineserver                   rows   4  run 0.23 ready 0.07 futex 0.00 kern 0.20 trap 0.04
+#### k7b-4 (k7-base)
+== world          frames   2269  fps 22.9  [HBP] sub 5.89 ms flip 2.98 ms (avg/frame)
+   ring 0.32/0.06ms  tls 0.00/0.00ms  space 1.18/0.57ms  slpR 0.28/0.05ms  slpO 1.20/0.56ms  yield 41.03/0.00ms  ntf 3.39/0.06ms  subF 24.83/0.31ms  subU 28.22/0.31ms  wait 58.67/22.06ms  fwait 19.90/21.33ms  qsub 24.69/6.74ms  pwait 0.00/0.00ms
+   threads (per frame: wait n/ms, submit n/ms, present-wait n/ms): t166 w4.0/5.8 q4.0/5.9 p0.00/0.0  t121 w40.0/9.6 q0.0/0.0 p0.00/0.0  t162 w1.0/5.5 q0.0/0.0 p0.00/0.0  t123 w6.9/0.6 q0.0/0.0 p0.00/0.0  t122 w2.2/0.0 q12.7/0.5 p0.00/0.0  t125 w0.6/0.2 q0.0/0.0 p0.00/0.0
+== prof-fp-world  frames    653  fps 32.4  [HBP] sub 5.10 ms flip 2.90 ms (avg/frame)
+== world          pid19:wineserver                   rows  19  run 0.31 ready 0.10 futex 0.00 kern 0.28 trap 0.10
+   blk 232:0.58
+   ksys 232:0.09 1:0.07 96:0.00 233:0.00 228:0.00 46:0.00 20:0.00
+   top (run/ready/kern/trap %) t19 31/9/28/9%(232=9,1=7,96=0,233=0,228=0,46=0,20=0)
+== world          pid92:Cyberpunk2077.e              rows  19  run 2.24 ready 0.28 futex 27.34 kern 0.92 trap 0.17
+   blk 0:12.07 23:4.91 16:0.11 230:0.01 7:0.01 1:0.00
+   ksys 16:0.40 202:0.17 14:0.05 228:0.03 1:0.02 0:0.02 20:0.01 47:0.00
+   top (run/ready/kern/trap %) t96 85/4/16/3%(202=5,14=2,228=0,0=0,1=0,9=0,16=0,98=0,20=0) t92 81/6/21/7%(202=6,14=1,1=1,228=0,0=0,47=0,20=0,98=0) t121 17/0/17/0%(16=17,202=0) t95 1/0/1/1%(0=0,3=0,47=0)
+== prof-fp-world  pid19:wineserver                   rows   4  run 0.18 ready 0.06 futex 0.00 kern 0.16 trap 0.05
+#### k7l-5 (k6)
+== world          frames   2337  fps 23.5  [HBP] sub 6.70 ms flip 2.93 ms (avg/frame)
+   ring 0.35/0.33ms  tls 0.00/0.00ms  space 0.96/2.68ms  slpR 0.65/0.33ms  slpO 1.47/2.68ms  yield 49.45/0.00ms  ntf 3.21/0.03ms  subF 25.05/0.31ms  subU 28.26/0.23ms  wait 59.14/24.26ms  fwait 21.23/23.76ms  qsub 24.86/7.47ms  pwait 0.00/0.00ms
+   threads (per frame: wait n/ms, submit n/ms, present-wait n/ms): t165 w4.0/6.6 q4.0/6.7 p0.00/0.0  t121 w40.0/9.9 q0.0/0.0 p0.00/0.0  t162 w1.0/6.4 q0.0/0.0 p0.00/0.0  t123 w7.1/0.7 q0.0/0.0 p0.00/0.0  t122 w1.8/0.0 q10.4/0.3 p0.00/0.0  t125 w0.6/0.1 q0.0/0.0 p0.00/0.0
+== prof-fp-world  frames    567  fps 28.0  [HBP] sub 5.88 ms flip 2.92 ms (avg/frame)
+== world          pid92:Cyberpunk2077.e              rows  20  run 2.35 ready 0.26 futex 27.29 kern 0.92 trap 0.12
+   blk 0:11.99 23:4.91 16:0.15 7:0.01 230:0.01 1:0.00
+   ksys 16:0.43 0:0.17 202:0.11 1:0.03 228:0.02 20:0.00 14:0.00 23:0.00
+   top (run/ready/kern/trap %) t96 86/4/13/4%(202=3,0=1,1=0,228=0,9=0,14=0,20=0,16=0,10=0) t92 82/6/18/4%(202=4,0=4,1=1,228=0,14=0,47=0,20=0,9=0,16=0) t121 18/0/18/0%(16=17,202=0) t95 4/0/4/0%(0=4,1=0,47=0)
+== world          pid19:wineserver                   rows  20  run 0.29 ready 0.08 futex 0.00 kern 0.26 trap 0.04
+   blk 232:0.61
+   ksys 1:0.11 232:0.08 0:0.01 228:0.00 96:0.00 46:0.00 20:0.00
+   top (run/ready/kern/trap %) t19 29/8/25/4%(1=11,232=7,0=0,228=0,96=0,46=0,20=0)
+== prof-fp-world  pid92:Cyberpunk2077.e              rows   4  run 2.41 ready 0.23 futex 27.25 kern 0.89 trap 0.12
+#### k7l-6 (k6)
+== world          frames   2451  fps 23.7  [HBP] sub 6.03 ms flip 3.27 ms (avg/frame)
+   ring 0.33/0.09ms  tls 0.00/0.00ms  space 2.34/2.49ms  slpR 0.35/0.08ms  slpO 3.59/2.49ms  yield 52.90/0.00ms  ntf 3.52/0.10ms  subF 24.99/0.50ms  subU 28.50/0.36ms  wait 59.07/23.74ms  fwait 19.89/23.08ms  qsub 24.83/7.13ms  pwait 0.00/0.00ms
+   threads (per frame: wait n/ms, submit n/ms, present-wait n/ms): t165 w4.0/5.9 q4.0/6.1 p0.00/0.0  t121 w40.0/10.4 q0.0/0.0 p0.00/0.0  t162 w1.0/5.4 q0.0/0.0 p0.00/0.0  t123 w5.6/0.6 q0.0/0.0 p0.00/0.0  t122 w1.8/0.0 q10.1/0.6 p0.00/0.0  t125 w0.5/0.4 q0.0/0.0 p0.00/0.0
+== prof-fp-world  frames    481  fps 21.5  [HBP] sub 6.34 ms flip 3.65 ms (avg/frame)
+== world          pid17:vkcube.exe                   rows   1  run 0.00 ready 0.05 futex 0.00 kern 0.00 trap 0.00
+   blk 23:0.94
+   top (run/ready/kern/trap %) t17 0/5/0/0%
+== world          pid19:wineserver                   rows  21  run 0.27 ready 0.10 futex 0.00 kern 0.24 trap 0.03
+   blk 232:0.62
+   ksys 1:0.10 232:0.08 0:0.01 46:0.00 96:0.00 20:0.00 228:0.00 257:0.00
+   top (run/ready/kern/trap %) t19 27/9/24/3%(1=10,232=7,0=1,46=0,228=0,20=0,96=0,257=0)
+== world          pid92:Cyberpunk2077.e              rows  21  run 2.33 ready 0.29 futex 27.35 kern 0.90 trap 0.13
+   blk 0:11.95 23:4.91 16:0.10 230:0.02 7:0.02 1:0.00
+   ksys 16:0.40 0:0.18 202:0.07 1:0.03 228:0.02 9:0.01 23:0.01 14:0.00
+   top (run/ready/kern/trap %) t96 84/4/12/5%(202=1,0=1,1=0,228=0,9=0,16=0,3=0,14=0,20=0,230=0) t92 80/6/15/4%(0=3,202=1,1=0,228=0,14=0,20=0,7=0,47=0,16=0,98=0) t121 13/0/13/0%(16=12,202=0) t95 7/0/7/0%(0=7,1=0,20=0,3=0,47=0,14=0,8=0)
+== prof-fp-world  pid19:wineserver                   rows   4  run 0.30 ready 0.13 futex 0.00 kern 0.27 trap 0.03
+#### k7b-5 (k7-base)
+== world          frames   2403  fps 25.8  [HBP] sub 5.28 ms flip 3.70 ms (avg/frame)
+   ring 0.30/0.07ms  tls 0.00/0.00ms  space 1.34/1.03ms  slpR 0.28/0.06ms  slpO 2.16/1.03ms  yield 39.69/0.00ms  ntf 3.30/0.04ms  subF 24.93/0.29ms  subU 28.23/0.29ms  wait 58.93/20.33ms  fwait 19.19/19.61ms  qsub 24.78/6.19ms  pwait 0.00/0.00ms
+   threads (per frame: wait n/ms, submit n/ms, present-wait n/ms): t165 w4.0/5.2 q4.0/5.3 p0.00/0.0  t121 w40.0/9.5 q0.0/0.0 p0.00/0.0  t162 w1.0/4.8 q0.0/0.0 p0.00/0.0  t122 w1.9/0.0 q10.9/0.5 p0.00/0.0  t125 w0.8/0.2 q0.0/0.0 p0.00/0.0  t123 w4.4/0.2 q0.0/0.0 p0.00/0.0
+== prof-fp-world  frames    508  fps 25.1  [HBP] sub 5.76 ms flip 4.34 ms (avg/frame)
+== world          pid19:wineserver                   rows  18  run 0.28 ready 0.08 futex 0.00 kern 0.25 trap 0.09
+   blk 232:0.63
+   ksys 232:0.09 1:0.05 96:0.00 228:0.00 46:0.00 20:0.00 233:0.00
+   top (run/ready/kern/trap %) t19 27/8/25/8%(232=9,1=5,96=0,228=0,46=0,20=0,233=0)
+== world          pid92:Cyberpunk2077.e              rows  18  run 2.38 ready 0.25 futex 27.30 kern 1.00 trap 0.19
+   blk 0:11.99 23:4.91 16:0.12 7:0.01 230:0.01 1:0.00
+   ksys 16:0.44 202:0.18 14:0.06 228:0.03 1:0.02 0:0.02 20:0.01 23:0.01
+   top (run/ready/kern/trap %) t96 87/4/16/3%(202=6,14=2,228=0,1=0,0=0,16=0,9=0,24=0,20=0,10=0) t92 82/6/21/6%(202=6,14=0,228=0,1=0,0=0,47=0,20=0,98=0,16=0,7=0,186=0) t121 20/0/19/0%(16=19,202=0) t95 3/0/2/2%(3=0,47=0,0=0,14=0,1=0,20=0)
+== prof-fp-world  pid19:wineserver                   rows   4  run 0.28 ready 0.09 futex 0.00 kern 0.24 trap 0.09

@@ -23,6 +23,7 @@
  */
 
 #include <stdint.h>
+#include "kmem.h" /* P1: phys_to_virt()/virt_to_phys() for frame-backed state */
 
 #define USER_VA_BASE 0x1000000000ULL /* 64 GiB */
 #define USER_WINDOW_SIZE 0x800000000ULL /* 32 GiB */
@@ -131,6 +132,9 @@
 #define VM_MAP_FIXED 0x10
 #define VM_MAP_ANONYMOUS 0x20
 #define VM_MAP_NORESERVE 0x40
+/* P1: MAP_FIXED_NOREPLACE, as a vm_mmap request flag only (never recorded
+ * on a region): fixed placement that fails -EEXIST instead of replacing. */
+#define VM_MAP_NOREPLACE 0x100
 
 /* M6/L69: this mapping's page-in failed with EIO.  Set the first time a
  * file-backed page cannot be delivered (a refused exec page, a short read that
@@ -148,15 +152,49 @@
 #define AS_V1 1
 #define AS_V2 2
 
+/* P1 (F1 v1, x86_64 only): the compat address space for Linux-ABI processes.
+ *   user VA     [CP_VA_LO, CP_VA_HI) minus [KIMG_BASE, CP_KHOLE_HI) (kmem.h)
+ *   no-hint mmap: the native MMAP window first-fit (unchanged placement),
+ *               then top-down from CP_MMAP_TOP for what does not fit there
+ *   MAP_FIXED / hints: anywhere in user VA; into the hole -> -ENOMEM
+ *   MAP_FIXED_NOREPLACE over a mapping or the hole -> -EEXIST
+ * CP_COMPAT_AS=0 keeps every process native (A/B vehicle).  CP_COMPAT_FLOOR
+ * is the lowest mappable compat VA (8 GiB = the guard floor of migration
+ * step S6, 0x10000 = F1 final, S8). */
+#define VM_LAYOUT_NATIVE 0
+#define VM_LAYOUT_COMPAT 1
+#define CP_VA_LO 0x10000ULL
+#define CP_VA_HI 0x7ffffffff000ULL
+#define CP_MMAP_TOP 0x7ffff7fff000ULL
+#ifndef CP_COMPAT_AS
+#define CP_COMPAT_AS 1
+#endif
+#ifndef CP_COMPAT_FLOOR
+#define CP_COMPAT_FLOOR CP_VA_LO /* S8: the F1 floor (S6/S7 shipped 8 GiB) */
+#endif
+
 /* --- P2.4 (S4): shared objects (memfd / MAP_SHARED anon) ------------- */
 
-/* Object slots and cap.  64 MiB per object is the S4 acceptance scope
- * (terabytes of sparse VA are fine; resident object pages are frames).
+/* Object slots and cap (the cap is below: 1 GiB since cp/sys; terabytes of
+ * sparse VA are fine; resident object pages are frames).
  * L54: slots raised 64 -> 2048 because RimWorld's XML loader keeps one mapped
  * view per LoadableXmlAsset while it parses the Core defs; the tree has 1,209
  * XML files, and at 64 the pool was exhausted after 8 files so every later
  * mmap returned ENOMEM ("Could not map file"). */
 #define VM_OBJ_MAX 2048
+/* cp/sys (C1-mmu owns this header; minimal diff, docs/cp-sys.md): 1 GiB,
+ * was 64 MiB.  Wine's largest memfd is exactly 64.0 MiB and a GPU buffer
+ * mapping reaches 192 MiB (docs/cyberpunk.md §0.2 item 12), so the old cap
+ * refused the first and the second.  The frame array is sized to the
+ * object, not to this cap (vm_object_create/truncate), so small objects
+ * cost what they did. */
+/* cp/pfx (docs/cp-pfx.md §2): what the cap protects is one contiguous frame
+ * allocation -- the per-object page array, 8 bytes per page (a 1 GiB object
+ * is 513 contiguous frames, a 200 MiB one 101) -- and nothing else: no
+ * structure is sized by VM_OBJ_MAX_FRAMES, the slot table is VM_OBJ_MAX
+ * fixed-size records, and data frames are allocated on first touch.  Measured
+ * by test_vm_big_object_cost (vm_test.c) and linux_probe_bigobj (200 MiB
+ * memfd, shared anon and ext2 file, shared and private). */
 /* The per-object ceiling is set by the largest single mapping a real Linux
  * program asks for, not by the S4 acceptance scope (it used to be 64 MiB,
  * which every compat workload was small enough to fit).
@@ -169,6 +207,13 @@
  * jimage.  Only the page-number array is eager (8 bytes per 4 KiB page: 2 MiB
  * of frames for a 3 GiB reservation); resident pages are still demand-zero,
  * so this costs nothing until something is touched. */
+/* cp-sync (merge of main): cyberpunk had raised the cap to 1 GiB, main to
+ * 4 GiB; the larger one is kept.  Both sides' reasoning holds at 4 GiB: the
+ * frame array is sized to the object (a 4 GiB object is 2049 contiguous
+ * frames = 8 MiB, a 200 MiB one still 101), the slot table is VM_OBJ_MAX
+ * fixed records, data frames are demand-zero, and page counts (<= 2^20) fit
+ * the int fields vm.c keeps.  test_vm_big_object_cost measures the 4 GiB
+ * array. */
 #define VM_OBJ_MAX_BYTES 0x100000000ULL /* 4 GiB */
 #define VM_OBJ_MAX_FRAMES (VM_OBJ_MAX_BYTES / 0x1000)
 
@@ -186,6 +231,12 @@
  * (mount, file handle).  Same demand-fill/shared-frame contract as
  * VM_OBJ_FILE. */
 #define VM_OBJ_NFS 4
+/* cp/ext2b (docs/cp-ext2b.md section 4): a regular file on the /EXT ext2
+ * volume.  Page source: ext2_obj_page() (src/kernel/ext2_obj.c), keyed by the
+ * inode; writable (MAP_SHARED through an O_RDWR fd: written back on msync/
+ * munmap/fsync/close), coherent with write()/truncate().  Same demand-fill
+ * and exec-gate contract as VM_OBJ_FILE / VM_OBJ_NFS. */
+#define VM_OBJ_EXT2 5
 
 /* fcntl(F_ADD_SEALS/F_GET_SEALS) subset (design section 4.3, Linux
  * numbers; SHRINK/GROW enforced at ftruncate, WRITE recorded advisory). */
@@ -217,6 +268,15 @@ struct vm_object {
   uint8_t nfs_mount_idx;
   uint8_t nfs_fh_len;
   uint8_t nfs_fh[64]; /* NFS_FH_MAX */
+  /* cp/ext2b: VM_OBJ_EXT2 source identity (the inode; the cache entry holds
+     an ext2 open reference on it for the object's whole life). */
+  uint32_t ext2_ino;
+  /* cp/pfx: VM_OBJ_FILE write generation.  file_obj_note_write() bumps it
+     (under vm_lock) after a FAT16 write() reached the disk and before it
+     refreshes the frames already cached; a page fill that read the disk
+     under an older generation is not published (it re-reads), so no fill
+     can install bytes from before a write behind the refresh's back. */
+  uint32_t wgen;
 };
 
 struct vm_region {  /* sorted by base; per AS, under proc_lock */
@@ -287,7 +347,63 @@ struct addr_space { /* one per group (leader PCB owned) */
   uint8_t jit_nfree;
   uint64_t jit_free_off[VM_JIT_FREE_MAX];
   uint64_t jit_free_len[VM_JIT_FREE_MAX];
+  /* P1 (F1, docs/cp-address-space.md section 3.5): the layout and its user
+     bounds.  Native: [USER_VA_BASE, USER_VA_TOP).  Compat: [CP_VA_LO or the
+     guard floor, CP_VA_HI) minus the supervisor-only kernel hole
+     [KIMG_BASE, CP_KHOLE_HI).  Set by vm_as_create / vm_as_set_layout. */
+  uint8_t layout;
+  uint64_t va_lo, va_hi;
 };
+
+/* P1 (docs/cp-address-space.md section 2.6): THE predicate for "is `va` a
+ * user address of this address space?" -- every functional user-range check
+ * goes through it instead of comparing against USER_VA_BASE/USER_VA_TOP. */
+static inline int vm_va_is_user(const struct addr_space *as, uint64_t va) {
+  if (!as || !as->va_hi)
+    return va >= USER_VA_BASE && va < USER_VA_TOP;
+  if (va < as->va_lo || va >= as->va_hi)
+    return 0;
+#ifdef __x86_64__
+  if (as->layout == VM_LAYOUT_COMPAT && va >= KIMG_BASE && va < CP_KHOLE_HI)
+    return 0; /* the kernel image: never a user address, never validatable */
+#endif
+  return 1;
+}
+
+/* Does [va, va+len) touch the compat kernel hole? */
+static inline int vm_range_hits_hole(const struct addr_space *as, uint64_t va,
+                                     uint64_t len) {
+#ifdef __x86_64__
+  if (as && as->layout == VM_LAYOUT_COMPAT && len &&
+      va < CP_KHOLE_HI && va + len > KIMG_BASE)
+    return 1;
+#else
+  (void)as; (void)va; (void)len;
+#endif
+  return 0;
+}
+
+/* Is all of [va, va+len) user VA of `as` (len 0 = the single byte va)? */
+static inline int vm_range_is_user(const struct addr_space *as, uint64_t va,
+                                   uint64_t len) {
+  if (len == 0)
+    return vm_va_is_user(as, va);
+  if (va + len < va)
+    return 0;
+  uint64_t lo = (as && as->va_hi) ? as->va_lo : USER_VA_BASE;
+  uint64_t hi = (as && as->va_hi) ? as->va_hi : USER_VA_TOP;
+  if (va < lo || va + len > hi)
+    return 0;
+  return !vm_range_hits_hole(as, va, len);
+}
+
+/* Switch a freshly created AS (no user pages yet) to `layout`.  Returns 0,
+ * or -1 when the arch cannot (ARM, or the A/B identity vehicle). */
+int vm_as_set_layout(struct addr_space *as, int layout);
+/* Arch half of the switch (mmu.c): per-AS PD for the image leaves. */
+int vm_arch_set_compat(struct addr_space *as);
+/* First VA >= va whose leaf might exist (skips absent tables). */
+uint64_t vm_arch_skip_absent(struct addr_space *as, uint64_t va);
 
 /* --- AS lifecycle (vm.c) --------------------------------------------- */
 
@@ -512,6 +628,17 @@ uint64_t vm_object_peek(struct vm_object *o, uint64_t off);
 uint64_t vm_object_peek_locked(struct vm_object *o, uint64_t off);
 uint64_t vm_object_install_page(struct vm_object *o, uint64_t off, uint64_t fr);
 
+/* cp/pfx (FAT write coherence, file_obj.c): `install_page_gen` is
+ * install_page that publishes only while o->wgen == gen; on a newer
+ * generation it frees `fr`, sets *stale and returns 0 (the caller re-reads).
+ * `file_writers` takes one reference on every live VM_OBJ_FILE object whose
+ * source is `cluster` -- cached or already detached by an invalidation but
+ * still mapped -- bumps its wgen, and returns how many it put in `out`. */
+uint32_t vm_object_wgen(struct vm_object *o);
+uint64_t vm_object_install_page_gen(struct vm_object *o, uint64_t off, uint64_t fr,
+                                    uint32_t gen, int *stale);
+int vm_object_file_writers(uint16_t cluster, struct vm_object **out, int max);
+
 /* ftruncate for objects: set the byte size.  Grow allocates a bigger
  * frame array; shrink frees materialized pages above the new size.
  * VM_SEAL_SHRINK/GROW are enforced here (-EPERM). Returns 0 or -errno. */
@@ -548,6 +675,12 @@ int64_t vm_map_fb_obj(struct process *grp, struct vm_object *obj, uint64_t len);
 int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
                 uint32_t flags, int fd, uint64_t offset);
 
+/* cp/wine2: mremap MAYMOVE of a MAP_PRIVATE object mapping -- copy the
+ * private COW pages of [src, src+len) to dst (pages still reading through
+ * the object stay absent).  Returns pages carried or -ENOMEM. */
+int vm_mremap_carry_private(struct process *grp, uint64_t src, uint64_t dst,
+                            uint64_t len);
+
 /* munmap(addr, len): full or partial (region split); resident private
  * pages are freed.  Unaligned / outside a region -> -EINVAL. */
 int vm_munmap_range(struct process *grp, uint64_t addr, uint64_t len);
@@ -579,14 +712,40 @@ uint64_t vm_arch_root_alloc(struct addr_space *as);
 int vm_arch_map(struct addr_space *as, uint64_t va, uint64_t phys,
                 uint16_t prot, uint16_t kind);
 void vm_arch_unmap(struct addr_space *as, uint64_t va);
+/* C1-k4: clear the leaf and flush it locally, but hand the private frame
+ * back (0 for an absent or SHARED-marked leaf) instead of freeing it: the
+ * caller frees it after vm_arch_shootdown(). */
+uint64_t vm_arch_unmap_keep(struct addr_space *as, uint64_t va);
+/* H7-fault round 2 (x86_64): vm_arch_unmap_keep over [va, end), one table at a
+   time: each present leaf is cleared and rel(ctx, frame-or-0) called (0 for a
+   shared or still-COW-shared frame, as unmap_keep returns).  This CPU's TLB is
+   flushed (invlpg, or one CR3 reload past 32 leaves); other CPUs are the
+   caller's (shootdown).  Returns the leaves cleared.
+   pt (may be 0): a page table wholly inside [va, end) is offered to
+   pt(ctx, table) instead; when it returns 1 the table is unhooked from its
+   PD entry and not walked (its leaves are not counted).  The caller then
+   drains it with vm_arch_pt_drain, without vm_lock, and frees the table
+   frame after the shootdown. */
+int vm_arch_zap_range(struct addr_space *as, uint64_t va, uint64_t end,
+                      void (*rel)(void *ctx, uint64_t fr), void *ctx,
+                      int (*pt)(void *ctx, uint64_t pt_phys));
+/* Each present leaf of a table vm_arch_zap_range unhooked: rel(ctx, frame-or-0)
+   by the same rule; the table itself is left as it is.  Returns the leaves. */
+int vm_arch_pt_drain(uint64_t pt_phys, void (*rel)(void *ctx, uint64_t fr), void *ctx);
+/* C1-k4: munmap/mremap cores with the cross-CPU flush (vm.c). */
+void vm_zap_span(struct addr_space *as, uint64_t base, uint64_t len);
+int vm_unmap_span(struct addr_space *as, uint64_t base, uint64_t len);
 void vm_arch_prot(struct addr_space *as, uint64_t va, uint16_t prot);
 /* 0 + *leaf when a page mapping is present; -1 when absent. */
 int vm_arch_walk(struct addr_space *as, uint64_t va, uint64_t *leaf);
+/* P6 (x64; docs/gpu-abi.md §10.4): set an installed leaf's memory type:
+ * 0 = WB, 1 = WC, 2 = UC.  0, or -1 when absent.  x64 only (no ARM definition). */
+int vm_arch_set_cache(struct addr_space *as, uint64_t va, int mode);
 /* GB-245: is `va` a legitimate resume target at CPL `cs` (0x08 kernel /
  * 0x1B user) for this AS?  Present leaves are checked for user/NX; an
  * absent user leaf is allowed only when an executable region covers it
  * (the #PF fills it from the image).  Kernel VAs are validated against the
- * static identity map.  Caller holds no lock; the region read is done under
+ * kernel image [KIMG_BASE, CP_KHOLE_HI) (P1, D6).  Caller holds no lock; the region read is done under
  * proc_lock inside the implementation. */
 int vm_arch_resume_va_ok(struct addr_space *as, uint64_t va, uint64_t cs);
 /* P5 (D5.7): the physical address encoded in a vm_arch_walk leaf (OA
@@ -598,6 +757,19 @@ uint64_t vm_arch_leaf_phys(uint64_t leaf);
  * test wants to prove the copy it installed is writable. */
 int vm_arch_leaf_writable(uint64_t leaf);
 void vm_arch_teardown(uint64_t root_phys, uint16_t asid);
+/* C1-k7 (x86_64): the copy fast path's leaf lookup (vm_user_read/vm_kwrite).
+ * Lock-free, and only for the address space THIS CPU is running (its root
+ * in CR3): the caller holds IF=0 across the lookup and the copy, so a
+ * munmap/mprotect that drops or downgrades the leaf cannot finish (its
+ * shootdown waits for this CPU) before the copy is done.  0 + the physical
+ * address of `va` when the leaf is present, user, (for a write) writable and
+ * not copy-on-write, and in the direct map; -1 otherwise (take the locked
+ * path, which materializes, breaks COW, or refuses). */
+int vm_arch_fast_leaf(struct addr_space *as, uint64_t va, int write, uint64_t *pa);
+/* C1-k7: copy `len` bytes to (write=1) or from user `va` of p's address
+ * space without vm_lock, when every page is already mapped with the access
+ * (vm.c).  0 = done; -1 = not done, use the locked path. */
+int vm_copy_fast(struct process *p, uint64_t va, void *buf, int len, int write);
 void vm_arch_switch(struct addr_space *as);
 /* L85: which CPU still has `root_phys` loaded as its USER translation, or -1
    when none does.  This is GROUND TRUTH, unlike cpu_current_pids: the claim is
@@ -612,6 +784,15 @@ int vm_arch_root_cpu(uint64_t root_phys);
    already there).  Called when a CPU stops running a v2 AS (v1 switch,
    idle entry) and by vm_arch_teardown before freeing tables. */
 void vm_arch_restore_kernel(void);
+/* H8-root: the end-of-run [ROOTFREE] row: teardowns, and how many found
+   another CPU still on the root being freed (docs/cp-root.md). */
+void vm_arch_root_report(void);
+/* H8-root: free the parked roots (vm_arch_teardown parks a root that another
+   CPU may still translate through) that no CPU is on any more.  Never waits;
+   called from the idle loop and from vm_arch_teardown. */
+void vm_arch_reap_roots(void);
+/* H8-root: tag this CPU's next vm_arch_teardown with its caller (rows). */
+void vm_arch_teardown_site(const void *pc);
 void vm_arch_flush_va(struct addr_space *as, uint64_t va);
 
 /* M6/L59: architecturally complete local flush of `as` (CR3 reload).  INVLPG
@@ -619,6 +800,27 @@ void vm_arch_flush_va(struct addr_space *as, uint64_t va);
  * CPU is only guaranteed to be seen after a CR3 reload on every
  * implementation; the retry path uses this once the cheap flush has failed. */
 void vm_arch_reload_cr3(struct addr_space *as);
+/* H7-fault round 2 (H7-07): settle this CPU's owed TLB shootdown now, if one
+   is pending.  For waits that spin with interrupts off (a spinlock, an NFS
+   reply inside a page fault), which cannot take the 0x82 IPI: the sender
+   would otherwise wait for the whole spin.  Safe in any context. */
+void vm_arch_tlb_poll(void);
 void vm_arch_shootdown(struct addr_space *as);
+/* C1-fork (x86_64): copy-on-write sharing of private frames across fork.
+   vm_arch_cow_mark makes a present private leaf read-only + COW (local
+   invlpg only); vm_arch_leaf_cow tests a vm_arch_walk leaf; vm_arch_cow_clear
+   gives the last mapper its writable leaf back.  The mapper counts are vm.c's:
+   vm_cow_frame_get adds a mapper (0, or -1 when the table is full: copy
+   instead), vm_cow_frame_put drops one and returns 1 when the caller was the
+   last (it must free the frame), vm_cow_frame_shared says whether another AS
+   still maps it.  ARM never creates COW leaves (its fork copies). */
+int vm_arch_cow_mark(struct addr_space *as, uint64_t va);
+int vm_arch_leaf_cow(uint64_t leaf);
+int vm_arch_map_cow(struct addr_space *as, uint64_t va, uint64_t phys, uint16_t prot);
+void vm_arch_cow_clear(struct addr_space *as, uint64_t va, uint16_t prot);
+int vm_cow_frame_get(uint64_t phys);
+int vm_cow_frame_put(uint64_t phys);
+int vm_cow_frame_shared(uint64_t phys);
+void vm_cow_frame_put_batch(uint64_t *phys, int n);
 
 #endif /* VM_H */

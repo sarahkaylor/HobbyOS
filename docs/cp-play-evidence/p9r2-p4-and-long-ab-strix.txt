@@ -1,0 +1,104 @@
+# Round 2 extras (strix, integ9 adb81ee4 + cp-play): Gate P4 with the rebuilt XHOBBY, and the long-session scanout/put_image A/B
+
+## Gate P4 (tools/cp/p4/run-p4.sh, HB_SCREEN_SIZE unset)
+[P4G] qemu pid 4170884
+[P4G] clip row: [RI] phase clip total n=70 rel=70 abs=0 dx=850 dy=25 lastabs=0,0 cursor=835,428 inside=1
+[P4G] modes: fullscreen (magenta) window bbox on the glass (0, 0, 1278, 718, 921600)
+[P4G] winecfg dialog face bbox (4, 30, 412, 474, 28824)
+[P4G] winecfg tab libraries: region hash d75e74c3f3ffe411 -> c719327a8929162b
+[P4G] winecfg tab graphics: region hash c719327a8929162b -> 3416f27e601e9893
+[P4G] winecfg tab audio: region hash 3416f27e601e9893 -> f2ff0749893d8a2f
+[P4G] winecfg: 3/3 tab clicks changed the dialog; exit status 0
+[P4G] notepad edit area bbox (0, 0, 1918, 1078, 711524)
+[P4G] notepad: dark pixels in the edit area 6547 -> 7149
+[P4G] notepad exit status 0
+[P4G] NFS failure rows: rpc-no-reply=0 nflk-rc-1=0 nfspipe-stall=0
+[P4G] NOTE: info: fullscreen window bbox (0, 0, 1278, 718, 921600) (expect (0, 0, 1278, 718) at 1280x720)
+[P4G] G1 PASS
+[P4G] G2 PASS
+[P4G] G3 PASS
+
+## same world segment (world start -> 2nd map), both long play.p9 sessions
+r2-play-scan1: game 212-586 s, rows 206, median 19.0, p10 11.4, mean 18.3; [HBP] scanout 5771 putimage 0
+r2-play-put3: game 205-571 s, rows 201, median 19.5, p10 15.0, mean 19.4; [HBP] scanout 0 putimage 5948
+
+## r2-play-put3 (play.p9, P9_SCANOUT=0) summary (rows after the 2nd map at game 577 s are hub frames)
+== fps (winevulkan trace:fps 'approx' rows) in obj/cp-p9/r2-play-put3
+phase           rows          game s   median     p10     min     max    mean
+launch            62          18-112     74.5    61.0     0.0    97.1    73.9
+menu              11         115-128     91.2    82.5    82.4    98.5    89.9
+loading           50         130-204     73.8    24.5     5.7   108.4    69.7
+prof-world-start    14         206-226     11.8     9.8     8.9    16.1    11.9
+world            234         227-630     20.4    15.8     5.7    62.0    24.8
+map               17         244-580     38.0    22.6    19.1    55.7    37.2
+prof-world-mid    14         536-556     22.9    21.5    21.1    23.9    22.8
+== frame pool free MiB ([P8MEM]) by phase: first / min / last
+   boot             31652   31652   31652  (1 rows)
+   launch           30871   29303   29303  (4 rows)
+   menu             29311   29311   29311  (1 rows)
+   loading          28495   27942   27942  (2 rows)
+   prof-world-start   27778   27778   27778  (1 rows)
+   map              27706   27556   27556  (2 rows)
+   world            27614   27559   27563  (10 rows)
+   prof-world-mid   27558   27558   27558  (1 rows)
+== game process ([THRS]): max threads 55, max anon 141078 MiB, max res 4510 MiB (126 rows)
+== phases (host s since boot, game s since launch, name)
+   61.3 0.0 launch
+   175.3 114.0 menu
+   175.3 114.0 menu
+   190.8 129.5 loading
+   266.1 204.8 world
+   267.5 206.2 prof-world-start
+   287.5 226.2 world
+   304.8 243.5 map
+   320.7 259.4 world
+   597.7 536.4 prof-world-mid
+   617.7 556.4 world
+   632.2 570.9 map
+   643.0 581.7 world
+== present path ([HBP] rows, C6-p7's instrument; per phase: rows, frames by path, avg flip/sub/wait us)
+   launch             rows   46  scanout      0  putimage   6905  refused    0  flip    4022  sub    3257  wait      12
+   menu               rows    9  scanout      0  putimage   1620  refused    0  flip    3335  sub    2115  wait      10
+   loading            rows   37  scanout      0  putimage   5182  refused    0  flip    3846  sub    3552  wait      19
+   prof-world-start   rows   11  scanout      0  putimage    266  refused    0  flip    3323  sub    7515  wait       9
+   world              rows  176  scanout      0  putimage   8759  refused    0  flip    2060  sub    3758  wait       7
+   map                rows   13  scanout      0  putimage    993  refused    0  flip    2055  sub    2321  wait       7
+   prof-world-mid     rows   10  scanout      0  putimage    462  refused    0  flip    1842  sub    3748  wait       7
+
+## guest PC profiles, r2-play-put3
+== obj/cp-p9/r2-play-put3/prof-world-start.txt: 1576 vCPU samples
+   kernel          706   44.8 %
+   idle (HLT)      675   42.8 %
+   user            195   12.4 %
+== per vCPU (idle / kernel / user %)
+   cpu0:   90 /   10 /    0
+   cpu1:   29 /   55 /   16
+   cpu2:   31 /   51 /   18
+   cpu3:   37 /   45 /   18
+   cpu4:   41 /   50 /    9
+   cpu5:   40 /   49 /   11
+   cpu6:   35 /   49 /   16
+   cpu7:   39 /   49 /   12
+== kernel, top symbols (% of all samples)
+    17.1 %  spin_acquire_raw
+     3.2 %  sched_wake_idle_cpu
+     1.8 %  general_interrupt_inner
+     1.7 %  schedule
+== obj/cp-p9/r2-play-put3/prof-world-mid.txt: 1576 vCPU samples
+   idle (HLT)      818   51.9 %
+   kernel          517   32.8 %
+   user            241   15.3 %
+== per vCPU (idle / kernel / user %)
+   cpu0:   87 /   13 /    0
+   cpu1:   35 /   45 /   20
+   cpu2:   44 /   38 /   18
+   cpu3:   46 /   39 /   15
+   cpu4:   51 /   35 /   14
+   cpu5:   53 /   31 /   15
+   cpu6:   47 /   29 /   24
+   cpu7:   51 /   34 /   15
+== kernel, top symbols (% of all samples)
+     8.4 %  spin_acquire_raw
+     2.6 %  virtio_gpu_x64_transact_ex
+     2.2 %  linux_compat_dispatch
+     1.8 %  safe_wfi

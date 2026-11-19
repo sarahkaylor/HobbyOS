@@ -1,0 +1,64 @@
+# rsize_guard NB_BIG=1 on the fixed tree (cp-nfs2 12577485 = hard mount 2555d642 + bench), strix, 2-3 other lanes guests running
+rsize_scan: PASS (32 KiB NFS READ paths intact)
+rsize_guard: G6 6/6 concurrent readers, every 4 KiB page correct
+rsize_guard: G7 6/6 readers of 6 files, every page correct; read_kib=12288 fetched_kib=12288 rpcs=384 amp_pct=100 hit_pct_est=93
+rsize_guard: G8 one 176 MiB read() hash match, stat times, 5/5 symlinked paths, big5g sha256 match
+rsize_guard: G9 5/5 injected-loss rows right (inject.blackout.read pages=1024 bad=0 short=0 eio=0 ms=8927)
+rsize_guard: [NFS] fsinfo rc=0 rtmax=32768 rtpref=32768 rsize=32768
+rsize_guard: G4 1/1 sampled 64 KiB reads: rs=32768 issued<=2
+rsize_guard: G5 172740 READ RPCs for 5660291906 bytes: 32767 bytes/RPC, 2.0 RPCs per 64 KiB
+rsize_guard: [NB] seq65536 bytes=67108864 ms=276 MBps=243.14 fnv=0x7a56a810ac49cd58 match ok
+rsize_guard: [NB] one176m bytes=184550153 want=184550153 ms=428 MBps=431.19 sha256=4436465b87fd649c04b0d91f16a1eed8b5e5af0027fcd8062ee8da252ec1fab9 match reads=1 ok
+rsize_guard: [NB] big5g bytes=5368721465 want=5368721465 ms=29420 MBps=182.48 sha256=a520d5a74db66de9c06bd8018b11dee2b95444e005a5cc17976d9d5c33e8b935 match fstat=ok seek_end=ok page_past_4g=ok ok
+rsize_guard: PASS (/home/sarah/cp/lanes/nfs2-injf)
+rc=0
+
+## console: [NB] rows, inject/hard rows, last [NFSNET]/[NFSRA]
+[NB] cp/nfs throughput bench
+[NFS] fsinfo rc=0 rtmax=32768 rtpref=32768 rsize=32768
+[NB] mount 10.0.2.2:/srv/nfs/cp-nfs-bench-nfs2-injf -> /NFS ok
+[NB] seq65536 bytes=67108864 ms=276 MBps=243.14 fnv=0x7a56a810ac49cd58 match ok
+[NB] seq4096 bytes=16777216 ms=24 MBps=699.05 fnv=0xb4a2bb4ec2694432 ok
+[NB] seq1344 bytes=4194304 ms=8 MBps=524.28 fnv=0x5d242dd7ec48c3b6 ok
+[NB] conc6 a=6 pages=6144 bad=0 first_bad=- ok
+[NB] multi6.ra read_kib=12288 fetched_kib=12288 rpcs=384 amp_pct=100 hit_pct_est=93
+[NB] multi6 a=6 pages=3072 bad=0 first_bad=- ok
+[NB] fstat rc=0 atime=1700000001 mtime=1600000002 ctime=1794854935 want=1700000001/1600000002/1794854935 ok
+[NB] stat rc=0 atime=1700000001 mtime=1600000002 ctime=1794854935 want=1700000001/1600000002/1794854935 ok
+[NB] symlink path=/NFS/sub/data.bin stat=0 size=2097152 open=0 bytes=2097152 match ok
+[NB] symlink path=/NFS/dlink/data.bin stat=0 size=2097152 open=0 bytes=2097152 match ok
+[NB] symlink path=/NFS/d2/data.bin stat=0 size=2097152 open=0 bytes=2097152 match ok
+[NB] symlink path=/NFS/sub/up/sub/data.bin stat=0 size=2097152 open=0 bytes=2097152 match ok
+[NB] symlink path=/NFS/sub/up/d2/data.bin stat=0 size=2097152 open=0 bytes=2097152 match ok
+[NB] one176m bytes=184550153 want=184550153 ms=428 MBps=431.19 sha256=4436465b87fd649c04b0d91f16a1eed8b5e5af0027fcd8062ee8da252ec1fab9 match reads=1 ok
+[NB] big5g bytes=5368721465 want=5368721465 ms=29420 MBps=182.48 sha256=a520d5a74db66de9c06bd8018b11dee2b95444e005a5cc17976d9d5c33e8b935 match fstat=ok seek_end=ok page_past_4g=ok ok
+[NFSINJ] every.5 every=5 dropped=0
+[NB] inject.every5.read pages=1024 bad=0 short=0 eio=0 ms=2949 read ok
+[NB] inject.every5.mmap pages=1024 bad=0 short=0 eio=0 ms=2596 mmap ok
+[NFSINJ] off every=0 dropped=64
+[NFSINJ] blackout.8000 every=0 dropped=64
+[NFSHARD] retry op=READ off=0 want=32768 try=1 waited_ms=0 total=1
+[NFSHARD] retry op=READ off=0 want=32768 try=2 waited_ms=501 total=2
+[NFSHARD] retry op=READ off=0 want=32768 try=3 waited_ms=1252 total=3
+[NFSHARD] retry op=READ off=0 want=32768 try=4 waited_ms=3756 total=4
+[NFSHARD] retry op=READ off=0 want=32768 try=5 waited_ms=5257 total=5
+[NB] inject.blackout.read pages=1024 bad=0 short=0 eio=0 ms=8927 read ok
+[NFSINJ] off every=0 dropped=79
+[NFSINJ] blackout.8000 every=0 dropped=79
+[NFSHARD] retry op=READ off=0 want=32768 try=1 waited_ms=0 total=6
+[NFSHARD] retry op=READ off=0 want=32768 try=2 waited_ms=501 total=7
+[NFSHARD] retry op=READ off=0 want=32768 try=3 waited_ms=1253 total=8
+[NFSHARD] retry op=READ off=0 want=32768 try=4 waited_ms=3757 total=9
+[NFSHARD] retry op=READ off=0 want=32768 try=5 waited_ms=5258 total=10
+[NB] inject.blackout.mmap pages=1024 bad=0 short=0 eio=0 ms=9135 mmap ok
+[NFSINJ] off every=0 dropped=94
+[NFSINJ] blackout.8000 every=0 dropped=94
+[NFSHARD] retry op=LOOKUP off=0 want=0 try=1 waited_ms=0 total=11
+[NFSHARD] retry op=LOOKUP off=0 want=0 try=2 waited_ms=1504 total=12
+[NFSHARD] retry op=LOOKUP off=0 want=0 try=3 waited_ms=3258 total=13
+[NFSHARD] retry op=LOOKUP off=0 want=0 try=4 waited_ms=5262 total=14
+[NB] inject.blackout.open pages=1024 bad=0 short=0 eio=0 ms=8289 read ok
+[NFSINJ] off every=0 dropped=107
+[NB] done rc=0
+[NFSNET] frags=3974961 done=172825 drop_timeout=0 drop_evict=0 drop_full=0 drop_bad=0 nosock=0 dgfull=0 stalls=39 inj_dropped=94
+[NFSRA] hits=11335 fills=1478 saved_kib=139322 misses=450 seqfills=344 fill_kib=94092 direct=0 hit_pct=96 stalls=39 big_kib=5433344 tail_kib=128 wins=1482 shrunk=0 alloc_us=516 fill_us=23458326

@@ -1,0 +1,71 @@
+# Kernel unit tiers
+# L = cp-regress on integ11 13dc693b (strix:~/cp/lanes/regress); R = main 3c1cb61f (strix:~/cp/lanes/regress-ref)
+# host: strix (Ryzen Zen 5, KVM for x86_64, TCG for aarch64), QEMU 10.2.1, guest <= 12 GiB
+
+
+=== L arm_unit
+== arm_unit start 21:31:57 tree=/home/sarah/cp/lanes/regress cmd=env UNIT_TESTS_TIMEOUT=1200 bash ./run_unit_tests.sh
+      1 EXPECT_EQ FAILED: gpu_abi_ioctl(0, 3, GPU_IOC_SUBMIT2, 0x1000) == -EINVAL at src/kernel/gpu_abi_m2_test.c:64
+      1 EXPECT_EQ FAILED: gpu_abi_pages_for(64ull * 1024 * 1024 + 1) == 0 at src/kernel/virtio_gpu_test.c:214
+      1 EXPECT_EQ FAILED: gpu_abi_res_ok(&r) == 0 at src/kernel/virtio_gpu_test.c:244
+      1 Tests failed!
+      1 Tests failed: 3
+      1 Tests run:    436
+      1 UNIT TESTS FAILED
+  Running test_elf_dispatch_track...
+
+=== L arm_unit_fix
+== arm_unit_fix start 21:37:48 tree=/home/sarah/cp/lanes/regress cmd=bash -c UNIT_TESTS_TIMEOUT=1200 bash ./run_unit_tests.sh
+      1 Tests failed: 0
+      1 Tests run:    436
+      1 UNIT TESTS PASSED
+  Running test_elf_dispatch_track...
+
+=== L unit_intel_fix
+== unit_intel_fix start 21:43:38 tree=/home/sarah/cp/lanes/regress cmd=bash -c rm -f hobbyos.elf; UNIT_TESTS_TIMEOUT=900 bash ./run_unit_tests_intel.sh
+      1 Tests failed: 0
+      1 Tests run:    463
+      1 UNIT TESTS PASSED
+  Running test_badvec_fatal_frame_window...
+
+=== R arm_unit_win
+== arm_unit_win start 21:42:12 tree=/home/sarah/cp/lanes/regress-ref cmd=bash -c UNIT_TESTS_TIMEOUT=1200 bash ./run_unit_tests.sh
+      1 Build failed!
+      1 src/kernel/unix_test.c:30:26: error: call to undeclared function 'phys_to_virt'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+      1 src/kernel/unix_test.c:36:16: error: call to undeclared function 'virt_to_phys'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+
+=== R arm_unit_win2
+== arm_unit_win2 start 21:55:48 tree=/home/sarah/cp/lanes/regress-ref cmd=bash -c UNIT_TESTS_TIMEOUT=1200 bash ./run_unit_tests.sh
+      1 Tests timed out!
+  Running test_fs_ftruncate_extend_then_write...
+
+=== R unit_intel
+== unit_intel start 21:44:16 tree=/home/sarah/cp/lanes/regress-ref cmd=bash -c rm -f hobbyos.elf; UNIT_TESTS_TIMEOUT=900 bash ./run_unit_tests_intel.sh
+      1 EXPECT_EQ FAILED: badvec_frame_window(0x23FFE2A0ull) == 1 at src/kernel/arch/x64/trap_badvec_arm_test.c:73
+      1 EXPECT_EQ FAILED: badvec_should_arm(0x23FFE280ull, 0x08, 13, 1, 55247, 0, 0, 0) == 1 at src/kernel/arch/x64/trap_badvec_arm_test.c:54
+      1 EXPECT_EQ FAILED: badvec_should_arm(0x23FFE280ull, 0x08, 13, 1, 9333, 0, 0, 0) == 1 at src/kernel/arch/x64/trap_badvec_arm_test.c:31
+      1 FAIL: interrupts stayed masked longer than the budget (see
+      1 Tests failed!
+      1 Tests failed: 4
+      1 Tests run:    448
+      1 UNIT TESTS FAILED
+  Running test_badvec_fatal_frame_window...
+
+=== ARM unit link, before (no-assert relink of 13dc693b MODE=unit_tests)
+13dc693b MODE=unit_tests ARCH=arm, relinked with linker.ld minus its ASSERT (obj from 21:29):
+000000004570cdb0 B __bss_end
+0000000040200000 B __bss_start
+000000004578cdb0 B __stack_top
+ASSERT line: __bss_end <= 0x45600000 -> over by 1101232 bytes
+largest unit-only .bss (llvm-nm -S, obj/arm/unix_test.o): test_unix_stream_basic.big 524304, .drain 524288, test_unix_park_marks.big 524288
+
+=== L arm-unit-build.log (13dc693b)
+ld.lld: error: kernel .bss exceeds the limine placement window (docs/blk-cache.md section 11)
+
+=== R arm-unit-build.log (3c1cb61f)
+ld.lld: error: kernel .bss exceeds the limine placement window (docs/blk-cache.md section 11)
+
+=== after (cp-regress)
+cp-regress f307b9f5 (unix_test frame-pool scratch), MODE=unit_tests ARCH=arm, stock linker.ld (ASSERT on): link OK
+000000004558cda0 B __bss_end   (0x45600000 - 0x4558cda0 = 471648 bytes under the line)
+000000004560cda0 B __stack_top

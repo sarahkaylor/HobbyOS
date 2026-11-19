@@ -1,0 +1,98 @@
+=== ext2_gate: boot 1 (CPDATA=/home/sarah/cp/lanes/exec/obj/ext2-gate/cpdata.img) ===
+boot 1: 75 ok rows; t3_linux_probe: PASS — ext2 reached its done marker
+[HOST] ok   e2fsck -fn rc=0
+[HOST] ok   /lp names = [big.bin dosdevices hello.hard hello.txt link_dir link_fast link_slow phase1.done sparse5g sub sub2 trunc.bin trunc2.bin victim.txt ]
+[HOST] ok   lp/big.bin sha256 d6b7c694481f75abb99600c37262aa35c4780153a569f6fbee92c044ecc1d16d (1048909 bytes)
+[HOST] ok   lp/hello.hard sha256 e3612b8d5957ad6528692ff73f8a6884d5081810b5174d02f2a289329c4c002f (20 bytes)
+[HOST] ok   lp/hello.txt sha256 e3612b8d5957ad6528692ff73f8a6884d5081810b5174d02f2a289329c4c002f (20 bytes)
+[HOST] ok   lp/phase1.done sha256 4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865 (2 bytes)
+[HOST] ok   lp/sub2/r4.txt sha256 fa347eb70a4d91f765ee8d48e892e3a7e07df3d4d76d1feb2a0feea19d9c83f6 (3 bytes)
+[HOST] ok   lp/trunc.bin sha256 f4643696243916d8c71d2a9a0d096a9653a2cdf3219aa0f8dc86590e992d18aa (8192 bytes)
+[HOST] ok   lp/trunc2.bin sha256 bccabc0e15758c541e47a63cab5addd263c38e8110d8a8fd5d73e6c41ffaed89 (100 bytes)
+[HOST] ok   lp/victim.txt sha256 1d054714357ce5ee01723ed91fcaa69206e221faaf9c1fad64f73be2e5d051da (12 bytes)
+[HOST] ok   lp is a directory
+[HOST] ok   lp/sub is a directory
+[HOST] ok   lp/sub2 is a directory
+[HOST] ok   lp/sub2/inner_moved is a directory
+[HOST] ok   lp/dosdevices is a directory
+[HOST] ok   lp/link_fast -> hello.txt
+[HOST] ok   lp/link_slow -> sub2/fghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnop
+[HOST] ok   lp/link_dir -> sub
+[HOST] ok   lp/dosdevices/z: -> /
+[HOST] ok   lp/dosdevices/c: -> ../sub
+[HOST] ok   lp/gone.txt absent
+[HOST] ok   lp/gonedir absent
+[HOST] ok   lp/tmp.bin absent
+[HOST] ok   lp/r1.txt absent
+[HOST] ok   lp/r2.txt absent
+[HOST] ok   lp/repl.txt absent
+[HOST] ok   lp/sub/r3.txt absent
+[HOST] ok   lp/sub/inner absent
+[HOST] ok   hello.hard = inode 16386, Links: 2
+[HOST] ok   sparse5g Size: 5368709135
+[HOST] ok   sparse5g lblk 1310720 -> pblk 197385 holds 'SPARSE-AT-5GiB'
+[HOST] ok   sparse5g lblk 1000 is a hole
+[HOST] info sparse5g Blockcount: 32 (512-byte units)
+=== ext2_gate: boot 2 (CPDATA=/home/sarah/cp/lanes/exec/obj/ext2-gate/cpdata.img) ===
+boot 2: 14 ok rows; t3_linux_probe: PASS — ext2 reached its done marker
+[HOST] ok   boot 2 ran phase 2 (persistence)
+[HOST] ok   e2fsck -fn rc=0
+[HOST] ok   /lp names = [big.bin dosdevices hello.hard hello.txt link_dir link_fast link_slow phase1.done phase2.done sparse5g sub sub2 trunc.bin trunc2.bin victim.txt ]
+[HOST] ok   lp/big.bin sha256 d6b7c694481f75abb99600c37262aa35c4780153a569f6fbee92c044ecc1d16d (1048909 bytes)
+[HOST] ok   lp/hello.hard sha256 13776430ffc6d7f0827af239ac714fc9c451e1d77d274604a22edf9bb55e0521 (27 bytes)
+[HOST] ok   lp/hello.txt sha256 13776430ffc6d7f0827af239ac714fc9c451e1d77d274604a22edf9bb55e0521 (27 bytes)
+[HOST] ok   lp/phase1.done sha256 4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865 (2 bytes)
+[HOST] ok   lp/phase2.done sha256 53c234e5e8472b6ac51c1ae1cab3fe06fad053beb8ebfd8977b010655bfdd3c3 (2 bytes)
+[HOST] ok   lp/sub2/r4.txt sha256 fa347eb70a4d91f765ee8d48e892e3a7e07df3d4d76d1feb2a0feea19d9c83f6 (3 bytes)
+[HOST] ok   lp/trunc.bin sha256 f4643696243916d8c71d2a9a0d096a9653a2cdf3219aa0f8dc86590e992d18aa (8192 bytes)
+[HOST] ok   lp/trunc2.bin sha256 bccabc0e15758c541e47a63cab5addd263c38e8110d8a8fd5d73e6c41ffaed89 (100 bytes)
+[HOST] ok   lp/victim.txt sha256 1d054714357ce5ee01723ed91fcaa69206e221faaf9c1fad64f73be2e5d051da (12 bytes)
+[HOST] ok   lp is a directory
+[HOST] ok   lp/sub is a directory
+[HOST] ok   lp/sub2 is a directory
+[HOST] ok   lp/sub2/inner_moved is a directory
+[HOST] ok   lp/dosdevices is a directory
+[HOST] ok   lp/link_fast -> hello.txt
+[HOST] ok   lp/link_slow -> sub2/fghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnop
+[HOST] ok   lp/link_dir -> sub
+[HOST] ok   lp/dosdevices/z: -> /
+[HOST] ok   lp/dosdevices/c: -> ../sub
+[HOST] ok   lp/gone.txt absent
+[HOST] ok   lp/gonedir absent
+[HOST] ok   lp/tmp.bin absent
+[HOST] ok   lp/r1.txt absent
+[HOST] ok   lp/r2.txt absent
+[HOST] ok   lp/repl.txt absent
+[HOST] ok   lp/sub/r3.txt absent
+[HOST] ok   lp/sub/inner absent
+[HOST] ok   hello.hard = inode 16386, Links: 2
+[HOST] ok   sparse5g Size: 5368709135
+[HOST] ok   sparse5g lblk 1310720 -> pblk 197385 holds 'SPARSE-AT-5GiB'
+[HOST] ok   sparse5g lblk 1000 is a hole
+[HOST] info sparse5g Blockcount: 32 (512-byte units)
+[HOST] ok   built glibc 2.31 hs (static-pie) + hd (dynamic, PT_INTERP /EXT/lpx/glibc/ld-linux-x86-64.so.2)
+[HOST] ok   staged lpx/{bin,glibc} with debugfs; e2fsck -fn rc=0
+[HOST] info staged /lpx/bin/hs mode 0755 size 914592
+[HOST] info staged /lpx/bin/hd mode 0755 size 8960
+[HOST] info staged /lpx/glibc/ld-linux-x86-64.so.2 mode 0755 size 191504
+[HOST] info staged /lpx/glibc/libc.so.6 mode 0755 size 2029592
+=== ext2_gate: boot 3 (linux_probe_ext2b + helper + glibc hs/hd from /EXT) ===
+boot 3: 125 main ok rows, 9 helper ok rows; t3_linux_probe: PASS — ext2b reached its done marker
+[HOST] ok   e2fsck -fn rc=0 (after ext2b)
+[HOST] ok   /lpx/attr.f Mode: 0751
+[HOST] ok   /lpx/attr.f User: 1234
+[HOST] ok   /lpx/attr.f Group: 5678
+[HOST] ok   /lpx/attr.f atime: 0x3b9aca00
+[HOST] ok   /lpx/attr.f mtime: 0x499602d2
+[HOST] ok   /lpx/attr.l User: 4242
+[HOST] ok   /lpx/attr.l Group: 4444
+[HOST] ok   /lpx/attr.l mtime: 0x00000378
+[HOST] ok   /lpx/attr.d Mode: 02775
+[HOST] ok   /lpx/attr.d User: 7
+[HOST] ok   /lpx/attr.d Group: 8
+[HOST] ok   m.bin sha256 569c9c6e9635e74792294b8cd20b098e8572f8a0383b796dd94e685e8e82d719 == m.expect (write()s + MAP_SHARED stores, 12388 bytes)
+[HOST] ok   m.bin holds the mapped stores (MAPPED-STORE-1 MAPPED-STORE-3 MAPPED-STORE-2 )
+[HOST] ok   unl.bin (unlinked while mapped) is gone; e2fsck saw no orphan
+[HOST] ok   /lpx/out/dyn.txt: ok dyn pid=5 libc=2.31 libcpath=/EXT/lpx/glibc/libc.so.6 argv0=/EXT/lpx/bin/hd
+[HOST] ok   /lpx/out/static.txt: ok static pid=4 libc=2.31 libcpath=static argv0=/EXT/lpx/bin/hs (glibc static-pie, 914592 bytes, from ext2)
+ext2_gate: PASS

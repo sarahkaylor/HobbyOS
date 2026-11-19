@@ -1,0 +1,283 @@
+# C3-pfx run 7: THE GATE RUN, full two boots on cp-pfx d46f438e (merge of cyberpunk 030a7f10, C1-k4 in) (strix, 2026-11-16, up to 4 concurrent guests on the box)
+# harness grade output (ps rows dropped):
+== build: kernel + disk (intel, test), winep2.bin, winprobe.exe
+== export: /srv/nfs/cp-pfx-p2 (Wine stage + winprobe.exe), 127.0.0.1 only, ro
+== exports.sh: add /srv/nfs/cp-pfx-p2 ok (non-cp lines unchanged)
+== exported: /srv/nfs/cp-pfx-p2
+== stage: glibc 2.31 under /LIB64 + /lib64/ld + WINEP2.BIN + WAVE.CFG
+mkcpdata: /home/sarah/cp/lanes/pfx/obj/wine-p2/cpdata-pfx.img (8G sparse) — ext_attr resize_inode filetype sparse_super large_file
+== boot (deadline 9000s, under a QEMU slot, tools/cp/qemu-slot.sh), CPDATA=/home/sarah/cp/lanes/pfx/obj/wine-p2/cpdata-pfx.img
+qemu-slot: all 4 slots busy; waiting
+qemu-slot: slot 3 of 4 held by pid 181169 20:41:44
+== e2fsck -fn after b1: rc=0 (cpdata: 1023/524288 files (0.2% non-contiguous), 91202/2097152 blocks)
+== manifest b1: 1012 entries, 216656812 file bytes
+== boot (deadline 9000s, under a QEMU slot, tools/cp/qemu-slot.sh), CPDATA=/home/sarah/cp/lanes/pfx/obj/wine-p2/cpdata-pfx.img
+qemu-slot: slot 3 of 4 held by pid 318954 21:20:29
+== e2fsck -fn after b2: rc=0 (cpdata: 1025/524288 files (0.2% non-contiguous), 91542/2097152 blocks)
+== manifest b2: 1014 entries, 218041260 file bytes
+
+== the P2 rows
+[P2] winep2 launcher (C2-wine2)
+[P2] mount 10.0.2.2:/srv/nfs/cp-pfx-p2 -> /CP ok
+[P2] prefix-on-ext2 phase 2: WINEPREFIX=/EXT/pfx
+[P2] begin pfxls-before : pfxls /EXT/pfx
+[P2] end pfxls-before status=0 ms=76
+[P2] begin echo : wine cmd /c echo hello
+hello
+[P2] end echo status=0 ms=17458
+[P2] wait for wineboot.exe to exit: left=0 ms=1
+[P2] begin winprobe : wine Z:\CP\WPROBE\winprobe.exe
+[WP] done rc=0
+[P2] end winprobe status=0 ms=2075
+[P2] begin copy : wine cmd /c copy /y Z:\CP\WPROBE\winprobe.exe C:\winprobe.exe
+[P2] end copy status=0 ms=5810
+[P2] begin winprobe-c : wine C:\winprobe.exe
+[WP] done rc=0
+[P2] end winprobe-c status=0 ms=2327
+[P2] begin kill : wineserver -k
+[P2] end kill status=0 ms=11666
+[P2] quiesce after kill: extra=0
+[P2] begin pfxls-after : pfxls /EXT/pfx
+[P2] end pfxls-after status=0 ms=69
+[P2] begin sync : pfxsync
+[P2] end sync status=0 ms=441
+[P2] sync done
+[P2] done
+
+G1 wine cmd /c echo hello prints hello : PASS   ([P2] end echo status=0 ms=17458)
+G2 winprobe.exe every marker + exit 0  : PASS   ([P2] end winprobe status=0 ms=2075; 41 markers, 0 missing/failed)
+G3 wineserver -k leaves no processes   : PASS   ([P2] end kill status=0 ms=11666; [P2] ps-extra count=0)
+extra: winprobe from C:\ (the prefix) : [WP] done rc=0 ([P2] end winprobe-c status=0 ms=2327)
+
+== ps before / after
+
+raw serial: /home/sarah/cp/lanes/pfx/obj/wine-p2/serial.log
+
+== pfx: boot 1 rows
+[P2] winep2 launcher (C2-wine2)
+[P2] mount 10.0.2.2:/srv/nfs/cp-pfx-p2 -> /CP ok
+[P2] prefix-on-ext2 phase 1: WINEPREFIX=/EXT/pfx
+[P2] begin wineboot : wineboot -i
+[P2] end wineboot status=53 ms=304761
+[P2] quiesce after wineboot: extra=0
+[P2] begin pfxls : pfxls /EXT/pfx
+[P2] end pfxls status=0 ms=520
+[P2] begin sync : pfxsync
+[P2] end sync status=0 ms=265
+[P2] sync done
+[P2] done
+P1 boot 1 built the prefix on ext2       : PASS   (missing: none; created-config rows 1, has-been-updated rows 1; 1012 entries)
+P2 boot 1 shut down cleanly             : PASS   ([P2] quiesce after wineboot: extra=0; timeouts/leftovers 0; 2 halt rows)
+== pfx: boot 2 changed entries outside the allowed set: 0; gone: 0
+== pfx: entries new in boot 2: pfx/drive_c/winprobe.exe pfx/reg80000.tmp 
+P3 boot 2 did not re-initialise         : PASS   (has-been-updated 0, created-config 0; .update-timestamp '1794762086' -> '1794762086'; 1012 entries kept; hives re-saved: none)
+P4 boot 2: G1 G2 G3 + winprobe from C:  : PASS   (PASS PASS PASS, C:\winprobe.exe on ext2 PASS)
+P5 e2fsck -fn clean after both boots    : PASS   (b1 rc=0, b2 rc=0)
+== exports.sh: remove /srv/nfs/cp-pfx-p2 ok (non-cp lines unchanged)
+== removed /srv/nfs/cp-pfx-p2
+
+# boot 1 key rows
+[EXT2] mounted /EXT bs=4096 blocks=2097152 free=2059633 inodes=524288 ifree=524277 groups=64 isz=256 rw filetype large_file
+[P2] winep2 launcher (C2-wine2)
+[P2] mount 10.0.2.2:/srv/nfs/cp-pfx-p2 -> /CP ok
+[P2] prefix-on-ext2 phase 1: WINEPREFIX=/EXT/pfx
+[P2] begin wineboot : wineboot -i
+wine: created the configuration directory '/EXT/pfx'
+[P2] end wineboot status=53 ms=304761
+002c:trace:wineboot:update_wineprefix wine: configuration in L"/EXT/pfx" has been updated.
+[P2] quiesce after wineboot: extra=0
+[P2] begin pfxls : pfxls /EXT/pfx
+[PFX] dir /EXT/pfx/drive_c/windows/system32 open=1 entries=797
+[PFX] dir /EXT/pfx/drive_c/windows open=1 entries=22
+[PFX] /EXT/pfx/dosdevices entry .
+[PFX] /EXT/pfx/dosdevices entry ..
+[PFX] /EXT/pfx/dosdevices entry c:
+[PFX] /EXT/pfx/dosdevices entry z:
+[PFX] dir /EXT/pfx/dosdevices open=1 entries=4
+[PFX] /EXT/pfx/ entry .
+[PFX] /EXT/pfx/ entry ..
+[PFX] /EXT/pfx/ entry dosdevices
+[PFX] /EXT/pfx/ entry drive_c
+[PFX] /EXT/pfx/ entry .update-timestamp
+[PFX] /EXT/pfx/ entry system.reg
+[PFX] /EXT/pfx/ entry userdef.reg
+[PFX] /EXT/pfx/ entry user.reg
+[PFX] dir /EXT/pfx/ open=1 entries=8
+[PFX] /EXT/pfx/drive_c/windows/system32/kernel32.dll stat=0 size=552960 mode=100644 open=1 read=4 head=4d5a7800
+[PFX] /EXT/pfx/drive_c/windows/system32/kernelbase.dll stat=0 size=1499136 mode=100644 open=1 read=4 head=4d5a7800
+[PFX] /EXT/pfx/drive_c/windows/system32/ntdll.dll stat=0 size=925696 mode=100644 open=1 read=4 head=4d5a7800
+[PFX] /EXT/pfx/drive_c/windows/system32/start.exe stat=0 size=53248 mode=100755 open=1 read=4 head=4d5a7800
+[PFX] /EXT/pfx/drive_c/windows/system32/cmd.exe stat=0 size=299008 mode=100755 open=1 read=4 head=4d5a7800
+[PFX] /EXT/pfx/dosdevices/c:/windows/system32/kernel32.dll stat=0 size=552960 mode=100644 open=1 read=4 head=4d5a7800
+[PFX] /EXT/pfx/.update-timestamp stat=0 size=12 mode=100644 open=1 read=4 head=31373934
+[PFX] /EXT/pfx/system.reg stat=0 size=1830541 mode=100644 open=1 read=4 head=57494e45
+[PFX] update-timestamp="1794762086" wine.inf stat=0 mtime=1794762086
+[P2] end pfxls status=0 ms=520
+[P2] begin sync : pfxsync
+[PFX] sync rc=0 errno=0
+[P2] end sync status=0 ms=265
+[P2] sync done
+[P2] done
+System halt.
+System halt from CPU [HALT-CD] cpu=3 free=512 alloc=0 exited=0 running=0 blocked=0 other=0 as_col=0 as_recl=0 as_noas=0
+
+# boot 2 key rows
+[EXT2] mounted /EXT bs=4096 blocks=2097152 free=2005950 inodes=524288 ifree=523265 groups=64 isz=256 rw filetype large_file
+[P2] winep2 launcher (C2-wine2)
+[P2] mount 10.0.2.2:/srv/nfs/cp-pfx-p2 -> /CP ok
+[P2] prefix-on-ext2 phase 2: WINEPREFIX=/EXT/pfx
+[P2] begin pfxls-before : pfxls /EXT/pfx
+[P2] end pfxls-before status=0 ms=76
+[P2] begin echo : wine cmd /c echo hello
+hello
+[P2] end echo status=0 ms=17458
+[P2] wait for wineboot.exe to exit: left=0 ms=1
+[P2] begin winprobe : wine Z:\CP\WPROBE\winprobe.exe
+[WP] winprobe start
+[WP] PASS W1 %gs:[0x30] non-null (0x7ffc0000)
+[WP] PASS W1 %gs:[0x30] == NtCurrentTeb() (0x7ffc0000)
+[WP] PASS W1 TEB->Self == TEB (0x7ffc0000)
+[WP] PASS W1 TEB ClientId.UniqueProcess (284)
+[WP] PASS W1 TEB ClientId.UniqueThread (288)
+[WP] PASS W1 TEB->ProcessEnvironmentBlock (0x7ffd0000)
+[WP] PASS W1 TIB stack bounds contain the stack (0x7ffffe1ffd50)
+[WP] PASS W3 TlsAlloc (2)
+[WP] PASS W2 CreateThread x4 (4)
+[WP] PASS W2 WaitForMultipleObjects(all) (0)
+[WP] PASS W2 thread exit codes (1)
+[WP] PASS W2 InterlockedIncrement 4x1000 (4000)
+[WP] PASS W1 each thread has its own TEB via %gs (1)
+[WP] PASS W3 TLS isolated per thread (+ TEB TlsSlots) (1)
+[WP] PASS W3 main thread TLS value kept (20817)
+[WP] PASS W3 TlsFree (0)
+[WP] PASS W4 __try/__except catches an access violation (0)
+[WP] PASS W4 __try/__except catches an integer divide by zero (0)
+[WP] PASS W4 AddVectoredExceptionHandler (0x7ffffe225e50)
+[WP] PASS W4 vectored handler resumes after AV (16726)
+[WP] PASS W4 vectored handler resumes after #DE (17494)
+[WP] PASS W4 RemoveVectoredExceptionHandler (0)
+[WP] PASS W4 __except again after VEH removal (0)
+[WP] PASS W5 QueryPerformanceFrequency (0x989680)
+[WP] PASS W5 QueryPerformanceCounter monotonic x10000 (1)
+[WP] PASS W5 QPC advances ~200 ms across Sleep(200) (262)
+[WP] PASS W6 GetTickCount64 advances across Sleep(200) (120)
+[WP] PASS W6 KUSER TickCountMultiplier readable at 0x7ffe0004 (0x1000000)
+[WP] PASS W6 KUSER NtMajorVersion (10)
+[WP] PASS W6 KUSER TickCount moves (server-written page seen live) (120)
+[WP] PASS W6 KUSER InterruptTime moves (0x124f80)
+[WP] PASS W6 GetTickCount64 agrees with KUSER TickCount (20509)
+[WP] PASS W7 CreateFile C:\winprobe.tmp (0)
+[WP] PASS W7 WriteFile (39)
+[WP] PASS W7 FlushFileBuffers (0)
+[WP] PASS W7 reopen for read (0)
+[WP] PASS W7 GetFileSize (39)
+[WP] PASS W7 ReadFile returns the bytes written (39)
+[WP] PASS W7 FindFirstFile C:\* lists it (1)
+[WP] PASS W7 DeleteFile (18)
+[WP] PASS W7 gone after delete (18)
+[WP] done rc=0
+[P2] end winprobe status=0 ms=2075
+[P2] begin copy : wine cmd /c copy /y Z:\CP\WPROBE\winprobe.exe C:\winprobe.exe
+[P2] end copy status=0 ms=5810
+[P2] begin winprobe-c : wine C:\winprobe.exe
+[WP] winprobe start
+[WP] PASS W1 %gs:[0x30] non-null (0x7ffc0000)
+[WP] PASS W1 %gs:[0x30] == NtCurrentTeb() (0x7ffc0000)
+[WP] PASS W1 TEB->Self == TEB (0x7ffc0000)
+[WP] PASS W1 TEB ClientId.UniqueProcess (324)
+[WP] PASS W1 TEB ClientId.UniqueThread (328)
+[WP] PASS W1 TEB->ProcessEnvironmentBlock (0x7ffd0000)
+[WP] PASS W1 TIB stack bounds contain the stack (0x7ffffe1ffd50)
+[WP] PASS W3 TlsAlloc (2)
+[WP] PASS W2 CreateThread x4 (4)
+[WP] PASS W2 WaitForMultipleObjects(all) (0)
+[WP] PASS W2 thread exit codes (1)
+[WP] PASS W2 InterlockedIncrement 4x1000 (4000)
+[WP] PASS W1 each thread has its own TEB via %gs (1)
+[WP] PASS W3 TLS isolated per thread (+ TEB TlsSlots) (1)
+[WP] PASS W3 main thread TLS value kept (20817)
+[WP] PASS W3 TlsFree (0)
+[WP] PASS W4 __try/__except catches an access violation (0)
+[WP] PASS W4 __try/__except catches an integer divide by zero (0)
+[WP] PASS W4 AddVectoredExceptionHandler (0x7ffffe2279f0)
+[WP] PASS W4 vectored handler resumes after AV (16726)
+[WP] PASS W4 vectored handler resumes after #DE (17494)
+[WP] PASS W4 RemoveVectoredExceptionHandler (0)
+[WP] PASS W4 __except again after VEH removal (0)
+[WP] PASS W5 QueryPerformanceFrequency (0x989680)
+[WP] PASS W5 QueryPerformanceCounter monotonic x10000 (1)
+[WP] PASS W5 QPC advances ~200 ms across Sleep(200) (217)
+[WP] PASS W6 GetTickCount64 advances across Sleep(200) (199)
+[WP] PASS W6 KUSER TickCountMultiplier readable at 0x7ffe0004 (0x1000000)
+[WP] PASS W6 KUSER NtMajorVersion (10)
+[WP] PASS W6 KUSER TickCount moves (server-written page seen live) (199)
+[WP] PASS W6 KUSER InterruptTime moves (0x1e5d70)
+[WP] PASS W6 GetTickCount64 agrees with KUSER TickCount (28678)
+[WP] PASS W7 CreateFile C:\winprobe.tmp (0)
+[WP] PASS W7 WriteFile (39)
+[WP] PASS W7 FlushFileBuffers (0)
+[WP] PASS W7 reopen for read (0)
+[WP] PASS W7 GetFileSize (39)
+[WP] PASS W7 ReadFile returns the bytes written (39)
+[WP] PASS W7 FindFirstFile C:\* lists it (1)
+[WP] PASS W7 DeleteFile (18)
+[WP] PASS W7 gone after delete (18)
+[WP] done rc=0
+[P2] end winprobe-c status=0 ms=2327
+[P2] begin kill : wineserver -k
+[P2] end kill status=0 ms=11666
+[P2] quiesce after kill: extra=0
+[P2] begin pfxls-after : pfxls /EXT/pfx
+[P2] end pfxls-after status=0 ms=69
+[P2] begin sync : pfxsync
+[P2] end sync status=0 ms=441
+[P2] sync done
+[P2] done
+System halt from CPU 2.
+
+# manifest b1 -> b2 (path TAB type TAB mtime TAB size TAB link), diff
+1c1
+< pfx	d	1794864024.0000000000	4096	
+---
+> pfx	d	1794864057.0000000000	4096	
+6c6
+< pfx/drive_c	d	1794863774.0000000000	4096	
+---
+> pfx/drive_c	d	1794864056.0000000000	4096	
+1009a1010,1011
+> pfx/drive_c/winprobe.exe	f	1794861356.0000000000	65536	
+> pfx/reg80000.tmp	f	1794864068.0000000000	1318912	
+
+# e2fsck -fn
+e2fsck 1.47.2 (1-Jan-2025)
+Pass 1: Checking inodes, blocks, and sizes
+Pass 2: Checking directory structure
+Pass 3: Checking directory connectivity
+Pass 4: Checking reference counts
+Pass 5: Checking group summary information
+cpdata: 1023/524288 files (0.2% non-contiguous), 91202/2097152 blocks
+e2fsck 1.47.2 (1-Jan-2025)
+Pass 1: Checking inodes, blocks, and sizes
+Pass 2: Checking directory structure
+Pass 3: Checking directory connectivity
+Pass 4: Checking reference counts
+Pass 5: Checking group summary information
+cpdata: 1025/524288 files (0.2% non-contiguous), 91542/2097152 blocks
+
+# NFS validity (integrator rule for 8b9fc2c9+)
+b1: rpc-no-reply=19 NFSHARD-retry=19 GIVE-UP=0 NFLK-rc-1=0 max-retry-waited_ms=1504
+b2: rpc-no-reply=0 NFSHARD-retry=0 GIVE-UP=0 NFLK-rc-1=0 max-retry-waited_ms=
+
+# the boot-2 hive save cut short by wineserver -k (10.5 s SIGINT->SIGKILL)
+manifest-b1.txt:pfx/system.reg	f	1794864024.0000000000	1830541	
+manifest-b1.txt:pfx/user.reg	f	1794864024.0000000000	21659	
+manifest-b1.txt:pfx/userdef.reg	f	1794863800.0000000000	4026	
+manifest-b2.txt:pfx/reg80000.tmp	f	1794864068.0000000000	1318912	
+manifest-b2.txt:pfx/system.reg	f	1794864024.0000000000	1830541	
+manifest-b2.txt:pfx/user.reg	f	1794864024.0000000000	21659	
+manifest-b2.txt:pfx/userdef.reg	f	1794863800.0000000000	4026	
+
+# the voided run 6 (GIVE UP)
+[NFSHARD] GIVE UP op=RPC off=0 want=3 tries=55 after_ms=180000 -> EIO
+[NFSHARD] GIVE UP op=RPC off=0 want=3 tries=55 after_ms=180000 -> EIO
+run6 b1 rpc-no-reply=116

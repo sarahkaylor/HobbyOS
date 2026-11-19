@@ -1,0 +1,26 @@
+qemu-slot: all 4 slots busy; waiting
+qemu-slot: slot 4 of 4 held by pid 89390 19:50:30
+[XPG] qemu pid 90222
+[XPG] randr screendump: red bbox (0, 0, 1279, 719, 921574); non-black samples outside the mode: 0
+  [XP] screens=1 XINERAMA=yes Composite=yes
+  [XP] xi2 device 2 "Virtual core pointer" use=1 valuators relative=2 absolute=0
+  [XP] xi2 device 4 "Virtual core XTEST pointer" use=3 valuators relative=2 absolute=0
+  [XP] xi2 device 6 "HobbyOS pointer" use=3 valuators relative=0 absolute=2
+  [XP] xi2 device 7 "HobbyOS relative pointer" use=3 valuators relative=2 absolute=0
+  [XP] raw ready
+  [XP] raw DeviceChanged device=2 source=7 reason=1 master valuators 0/1: relative=2 absolute=0
+  [XP] raw total source=7 events=55 dx=4050 dy=25
+  [XP] randr modes=12 current=1920x1080 mode1280x720=yes
+  [XP] randr refused-offset status=3 (RRSetConfigFailed=3 expected)
+  [XP] randr set status=0 xerr=0 crtc=1280x720 root=1280x720
+  [XP] randr hold 5000 ms (red window 1280x720 at 0,0)
+  [XP] randr restore status=0 root=1920x1080
+  [XP] done rc=0
+  [X] hobbyos: one screen: :0.0 depth 24 (HB_SECOND_SCREEN=0: no :0.1; Composite and RandR's Xinerama can be advertised)
+  [X] hobbyos: randr: refusing crtc 1280x720+16+16 rot 1 (only 0,0, unrotated, <= 1920x1080)
+  [X] hobbyos: randr: crtc mode 1280x720 on screen 1920x1080
+  [X] hobbyos: randr: screen 0 now 1280x720 (339x191 mm)
+  [X] hobbyos: randr: screen 0 now 1920x1080 (508x286 mm)
+  [X] hobbyos: randr: crtc mode 1920x1080 on screen 1920x1080
+[XPG] PASS
+# serial: ~/cp/lanes/x2-p4/obj/p4/xprobe/serial.log (strix KVM, 4 guests running); kernel+disk: cp-x2 at c094ef39-equivalent (cyberpunk 8b9fc2c9 merged), XHOBBY.BIN sha256 935c760fd450eb9a3326e75691a9b8feaacf155f19033e807f98a4bf78424c97

@@ -1,0 +1,20 @@
+# C1-k5: thrstorm on cp-k5 053a5745 (merged) -- a REGRESSION found and fixed in the next commit
+# The P8-scope commit f7643440 moved file_pipe's fd scan BEFORE the file/pipe allocation, without fdtab_lock.
+# Two Wine threads creating their reply/wait pipes at once could then pick the same fd numbers:
+# a client read EBADF on its reply fd, the server hit EPIPE, and the storm never started (stopped by hand).
+
+[K5] k5wine launcher (C1-k5)
+[K5] ps-before count=1
+[K5] mount 10.0.2.2:/srv/nfs/cp-k5-ts -> /CP ok
+[K5] begin wineboot : wineboot -i
+[K5] end wineboot status=0 ms=24891
+[K5] quiesce after wineboot: extra=0
+[K5] begin thrstorm : wine Z:\CP\K5\thrstorm.exe 60
+[TS] thrstorm (C1-k5): threads=256 secs=60 pid=32
+[TS] PASS T1 create (threads=256 why=0)
+[TS] FAIL T1 start (started=256 toolhelp=255)
+[TS] info startup ms=2759
+wine client error:258: [PUB] who=fault_obj va=0x1080861000 off=0x12F000 prot=RX priv=1 src=file zero=702 ver=1
+wakeup read: Bad file descriptor
+wine client error:260: [PIPE_WRITE_EPIPE] PID 103 pipe 0xFFFF80027BB195C0 reader_count is 0
+read: Bad file descriptor

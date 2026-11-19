@@ -1,0 +1,175 @@
+# P8 run1 -- first game boot (stop 2)
+# host strix (Ryzen AI MAX+ 395, Zen 5, KVM), guest -cpu host -smp 8 -m 12288M; tree cyberpunk 949ba008 + cp-game harness (tools/cp/p8)
+# generated 2026-11-17T00:24:37-06:00 from obj/cp-p8/run1 (serial.log, run-p8.log, timeline.txt); no game content beyond file names
+
+## harness log (run-p8.log, the == rows and the boot watcher)
+== run-p8 phase=game run=run1 2026-11-16T23:56:35-06:00 host=sarahpc tree=/home/sarah/cp/lanes/game
+== build: kernel + disk (intel, desktop/icewm), P8.BIN, PFXSYNC.ELF, PE warm-up client
+== staging export: /srv/nfs/cp-game-p8 (WINE, X11, VK, P5/VK)
+== exports.sh: add /srv/nfs/cp-game-p8 ok (non-cp lines unchanged)
+== game copy before: 156 files, 66820176214 bytes, newest mtime 1794714264
+== game copy before: modes of the top dir and bin/x64: dr-xr-xr-x dr-xr-xr-x
+== exports.sh: add /srv/nfs/cp-game ok (non-cp lines unchanged)
+== stage (a copy of disk.img): glibc 2.31, /P8.BIN, /PFXSYNC.ELF, XHOBBY.BIN, XSESSION.ENV, /XSTART.TXT
+== X server: /home/sarah/cp/vk2-scratch/x2-xserver/XHOBBY.BIN (sha256 935c760fd450eb9a3326e75691a9b8feaacf155f19033e807f98a4bf78424c97) staged as ::/XHOBBY.BIN (scratch override, not committed)
+== data disk: a copy of /home/sarah/cp/lanes/game/obj/cp-p8/pfx-seeded.img
+== boot (deadline 5400s; one QEMU slot for the boot only)
+[P8W] waiting for a QEMU slot (tools/cp/qemu-slot.sh semantics)
+[P8W] +     0.0 s  23:56:39  slot 2 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 2
+[P8W] qemu pid 1465898
+[P8W] +     4.3 s  23:56:43  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
+[P8W] +    24.3 s  23:57:03  warm-up result: [P8] warm-up: display driver loaded
+[P8W] +    24.3 s  23:57:03  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8W] +    24.4 s  23:57:03  baseline screendump 1920x1080 (desktop before the game's window)
+[P8W] +   153.7 s  23:59:13  verdict: qemu-exited rc=0; QEMU stopped, slot released; guests on the host now: 2
+== e2fsck -fn after the boot: rc=0 (cpdata: 1034/1048576 files (0.6% non-contiguous), 135257/4194304 blocks)
+== game copy after: 156 files, 66820176214 bytes, newest mtime 1794714264
+== game copy after: modes of the top dir and bin/x64: dr-xr-xr-x dr-xr-xr-x
+== WARNING: game copy census changed
+== caches on ext2 after the boot (debugfs, sizes only)
+   /pfx/drive_c/vc              0 entries, 0 bytes
+   /mc                          0 entries, 0 bytes
+== verdict: qemu-exited rc=0
+== timeline:
+== exports.sh: remove /srv/nfs/cp-game ok (non-cp lines unchanged)
+== exports.sh: remove /srv/nfs/cp-game-p8 ok (non-cp lines unchanged)
+== removed /srv/nfs/cp-game-p8
+
+## timeline (host wall clock)
++     0.0 s  23:56:39  slot 2 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 2
++     4.3 s  23:56:43  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
++    24.3 s  23:57:03  warm-up result: [P8] warm-up: display driver loaded
++    24.3 s  23:57:03  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
++    24.4 s  23:57:03  baseline screendump 1920x1080 (desktop before the game's window)
++   153.7 s  23:59:13  verdict: qemu-exited rc=0; QEMU stopped, slot released; guests on the host now: 2
+
+## NFS: no-reply rows=0 [NFSHARD] retry=0 GIVE UP=0 NFLK rc=-1=0
+
+## rows that matter (tools/cp/p8/rows.sh: launcher rows, Wine output except loaddll, kernel faults, ENOSYS)
+[P8] env entries=13 bytes=398 (HobbyOS keeps <= 512 bytes / 24 entries per process)
+[P8] mount 10.0.2.2:/srv/nfs/cp-game-p8 -> /CP ok
+[P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
+[P8] begin keepalive (background) : wine Z:\CP\P5\VK\vkcube.exe --idle 86400
+[P8] keepalive pid=16
+[P8] begin winprobe01 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+[X] 0034:err:winediag:getaddrinfo Failed to resolve your host name IP
+[X] 0034:err:wineboot:process_run_key Error running cmd L"C:\\windows\\system32\\winemenubuilder.exe -a -r" (126).
+[X] 00ac:err:ntoskrnl:ZwLoadDriver failed to create driver L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\winebth": c00000e5
+[X] [VK] idle: keepalive pid 40, desktop 0000000000010020, 86400 s
+[X] [VK] winprobe: CreateWindowEx -> 0000000000010056 in 124 ms (display driver loaded)
+[P8] end winprobe01 status=0 ms=19578
+[P8] warm-up: display driver loaded
+[P8] chdir /GAME/bin/x64 rc=0
+[P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8] game pid=92
+[LCOMPAT] ENOSYS nr=221 name=wineserver pid=21 rip=0x108011AD0E rdi=0xC3
+[X] 016c:err:secur32:SECUR32_initSchannelSP no schannel support, expect problems
+[X] 016c:err:kerberos:kerberos_LsaApInitializePackage no Kerberos support, expect problems
+[X] 0144:err:winediag:NtCreateFile Too many open files, ulimit -n probably needs to be increased
+[X] Protocol error: process 015c: recvmsg: Too many open files
+[KERNEL] pid=21 (wineserver) memory fault VA=0x0000000000000000 PC=0x0000001000043D20 rw=r  in=HOLE region=NONE rsp=0x00000017FFFFF318 live=1 inH=0 cr3frame=0x00000002053E4000 asroot=0x00000002053E4000 sys=47 ret=0x0000000000000000 rbx=0x0000001040708170 rdi=0x0000000000000000 rsi=0x0000000000000018
+[SIGDUMP] pid=21 tgid=21 nm=wineserver rip=0x0000001000043D20 rsp=0x00000017FFFFF318 cs=0x000000000000001B vec=14 err=0x0000000000000004 cr2=0x0000000000000000
+[X] wineserver crashed, please enable coredumps (ulimit -c unlimited) and restart.
+[P8] census game t=42s mem_free_mib=11520 mem_total_mib=11520 procs: vkcube.exe/16:s3 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/69:s5 rpcss.exe/78:s5 Cyberpunk2077.e/92:s9 wine/102:s5 (n=10)
+[P8] census game t=73s mem_free_mib=11520 mem_total_mib=11520 procs: vkcube.exe/16:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/69:s5 rpcss.exe/78:s5 Cyberpunk2077.e/92:s9 wine/102:s5 (n=10)
+[P8] census game t=103s mem_free_mib=11520 mem_total_mib=11520 procs: vkcube.exe/16:s2 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 explorer.exe/69:s5 rpcss.exe/78:s5 Cyberpunk2077.e/92:s9 wine/102:s5 (n=10)
+
+## fd headroom rows (src/user/cp/p8fdcount.c), in order with the census rows
+[P8] census game t=42s mem_free_mib=11520 mem_total_mib=11520 (n=10)
+[P8] census game t=73s mem_free_mib=11520 mem_total_mib=11520 (n=10)
+[P8] census game t=103s mem_free_mib=11520 mem_total_mib=11520 (n=10)
+
+## modules the game process tree loaded after launch (WINEDEBUG +loaddll; names only)
+1: 0144 native Z:\GAME\bin\x64\Cyberpunk2077.exe
+2: 0144 builtin C:\windows\system32\kernelbase.dll
+3: 0144 builtin C:\windows\system32\kernel32.dll
+4: 0144 builtin C:\windows\system32\ucrtbase.dll
+5: 0144 builtin C:\windows\system32\sechost.dll
+6: 0144 builtin C:\windows\system32\msvcrt.dll
+7: 0144 builtin C:\windows\system32\advapi32.dll
+8: 0144 builtin C:\windows\system32\win32u.dll
+9: 0144 builtin C:\windows\system32\gdi32.dll
+10: 0144 builtin C:\windows\system32\USER32.dll
+11: 0144 builtin C:\windows\system32\shcore.dll
+12: 0144 builtin C:\windows\system32\shlwapi.dll
+13: 0144 builtin C:\windows\system32\SHELL32.dll
+14: 0144 builtin Z:\GAME\bin\x64\dbghelp.dll
+15: 0144 builtin C:\windows\system32\IMM32.dll
+16: 0144 builtin C:\windows\system32\cryptbase.dll
+17: 0144 builtin C:\windows\system32\rpcrt4.dll
+18: 0144 builtin C:\windows\system32\combase.dll
+19: 0144 builtin C:\windows\system32\coml2.dll
+20: 0144 builtin C:\windows\system32\ole32.dll
+21: 0144 builtin C:\windows\system32\vcruntime140.dll
+22: 0144 builtin C:\windows\system32\MSVCP140.dll
+23: 0144 builtin C:\windows\system32\VCRUNTIME140_1.dll
+24: 0144 native Z:\GAME\bin\x64\sl.interposer.dll
+25: 0144 builtin C:\windows\system32\SETUPAPI.dll
+26: 0144 builtin C:\windows\system32\VERSION.dll
+27: 0144 native C:\windows\system32\dxgi.dll
+28: 0144 builtin C:\windows\system32\CFGMGR32.dll
+29: 0144 native Z:\GAME\bin\x64\libxell.dll
+30: 0144 native Z:\GAME\bin\x64\libxess_fg.dll
+31: 0144 builtin C:\windows\system32\HID.DLL
+32: 0144 builtin C:\windows\system32\msacm32.dll
+33: 0144 builtin C:\windows\system32\WINMM.dll
+34: 0144 builtin C:\windows\system32\WS2_32.dll
+35: 0144 builtin C:\windows\system32\bcrypt.dll
+36: 0144 builtin C:\windows\system32\CRYPT32.dll
+37: 0144 builtin C:\windows\system32\mpr.dll
+38: 0144 builtin C:\windows\system32\WININET.dll
+39: 0144 native Z:\GAME\bin\x64\REDGalaxy64.dll
+40: 0144 native Z:\GAME\bin\x64\libxess.dll
+41: 0144 builtin C:\windows\system32\WLDAP32.dll
+42: 0144 builtin C:\windows\system32\Normaliz.dll
+43: 0144 native Z:\GAME\bin\x64\libcurl.dll
+44: 0144 native Z:\GAME\bin\x64\redlexer_native.dll
+45: 0144 builtin C:\windows\system32\XINPUT9_1_0.dll
+46: 0144 native Z:\GAME\bin\x64\bink2w64.dll
+47: 0144 native Z:\GAME\bin\x64\icudt.dll
+48: 0144 native Z:\GAME\bin\x64\icuuc.dll
+49: 0144 native Z:\GAME\bin\x64\icuin.dll
+50: 0144 native Z:\GAME\bin\x64\PhysX3Common_x64.dll
+51: 0144 native Z:\GAME\bin\x64\PxFoundation_x64.dll
+52: 0144 native Z:\GAME\bin\x64\PhysX3CharacterKinematic_x64.dll
+53: 0144 native Z:\GAME\bin\x64\PhysX3Cooking_x64.dll
+54: 0144 native Z:\GAME\bin\x64\PhysX3_x64.dll
+55: 0144 native Z:\GAME\bin\x64\amd_fidelityfx_loader_dx12.dll
+56: 0144 builtin C:\windows\system32\POWRPROF.dll
+57: 0144 native Z:\GAME\bin\x64\oo2ext_7_win64.dll
+58: 0144 native Z:\GAME\bin\x64\amd_ags_x64.dll
+59: 0144 builtin C:\windows\system32\OLEAUT32.dll
+60: 0144 builtin C:\windows\system32\jsproxy.dll
+61: 0144 builtin C:\windows\system32\WINHTTP.dll
+62: 0144 builtin C:\windows\system32\concrt140.dll
+63: 014c native Z:\GAME\bin\x64\REDEngineErrorReporter.exe
+64: 014c builtin C:\windows\system32\kernelbase.dll
+65: 014c builtin C:\windows\system32\kernel32.dll
+66: 014c builtin C:\windows\system32\ucrtbase.dll
+67: 014c builtin C:\windows\system32\sechost.dll
+68: 014c builtin C:\windows\system32\msvcrt.dll
+69: 014c builtin C:\windows\system32\advapi32.dll
+70: 014c builtin C:\windows\system32\win32u.dll
+71: 014c builtin C:\windows\system32\gdi32.dll
+72: 014c builtin C:\windows\system32\USER32.dll
+73: 014c builtin Z:\GAME\bin\x64\dbghelp.dll
+74: 014c builtin C:\windows\system32\VERSION.dll
+75: 014c builtin C:\windows\system32\shcore.dll
+76: 014c builtin C:\windows\system32\shlwapi.dll
+77: 014c builtin C:\windows\system32\SHELL32.dll
+78: 014c builtin C:\windows\system32\cryptbase.dll
+79: 014c builtin C:\windows\system32\rpcrt4.dll
+80: 014c builtin C:\windows\system32\combase.dll
+81: 014c builtin C:\windows\system32\coml2.dll
+82: 014c builtin C:\windows\system32\ole32.dll
+83: 0144 native Z:\GAME\bin\x64\steam_api64.dll
+84: 0144 native Z:\GAME\bin\x64\GameServicesSteam.dll
+85: 0144 builtin C:\windows\system32\dnsapi.dll
+86: 0144 builtin C:\windows\system32\nsi.dll
+87: 0144 builtin C:\windows\system32\iphlpapi.dll
+88: 0144 builtin C:\windows\system32\netprofm.dll
+89: 016c builtin C:\windows\system32\secur32.dll
+90: 016c builtin C:\windows\system32\Kerberos.dll
+91: 016c builtin C:\windows\system32\netutils.dll
+92: 016c builtin C:\windows\system32\netapi32.dll
+93: 016c builtin C:\windows\system32\MSV1_0.dll

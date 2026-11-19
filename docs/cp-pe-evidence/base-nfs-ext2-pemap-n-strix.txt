@@ -1,0 +1,44 @@
+== build: tree /home/sarah/cp/lanes/pe-base (intel, test), probe + launcher from /home/sarah/cp/lanes/pe
+== data: NFS set + ext2 set (generator: the probe's --gen)
+== host reference: [LP] PASS S1 storm: 16 children (8 at a time) x 3 iters x 8 files, 0 bad, 328 ms
+== host reference: [LP] done rc=0
+exports.sh: add /srv/nfs/cp-pe-pe-base ok (non-cp lines unchanged)
+[boot 1] [EXT2] mounted /EXT bs=4096 blocks=131072 free=128274 inodes=32768 ifree=32753 groups=4 isz=256 rw filetype large_file
+[boot 1] [PE] pemap launcher (C1-pe) args="-s -n -p 8 -c 48 -i 6 /CP /EXT/pe"
+[boot 1] [PE] mount 10.0.2.2:/srv/nfs/cp-pe-pe-base -> /CP ok
+[boot 1] [LP] pemap: 8 data files (first /CP/pemap03.bin, 1086611 bytes), par=8 children=48 iters=6
+[boot 1] [LP] S1 child 1 pid 6 ok maps=341 preads=112 sib_reads=11652 sib_churn=1525
+[boot 1] [LP] S1 child 0 pid 5 ok maps=354 preads=93 sib_reads=11654 sib_churn=1662
+[boot 1] [LP] PASS S1 storm: 48 children (8 at a time) x 6 iters x 8 files, 0 bad, 63475 ms
+[boot 1] [LP] done rc=0
+[boot 1] [PE] run 0 status=0 ms=63543
+[boot 1] [LP] pemap: 8 data files (first /CP/pemap03.bin, 1086611 bytes), par=8 children=48 iters=6
+[boot 1] [LP] S1 child 1 pid 104 ok maps=318 preads=125 sib_reads=11653 sib_churn=2420
+[boot 1] [LP] S1 child 0 pid 103 ok maps=302 preads=154 sib_reads=11651 sib_churn=3024
+[boot 1] [LP] PASS S1 storm: 48 children (8 at a time) x 6 iters x 8 files, 0 bad, 22952 ms
+[boot 1] [LP] done rc=0
+[boot 1] [PE] run 1 status=0 ms=22981
+[boot 1] [PE] done runs=2 bad=0
+pemap: boot 1 run 1 rc=0
+pemap: boot 1 run 2 rc=0
+[boot 2] [EXT2] mounted /EXT bs=4096 blocks=131072 free=128274 inodes=32768 ifree=32753 groups=4 isz=256 rw filetype large_file
+[boot 2] [PE] pemap launcher (C1-pe) args="-s -n -p 8 -c 48 -i 6 /CP /EXT/pe"
+[boot 2] [PE] mount 10.0.2.2:/srv/nfs/cp-pe-pe-base -> /CP ok
+[boot 2] [LP] pemap: 8 data files (first /CP/pemap03.bin, 1086611 bytes), par=8 children=48 iters=6
+[boot 2] [LP] S1 child 1 pid 6 ok maps=341 preads=112 sib_reads=11652 sib_churn=1651
+[boot 2] [LP] S1 child 0 pid 5 ok maps=354 preads=93 sib_reads=11654 sib_churn=1690
+[boot 2] [LP] PASS S1 storm: 48 children (8 at a time) x 6 iters x 8 files, 0 bad, 42308 ms
+[boot 2] [LP] done rc=0
+[boot 2] [PE] run 0 status=0 ms=42375
+[boot 2] [LP] pemap: 8 data files (first /CP/pemap03.bin, 1086611 bytes), par=8 children=48 iters=6
+[boot 2] [LP] S1 child 0 pid 103 ok maps=302 preads=154 sib_reads=11651 sib_churn=2524
+[boot 2] [LP] S1 child 1 pid 104 ok maps=318 preads=125 sib_reads=11653 sib_churn=2475
+[boot 2] [LP] PASS S1 storm: 48 children (8 at a time) x 6 iters x 8 files, 0 bad, 23919 ms
+[boot 2] [LP] done rc=0
+[boot 2] [PE] run 1 status=0 ms=23948
+[boot 2] [PE] done runs=2 bad=0
+pemap: boot 2 run 1 rc=0
+pemap: boot 2 run 2 rc=0
+pemap: SUMMARY tree=/home/sarah/cp/lanes/pe-base runs=4 pass=4 fail=0
+exports.sh: remove /srv/nfs/cp-pe-pe-base ok (non-cp lines unchanged)
+== removed /srv/nfs/cp-pe-pe-base

@@ -1,6 +1,7 @@
 #include "gic.h"
 #include "process.h"
 #include "arch/cpu.h"
+#include "kmem.h"
 
 static volatile uint32_t current_vector[MAX_CPUS];
 
@@ -47,7 +48,7 @@ void pic_init(void) {
  * them as pending in IRR forever without ever injecting them.
  */
 void gic_init_cpu(void) {
-  volatile uint32_t *svr = (volatile uint32_t *)0xFEE000F0;
+  volatile uint32_t *svr = (volatile uint32_t *)phys_to_virt(0xFEE000F0);
   // Keep the spurious-interrupt vector at 0xFF and set the APIC software
   // enable bit so IPI and LVT-timer delivery actually reaches this core.
   *svr = (*svr & ~0xFFu) | 0xFFu | 0x100u;
@@ -114,7 +115,9 @@ void gic_enable_interrupt(uint32_t intid) {
  * Called by the assembly exception handler in trap.c.
  */
 void gic_set_current_vector(uint32_t cpu, uint32_t vector) {
-  if (cpu < MAX_CPUS) {
+  /* C1-k7: one line for all CPUs; store only on a change (a run of
+     syscalls on one CPU keeps 0x80). */
+  if (cpu < MAX_CPUS && current_vector[cpu] != vector) {
     current_vector[cpu] = vector;
   }
 }

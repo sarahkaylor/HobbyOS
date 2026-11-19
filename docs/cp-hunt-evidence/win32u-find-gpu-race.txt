@@ -1,0 +1,11 @@
+# H1-hunt: win32u cannot find the GPU while the per-boot prefix update rebuilds the device list (strix, h-fq1b serial.txt; guest s from WINEDEBUG +timestamp)
+[X]  47.669:00e8:err:system:find_gpu_from_path Failed to find gpu with path "PCI\\VEN_1002&DEV_7550&SUBSYS_00000000&REV_00\\00000000"
+[X]  47.669:00e8:err:system:lock_display_devices Failed to read display config.
+[X]  47.670:00e0:err:system:find_gpu_from_path Failed to find gpu with path "PCI\\VEN_1002&DEV_7550&SUBSYS_00000000&REV_00\\00000000"
+[X]  47.670:00e0:err:system:lock_display_devices Failed to read display config.
+[X]  48.531:00d0:err:system:find_gpu_from_path Failed to find gpu with path "PCI\\VEN_1002&DEV_7550&SUBSYS_00000000&REV_00\\00000000"
+[X]  48.534:002c:err:system:find_gpu_from_path Failed to find gpu with path "PCI\\VEN_1002&DEV_7550&SUBSYS_00000000&REV_00\\00000000"
+[X]  46.728:002c:trace:process:CreateProcessInternalW app L"C:\\windows\\system3
+[X]  48.914:002c:trace:process:CreateProcessInternalW app L"C:\\windows\\system3
+[X]  57.070:002c:trace:process:CreateProcessInternalW app L"C:\\windows\\syswow6
+# 47.7-48.5 s falls inside the wine.inf reinstall (between PreInstall at 46.7 s and DefaultInstall at 48.9 s) that the stale prefix stamp triggers every boot (prefix-stale-stamp.txt); the game launches after it. 1 of the first 9 boots.

@@ -1,0 +1,9 @@
+1794716248114433934 waiting for /home/sarah/cp/measure.lock
+1794716248120708231 lock held=1
+1794716248172705487 nav start
+1794716278296778263 press-to-continue seen (n0021)
+1794716296623560177 press-to-continue seen (n0032)
+1794716300658878660 main menu seen (n0034)
+1794716315948793400 snapshot menu pid=59561 threads=87 fds=433 run_processes=15 run_threads=176
+1794716315948874562 nav done (menu)
+1794716324197409699 run end rc=0

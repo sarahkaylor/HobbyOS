@@ -1,0 +1,47 @@
+# [THRW] world rows on integ10 kernels (pr10-lane2: integ10 + lane; pr10-k6: + 9d47b051)
+#### pr10-lane2
+== world          frames   2687  fps 28.9  [HBP] sub 5.06 ms flip 3.39 ms (avg/frame)
+   ring 0.24/0.03ms  tls 0.00/0.00ms  space 1.03/0.46ms  slpR 0.15/0.03ms  slpO 1.62/0.45ms  yield 29.32/0.00ms  ntf 2.91/0.04ms  subF 24.56/0.30ms  subU 27.48/0.29ms  wait 58.22/19.23ms  fwait 18.35/18.58ms  qsub 24.46/5.86ms  pwait 0.00/0.00ms
+   threads (per frame: wait n/ms, submit n/ms, present-wait n/ms): t165 w4.0/5.0 q4.0/5.1 p0.00/0.0  t121 w40.0/9.0 q0.0/0.0 p0.00/0.0  t162 w1.0/4.5 q0.0/0.0 p0.00/0.0  t122 w2.5/0.0 q14.3/0.6 p0.00/0.0  t123 w7.1/0.4 q0.0/0.0 p0.00/0.0  t125 w0.4/0.1 q0.0/0.0 p0.00/0.0
+   replies: vkGetDeviceImageMemoryRequirements 0.10/0.03ms  vkCreateImage 0.06/0.01ms  vkGetImageMemoryRequirements2 0.06/0.00ms  vkGetBufferDeviceAddress 0.00/0.00ms  vkCreateBuffer 0.01/0.00ms  vkGetBufferMemoryRequirements2 0.01/0.00ms
+--
+== world          pid19:wineserver                   rows  19  run 0.24 ready 0.08 futex 0.00 kern 0.22 trap 0.08
+   blk 232:0.67
+   ksys 232:0.07 1:0.05 96:0.00 228:0.00 257:0.00 46:0.00 20:0.00 77:0.00
+   top (run/ready/kern/trap %) t19 24/7/22/8%(232=7,1=4,96=0,228=0,257=0,46=0,20=0,77=0)
+== world          pid92:services.exe                 rows  19  run 2.39 ready 0.24 futex 27.28 kern 0.99 trap 0.17
+   blk 0:11.99 23:4.92 16:0.12 230:0.01 7:0.01 1:0.00
+   ksys 16:0.45 202:0.19 14:0.05 228:0.04 1:0.01 0:0.01 20:0.01 23:0.01
+   top (run/ready/kern/trap %) t96 73/3/14/2%(202=3,14=0,228=0,0=0,9=0,1=0,20=0,24=0,186=0,16=0) t92 18/0/4/0%(202=1,228=0,14=0,98=0,0=0,47=0,1=0,20=0)
+== world          pid19:wineserver                   rows  19  run 0.24 ready 0.08 futex 0.00 kern 0.22 trap 0.08
+   blk 232:0.67
+   ksys 232:0.07 1:0.05 96:0.00 228:0.00 257:0.00 46:0.00 20:0.00 77:0.00
+   top (run/ready/kern/trap %) t19 24/7/22/8%(232=7,1=4,96=0,228=0,257=0,46=0,20=0,77=0)
+== world          pid92:services.exe                 rows  19  run 2.39 ready 0.24 futex 27.28 kern 0.99 trap 0.17
+   blk 0:11.99 23:4.92 16:0.12 230:0.01 7:0.01 1:0.00
+   ksys 16:0.45 202:0.19 14:0.05 228:0.04 1:0.01 0:0.01 20:0.01 23:0.01
+   top (run/ready/kern/trap %) t96 73/3/14/2%(202=3,14=0,228=0,0=0,9=0,1=0,20=0,24=0,186=0,16=0) t92 18/0/4/0%(202=1,228=0,14=0,98=0,0=0,47=0,1=0,20=0)
+== prof-fp-world  pid19:wineserver                   rows   4  run 0.17 ready 0.06 futex 0.00 kern 0.15 trap 0.06
+#### pr10-k6
+== world          frames   2910  fps 30.7  [HBP] sub 4.34 ms flip 2.96 ms (avg/frame)
+   ring 0.26/0.04ms  tls 0.00/0.00ms  space 0.48/0.67ms  slpR 0.18/0.03ms  slpO 1.09/0.66ms  yield 29.02/0.00ms  ntf 2.57/0.03ms  subF 24.79/0.50ms  subU 27.36/0.28ms  wait 58.66/16.83ms  fwait 18.02/16.24ms  qsub 24.66/5.31ms  pwait 0.00/0.00ms
+   threads (per frame: wait n/ms, submit n/ms, present-wait n/ms): t165 w4.0/4.2 q4.0/4.4 p0.00/0.0  t121 w40.0/7.8 q0.0/0.0 p0.00/0.0  t162 w1.0/4.0 q0.0/0.0 p0.00/0.0  t122 w2.3/0.0 q13.1/0.7 p0.00/0.0  t123 w5.8/0.3 q0.0/0.0 p0.00/0.0  t125 w0.7/0.2 q0.0/0.0 p0.00/0.0
+   replies: vkGetDeviceImageMemoryRequirements 0.10/0.03ms  vkCreateImage 0.07/0.01ms  vkGetImageMemoryRequirements2 0.07/0.00ms  vkGetBufferDeviceAddress 0.01/0.00ms  vkCreateBuffer 0.01/0.00ms  vkGetBufferMemoryRequirements2 0.01/0.00ms
+--
+== world          pid19:wineserver                   rows  19  run 0.28 ready 0.08 futex 0.00 kern 0.25 trap 0.09
+   blk 232:0.63
+   ksys 232:0.08 1:0.06 96:0.00 46:0.00 20:0.00 228:0.00 257:0.00 233:0.00
+   top (run/ready/kern/trap %) t19 27/8/25/8%(232=8,1=6,96=0,46=0,20=0,228=0,257=0,233=0)
+== world          pid92:services.exe                 rows  19  run 2.39 ready 0.24 futex 27.30 kern 1.02 trap 0.19
+   blk 0:11.99 23:4.93 16:0.10 7:0.01 230:0.01 1:0.00
+   ksys 16:0.46 202:0.18 14:0.05 228:0.03 1:0.02 0:0.02 20:0.01 23:0.00
+   top (run/ready/kern/trap %) t96 59/3/11/2%(202=3,14=1,228=0,1=0,0=0,9=0,20=0,16=0,10=0,186=0) t92 31/2/6/1%(202=1,228=0,1=0,14=0,0=0,7=0,47=0,20=0,16=0)
+== world          pid19:wineserver                   rows  19  run 0.28 ready 0.08 futex 0.00 kern 0.25 trap 0.09
+   blk 232:0.63
+   ksys 232:0.08 1:0.06 96:0.00 46:0.00 20:0.00 228:0.00 257:0.00 233:0.00
+   top (run/ready/kern/trap %) t19 27/8/25/8%(232=8,1=6,96=0,46=0,20=0,228=0,257=0,233=0)
+== world          pid92:services.exe                 rows  19  run 2.39 ready 0.24 futex 27.30 kern 1.02 trap 0.19
+   blk 0:11.99 23:4.93 16:0.10 7:0.01 230:0.01 1:0.00
+   ksys 16:0.46 202:0.18 14:0.05 228:0.03 1:0.02 0:0.02 20:0.01 23:0.00
+   top (run/ready/kern/trap %) t96 59/3/11/2%(202=3,14=1,228=0,1=0,0=0,9=0,20=0,16=0,10=0,186=0) t92 31/2/6/1%(202=1,228=0,1=0,14=0,0=0,7=0,47=0,20=0,16=0)
+== prof-fp-world  pid19:wineserver                   rows   4  run 0.27 ready 0.07 futex 0.00 kern 0.25 trap 0.09

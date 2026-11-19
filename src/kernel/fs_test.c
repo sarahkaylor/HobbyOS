@@ -437,8 +437,72 @@ static void test_fs_console_write_user_guards(void) {
   EXPECT_EQ(console_write_user(&fake, buf, 6), -EFAULT); /* kernel VA: not user memory */
 }
 
+/* C1-k5 (docs/cp-k5.md §1): the open-file table and the pipe pool grow past
+ * their static parts (512 files / 256 pipes) on demand, and fd allocation
+ * honours the soft RLIMIT_NOFILE.  300 native pipes = 600 open files: on the
+ * base kernel the 257th pipe() failed (MAX_GLOBAL_FILES / 2 pipes) and the
+ * 512th file slot was the last. */
+extern int fs_gft_live(void);
+static void test_fs_table_growth(void) {
+  uart_puts("  Running test_fs_table_growth...\n");
+  tests_run++;
+  int pid = process_create();
+  EXPECT_EQ((pid >= 0), 1);
+  if (pid < 0) return;
+  process_get_pcb(pid)->is_kernel_process = 1;
+  int old_pid = cpu_current_pids[0];
+  set_current_process_pid(0, pid);
+  struct process *cur = current_process();
+  EXPECT_EQ((int)cur->rlim_nofile_cur, FD_RLIM_SOFT_DEFAULT);
+  EXPECT_EQ((int)cur->rlim_nofile_max, MAX_OPEN_FDS);
+#ifdef __x86_64__
+  enum { NP = 300 };
+  static int fds[NP][2];
+  int made = 0;
+  for (int i = 0; i < NP; i++) {
+    if (file_pipe(cur, fds[i]) != 0) break;
+    made++;
+  }
+  EXPECT_EQ(made, NP);
+  EXPECT_EQ((fs_gft_live() > GFT_STATIC), 1);
+  /* every pipe works, including the ones in the frame-pool chunks */
+  int good = 0;
+  for (int i = 0; i < made; i++) {
+    char c = (char)('a' + i % 26), r = 0;
+    if (file_write(cur, fds[i][1], &c, 1, 0) == 1 &&
+        file_read(cur, fds[i][0], &r, 1, 0) == 1 && r == c)
+      good++;
+  }
+  EXPECT_EQ(good, made);
+  /* the soft limit bounds allocation: with it at the current count + 1, one
+     more fd fits and the next dup is EMFILE */
+  uint32_t save = cur->rlim_nofile_cur;
+  int top = 0;
+  for (int i = 0; i < MAX_OPEN_FDS; i++)
+    if (cur->open_fds[i] != -1) top = i;
+  cur->rlim_nofile_cur = (uint32_t)(top + 2);
+  int d1 = file_dup(cur, fds[0][0]);
+  EXPECT_EQ(d1, top + 1);
+  EXPECT_EQ(file_dup(cur, fds[0][0]), -EMFILE);
+  EXPECT_EQ(file_dup2(cur, fds[0][0], top + 2), -EINVAL);
+  if (d1 >= 0) file_close(cur, d1);
+  cur->rlim_nofile_cur = save;
+  for (int i = 0; i < made; i++) {
+    file_close(cur, fds[i][0]);
+    file_close(cur, fds[i][1]);
+  }
+  int strayed = 0;
+  for (int g = 0; g < MAX_GLOBAL_FILES; g++)
+    if (fs_test_slot_type(g) == (int)FILE_TYPE_UNINIT) strayed++;
+  EXPECT_EQ(strayed, 0);
+#endif
+  set_current_process_pid(0, old_pid);
+  process_kill(pid);
+}
+
 void fs_test_suite(void) {
   uart_puts("fs_test_suite:\n");
+  test_fs_table_growth(); /* C1-k5: chunked file table + pipe pool, soft limit */
 
   test_fs_file_open_close();
   test_file_slot_sentinel(); /* SEC-6: no stranded/untyped slots */

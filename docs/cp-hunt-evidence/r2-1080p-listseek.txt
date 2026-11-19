@@ -1,0 +1,43 @@
+# H1-hunt round 2: a real 1080p P9 boot with H2's --game-res (209a5ce4), stock fpsprobe.p9 (strix, h2-fq1; Resolution=1920x1080 via prep-settings.sh, P9_XSCREEN=1920x1080, P9_GAME_RES=1920x1080)
+## the main-menu seek now works at 1080p (the menu does scale 1.5x: SETTINGS frame at canon rows 563..598 vs 563..599 at 720p)
+[P9W] focus s014-t000165-menu-load0: no highlighted row
+[P9W] focus s015-t000168-menu-load1: rows 563..598 centre 580 -> SETTINGS
+[P9W] focus s016-t000171-menu-load2: rows 527..561 centre 544 -> LOAD GAME
+[P9W] +   196.3 s  08:41:13  seek menu-load: main menu focus on LOAD GAME after 2 taps
+[P9W] list focus s019-t000183-loadlist-focus0: frame rows []..[] centre None
+[P9W] list focus s020-t000186-loadlist-focus1: frame rows []..[] centre None
+[P9W] list focus s021-t000189-loadlist-focus2: frame rows []..[] centre None
+[P9W] list focus s022-t000191-loadlist-focus3: frame rows [347]..[415] centre 381.0
+[P9W] list focus s024-t000195-loadlist-focus4: frame rows []..[] centre None
+[P9W] list focus s025-t000197-loadlist-focus5: frame rows [475]..[475] centre 475.0
+[P9W] list focus s026-t000199-loadlist-focus6: frame rows []..[] centre None
+[P9W] list focus s027-t000202-loadlist-focus7: frame rows []..[] centre None
+[P9W] list focus s028-t000205-loadlist-focus8: frame rows [346]..[415] centre 380.5
+[P9W] +   229.8 s  08:41:47  LISTSEEK FAILED loadlist-focus: no entry focused at y=509.0 after 8 taps
+[P9W] +   229.8 s  08:41:47  play script ended: listseek-failed:loadlist-focus
+[P9W] +   232.5 s  08:41:49  verdict: listseek-failed:loadlist-focus; QEMU stopped, slot released; guests on the host no
+## the same nine list shots re-read offline (tools/cp/hunt/focusprobe.py --list --game-res 1920x1080), by how the 1080p shot is scaled to the 1280x720 tables:
+-- default
+s022-t000191-loadlist-focus3.png: rows 347..415 (3 rows) centre 381.0
+s024-t000195-loadlist-focus4.png: no frame
+s025-t000197-loadlist-focus5.png: rows 475..475 (1 rows) centre 475.0
+-- nearest
+s022-t000191-loadlist-focus3.png: rows 346..415 (5 rows) centre 380.5
+s024-t000195-loadlist-focus4.png: rows 470..470 (1 rows) centre 470.0
+s025-t000197-loadlist-focus5.png: rows 475..543 (3 rows) centre 509.0
+# the focused entry's cyan frame is a 1-2 px line at 1080p; game_view()'s resize() uses PIL's default (bicubic) and blends it below list_focus()'s r<120/g>170/b>170 test: at focus5 the target entry (canon y 509, the 720p Ripperdoc row) reads as a 1-row sliver at 475 -> centre 475, not 509 -> one more Down -> past it -> LISTSEEK FAILED. NEAREST keeps the frame (rows 475..543, centre 509).
+
+## the same boot with tools/cp/hunt/boot_p9_nn.py (boot_p9.py unchanged except game_view() resizes with Image.NEAREST), h2-fq2nn:
+[P9W] focus s012-t000136-menu-load0: no highlighted row
+[P9W] focus s013-t000139-menu-load1: rows 563..598 centre 580 -> SETTINGS
+[P9W] focus s014-t000141-menu-load2: rows 527..561 centre 544 -> LOAD GAME
+[P9W] +   165.7 s  09:11:00  seek menu-load: main menu focus on LOAD GAME after 2 taps
+[P9W] list focus s019-t000164-loadlist-focus0: frame rows []..[] centre None
+[P9W] list focus s021-t000171-loadlist-focus1: frame rows [421]..[470] centre 445.5
+[P9W] list focus s022-t000173-loadlist-focus2: frame rows [475]..[543] centre 509.0
+[P9W] +   198.1 s  09:11:33  listseek loadlist-focus: entry at y=509 focused after 2 taps
+[P9W] +   306.0 s  09:13:20  expect inworld: matched /RIPPERDOC|Jackie/ at s043-t000281-inworld
+[P9W] +   426.2 s  09:15:21  verdict: script-stop; QEMU stopped, slot released; guests on the host now: 1
+== verdict: script-stop
+world             64         283-378     34.5    25.3    10.5    39.2    32.8
+# -> the whole stock fpsprobe.p9 runs at 1080p with --game-res once the scaling keeps the 1-2 px frame (1/1 boot); proposed one-word fix in boot_p9.game_view: g.resize((1280, 720), Image.NEAREST).

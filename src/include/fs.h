@@ -79,7 +79,33 @@ typedef enum {
      read/write refuse it; the compat ioctl(16) route answers the GPU_IOC_*
      requests through gpu_abi.c.  mmap is refused in M1 (no blob resources).
      Appended last: no values shift. */
-  FILE_TYPE_DEVGPU
+  FILE_TYPE_DEVGPU,
+  /* cp/ext2 (docs/cp-ext2.md): a regular file / a directory on the ext2 data
+     disk mounted at /EXT (src/kernel/ext2_vfs.c).  The file keeps the inode
+     number and a 64-bit cursor; the inode is referenced (ext2_iget) for the
+     life of the description, so an unlinked-while-open file survives until
+     its last close.  Appended last: no values shift. */
+  FILE_TYPE_EXT2,
+  FILE_TYPE_EXT2DIR,
+  /* cp/sys (docs/cp-sys.md): a regular file / a directory on the compat
+     /tmp tmpfs (src/kernel/tmpfs.c).  The description references its node
+     (unlinked-while-open survives to the last close); a regular file's data
+     is a vm_object shared with every MAP_SHARED mapping of it.  Appended
+     last: no values shift. */
+  FILE_TYPE_TMPFS,
+  FILE_TYPE_TMPFSDIR,
+  /* cp/sys: an eventfd counter (linux_compat_fd.c owns the slot table). */
+  FILE_TYPE_EVENTFD,
+  /* C1-k6: a signalfd (linux_compat_fd.c reads it: the reader's pending
+     signals in the fd's mask, dequeued as signalfd_siginfo records). */
+  FILE_TYPE_SIGNALFD,
+  /* C2-ntsync: /dev/ntsync or one of its objects (sem / mutex / event);
+     linux_compat_ntsync.c owns the object (f->ntsync.obj). */
+  FILE_TYPE_NTSYNC,
+  /* C4-audio (docs/cp-audio.md): an ALSA node, /dev/snd/controlC0 or
+     /dev/snd/pcmC0D0p (linux_snd.c); exists only with a virtio-sound device.
+     read/write refuse it, ioctl goes to linux_snd_ioctl(), mmap is refused. */
+  FILE_TYPE_DEVSND
 } file_type_t;
 
 struct vm_object;
@@ -139,8 +165,10 @@ struct file {
     struct {
       struct nfs_fh fh;            /**< NFSv3 file handle */
       uint64_t size;               /**< Size from the open attributes */
-      uint32_t cursor;             /**< Current read position */
-      uint32_t ra_next;            /**< L76: end of the previous read */
+      uint64_t cursor;             /**< Current read position (cp/nfs2: 64-bit,
+                                        files > 4 GiB; a directory's getdents
+                                        resume index) */
+      uint64_t ra_next;            /**< L76: end of the previous read */
       int ra_seq;                  /**< L76: consecutive sequential reads */
       int is_dir;                  /**< Opened entry is a directory */
       int mount_idx;               /**< Index of the mount serving it */
@@ -149,7 +177,20 @@ struct file {
       struct vm_object *obj;       /**< P2.4 (S4): memfd backing object;
                                         holds one object ref per fd instance */
       int mfd_flags;               /**< MFD_* passed at create (recorded) */
+      uint64_t cursor;             /**< cp/sys: read/write/lseek offset */
     } memfd;
+    struct {
+      int node;                    /**< cp/sys: tmpfs node index */
+      uint64_t ino;                /**< its inode number (reuse guard) */
+      uint64_t cursor;             /**< offset / getdents position */
+    } tmpfs;
+    struct {
+      int slot;                    /**< cp/sys: eventfd counter slot */
+    } eventfd;
+    struct {
+      uint32_t ino;                /**< cp/ext2: inode number */
+      uint64_t cursor;             /**< file offset / getdents byte position */
+    } ext2;
     struct {
       int slot;                    /**< L49: index into linux_compat_timers'
                                         timer table */
@@ -158,32 +199,68 @@ struct file {
       int slot;                    /**< L49: index into linux_compat_timers'
                                         epoll table */
     } epollfd;
+    struct {
+      int minor;                   /**< C4-audio: ALSA minor (linux_snd.h) */
+    } snd;
+    struct {
+      uint64_t mask;               /**< C1-k6: signals this signalfd reads
+                                        (bit sig-1; never SIGKILL/SIGSTOP) */
+    } sigfd;
+    struct {
+      void *obj;                   /**< C2-ntsync: struct ns_obj (device or
+                                        object); one reference per slot */
+    } ntsync;
   };
+  int gidx;                        /**< C1-k5: this slot's global index (the
+                                        table is chunked, fs.c gfile) */
+  ylock_t pos_lock;                /**< C1-k5: the positioned-I/O lock (was
+                                        fs.c's static f1_pos_locks[]) */
 };
 
 /* L55: 512, not 128.  MAX_OPEN_FDS is now 256 per process, and this table is
  * the one every local fd indexes: leaving it at 128 would have made the wider
  * per-process table unusable (a single process could still only reach 128
  * distinct open files, and the desktop/launcher/socket slots share the rest).
- * One slot is ~400 B, so the extra 384 slots cost ~150 KiB of BSS. */
+ * One slot is ~400 B, so the extra 384 slots cost ~150 KiB of BSS.
+ * C1-k5: 16384 on x86_64 (Wine: ~3 pipes = 6 files per thread, in two
+ * processes).  Only GFT_STATIC slots are static; the rest are frame-pool
+ * chunks allocated on demand (fs.c gfile, docs/cp-k5.md §1).  ARM stays at
+ * 512, all static. */
+#ifdef __x86_64__
+#define MAX_GLOBAL_FILES 16384
+#else
 #define MAX_GLOBAL_FILES 512
+#endif
+#define GFT_STATIC 512
 
 void fs_init(void);
 struct trap_frame;
 int file_open(struct process *p, const char *filename, int flags);
+/* cp/ext2: open(2) with its mode argument (stored only by the ext2 volume;
+ * file_open() passes 0666, the umask 022 then applies). */
+int file_open_mode(struct process *p, const char *filename, int flags,
+                   int mode);
 /* M5 exec-from-NFS: read a whole program image into a contiguous frame range
  * via the same VFS route open() uses.  1 = NFS (buf/size/pages filled, caller
  * frees the frames), 0 = FAT16 path (use the legacy cluster loader), <0 = a
  * real failure. */
 int fs_read_image(const char *path, uint8_t **buf_out, uint32_t *size_out,
                   uint32_t *pages_out);
+/* cp/ext2b: read an ELF interpreter that lives on /EXT (1 read / 0 not an
+ * ext2 path / <0 error); see fs.c. */
+int fs_read_ext2_file(const char *path, uint8_t **buf_out, uint32_t *size_out,
+                      uint32_t *pages_out, uint32_t max);
 int file_close(struct process *p, int fd);
 int file_dup(struct process *p, int fd);
 int file_dup2(struct process *p, int oldfd, int newfd);
+/* C1-k5: F_DUPFD -- lowest free fd >= minfd below RLIMIT_NOFILE. */
+int file_dup_min(struct process *p, int fd, int minfd);
 int file_gfd_is_pipe(int gfd);
 int file_read(struct process *p, int fd, void *buf, int size, struct trap_frame *tf);
-/* GB-308: read into a USER virtual range — bounces through a kernel buffer and
- * vm_kwrite() so an unbacked destination page cannot fault in kernel mode. */
+/* GB-308: read into a USER virtual range.  cp-sync: materializes the range
+ * writable (vm_range_ok, P1) and then reads into it directly, so an unbacked
+ * destination page cannot fault in kernel mode (main's bounce buffer split
+ * 64 KiB NFS reads; see fs.c). */
 int file_read_user(struct process *cur, int fd, uint64_t ubuf, int64_t size,
                    struct trap_frame *tf);
 /* GB-308: positioned I/O that is atomic and cursor-neutral (the native layer
@@ -193,6 +270,9 @@ int file_pread_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
 int file_pwrite_user(struct process *p, int fd, uint64_t ubuf, int64_t n,
                      int64_t off, struct trap_frame *tf);
 int file_write(struct process *p, int fd, const void *buf, int size, struct trap_frame *tf);
+/* H4-kglitch K8/K9: the Linux errno for fs.c's generic -1 on this fd
+   (EPERM for a memfd/tmpfs write, whose only -1 is a seal; else EBADF). */
+int file_fail_errno(struct process *p, int fd);
 
 /* GB-308: open flags of an fd (-EBADF if absent), for the mmap access check. */
 int file_open_flags(struct process *p, int fd, uint32_t *out);
@@ -210,6 +290,16 @@ int file_available(struct process *p, int fd);
 int file_memfd_create(struct process *p, const char *name, int flags);
 struct vm_object *file_memfd_obj(struct process *p, int fd);
 int file_memfd_seals(struct process *p, int fd, int cmd, int arg);
+/* cp/sys: an eventfd fd over linux_compat_fd.c's counter slots. */
+int file_eventfd_create(struct process *p, unsigned int initval, int flags);
+/* C1-k6: signalfd.  create: a new fd (flags SFD_CLOEXEC|SFD_NONBLOCK) or
+   -errno; set_mask: replace an existing signalfd's mask (-EINVAL when fd is
+   not one, -EBADF when closed). */
+int file_signalfd_create(struct process *p, uint64_t mask, int flags);
+int file_signalfd_set_mask(struct process *p, int fd, uint64_t mask);
+/* cp/sys: 1 when `fd` is an open directory (any filesystem), 0 when it is
+ * some other open fd, -EBADF when it is not open.  fchdir(2) uses it. */
+int file_fd_is_dir(struct process *p, int fd);
 int file_connect(struct process *p, uint32_t ip, uint16_t port, int protocol);
 int file_mkdir(struct process *p, const char *path);
 /* mkdir with POSIX errnos (0 / -EEXIST / -ENOENT); see file_mkdir_errno. */
@@ -402,6 +492,15 @@ int file_ftruncate(struct process *p, int fd, int64_t length);
  * SYN retransmission while a program waits in select(). */
 int file_select(struct process *p, int nfds, struct fd_set_k *rd,
                 struct fd_set_k *wr, struct fd_set_k *ex, int timeout_ms);
+/* C1-k5: the same engine over sets of nwords 32-bit words (<= MAX_OPEN_FDS
+ * bits); the compat select/pselect6 path. */
+/* C1-k6: the engines in microseconds (-1 = forever); the ms forms wrap them. */
+int file_select_words_us(struct process *p, int nfds, uint32_t *rd, uint32_t *wr,
+                         uint32_t *ex, int nwords, int64_t timeout_us);
+int file_poll_us(struct process *p, struct k_pollfd *fds, int nfds,
+                 int64_t timeout_us);
+int file_select_words(struct process *p, int nfds, uint32_t *rd, uint32_t *wr,
+                      uint32_t *ex, int nwords, int timeout_ms);
 
 /* P1: drop a pid's remembered select deadline (group teardown / thread
  * death: a parked select must not resurrect a dead thread's slice). */
@@ -428,6 +527,15 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
  * set (EBADF/ENOENT/EINVAL). */
 int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp);
 int file_fd_is_devfb(struct process *p, int fd);   /* GB-167: /dev/fb0 node? */
+int file_fd_is_ext2(struct process *p, int fd);    /* cp/ext2: 1/0, -1 = bad fd */
+/* cp/ext2b: fchmod/fchown/futimens (vfs.h setattr contract); 0 / -errno. */
+struct vfs_setattr;
+int file_setattr_fd(struct process *p, int fd, const struct vfs_setattr *sa);
+/* cp/ext2b: lock key, open-description owner (slot + 1) and O_* flags of an
+ * fd, for the compat fcntl/flock rows (vfs_lock.h).  0 / -EBADF. */
+struct vfs_lock_key;
+int file_lock_target(struct process *p, int fd, struct vfs_lock_key *key,
+                     int *desc, uint32_t *open_flags);
 int file_stat_path(struct process *p, const char *path, struct k_stat *st,
                    int *errp);
 /* M6 launch plumbing: the absolute path an open fd was opened from, for

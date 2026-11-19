@@ -1,0 +1,543 @@
+# Gate P6 probe 2 -- d3d12tri.exe (vkd3d-proton 3.1) and d3d11tri.exe (DXVK 3.1.1) under Wine on Venus: PASS (run 11), strix 2026-11-17
+# Mesa: present_wait hidden on HobbyOS, venus present synchronous; kernel: tick re-check for parked fence waits, INTx line 10 in level mode (ELCR) and re-unmasked after gic_init; timeline syncs
+# command: <P5 env> P5_PROBES='d3d12 d3d11' bash tools/cp/venus/run-wine-venus.sh   (screendumps: evidence/cp-venus/d3d1{1,2}-t{20,50}s.png)
+
+== merged Vulkan tree /home/sarah/cp/venus-build/vkmerge: virtio_icd.x86_64.json
+== build: kernel + disk (intel, default desktop/icewm), WINEP5.BIN, PE probes
+== export dir: /srv/nfs/cp-venus-p5 (WINE, X11, VK, P5)
+== exports.sh: add /srv/nfs/cp-venus-p5 ok (non-cp lines unchanged)
+== exported: /srv/nfs/cp-venus-p5
+== stage (a copy of disk.img): glibc 2.31 /LIB64 + /lib64/ld, /WINEP5.BIN, /XSTART.TXT
+== X server: /home/sarah/cp/vk2-scratch/x2-xserver/XHOBBY.BIN (sha256 935c760fd450eb9a3326e75691a9b8feaacf155f19033e807f98a4bf78424c97) staged as ::/XHOBBY.BIN
+== XSESSION.ENV: HB_SECOND_SCREEN=0 
+== boot + grade (deadline 7200s; one QEMU slot for the boot only)
+[VENUS-P5] qemu: qemu-system-x86_64 -name hobbyos-venus,debug-threads=on -machine q35,accel=kvm,memory-backend=mem0 -cpu host -smp 8 -m 12288M -object memory-backend-memfd,id=mem0,size=12288M,share=on -drive if=pflash,format=raw,file=/home/sarah/cp/lanes/venus/obj/cp-p5/wine/ovmf.fd -device virtio-gpu-gl-pci,blob=true,hostmem=8G,venus=true -vga none -display egl-headless,rendernode=/dev/dri/renderD129 -serial file:/home/sarah/cp/lanes/venus/obj/cp-p5/wine/serial.log -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=/home/sarah/cp/lanes/venus/obj/cp-p5/wine/disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -action shutdown=poweroff -qmp unix:/home/sarah/cp/lanes/venus/obj/cp-p5/wine/qmp-sock,server,nowait -d guest_errors -D /home/sarah/cp/lanes/venus/obj/cp-p5/wine/qemu-debug.log
+[P5W] waiting for a QEMU slot (tools/cp/qemu-slot.sh semantics)
+qemu-slot: all 4 slots busy; waiting
+qemu-slot: slot 4 of 4 held by pid 31055 02:39:45
+[P5W] slot 4 acquired 02:39:45; boot: -smp 8 -m 12288M -cpu host (KVM)
+[P5W] qemu pid 46794
+[P5W] +0 s: (no [P5] row yet)
+[VENUS-P5] screendump via pmemsave of framebuffer pa=0x75c00000 -> /home/sarah/cp/lanes/venus/obj/cp-p5/wine/d3d11-t20s.ppm
+[P5W] screendump d3d11-t20s.ppm at +92 s; QEMU guests on the host now (incl. this one): 4
+[VENUS-P5] screendump via pmemsave of framebuffer pa=0x75c00000 -> /home/sarah/cp/lanes/venus/obj/cp-p5/wine/d3d11-t50s.ppm
+[P5W] screendump d3d11-t50s.ppm at +122 s; QEMU guests on the host now (incl. this one): 4
+[VENUS-P5] screendump via pmemsave of framebuffer pa=0x75c00000 -> /home/sarah/cp/lanes/venus/obj/cp-p5/wine/d3d12-t20s.ppm
+[P5W] screendump d3d12-t20s.ppm at +159 s; QEMU guests on the host now (incl. this one): 4
+[VENUS-P5] screendump via pmemsave of framebuffer pa=0x75c00000 -> /home/sarah/cp/lanes/venus/obj/cp-p5/wine/d3d12-t50s.ppm
+[P5W] screendump d3d12-t50s.ppm at +189 s; QEMU guests on the host now (incl. this one): 4
+[P5W] guests on the host at the end of the run: 3 (incl. none of ours)
+[P5W] boot finished after 227 s; lock released
+[P5W] --- [P5] rows and probe rows (serial) ---
+[P5] winep5 launcher (C5-vk2)
+[P5] mount 10.0.2.2:/srv/nfs/cp-venus-p5 -> /CP ok
+[P5] begin wineboot : wineboot -i
+[P5] end wineboot status=0 ms=39357
+[P5] quiesce after wineboot: extra=0
+[P5] begin keepalive (background) : wine Z:\CP\P5\VK\vkcube.exe --idle 7200
+[P5] keepalive pid=110
+[P5] begin winprobe01 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+[P5] end winprobe01 status=0 ms=14541
+[P5] warm-up: display driver loaded
+[P5] begin d3d11 : wine Z:\CP\P5\D3D11\d3d11tri.exe 65 640 480
+[D3D11] d3d11tri start (C5-vk2): 65 s, 640x480, pid 308
+[D3D11] env WINEDLLOVERRIDES=d3d11,dxgi,d3d10core,d3d9,d3d12,d3d12core=n,b;mscoree,mshtml=;winemenubuilder.exe=d DXVK_LOG_LEVEL=info
+[D3D11] module d3d11.dll          Z:\CP\P5\D3D11\d3d11.dll
+[D3D11] module dxgi.dll           Z:\CP\P5\D3D11\dxgi.dll
+[D3D11] module d3dcompiler_47.dll C:\windows\system32\d3dcompiler_47.dll
+[D3D11] D3D11CreateDeviceAndSwapChain ok in 871.0 ms, feature level 0xb100
+[D3D11] adapter: "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" vendor 0x1002 device 0x7550 dedicated video memory 16304 MiB [P5 device override: 'Virtio-GPU Venus' stands in for llvmpipe]
+[D3D11] D3DCompile vs/vs_5_0: 1372 bytes DXBC in 8.0 ms
+[D3D11] D3DCompile ps/ps_5_0: 580 bytes DXBC in 0.0 ms
+[D3D11] render loop: 65 s
+[D3D11] frame 0: 98.00 ms
+[D3D11] frame 1: 11.00 ms
+[D3D11] frame 2: 1.00 ms
+[D3D11] t=5s frames=613 window fps=122.45
+[D3D11] t=10s frames=1245 window fps=126.48
+[D3D11] t=15s frames=1891 window fps=128.97
+[D3D11] t=20s frames=2443 window fps=102.32
+[D3D11] t=25s frames=3029 window fps=127.59
+[D3D11] t=30s frames=3671 window fps=128.19
+[D3D11] t=35s frames=4307 window fps=127.30
+[D3D11] t=40s frames=4951 window fps=128.83
+[D3D11] t=45s frames=5578 window fps=125.35
+[D3D11] t=50s frames=6124 window fps=104.76
+[D3D11] t=55s frames=6729 window fps=126.49
+[D3D11] t=60s frames=7365 window fps=127.17
+[D3D11] t=65s frames=7994 window fps=125.83
+[D3D11] RESULT frames=7994 wall=65000.0 ms fps=122.98 | per-frame median 7.00 p90 13.00 worst(after frame 0) 1117.00 ms
+[D3D11] teardown: clean
+[D3D11] done rc=0
+[P5] end d3d11 status=0 ms=67772
+[P5] begin d3d12 : wine Z:\CP\P5\D3D12\d3d12tri.exe 65 640 480
+[D3D12] d3d12tri start (C5-vk2): 65 s, 640x480, pid 340
+[D3D12] env WINEDLLOVERRIDES=d3d11,dxgi,d3d10core,d3d9,d3d12,d3d12core=n,b;mscoree,mshtml=;winemenubuilder.exe=d VKD3D_DEBUG=warn
+[D3D12] module d3d12.dll          Z:\CP\P5\D3D12\d3d12.dll
+[D3D12] module d3d12core.dll      Z:\CP\P5\D3D12\d3d12core.dll
+[D3D12] module dxgi.dll           Z:\CP\P5\D3D12\dxgi.dll
+[D3D12] module d3dcompiler_47.dll C:\windows\system32\d3dcompiler_47.dll
+[D3D12] D3D12CreateDevice ok in 373.0 ms
+[D3D12] adapter: "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" vendor 0x1002 device 0x7550 dedicated video memory 16304 MiB [P5 device override: 'Virtio-GPU Venus' stands in for llvmpipe]
+[D3D12] highest shader model (asked 6.0): 0x60
+[D3D12] CreateSwapChainForHwnd ok in 45.0 ms (2 buffers, FLIP_DISCARD)
+[D3D12] D3DCompile vs/vs_5_0: 1340 bytes DXBC in 4.0 ms
+[D3D12] D3DCompile ps/ps_5_0: 580 bytes DXBC in 0.0 ms
+[D3D12] CreateGraphicsPipelineState ok in 5.0 ms
+[D3D12] render loop: 65 s
+[D3D12] frame 0: 85.00 ms (back buffer 0)
+[D3D12] frame 1: 50.00 ms (back buffer 1)
+[D3D12] frame 2: 4.00 ms (back buffer 0)
+[D3D12] t=5s frames=941 window fps=188.20
+[D3D12] t=10s frames=1956 window fps=202.96
+[D3D12] t=15s frames=2780 window fps=164.83
+[D3D12] t=20s frames=3759 window fps=195.72
+[D3D12] t=25s frames=4718 window fps=191.76
+[D3D12] t=30s frames=5730 window fps=202.44
+[D3D12] t=35s frames=6702 window fps=194.48
+[D3D12] t=40s frames=7660 window fps=191.60
+[D3D12] t=45s frames=8472 window fps=162.30
+[D3D12] t=50s frames=9450 window fps=195.60
+[D3D12] t=55s frames=10420 window fps=193.92
+[D3D12] t=60s frames=11404 window fps=196.92
+[D3D12] t=65s frames=12374 window fps=193.92
+[D3D12] RESULT frames=12374 wall=65004.0 ms fps=190.36 | per-frame median 5.00 p90 5.00 worst(after frame 0) 668.00 ms
+[D3D12] teardown: clean
+[D3D12] done rc=0
+[P5] end d3d12 status=0 ms=67669
+[P5] begin kill : wineserver -k
+[P5] end kill status=0 ms=400
+[P5] quiesce after kill: extra=1
+[P5] done
+[P5W] d3d12 d3d12-t20s.ppm: clear=237312 saturated=46480 bbox=(724, 574, 1362, 1052) hash=edc27507fa167f08
+[P5W] d3d12 d3d12-t50s.ppm: clear=237328 saturated=46492 bbox=(724, 574, 1362, 1052) hash=22800e11f5916be1
+[P5W] d3d12: PASS
+[P5W] d3d11 d3d11-t20s.ppm: clear=237252 saturated=48320 bbox=(724, 70, 1362, 548) hash=61c555239dad0caf
+[P5W] d3d11 d3d11-t50s.ppm: clear=237260 saturated=48260 bbox=(724, 70, 1362, 548) hash=0308bde2abb35ae9
+[P5W] d3d11: PASS
+[P5W] NFS: no-reply rows=0 [NFSHARD] retry rows=0 longest waited_ms=0 GIVE UP=0 NFLK rc=-1=0
+[P5W] PASS: d3d12, d3d11 each ran >= 60 s under Wine with two distinct, recognisable screendumps
+raw serial: /home/sarah/cp/lanes/venus/obj/cp-p5/wine/serial.log
+== exports.sh: remove /srv/nfs/cp-venus-p5 ok (non-cp lines unchanged)
+== removed /srv/nfs/cp-venus-p5
+rc=0
+# --- probe rows
+[P5] winep5 launcher (C5-vk2)
+[P5] mount 10.0.2.2:/srv/nfs/cp-venus-p5 -> /CP ok
+[P5] begin wineboot : wineboot -i
+[VIRGL3D] irq late-enable line=10 elcr_before=0x0000000000000000 elcr_after=0x0000000000000004 pic_mask=[LNFSD] path=/CP/VK/etc/vulkan/implicit_layer.d routed=1 midx=0 rel=/VK/etc/vulkan/implicit_layer.d lrc=-1 type=-1
+[P5] end wineboot status=0 ms=39357
+[P5] quiesce after wineboot: extra=0
+[P5] begin keepalive (background) : wine Z:\CP\P5\VK\vkcube.exe --idle 7200
+[P5] keepalive pid=110
+[P5] begin winprobe01 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+[P5] end winprobe01 status=0 ms=14541
+[P5] warm-up: display driver loaded
+[P5] begin d3d11 : wine Z:\CP\P5\D3D11\d3d11tri.exe 65 640 480
+[X] [D3D11] d3d11tri start (C5-vk2): 65 s, 640x480, pid 308
+[X] [D3D11] env WINEDLLOVERRIDES=d3d11,dxgi,d3d10core,d3d9,d3d12,d3d12core=n,b;mscoree,mshtml=;winemenubuilder.exe=d DXVK_LOG_LEVEL=info
+[X] [D3D11] module d3d11.dll          Z:\CP\P5\D3D11\d3d11.dll
+[X] [D3D11] module dxgi.dll           Z:\CP\P5\D3D11\dxgi.dll
+[X] [D3D11] module d3dcompiler_47.dll C:\windows\system32\d3dcompiler_47.dll
+[X] info:  Game: d3d11tri.exe
+[X] info:  DXVK: v3.1.1
+[X] info:  Build: x86_64 gcc 16.2.0
+[X] info:  Vulkan: Found vkGetInstanceProcAddr in winevulkan.dll @ 0x7ffffdec3b60
+[X] info:  Extension providers:
+[X] info:    Platform WSI
+[X] info:    OpenVR
+[X] info:  OpenVR: could not open registry key, status 2
+[X] info:  OpenVR: Failed to locate module
+[X] info:    OpenXR
+[X] info:  Enabled instance extensions:
+[X] info:    VK_KHR_get_surface_capabilities2
+[X] info:    VK_KHR_surface
+[X] info:    VK_KHR_surface_maintenance1
+[X] info:    VK_KHR_win32_surface
+[X] info:  Found device: Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201)) (venus 26.2.6)
+[X] info:  Creating device:
+[X] info:  Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201)):
+[X] info:    Driver   : venus 26.2.6
+[X] info:  Queues:
+[X] info:    Graphics : (0, 0)
+[X] info:    Transfer : (1, 0)
+[X] info:    Sparse   : (0, 0)
+[X] info:  Memory:
+[X] info:    Heap 0: 46.96 GiB
+[X] info:      Type  2: HOST_VISIBLE | HOST_COHERENT
+[X] info:      Type  5: HOST_VISIBLE | HOST_COHERENT | HOST_CACHED
+[X] info:      Type  6: HOST_VISIBLE | HOST_COHERENT | HOST_CACHED
+[X] info:      Type  8: HOST_VISIBLE | HOST_COHERENT | DEVICE_COHERENT | DEVICE_UNCACHED
+[X] info:      Type 10: HOST_VISIBLE | HOST_COHERENT | HOST_CACHED | DEVICE_COHERENT | DEVICE_UNCACHED
+[X] info:    Heap 1: 15.92 GiB (DEVICE_LOCAL)
+[X] info:      Type  0: DEVICE_LOCAL
+[X] info:      Type  1: DEVICE_LOCAL
+[X] info:      Type  3: DEVICE_LOCAL | HOST_VISIBLE | HOST_COHERENT
+[X] info:      Type  4: DEVICE_LOCAL | HOST_VISIBLE | HOST_COHERENT
+[X] info:      Type  7: DEVICE_LOCAL | DEVICE_COHERENT | DEVICE_UNCACHED
+[X] info:      Type  9: DEVICE_LOCAL | HOST_VISIBLE | HOST_COHERENT | DEVICE_COHERENT | DEVICE_UNCACHED
+[X] info:  Enabled extensions:
+[X] info:    VK_EXT_attachment_feedback_loop_layout
+[X] info:    VK_EXT_border_color_swizzle
+[X] info:    VK_EXT_conservative_rasterization
+[X] info:    VK_EXT_custom_border_color
+[X] info:    VK_EXT_depth_clip_enable
+[X] info:    VK_EXT_depth_bias_control
+[X] info:    VK_EXT_dynamic_rendering_unused_attachments
+[X] info:    VK_EXT_extended_dynamic_state3
+[X] info:    VK_EXT_fragment_shader_interlock
+[X] info:    VK_EXT_graphics_pipeline_library
+[X] info:    VK_EXT_hdr_metadata
+[X] info:    VK_EXT_line_rasterization
+[X] info:    VK_EXT_multi_draw
+[X] info:    VK_EXT_non_seamless_cube_map
+[X] info:    VK_EXT_robustness2
+[X] info:    VK_EXT_sample_locations
+[X] info:    VK_EXT_shader_stencil_export
+[X] info:    VK_EXT_transform_feedback
+[X] info:    VK_EXT_vertex_attribute_divisor
+[X] info:    VK_KHR_dynamic_rendering_local_read
+[X] info:    VK_KHR_external_memory_win32
+[X] info:    VK_KHR_incremental_present
+[X] info:    VK_KHR_load_store_op_none
+[X] info:    VK_KHR_maintenance5
+[X] info:    VK_KHR_maintenance6
+[X] info:    VK_KHR_pipeline_library
+[X] info:    VK_KHR_present_id
+[X] info:    VK_KHR_shader_float_controls2
+[X] info:    VK_KHR_shader_subgroup_uniform_control_flow
+[X] info:    VK_KHR_swapchain
+[X] info:    VK_KHR_swapchain_maintenance1
+[X] info:    VK_KHR_swapchain_mutable_format
+[X] info:  Enabled features:
+[X] info:    depthBiasClamp                 : 1
+[X] info:    depthBounds                    : 1
+[X] info:    depthClamp                     : 1
+[X] info:    drawIndirectFirstInstance      : 1
+[X] info:    dualSrcBlend                   : 1
+[X] info:    fillModeNonSolid               : 1
+[X] info:    fragmentStoresAndAtomics       : 1
+[X] info:    fullDrawIndexUint32            : 1
+[X] info:    geometryShader                 : 1
+[X] info:    imageCubeArray                 : 1
+[X] info:    independentBlend               : 1
+[X] info:    largePoints                    : 1
+[X] info:    logicOp                        : 1
+[X] info:    multiDrawIndirect              : 1
+[X] info:    multiViewport                  : 1
+[X] info:    occlusionQueryPrecise          : 1
+[X] info:    pipelineStatisticsQuery        : 1
+[X] info:    robustBufferAccess             : 1
+[X] info:    sampleRateShading              : 1
+[X] info:    samplerAnisotropy              : 1
+[X] info:    shaderClipDistance             : 1
+[X] info:    shaderCullDistance             : 1
+[X] info:    shaderFloat64                  : 1
+[X] info:    shaderImageGatherExtended      : 1
+[X] info:    shaderInt16                    : 1
+[X] info:    shaderInt64                    : 1
+[X] info:    shaderUniformBufferArrayDynamicIndexing : 1
+[X] info:    shaderSampledImageArrayDynamicIndexing : 1
+[X] info:    shaderStorageBufferArrayDynamicIndexing : 1
+[X] info:    shaderStorageImageArrayDynamicIndexing : 1
+[X] info:    sparseBinding                  : 1
+[X] info:    sparseResidencyBuffer          : 1
+[X] info:    sparseResidencyImage2D         : 1
+[X] info:    sparseResidencyImage3D         : 1
+[X] info:    sparseResidency2Samples        : 0
+[X] info:    sparseResidency4Samples        : 0
+[X] info:    sparseResidency8Samples        : 0
+[X] info:    sparseResidency16Samples       : 0
+[X] info:    sparseResidencyAliased         : 1
+[X] info:    shaderResourceResidency        : 1
+[X] info:    shaderResourceMinLod           : 1
+[X] info:    tessellationShader             : 1
+[X] info:    textureCompressionBC           : 1
+[X] info:    variableMultisampleRate        : 1
+[X] info:    vertexPipelineStoresAndAtomics : 1
+[X] info:    wideLines                      : 1
+[X] info:    shaderDrawParameters           : 1
+[X] info:    storageBuffer16BitAccess       : 1
+[X] info:    storagePushConstant16          : 1
+[X] info:    bufferDeviceAddress            : 1
+[X] info:    descriptorIndexing             : 1
+[X] info:    storageBuffer8BitAccess        : 1
+[X] info:    storagePushConstant8           : 1
+[X] info:    shaderUniformTexelBufferArrayDynamicIndexing : 1
+[X] info:    shaderStorageTexelBufferArrayDynamicIndexing : 1
+[X] info:    shaderUniformBufferArrayNonUniformIndexing : 1
+[X] info:    shaderSampledImageArrayNonUniformIndexing : 1
+[X] info:    shaderStorageBufferArrayNonUniformIndexing : 1
+[X] info:    shaderStorageImageArrayNonUniformIndexing : 1
+[X] info:    shaderUniformTexelBufferArrayNonUniformIndexing : 1
+[X] info:    shaderStorageTexelBufferArrayNonUniformIndexing : 1
+[X] info:    descriptorBindingSampledImageUpdateAfterBind : 1
+[X] info:    descriptorBindingUpdateUnusedWhilePending : 1
+[X] info:    descriptorBindingPartiallyBound : 1
+[X] info:    drawIndirectCount              : 1
+[X] info:    hostQueryReset                 : 1
+[X] info:    runtimeDescriptorArray         : 1
+[X] info:    samplerFilterMinmax            : 1
+[X] info:    samplerMirrorClampToEdge       : 1
+[X] info:    scalarBlockLayout              : 1
+[X] info:    shaderFloat16                  : 1
+[X] info:    shaderInt8                     : 1
+[X] info:    shaderOutputViewportIndex      : 1
+[X] info:    shaderOutputLayer              : 1
+[X] info:    timelineSemaphore              : 1
+[X] info:    uniformBufferStandardLayout    : 1
+[X] info:    vulkanMemoryModel              : 1
+[X] info:    inlineUniformBlock             : 1
+[X] info:    computeFullSubgroups           : 1
+[X] info:    dynamicRendering               : 1
+[X] info:    maintenance4                   : 1
+[X] info:    robustImageAccess              : 0
+[X] info:    pipelineCreationCacheControl   : 1
+[X] info:    shaderDemoteToHelperInvocation : 1
+[X] info:    shaderZeroInitializeWorkgroupMemory : 1
+[X] info:    subgroupSizeControl            : 1
+[X] info:    synchronization2               : 1
+[X] info:  VK_EXT_attachment_feedback_loop_layout:
+[X] info:    attachmentFeedbackLoopLayout   : 1
+[X] info:  VK_EXT_border_color_swizzle:
+[X] info:    borderColorSwizzle             : 1
+[X] info:    borderColorSwizzleFromImage    : 1
+[X] info:  VK_EXT_conservative_rasterization:
+[X] info:    extConservativeRasterization   : 1
+[X] info:  VK_EXT_custom_border_color:
+[X] info:    customBorderColors             : 1
+[X] info:    customBorderColorWithoutFormat : 1
+[X] info:  VK_EXT_depth_clip_enable:
+[X] info:    depthClipEnable                : 1
+[X] info:  VK_EXT_depth_bias_control:
+[X] info:    depthBiasControl               : 1
+[X] info:    leastRepresentableValueForceUnormRepresentation : 1
+[X] info:    floatRepresentation            : 1
+[X] info:    depthBiasExact                 : 1
+[X] info:  VK_EXT_descriptor_buffer:
+[X] info:    descriptorBuffer               : 0
+[X] info:  VK_EXT_descriptor_heap:
+[X] info:    descriptorHeap                 : 0
+[X] info:  VK_EXT_dynamic_rendering_unused_attachments:
+[X] info:    dynamicRenderingUnusedAttachments : 1
+[X] info:  VK_EXT_extended_dynamic_state3:
+[X] info:    extendedDynamicState3AlphaToCoverageEnable : 1
+[X] info:    extendedDynamicState3DepthClipEnable : 1
+[X] info:    extendedDynamicState3RasterizationSamples : 1
+[X] info:    extendedDynamicState3SampleMask : 1
+[X] info:    extendedDynamicState3LineRasterizationMode : 1
+[X] info:    extendedDynamicState3SampleLocationsEnable : 1
+[X] info:  VK_EXT_fragment_shader_interlock:
+[X] info:    fragmentShaderSampleInterlock  : 1
+[X] info:    fragmentShaderPixelInterlock   : 1
+[X] info:  VK_EXT_full_screen_exclusive:
+[X] info:    extFullScreenExclusive         : 0
+[X] info:  VK_EXT_graphics_pipeline_library:
+[X] info:    graphicsPipelineLibrary        : 1
+[X] info:  VK_EXT_hdr_metadata:
+[X] info:    extHdrMetadata                 : 1
+[X] info:  VK_EXT_line_rasterization:
+[X] info:    rectangularLines               : 1
+[X] info:    smoothLines                    : 1
+[X] info:  VK_EXT_memory_budget:
+[X] info:    extMemoryBudget                : 0
+[X] info:  VK_EXT_memory_priority:
+[X] info:    memoryPriority                 : 0
+[X] info:  VK_EXT_multi_draw:
+[X] info:    multiDraw                      : 1
+[X] info:  VK_EXT_non_seamless_cube_map:
+[X] info:    nonSeamlessCubeMap             : 1
+[X] info:  VK_EXT_pageable_device_local_memory:
+[X] info:    pageableDeviceLocalMemory      : 0
+[X] info:  VK_EXT_robustness2:
+[X] info:    robustBufferAccess2            : 1
+[X] info:    robustImageAccess2             : 1
+[X] info:    nullDescriptor                 : 1
+[X] info:  VK_EXT_sample_locations:
+[X] info:    extSampleLocations             : 1
+[X] info:  VK_EXT_shader_module_identifier:
+[X] info:    shaderModuleIdentifier         : 0
+[X] info:  VK_EXT_shader_stencil_export:
+[X] info:    extShaderStencilExport         : 1
+[X] info:  VK_EXT_swapchain_colorspace:
+[X] info:    extSwapchainColorSpace         : 0
+[X] info:  VK_EXT_swapchain_maintenance1:
+[X] info:    swapchainMaintenance1          : 0
+[X] info:  VK_EXT_transform_feedback:
+[X] info:    transformFeedback              : 1
+[X] info:    geometryStreams                : 1
+[X] info:  VK_EXT_vertex_attribute_divisor:
+[X] info:    vertexAttributeInstanceRateDivisor : 1
+[X] info:    vertexAttributeInstanceRateZeroDivisor : 1
+[X] info:  VK_KHR_device_fault:
+[X] info:    deviceFault                    : 0
+[X] info:    deviceFaultVendorBinary        : 0
+[X] info:  VK_KHR_dynamic_rendering_local_read:
+[X] info:    dynamicRenderingLocalRead      : 1
+[X] info:  VK_KHR_external_memory_win32:
+[X] info:    khrExternalMemoryWin32         : 1
+[X] info:  VK_KHR_external_semaphore_win32:
+[X] info:    khrExternalSemaphoreWin32      : 0
+[X] info:  VK_KHR_incremental_present:
+[X] info:    khrIncrementalPresent          : 1
+[X] info:  VK_KHR_load_store_op_none:
+[X] info:    khrLoadStoreOpNone             : 1
+[X] info:  VK_KHR_maintenance5:
+[X] info:    maintenance5                   : 1
+[X] info:  VK_KHR_maintenance6:
+[X] info:    maintenance6                   : 1
+[X] info:  VK_KHR_maintenance7:
+[X] info:    maintenance7                   : 0
+[X] info:  VK_KHR_maintenance8:
+[X] info:    maintenance8                   : 0
+[X] info:  VK_KHR_maintenance9:
+[X] info:    maintenance9                   : 0
+[X] info:  VK_KHR_maintenance10:
+[X] info:    maintenance10                  : 0
+[X] info:  VK_KHR_maintenance11:
+[X] info:    maintenance11                  : 0
+[X] info:  VK_KHR_pipeline_library:
+[X] info:    khrPipelineLibrary             : 1
+[X] info:  VK_KHR_present_id:
+[X] info:    presentId                      : 1
+[X] info:  VK_KHR_present_id2:
+[X] info:    presentId2                     : 0
+[X] info:  VK_KHR_present_wait:
+[X] info:    presentWait                    : 0
+[X] info:  VK_KHR_present_wait2:
+[X] info:    presentWait2                   : 0
+[X] info:  VK_KHR_shader_float_controls2:
+[X] info:    shaderFloatControls2           : 1
+[X] info:  VK_KHR_shader_subgroup_uniform_control_flow:
+[X] info:    shaderSubgroupUniformControlFlow : 1
+[X] info:  VK_KHR_shader_untyped_pointers:
+[X] info:    shaderUntypedPointers          : 0
+[X] info:  VK_KHR_swapchain:
+[X] info:    khrSwapchain                   : 1
+[X] info:  VK_KHR_swapchain_maintenance1:
+[X] info:    swapchainMaintenance1          : 1
+[X] info:  VK_KHR_swapchain_mutable_format:
+[X] info:    khrSwapchainMutableFormat      : 1
+[X] info:  VK_KHR_unified_image_layouts:
+[X] info:    unifiedImageLayouts            : 0
+[X] info:  VK_KHR_win32_keyed_mutex:
+[X] info:    khrWin32KeyedMutex             : 0
+[X] info:  VK_AMD_buffer_marker:
+[X] info:    amdBufferMarker                : 0
+[X] info:  VK_NV_device_diagnostic_checkpoints:
+[X] info:    nvDeviceDiagnosticCheckpoints  : 0
+[X] info:  VK_NV_low_latency2:
+[X] info:    nvLowLatency2                  : 0
+[X] info:  VK_NV_raw_access_chains:
+[X] info:    shaderRawAccessChains          : 0
+[X] info:  VK_NVX_binary_import:
+[X] info:    nvxBinaryImport                : 0
+[X] info:  VK_NVX_image_view_handle:
+[X] info:    nvxImageViewHandle             : 0
+[X] info:  Memory type mask for sparse resources: 0x7ad
+[X] info:  Memory type mask for buffer resources: 0x7ad, usage: 0x219ff
+[X] info:  Graphics pipeline libraries supported
+[X] info:  Binding model: Legacy
+[X] info:  D3D11InternalCreateDevice: Maximum supported feature level: D3D_FEATURE_LEVEL_12_1
+[X] info:  D3D11InternalCreateDevice: Using feature level D3D_FEATURE_LEVEL_11_1
+[X] info:  DXGI: VK_FORMAT_D24_UNORM_S8_UINT -> VK_FORMAT_D32_SFLOAT_S8_UINT
+[X] [D3D11] D3D11CreateDeviceAndSwapChain ok in 871.0 ms, feature level 0xb100
+[X] [D3D11] adapter: "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" vendor 0x1002 device 0x7550 dedicated video memory 16304 MiB
+[X] [D3D11] D3DCompile vs/vs_5_0: 1372 bytes DXBC in 8.0 ms
+[X] [D3D11] D3DCompile ps/ps_5_0: 580 bytes DXBC in 0.0 ms
+[X] info:  Created cache file: C:\users\root\AppData\Local\dxvk\4a866b784d751687.dxvk.bin
+[X] info:  DXVK: Using 2 compiler threads
+[X] [D3D11] render loop: 65 s
+[X] info:  Presenter: Actual swapchain properties:
+[X] info:    Format:       VK_FORMAT_B8G8R8A8_UNORM
+[X] info:    Color space:  VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
+[X] info:    Present mode: VK_PRESENT_MODE_FIFO_KHR (dynamic: yes)
+[X] info:    Buffer size:  640x480
+[X] info:    Image count:  4
+[X] [D3D11] frame 0: 98.00 ms
+[X] [D3D11] frame 1: 11.00 ms
+[X] [D3D11] frame 2: 1.00 ms
+[X] [D3D11] RESULT frames=7994 wall=65000.0 ms fps=122.98 | per-frame median 7.00 p90 13.00 worst(after frame 0) 1117.00 ms
+[X] [D3D11] teardown: clean
+[X] [D3D11] done rc=0
+[P5] end d3d11 status=0 ms=67772
+[P5] begin d3d12 : wine Z:\CP\P5\D3D12\d3d12tri.exe 65 640 480
+[X] [D3D12] d3d12tri start (C5-vk2): 65 s, 640x480, pid 340
+[X] [D3D12] env WINEDLLOVERRIDES=d3d11,dxgi,d3d10core,d3d9,d3d12,d3d12core=n,b;mscoree,mshtml=;winemenubuilder.exe=d VKD3D_DEBUG=warn
+[X] [D3D12] module d3d12.dll          Z:\CP\P5\D3D12\d3d12.dll
+[X] [D3D12] module d3d12core.dll      Z:\CP\P5\D3D12\d3d12core.dll
+[X] [D3D12] module dxgi.dll           Z:\CP\P5\D3D12\dxgi.dll
+[X] [D3D12] module d3dcompiler_47.dll C:\windows\system32\d3dcompiler_47.dll
+[X] info:  Game: d3d12tri.exe
+[X] info:  DXVK: v3.1.1
+[X] info:  Build: x86_64 gcc 16.2.0
+[X] info:  Vulkan: Found vkGetInstanceProcAddr in winevulkan.dll @ 0x7ffffdf73b60
+[X] info:  Extension providers:
+[X] info:    Platform WSI
+[X] info:    OpenVR
+[X] info:  OpenVR: could not open registry key, status 2
+[X] info:  OpenVR: Failed to locate module
+[X] info:    OpenXR
+[X] info:  Enabled instance extensions:
+[X] info:    VK_KHR_get_surface_capabilities2
+[X] info:    VK_KHR_surface
+[X] info:    VK_KHR_surface_maintenance1
+[X] info:    VK_KHR_win32_surface
+[X] info:  Found device: Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201)) (venus 26.2.6)
+[X] 137.973:0154:0158:warn:vkd3d-proton:openvr_instance_extensions: Failed to open VR registry key, status 2.
+[X] 137.973:0154:0158:warn:vkd3d-proton:openxr_vulkan_extensions: wineopenxr.dll is missing required symbols.
+[X] 137.980:0154:0158:info:vkd3d-proton:vkd3d_instance_deduce_config_flags_from_environment: shader_cache is used, global_pipeline_cache is enforced.
+[X] 137.980:0154:0158:info:vkd3d-proton:vkd3d_config_flags_init_once: VKD3D_CONFIG=''.
+[X] 138.012:0154:0158:info:vkd3d-proton:vkd3d_get_vk_version: vkd3d-proton - applicationVersion: 3.1.0.
+[X] 138.012:0154:0158:info:vkd3d-proton:vkd3d_instance_init: vkd3d-proton - build: 4522cc1a8b1347f.
+[X] 138.049:0154:0158:warn:vkd3d-proton:openvr_device_extensions: Failed to open VR registry key, status 2.
+[X] 138.049:0154:0158:warn:vkd3d-proton:openxr_vulkan_extensions: wineopenxr.dll is missing required symbols.
+[X] 138.157:0154:0158:info:vkd3d-proton:vkd3d_init_device_caps: Not all relevant pipeline stages are supported by EXT_dgc. Skipping.
+[X] 138.271:0154:0158:info:vkd3d-proton:d3d12_device_init_workarounds: Detected Linux kernel version 6.1.0
+[X] 138.271:0154:0158:info:vkd3d-proton:d3d12_device_init_workarounds: Broken NULL PRT with SMEM detected, per-game workarounds may apply.
+[X] 138.289:0154:0158:warn:vkd3d-proton:vkd3d_init_depth_stencil_formats: Mapping VK_FORMAT_D24_UNORM_S8_UINT to VK_FORMAT_D32_SFLOAT_S8_UINT.
+[X] 138.295:0154:0158:info:vkd3d-proton:vkd3d_memory_info_decide_hvv_usage: Topology: No more than 1 device local heap, HVV access is viable.
+[X] 138.295:0154:0158:info:vkd3d-proton:vkd3d_memory_info_upload_hvv_memory_properties: Topology: HVV usage is allowed, using DEVICE_LOCAL | HOST_COHERENT for UPLOAD.
+[X] 138.295:0154:0158:info:vkd3d-proton:vkd3d_memory_info_init_budgets: Applying resizable BAR budget to memory types: 0x218.
+[X] 138.311:0154:0158:info:vkd3d-proton:vkd3d_bindless_state_get_bindless_flags: Device supports VK_EXT_mutable_descriptor_type.
+[X] 138.331:0154:0158:info:vkd3d-proton:d3d12_device_caps_init_shader_model: Enabling support for SM 6.6.
+[X] 138.331:0154:0158:info:vkd3d-proton:d3d12_device_caps_init_shader_model: Enabling support for SM 6.7.
+[X] 138.331:0154:0158:info:vkd3d-proton:d3d12_device_caps_init_shader_model: Enabling support for SM 6.8.
+[X] 138.334:0154:0158:warn:vkd3d-proton:d3d12_device_caps_init_feature_options1: No device info available for TotalLaneCount = 2048.
+[X] 138.334:0154:0158:fixme:vkd3d-proton:d3d12_device_caps_init_feature_options1: TotalLaneCount = 2048, may be inaccurate.
+[X] 138.334:0154:0158:info:vkd3d-proton:d3d12_device_determine_ray_tracing_tier: DXR support enabled.
+[X] 138.334:0154:0158:info:vkd3d-proton:d3d12_device_determine_ray_tracing_tier: DXR 1.1 support enabled.
+[X] 138.334:0154:0158:info:vkd3d-proton:vkd3d_pipeline_library_init_disk_cache: Remapping VKD3D_SHADER_CACHE to: vkd3d-proton.cache.
+[X] 138.335:0154:0158:info:vkd3d-proton:vkd3d_pipeline_library_init_disk_cache: Attempting to load disk cache from: vkd3d-proton.cache.
+[X] [D3D12] D3D12CreateDevice ok in 373.0 ms
+[X] [D3D12] adapter: "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" vendor 0x1002 device 0x7550 dedicated video memory 16304 MiB
+[X] 138.337:0154:0160:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Performing async setup of stream archive ...
+[X] 138.340:0154:0160:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_merge: No write cache exists. No need to merge any disk caches.
+[X] [D3D12] highest shader model (asked 6.0): 0x60
+[X] 138.342:0154:0160:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Merging pipeline libraries took 3.000 ms.
+[X] 138.343:0154:0158:info:vkd3d-proton:dxgi_vk_swap_chain_init: Creating swapchain (640 x 480), BufferCount = 2.
+[X] 138.346:0154:0160:info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Failed to map read-only cache: vkd3d-proton.cache.
+[X] 138.350:0154:0160:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Done performing async setup of stream archive.
+[X] 138.385:0154:0158:info:vkd3d-proton:dxgi_vk_swap_chain_init_sync_objects: Ensure maximum latency of 3 frames with KHR_present_wait.
+[X] 138.386:0154:0158:info:vkd3d-proton:dxgi_vk_swap_chain_init_sleep_state: Timer interval is 1.0 ms.
+[X] [D3D12] CreateSwapChainForHwnd ok in 45.0 ms (2 buffers, FLIP_DISCARD)
+[X] [D3D12] D3DCompile vs/vs_5_0: 1340 bytes DXBC in 4.0 ms
+[X] [D3D12] D3DCompile ps/ps_5_0: 580 bytes DXBC in 0.0 ms
+[X] [D3D12] CreateGraphicsPipelineState ok in 5.0 ms
+[X] [D3D12] render loop: 65 s
+[X] 138.403:0154:0160:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Pipeline cache marked dirty. Flush is scheduled.
+[X] 138.465:0154:0168:fixme:vkd3d-proton:dxgi_vk_swap_chain_update_wait_timing_capabilities: Implementation supports neither present_wait1 or present_wait2. Latency will increase.
+[X] 138.486:0154:0168:info:vkd3d-proton:dxgi_vk_swap_chain_recreate_swapchain_in_present_task: Got 3 swapchain images.
+[X] [D3D12] frame 0: 85.00 ms (back buffer 0)
+[X] 138.550:0154:0168:info:vkd3d-proton:dxgi_vk_swap_chain_recreate_swapchain_in_present_task: Got 3 swapchain images.
+[X] [D3D12] frame 1: 50.00 ms (back buffer 1)
+[X] [D3D12] frame 2: 4.00 ms (back buffer 0)
+[X] 139.404:0154:0160:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Flushing disk cache (wakeup counter since last flush = 2). It seems like application has stopped creating new PSOs for the time being.
+[X] [D3D12] RESULT frames=12374 wall=65004.0 ms fps=190.36 | per-frame median 5.00 p90 5.00 worst(after frame 0) 668.00 ms
+[X] [D3D12] teardown: clean
+[X] [D3D12] done rc=0
+[P5] end d3d12 status=0 ms=67669
+[P5] begin kill : wineserver -k
+[P5] end kill status=0 ms=400
+[P5] quiesce after kill: extra=1
+[P5] done

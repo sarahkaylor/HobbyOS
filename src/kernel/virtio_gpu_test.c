@@ -1,6 +1,7 @@
 #ifdef KERNEL_MODE_UNIT_TEST
 
 #include "unit_test.h"
+#include "kmem.h"
 #include "virtio_gpu.h"
 #include "display_mode.h"
 #include "gpu_abi.h" /* M1: /dev/gpu ABI pure helpers */
@@ -209,9 +210,12 @@ static void test_gpu_abi_pages_for(void) {
   EXPECT_EQ(gpu_abi_pages_for(4097), 2);
   EXPECT_EQ(gpu_abi_pages_for(64 * 64 * 4), 4);        /* the M1 probe buffer */
   EXPECT_EQ(gpu_abi_pages_for(64ull * 1024 * 1024), 16384);
-  /* The per-resource cap moved to 512 MiB so a planet-sized texture can be
-   * attached; the old 64 MiB boundary is an ordinary legal buffer now. */
+  /* The per-resource cap is GPU_ABI_MAX_BYTES, 512 MiB (it was 64 MiB when
+   * these rows were written): the old 64 MiB boundary is an ordinary legal
+   * buffer now, 512 MiB is the last legal size, and one byte over is refused
+   * rather than truncated. */
   EXPECT_EQ(gpu_abi_pages_for(64ull * 1024 * 1024 + 1), 16385);
+  EXPECT_EQ(gpu_abi_pages_for(512ull * 1024 * 1024), 131072);
   EXPECT_EQ(gpu_abi_pages_for(512ull * 1024 * 1024 + 1), 0);
   EXPECT_EQ(gpu_abi_pages_for(0xFFFFFFFFFFFFFFFFull), 0);
 }
@@ -241,6 +245,7 @@ static void test_gpu_abi_res_ok(void) {
    * buffer is legal and must not trip the 16384 texel dimension limit. */
   r.width = 1024 * 1024;
   EXPECT_EQ(gpu_abi_res_ok(&r), 1);
+  /* The buffer ceiling is the 512 MiB backing cap (GPU_ABI_MAX_BYTES). */
   r.width = 65 * 1024 * 1024;
   EXPECT_EQ(gpu_abi_res_ok(&r), 1); /* 64 MiB is no longer the ceiling */
   r.width = 512u * 1024u * 1024u + 1u;
@@ -468,7 +473,7 @@ static void test_virtio_gpu_flush_smoke(void) {
 
   if (virtio_gpu_x64_active_mode() == 2) {
     uint32_t* fb = virtio_gpu_get_framebuffer();
-    volatile uint32_t* lfb = (volatile uint32_t*)(uint64_t)bga_framebuffer_phys;
+    volatile uint32_t* lfb = (volatile uint32_t*)phys_to_virt((uint64_t)bga_framebuffer_phys);
     uint32_t old_in = lfb[100 * DISPLAY_WIDTH + 200];
     uint32_t old_out = lfb[50 * DISPLAY_WIDTH + 50];
     fb[100 * DISPLAY_WIDTH + 200] = 0xFF123456;

@@ -1,0 +1,19 @@
+# H1-hunt: the in-game Settings menu, driven by hand (strix, h-set1: P9 32 GiB Venus, tools/cp/hunt/settings.p9 -> ctl)
+[P9W] +   227.4 s  06:29:14  ctl: seek set-focus main down 4 SETTINGS
+[P9W] +   231.5 s  06:29:18  seek set-focus: main menu focus on SETTINGS after 1 taps
+[P9W] shot s012-t000128-settings0: OCR '(SOUND CONTROLS GAMEPLAY GRAPHICS VIDEO LANGUAGE INTERFACE KEY BINDINGS ACCESSIBILITY UTILITIES ‘Oynamic Range Headphones Enable Controller Speaker ou | Volume ‘Master Volume 100 Dd SEX Volu
+[P9W] shot s016-t000157-tab3: OCR '(SOUND CONTROLS GAMEPLAY GRAPHICS VIDEO LANGUAGE INTERFACE KEY BINDINGS ACCESSIBILITY UTILITIES — |Georma some Toggle Aiming oe) ‘Dodging on Movement input Keys oe) Inner Dead Zone 4 [036 ) Dd ‘O
+[P9W] shot s019-t000181-gfx0: OCR '(SOUND CONTROLS GAMEPLAY GRAPHICS VIDEO LANGUAGE INTERFACE KEY BINDINGS ACCESSIBILITY UTILITIES [Ganson Quick Preset Quick Preset Custom Resolution Scaling Frame Generation Texture Quality Ray Tr
+[P9W] shot s025-t000246-gfx4: OCR "(SOUND CONTROLS GAMEPLAY GRAPHICS VIDEO LANGUAGE INTERFACE KEY BINDINGS ACCESSIBILITY UTILITIES os == ~ Presets are tailored to provide the best Custom: ‘experience for various systems. The game'
+   +   227.4 s  06:29:14  ctl: seek set-focus main down 4 SETTINGS
+   +   231.5 s  06:29:18  seek set-focus: main menu focus on SETTINGS after 1 taps
+[P9W] focus s030-t000296-menu-load0: no highlighted row
+[P9W] focus s031-t000298-menu-load1: no highlighted row
+[P9W] focus s032-t000299-menu-load2: no highlighted row
+[P9W] focus s033-t000301-menu-load3: no highlighted row
+[P9W] focus s034-t000302-menu-load4: no highlighted row
+[P9W] +   412.1 s  06:32:18  SEEK FAILED menu-load: main menu row 'LOAD GAME' not focused after 4 x up
+[P9W] +   413.7 s  06:32:20  verdict: seek-failed:menu-load; QEMU stopped, slot released; guests on the host now: 3
+# keys: '3' / '1' switch tabs (SOUND -> CONTROLS -> GAMEPLAY -> GRAPHICS), Up/Down move, Left/Right change a value; 'e', 'q', Tab do nothing there.
+# Right on Field of View moved the slider (OCR of the next shot reads "85") and Left moved it back; Quick Preset: Right on 'Custom' did not change it (UserSettings.json written by the game at 06:31:55 on leaving the menu: QuickPresets Custom, FieldOfView 80.0, read with debugfs from a hard link of the data disk, then deleted). Esc back to the main menu: game alive; classify.py: 0 kernel faults, no [VENUS] stall, only the benign DXVK rows (no device-lost).
+# back on the main menu, 5 Up taps never showed a focus frame (also with looser colour thresholds; column brightness unchanged) -> the same state as H1-12; the boot ended there (seek-failed).

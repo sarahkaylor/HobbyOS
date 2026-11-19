@@ -1,0 +1,29 @@
+# pr-ioe1: [HBV] per phase (tools/cp/present/hbv_summary.py), strix fpsprobe boot
+== fps (winevulkan trace:fps 'approx' rows) in /home/sarah/cp/lanes/venus/obj/cp-p9/pr-ioe1
+phase           rows          game s   median     p10     min     max    mean
+launch            84          15-142     86.2    59.7     0.0   119.6    85.4
+menu              11         144-158    115.8   105.1   105.0   123.6   114.3
+loading           56         160-243    135.7    25.7    11.7   232.2   127.6
+world             60         246-335     25.9    14.7    10.4    32.7    24.1
+prof-fp-world     13         336-355     28.0    22.8    21.3    29.8    26.9
+# [HBV] per phase: per frame = count/frame, ms/frame (sum over all threads)
+== launch         frames  10863  fps 79.0  [HBP] sub 3.68 ms flip 3.74 ms (avg/frame)
+   ring 0.40/0.03ms  tls 0.10/0.04ms  space 1.66/0.04ms  slpR 0.32/0.07ms  slpO 0.14/0.04ms  yield 10.71/0.00ms  ntf 0.92/0.73ms  subF 17.10/1.81ms  subU 18.02/1.33ms  wait 38.95/8.68ms  fwait 11.16/7.91ms  qsub 17.07/6.31ms  pwait 0.00/0.00ms
+   replies: vkCreateComputePipelines 0.06/0.03ms  vkGetRayTracingShaderGroupHandlesKHR 0.05/0.02ms  vkCreateGraphicsPipelines 0.04/0.02ms  vkCreateInstance 0.00/0.00ms  vkCreateBuffer 0.01/0.00ms  vkCreateRayTracingPipelinesKHR 0.00/0.00ms  vkGetDeviceImageMemoryRequirements 0.02/0.00ms  vkEnumeratePhysicalDevices 0.00/0.00ms
+== menu           frames   1833  fps 114.3  [HBP] sub 1.53 ms flip 2.69 ms (avg/frame)
+   ring 0.01/0.00ms  tls 0.00/0.00ms  space 1.80/0.03ms  slpR 0.00/0.00ms  slpO 0.14/0.03ms  yield 2.95/0.00ms  ntf 1.10/0.26ms  subF 9.01/0.69ms  subU 10.11/0.46ms  wait 18.01/3.72ms  fwait 5.72/3.59ms  qsub 9.01/2.41ms  pwait 0.00/0.00ms
+   replies: vkGetDeviceImageMemoryRequirements 0.00/0.00ms  vkCreateBuffer 0.00/0.00ms  vkCreateImage 0.00/0.00ms  vkGetImageMemoryRequirements2 0.00/0.00ms  vkGetBufferMemoryRequirements2 0.00/0.00ms
+== loading        frames  10805  fps 128.0  [HBP] sub 2.64 ms flip 2.99 ms (avg/frame)
+   ring 0.11/0.01ms  tls 0.00/0.00ms  space 0.18/0.04ms  slpR 0.02/0.00ms  slpO 0.17/0.04ms  yield 4.99/0.00ms  ntf 0.74/0.47ms  subF 10.37/2.05ms  subU 11.11/0.92ms  wait 21.26/4.74ms  fwait 5.99/4.16ms  qsub 10.19/5.36ms  pwait 0.00/0.00ms
+   replies: vkGetDeviceImageMemoryRequirements 0.04/0.01ms  vkCreateImage 0.02/0.00ms  vkGetBufferDeviceAddress 0.01/0.00ms  vkCreateBuffer 0.01/0.00ms  vkGetImageMemoryRequirements2 0.02/0.00ms  vkGetBufferMemoryRequirements2 0.01/0.00ms
+== world          frames   2174  fps 23.9  [HBP] sub 4.49 ms flip 3.00 ms (avg/frame)
+   ring 0.35/0.04ms  tls 0.00/0.00ms  space 0.41/0.22ms  slpR 0.13/0.02ms  slpO 0.85/0.21ms  yield 24.37/0.00ms  ntf 3.16/0.88ms  subF 24.91/0.82ms  subU 28.07/2.03ms  wait 58.91/16.29ms  fwait 17.06/15.16ms  qsub 24.76/6.75ms  pwait 0.00/0.00ms
+   replies: vkGetDeviceImageMemoryRequirements 0.14/0.03ms  vkCreateImage 0.09/0.01ms  vkCreateBuffer 0.01/0.00ms  vkGetImageMemoryRequirements2 0.09/0.00ms  vkGetBufferDeviceAddress 0.01/0.00ms  vkGetBufferMemoryRequirements2 0.01/0.00ms
+== prof-fp-world  frames    601  fps 27.1  [HBP] sub 4.13 ms flip 3.04 ms (avg/frame)
+   ring 0.05/0.01ms  tls 0.00/0.00ms  space 2.21/0.11ms  slpR 0.02/0.00ms  slpO 0.49/0.10ms  yield 12.26/0.00ms  ntf 3.11/0.54ms  subF 24.55/0.90ms  subU 27.65/1.35ms  wait 58.17/15.06ms  fwait 16.60/14.13ms  qsub 24.45/6.10ms  pwait 0.00/0.00ms
+   replies: vkGetDeviceImageMemoryRequirements 0.02/0.00ms  vkGetImageMemoryRequirements2 0.01/0.00ms  vkGetBufferDeviceAddress 0.00/0.00ms  vkCreateImage 0.01/0.00ms  vkCreateBuffer 0.00/0.00ms  vkGetBufferMemoryRequirements2 0.00/0.00ms
+## raw [HBP]+[HBV] rows, two windows from the middle of the world phase
+[X] [HBP] pid=92 n=51 fps=25.1 path=scanout acq=1/5 sub=8023/200237 wait=6/20 flip=2920/3392 geom=0/0 set=136 flush=2745 us scanout=51 putimage=0 refused=0 total=24472
+[X] [HBV] pid=92 n=51 win_ms=2033 ring=17/207/3.5/870 tls=0/0/0.0/0 space=10/371/3.7/1750 slpR=13/178/2.3/200 slpO=20/180/3.6/206 yield=2268/0/0.0/0 ntf=153/1403/214.6/189364 subF=1280/34/44.1/3093 subU=1433/314/449.5/199760 wait=3020/388/1172.9/200234 fwait=853/1324/1129.1/200111 qsub=1278/548/699.9/199915 cmd 231:5/323/673 144:3/310/870 54:3/260/661 175:2/83/95 50:2/12/16 145:2/3/3
+[X] [HBP] pid=92 n=62 fps=30.5 path=scanout acq=1/1 sub=3994/6304 wait=6/12 flip=2971/3595 geom=0/0 set=142 flush=2798 us scanout=62 putimage=0 refused=0 total=24534
+[X] [HBV] pid=92 n=62 win_ms=2033 ring=3/9/0.0/13 tls=0/0/0.0/0 space=18/328/5.9/963 slpR=0/0/0.0/0 slpO=29/195/5.7/371 yield=308/0/0.0/0 ntf=154/432/66.6/44337 subF=1504/36/54.0/3032 subU=1658/58/95.9/44337 wait=3562/250/889.5/5775 fwait=1018/822/836.6/5770 qsub=1500/231/346.5/5833 cmd 231:1/13/13 54:1/12/12 144:1/2/2

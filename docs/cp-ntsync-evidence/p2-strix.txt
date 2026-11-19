@@ -1,0 +1,30 @@
+# Gate P2 (tools/cp/run-wine-p2.sh) with the ntsync Wine stage on the LANE kernel (a6efd84e), strix
+# CP_WINE_STAGE=~/cp/lanes/ntsync-wine/stage/CP/WINE WINE_EXPORT=/srv/nfs/cp-ntsync-p2 bash tools/cp/run-wine-p2.sh
+[P2] begin nfshash : pfxls -h /CP/WINE/lib/wine/x86_64-unix/ntdll.so /CP/WINE/lib/wine/x86_64-windows/kernelbase.dll /CP/WINE/lib/wine/x86_64-windows/ntdll.dll /CP/WINE/lib/wine/x86_64-windows/wineboot.exe /CP/WINE/lib/wine/x86_64-windows/setupapi.dll /CP/WINE/share/wine/wine.inf
+[P2] begin wineboot : wineboot -i
+[P2] end wineboot status=0 ms=20100
+[P2] quiesce after wineboot: extra=0
+G1 wine cmd /c echo hello prints hello : PASS   ([P2] end echo status=0 ms=1078)
+G2 winprobe.exe every marker + exit 0  : PASS   ([P2] end winprobe status=0 ms=2105; 41 markers, 0 missing/failed)
+G3 wineserver -k leaves no processes   : PASS   ([P2] end kill status=0 ms=173; [P2] ps-extra count=0)
+extra: winprobe from C:\ (the prefix) : [WP] done rc=0 ([P2] end winprobe-c status=0 ms=358)
+[P2] ps-before count=1
+[P2] ps-before pid=2 ppid=-1 state=3 name=WINEP2.BIN
+[P2] ps-after count=1
+[P2] ps-after pid=2 ppid=-1 state=3 name=WINEP2.BIN
+# kernel [NTSYNC] rows (serial): Wine uses the device
+[NTSYNC] open /dev/ntsync pid=10 name=wineserver n=1
+[NTSYNC] stats opens=1 sem/mutex/event=6/33/7031 live=477 max=483 any/all=1067/0 imm=473 parks=594 tmo=0 eintr=442 alert=0 dead=0 wakes=597 set/rel/unl/kill=7357/3/26/191 skip=0 stale=0
+[NTSYNC] device-closed opens=1 sem/mutex/event=6/39/7176 live=0 max=483 any/all=1105/0 imm=495 parks=610 tmo=1 eintr=468 alert=0 dead=0 wakes=636 set/rel/unl/kill=7667/3/29/442 skip=0 stale=0
+[NTSYNC] open /dev/ntsync pid=115 name=wineserver n=2
+[NTSYNC] device-closed opens=2 sem/mutex/event=8/58/9471 live=0 max=503 any/all=1659/0 imm=751 parks=908 tmo=1 eintr=703 alert=0 dead=0 wakes=955 set/rel/unl/kill=11372/4/50/781 skip=0 stale=0
+[NTSYNC] open /dev/ntsync pid=186 name=wineserver n=3
+
+# FALLBACK: the same ntsync Wine on the BASE kernel (integ11 13dc693b, no /dev/ntsync), tree ~/cp/lanes/ntsync-base
+# CP_WINE_STAGE=~/cp/lanes/ntsync-wine/stage/CP/WINE WINE_EXPORT=/srv/nfs/cp-ntsync-p2b bash tools/cp/run-wine-p2.sh
+G1 wine cmd /c echo hello prints hello : PASS   ([P2] end echo status=0 ms=1204)
+G2 winprobe.exe every marker + exit 0  : PASS   ([P2] end winprobe status=0 ms=3068; 41 markers, 0 missing/failed)
+G3 wineserver -k leaves no processes   : PASS   ([P2] end kill status=0 ms=179; [P2] ps-extra count=0)
+extra: winprobe from C:\ (the prefix) : [WP] done rc=0 ([P2] end winprobe-c status=0 ms=392)
+[NTSYNC] rows in that boot: 0
+/dev/ntsync opens answered by the base kernel: open() falls to the /dev branch -> -ENOENT (fs.c), wineserver get_inproc_device_fd() = -1, every sync stays a server object

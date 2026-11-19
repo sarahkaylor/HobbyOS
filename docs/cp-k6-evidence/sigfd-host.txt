@@ -1,0 +1,14 @@
+== strix Linux host (7.0.0-43-generic), unprivileged, static musl probe_sigfd.elf (the same source as the guest run)
+[LP] S1 signalfd4(-1, mask, 8, NONBLOCK|CLOEXEC)     fd=3 -> PASS
+[LP] S2 nothing pending: EAGAIN, not readable        read=-1 errno=11 poll=0 -> PASS
+[LP] S3 raise(USR1): one record, SI_TKILL, consumed  poll=1 read=128 signo=10 code=-6 still_pending=0 -> PASS
+[LP] S4 kill(self, USR1): SI_USER                    read=128 signo=10 code=0 -> PASS
+[LP] S5 two pending, 3-record buffer: 2 in order     read=256 signos=10,12 -> PASS
+[LP] S6 a blocking read is ended by the signal       sig=12 latency=25us -> PASS
+[LP] S7 epoll_wait(signalfd) wakes for a kill        epoll=1 read=128 signo=10 after=50140us -> PASS
+[LP] S8 SIGCHLD: CLD_EXITED, child pid, status 5     poll=1 read=128 signo=17 code=1 pid=2032382/2032382 status=5 -> PASS
+[LP] S9 blocked SIG_DFL SIGTERM: alive, read it      read=128 signo=15 -> PASS
+[LP] S10 signalfd(fd, {USR2}) replaces the mask       rc=3 usr1_read=-1/11 usr2_read=128 signo=12 -> PASS
+[LP] S11 EINVAL: sizemask 4, bad flags, a pipe fd     size=-22 flags=-22 pipe=-22 -> PASS
+[LP] done rc=0
+exit=0

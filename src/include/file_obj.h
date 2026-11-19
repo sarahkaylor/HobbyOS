@@ -51,6 +51,12 @@ struct nfs_fh;
 int file_nfs_ident(struct process *p, int fd, int *mount_idx,
                    struct nfs_fh *fh, uint32_t *size);
 
+/* cp/ext2b: resolve an fd to a REGULAR ext2 (/EXT) file: inode, current size
+ * and the O_* flags it was opened with (mmap's EACCES rules).  0, or -EBADF /
+ * -ENOTSUP for any other fd type.  The page cache is ext2_obj.h. */
+int file_ext2_ident(struct process *p, int fd, uint32_t *ino, uint64_t *size,
+                    uint32_t *oflags);
+
 /* --- /dev/fb0 (GB-025 / M3, implemented in fs.c) -----------------------
  * 1 when `fd` is the framebuffer node opened from /dev/fb0.  vm_mmap maps
  * it to the scanout smem (USER_FB_BASE_V2) instead of a vm_object, and the
@@ -65,6 +71,8 @@ int file_is_devfb(struct process *p, int fd);
  * close path calls gpu_abi_release_fd() so a client's context/resources die
  * with its fd.  0 for every other fd (including an absent one). */
 int file_is_devgpu(struct process *p, int fd);
+/* C4-audio: the ALSA node's minor when `fd` is one (linux_snd.h), else -1. */
+int file_devsnd_minor(struct process *p, int fd);
 
 /* --- the cache (file_obj.c) ------------------------------------------ */
 
@@ -108,6 +116,13 @@ uint64_t nfs_obj_page(struct vm_object *o, uint64_t off);
  * only costs a re-read).  Both are safe with no lock held. */
 void file_obj_invalidate(uint16_t start_cluster, uint32_t file_size);
 void file_obj_invalidate_all(void);
+
+/* cp/pfx: write() coherence.  After a FAT16 write of [off, off+len) reached
+ * the disk (file_size = the size now), copy the written bytes into every
+ * frame already materialized by a live object of that file, so MAP_SHARED
+ * views and MAP_PRIVATE pages the mapper has not written see them (Linux).
+ * NO lock may be held (disk I/O).  fs.c's FAT write path calls it. */
+void file_obj_note_write(uint16_t cluster, uint32_t off, uint32_t len, uint32_t file_size);
 
 /* Number of live cache entries (diagnostics / unit tests). */
 int file_obj_count(void);

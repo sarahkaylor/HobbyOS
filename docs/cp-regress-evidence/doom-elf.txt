@@ -1,0 +1,132 @@
+# Doom ELF (doomgeneric from third_party/doomgeneric, Freedoom IWAD), tools/doom_elf/run_doom_elf_test.py
+# L = cp-regress on integ11 13dc693b (strix:~/cp/lanes/regress); R = main 3c1cb61f (strix:~/cp/lanes/regress-ref)
+# host: strix (Ryzen Zen 5, KVM for x86_64, TCG for aarch64), QEMU 10.2.1, guest <= 12 GiB
+
+
+=== L doom_gen
+== doom_gen start 21:24:11 tree=/home/sarah/cp/lanes/regress cmd=python3 tools/doom_elf/run_doom_elf_test.py --no-build --elf obj/doom-linux/doomgen.elf --wad obj/doom-linux/DOOM1.WAD --start-line /DOOM.ELF -iwad /DOOM1.WAD --out /tmp/doom
+[DOOMELF] PASS: Doom ELF ran under X and produced a frame
+run_doom_elf_test report
+elf=obj/doom-linux/doomgen.elf
+wad=obj/doom-linux/DOOM1.WAD
+shots=14
+best=/tmp/doom/shot-00.ppm nonblack=0.123 colours=178
+fails=[]
+shot-00.ppm              1920x1080 nonblack=0.122 colours=172 md5=038d0b93aba6
+shot-01.ppm              1920x1080 nonblack=0.122 colours=132 md5=988f50cc1404
+shot-02.ppm              1920x1080 nonblack=0.123 colours=136 md5=a6b70408c3b0
+shot-03.ppm              1920x1080 nonblack=0.123 colours=125 md5=fe6077aec82c
+shot-04.ppm              1920x1080 nonblack=0.122 colours=143 md5=f051dceda483
+shot-05.ppm              1920x1080 nonblack=0.123 colours=105 md5=70691adebf10
+shot-06.ppm              1920x1080 nonblack=0.123 colours=159 md5=168d3063d7dc
+shot-07.ppm              1920x1080 nonblack=0.121 colours=156 md5=47011e5ffcce
+shot-08.ppm              1920x1080 nonblack=0.119 colours=171 md5=9928e419c00e
+shot-09.ppm              1920x1080 nonblack=0.121 colours=119 md5=2656719b22e8
+shot-10.ppm              1920x1080 nonblack=0.122 colours=157 md5=ddd2b395aa79
+shot-11.ppm              1920x1080 nonblack=0.123 colours=129 md5=d88fcb1c9446
+shot-12.ppm              1920x1080 nonblack=0.120 colours=133 md5=2be7a621f373
+shot-13.ppm              1920x1080 nonblack=0.122 colours=166 md5=8cd7e0111afa
+frames=14 distinct=14 max_nonblack=0.123 max_colours=172
+-cpu host
+
+=== L doom_gen2
+== doom_gen2 start 23:07:54 tree=/home/sarah/cp/lanes/regress cmd=bash -c python3 tools/doom_elf/run_doom_elf_test.py --elf obj/doom-linux/doomgen.elf --wad obj/doom-linux/DOOM1.WAD --start-line "/DOOM.ELF -iwad /DOOM1.WAD" --out /tmp/doom
+[DOOMELF] PASS: Doom ELF ran under X and produced a frame
+run_doom_elf_test report
+elf=obj/doom-linux/doomgen.elf
+wad=obj/doom-linux/DOOM1.WAD
+shots=14
+best=/tmp/doom/shot-00.ppm nonblack=0.123 colours=178
+fails=[]
+shot-00.ppm              1920x1080 nonblack=0.122 colours=172 md5=038d0b93aba6
+shot-01.ppm              1920x1080 nonblack=0.122 colours=161 md5=5de75bee5bd8
+shot-02.ppm              1920x1080 nonblack=0.122 colours=145 md5=9a446bbf0062
+shot-03.ppm              1920x1080 nonblack=0.123 colours=117 md5=dc64428867ca
+shot-04.ppm              1920x1080 nonblack=0.122 colours=142 md5=732cf2978312
+shot-05.ppm              1920x1080 nonblack=0.123 colours=92 md5=167aa6165738
+shot-06.ppm              1920x1080 nonblack=0.119 colours=151 md5=409ce22316bd
+shot-07.ppm              1920x1080 nonblack=0.123 colours=161 md5=0c6c5a102c04
+shot-08.ppm              1920x1080 nonblack=0.122 colours=168 md5=61c4acf25127
+shot-09.ppm              1920x1080 nonblack=0.121 colours=129 md5=d3eb2e085655
+shot-10.ppm              1920x1080 nonblack=0.122 colours=157 md5=c239eda0a1de
+shot-11.ppm              1920x1080 nonblack=0.123 colours=138 md5=2d516a37eb5e
+shot-12.ppm              1920x1080 nonblack=0.121 colours=145 md5=261d2732ab65
+shot-13.ppm              1920x1080 nonblack=0.121 colours=133 md5=efc33dbdf26c
+frames=14 distinct=14 max_nonblack=0.123 max_colours=172
+-cpu host
+
+=== L doom_q64
+== doom_q64 start 23:12:30 tree=/home/sarah/cp/lanes/regress cmd=bash -c DOOM_ELF_CPU=qemu64 python3 tools/doom_elf/run_doom_elf_test.py --no-build --elf obj/doom-linux/doomgen.elf --wad obj/doom-linux/DOOM1.WAD --start-line "/DOOM.ELF -iwad /DOOM1.WAD" --out /tmp/doom
+[DOOMELF] PASS: Doom ELF ran under X and produced a frame
+run_doom_elf_test report
+elf=obj/doom-linux/doomgen.elf
+wad=obj/doom-linux/DOOM1.WAD
+shots=14
+best=/tmp/doom/shot-00.ppm nonblack=0.123 colours=178
+fails=[]
+shot-00.ppm              1920x1080 nonblack=0.122 colours=172 md5=038d0b93aba6
+shot-01.ppm              1920x1080 nonblack=0.122 colours=167 md5=c4d21b726d54
+shot-02.ppm              1920x1080 nonblack=0.122 colours=153 md5=62fa59384f48
+shot-03.ppm              1920x1080 nonblack=0.123 colours=121 md5=2480af4e1030
+shot-04.ppm              1920x1080 nonblack=0.123 colours=129 md5=e19959de5fba
+shot-05.ppm              1920x1080 nonblack=0.123 colours=128 md5=0bb95562b26b
+shot-06.ppm              1920x1080 nonblack=0.123 colours=134 md5=78cc1098fe7e
+shot-07.ppm              1920x1080 nonblack=0.121 colours=164 md5=f37424070b30
+shot-08.ppm              1920x1080 nonblack=0.119 colours=159 md5=6ae039898a22
+shot-09.ppm              1920x1080 nonblack=0.122 colours=122 md5=52a9d56e3974
+shot-10.ppm              1920x1080 nonblack=0.122 colours=152 md5=f73dbf4f4f13
+shot-11.ppm              1920x1080 nonblack=0.123 colours=133 md5=4bb0888b0ccb
+shot-12.ppm              1920x1080 nonblack=0.121 colours=139 md5=b82875554615
+shot-13.ppm              1920x1080 nonblack=0.122 colours=140 md5=8cfff821e98c
+frames=14 distinct=14 max_nonblack=0.123 max_colours=172
+-cpu qemu64
+
+=== R doom_gen
+== doom_gen start 21:27:04 tree=/home/sarah/cp/lanes/regress-ref cmd=python3 tools/doom_elf/run_doom_elf_test.py --no-build --elf obj/doom-linux/doomgen.elf --wad obj/doom-linux/DOOM1.WAD --start-line /DOOM.ELF -iwad /DOOM1.WAD --out /tmp/doom
+[DOOMELF] PASS: Doom ELF ran under X and produced a frame
+run_doom_elf_test report
+elf=obj/doom-linux/doomgen.elf
+wad=obj/doom-linux/DOOM1.WAD
+shots=14
+best=/tmp/doom/shot-00.ppm nonblack=0.123 colours=178
+fails=[]
+shot-00.ppm              1920x1080 nonblack=0.122 colours=172 md5=038d0b93aba6
+shot-01.ppm              1920x1080 nonblack=0.122 colours=133 md5=394c56c146c7
+shot-02.ppm              1920x1080 nonblack=0.123 colours=144 md5=1aa601c2b467
+shot-03.ppm              1920x1080 nonblack=0.123 colours=127 md5=69dee08e93ce
+shot-04.ppm              1920x1080 nonblack=0.122 colours=145 md5=9452d4d33714
+shot-05.ppm              1920x1080 nonblack=0.123 colours=103 md5=22ef9c13bfc6
+shot-06.ppm              1920x1080 nonblack=0.123 colours=147 md5=156578d91841
+shot-07.ppm              1920x1080 nonblack=0.122 colours=158 md5=4d227e2ab349
+shot-08.ppm              1920x1080 nonblack=0.120 colours=173 md5=47ab341359eb
+shot-09.ppm              1920x1080 nonblack=0.121 colours=125 md5=ace92b092ffd
+shot-10.ppm              1920x1080 nonblack=0.122 colours=155 md5=a3d1337d900d
+shot-11.ppm              1920x1080 nonblack=0.123 colours=123 md5=fb1da9c98872
+shot-12.ppm              1920x1080 nonblack=0.120 colours=138 md5=6aa3431a3ee5
+shot-13.ppm              1920x1080 nonblack=0.122 colours=136 md5=ef30785f2870
+frames=14 distinct=14 max_nonblack=0.123 max_colours=173
+
+=== R doom_q64
+== doom_q64 start 21:32:47 tree=/home/sarah/cp/lanes/regress-ref cmd=bash -c DOOM_ELF_CPU=qemu64 python3 tools/doom_elf/run_doom_elf_test.py --no-build --elf obj/doom-linux/doomgen.elf --wad obj/doom-linux/DOOM1.WAD --start-line "/DOOM.ELF -iwad /DOOM1.WAD" --out /tmp/doom
+[DOOMELF] PASS: Doom ELF ran under X and produced a frame
+run_doom_elf_test report
+elf=obj/doom-linux/doomgen.elf
+wad=obj/doom-linux/DOOM1.WAD
+shots=14
+best=/tmp/doom/shot-00.ppm nonblack=0.123 colours=178
+fails=[]
+shot-00.ppm              1920x1080 nonblack=0.122 colours=172 md5=038d0b93aba6
+shot-01.ppm              1920x1080 nonblack=0.122 colours=137 md5=81ad20d31fcc
+shot-02.ppm              1920x1080 nonblack=0.123 colours=142 md5=00936015fe10
+shot-03.ppm              1920x1080 nonblack=0.123 colours=127 md5=1422109a2230
+shot-04.ppm              1920x1080 nonblack=0.122 colours=138 md5=6a47a4e6ae49
+shot-05.ppm              1920x1080 nonblack=0.123 colours=119 md5=9552a86df424
+shot-06.ppm              1920x1080 nonblack=0.123 colours=148 md5=eec09d924f62
+shot-07.ppm              1920x1080 nonblack=0.121 colours=168 md5=cf29646f443b
+shot-08.ppm              1920x1080 nonblack=0.120 colours=160 md5=f8f8677aeb06
+shot-09.ppm              1920x1080 nonblack=0.121 colours=121 md5=9e06618dc6f2
+shot-10.ppm              1920x1080 nonblack=0.121 colours=120 md5=f50ba688630e
+shot-11.ppm              1920x1080 nonblack=0.123 colours=128 md5=1c5aea458de2
+shot-12.ppm              1920x1080 nonblack=0.122 colours=125 md5=a9921e132720
+shot-13.ppm              1920x1080 nonblack=0.122 colours=162 md5=4fe7c5c53ad6
+frames=14 distinct=14 max_nonblack=0.123 max_colours=172

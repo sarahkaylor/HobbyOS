@@ -1,0 +1,132 @@
+# H1-hunt old-log census (strix, 2026-11-18 ~02:45; tools/cp/hunt/classify.py --mine @mine-list.txt | mine_report.py)
+# 595 paths -> 147 distinct serial logs (sha256 of CR-stripped bytes; 146 copies dropped) -> 128 game boots
+## all 128 game boots
+== 128 game boots
+   verdicts: script-stop=38, main-menu=28, launcher-done=26, ?=14, script-done=8, qemu-exited rc=0=6, expect-failed:loadlist=2, first-run:account offer=1, listseek-failed:loadlist-focus=1, game-exited
+-- kfault
+    24/128 rows=52    last=11-17 04:46  lcompat-fault: [LCOMPAT] fault sig=11 pid=N tgid=N tls=0x#
+    10/128 rows=12    last=11-17 12:36  tlbtimeout: [TLBTIMEOUT] shootdown root=
+     8/128 rows=8     last=11-17 04:46  lcompat-fault: [LCOMPAT] rt_sigreturn: bad rip/rsp -> SIGSEGV
+     8/128 rows=8     last=11-17 04:46  lcompat-fault: [LCOMPAT] fault-in-handler pid=N sig=11 ipc=0x# rsp=0x#
+     5/128 rows=243   last=11-17 04:20  fault-pc: [KERNEL] fault-pc region=0x#+0x# prot=N kind=N jit=N
+     4/128 rows=4     last=11-17 04:20  user-fault: [KERNEL] User process fault! Vector: 3
+     4/128 rows=4     last=11-17 04:20  lcompat-fault: [LCOMPAT] fault sig=5 pid=N tgid=N tls=0x#
+     3/128 rows=3     last=11-17 04:53  kpanic: KERNEL PANIC: stack smashing detected (SEC-N
+     1/128 rows=240   last=11-17 00:03  user-fault: [KERNEL] User process fault! Vector: 13
+     1/128 rows=8     last=11-17 04:20  tlbtimeout: [TLBTIMEOUT] shootdown root=0x# unacked cpus=0x#
+     1/128 rows=1     last=11-17 03:37  fork-fail: [KERNEL] fork: AS clone failed
+     1/128 rows=1     last=11-17 02:35  badvec: [BADVEC] entry sl oltesn =u0nxcC0h0a0n gkeidn:d
+     1/128 rows=1     last=11-17 02:35  kernel-fatal: [KERNEL] FATAL:= 0Exx6c0e0p0t0i okni nidn= 7K
+-- kstall
+    95/128 rows=1216  last=11-18 01:59  venus: [VENUS] fence_wait2 timeout pid=N ctx=N ring=N
+    64/128 rows=118   last=11-18 01:07  nfspipe: [NFSPIPE] stall inflight=N issued=N replies=N contig=#
+    35/128 rows=70    last=11-17 12:35  venus: [VENUS] fence_wait2 timeout pid=
+    25/128 rows=32    last=11-17 12:35  venus: [VENUS] fence_wait2 timeout pid=N
+    21/128 rows=35    last=11-17 22:25  nfspipe: [NFSPIPE] stall inflight=N issued=N replies=N contig=N
+    15/128 rows=20    last=11-17 12:36  stallbreak: [STALLBREAK] cpu=N lock=0x# owner_cpu=N stale_ms=N owner_pc=0x#
+    10/128 rows=11    last=11-17 12:36  venus: [VENUS] fence_wait2 timeout pid=N ctx=N ring=
+     7/128 rows=8     last=11-17 12:24  venus: [VENUS] fence_wait2 timeout pid=N ctx=N
+     4/128 rows=4     last=11-17 08:04  venus: [VENUS] fence_wait2 timeout pid=N ctx=
+     2/128 rows=4     last=11-17 21:19  venus: [VENUS] stall slots: [ctx N r1
+     2/128 rows=4     last=11-17 21:19  venus: [VENUS] stall ctx=N inflight=N rings(issued/done): r0=N/N
+     2/128 rows=2     last=11-17 10:57  venus: [VENUS] fence_wait2 timeout pid=N wait_min_us=N ctx=N
+     2/128 rows=2     last=11-17 04:40  venus: [VENUS] fence_wait2 timeout pid=N ctx=N wait_max_us=
+     1/128 rows=1     last=11-17 03:21  venus: [VENUS] fence_wait2 timeout pid=N wait_max_us=N wait_min_us=
+     1/128 rows=1     last=11-17 03:21  venus: [VENUS] fence_wait2 timeout pid=N ctx=N ring=10x#
+     1/128 rows=1     last=11-17 03:47  venus: [VENUS] fence_wait2 timeout pid=N stalls=N devoff=
+     1/128 rows=1     last=11-17 12:07  venus: [VENUS] fence_wait2 timeout pid=N ctx=N send_us=N
+     1/128 rows=1     last=11-17 12:35  blkq: [BLKQ] stall cid=
+     1/128 rows=1     last=11-17 20:50  venus: [VENUS] stall slots: none in flight
+     1/128 rows=1     last=11-17 20:50  venus: [VENUS] stall pid=N tid=N waits_ms=N ctx=N
+     1/128 rows=1     last=11-17 11:08  venus: [VENUS] fence_wait2 timeout pid=N wait_max_us=N ctx=N
+     1/128 rows=1     last=11-17 11:08  stallbreak: [STALLBREAK] cFFpuFF=N t ol=o1c kr=e0sx=N
+-- kdiag
+   127/128 rows=2475  last=11-18 01:59  badelr: elr~0x140000000 in Cyberpunk2077.e
+    22/128 rows=24    last=11-17 22:25  badelr: elr~0x140000000 in services.exe
+     3/128 rows=7     last=11-17 14:45  badelr: elr~0x140000000 in vkcube.exe
+     2/128 rows=2     last=11-17 20:54  badelr: elr~0x140000000 in wineboot.exe
+     2/128 rows=2     last=11-17 04:20  badelr: elr~0x140000000 in xunv=0
+     1/128 rows=5     last=11-17 05:19  badelr: elr~0x140000000 in p8caps.exe
+     1/128 rows=1     last=11-17 03:57  badelr: [BADELR] picking a user slot with an implausible frame.elr=[MR] s=N pid=N g=N as=0x# len=0x# base=0x# 
+     1/128 rows=1     last=11-17 03:31  badelr: [BADELR] picking a user slot with an implausible frame.elr=[PUB] who=touch_anon va=0x# off=0x# prot=RW
+     1/128 rows=1     last=11-17 02:35  badelr: [BADELR] picking a user slot with an implausible frame.elr=[PUB] who=fault_obj va=0x# off=0x# prot=RX 
+     1/128 rows=1     last=11-17 04:08  badelr: elr~0x140000000 in explorer.exe
+-- exitpc
+   128/128 rows=130   last=11-18 01:59  wine code=0xC0000135 DLL_NOT_FOUND
+    34/128 rows=34    last=11-17 18:33  services.exe code=0x1 exit(1)
+    33/128 rows=33    last=11-17 18:33  explorer.exe code=0x1 exit(1)
+    18/128 rows=18    last=11-17 04:46  CrashReporter.e code=0xC0000135 DLL_NOT_FOUND
+    14/128 rows=15    last=11-17 14:58  winedevice.exe code=0x1 exit(1)
+    11/128 rows=11    last=11-17 04:40  Cyberpunk2077.e code=0xC0000005 ACCESS_VIOLATION
+    10/128 rows=10    last=11-17 18:18  svchost.exe code=0x1 exit(1)
+     9/128 rows=9     last=11-17 18:33  plugplay.exe code=0x1 exit(1)
+     8/128 rows=8     last=11-17 04:46  Cyberpunk2077.e code=0x4000000B
+     4/128 rows=8     last=11-17 00:19  wineserver code=0x2
+     4/128 rows=4     last=11-17 10:57  rpcss.exe code=0x1 exit(1)
+     4/128 rows=4     last=11-17 00:40  wineserver code=0x1 exit(1)
+     2/128 rows=2     last=11-17 18:33  REDEngineErrorR code=0x1 exit(1)
+     2/128 rows=2     last=11-17 04:49  ? code=0x9
+     1/128 rows=1     last=11-17 03:37  Cyberpunk2077.e code=0x1 exit(1)
+     1/128 rows=1     last=11-17 03:37  Cyberpunk2077.e code=0x80000003 BREAKPOINT
+     1/128 rows=1     last=11-17 00:03  vkcube.exe code=0xC0000005 ACCESS_VIOLATION
+     1/128 rows=1     last=11-17 00:03  vkcube.exe code=0x1 exit(1)
+     1/128 rows=1     last=11-17 00:03  conhost.exe code=0x1 exit(1)
+-- red
+   127/128 rows=127   last=11-18 01:59  REDEngineErrorReporter.exe loaded
+   126/128 rows=181   last=11-18 01:59  REDEngineErrorReporter exited
+-- wine_err
+    18/128 rows=18    last=11-17 04:46  module:fixup_imports_ilonly mscoree.dll not found, IL-only binary L"CrashReporter.exe" cannot be loaded
+
+## boots whose serial mtime >= 2026-11-17 12:00 (integ10 onwards, 68)
+== 68 game boots with serial mtime >= 2026-11-17T12:00:00
+   verdicts: script-stop=36, main-menu=14, ?=8, launcher-done=3, script-done=3, listseek-failed:loadlist-focus=1, expect-failed:loadlist=1, expect-failed:map=1, seek-failed:pause-quit=1
+-- kfault
+     1/68 rows=1     last=11-17 12:36  tlbtimeout: [TLBTIMEOUT] shootdown root=
+-- kstall
+    57/68 rows=878   last=11-18 01:59  venus: [VENUS] fence_wait2 timeout pid=N ctx=N ring=N
+    43/68 rows=81    last=11-18 01:07  nfspipe: [NFSPIPE] stall inflight=N issued=N replies=N contig=#
+    18/68 rows=32    last=11-17 22:25  nfspipe: [NFSPIPE] stall inflight=N issued=N replies=N contig=N
+     4/68 rows=10    last=11-17 12:35  venus: [VENUS] fence_wait2 timeout pid=
+     2/68 rows=4     last=11-17 21:19  venus: [VENUS] stall slots: [ctx N r1
+     2/68 rows=4     last=11-17 21:19  venus: [VENUS] stall ctx=N inflight=N rings(issued/done): r0=N/N
+     2/68 rows=2     last=11-17 12:35  venus: [VENUS] fence_wait2 timeout pid=N
+     1/68 rows=1     last=11-17 12:07  venus: [VENUS] fence_wait2 timeout pid=N ctx=N send_us=N
+     1/68 rows=1     last=11-17 12:35  blkq: [BLKQ] stall cid=
+     1/68 rows=1     last=11-17 12:36  venus: [VENUS] fence_wait2 timeout pid=N ctx=N ring=
+     1/68 rows=1     last=11-17 12:36  stallbreak: [STALLBREAK] cpu=N lock=0x# owner_cpu=N stale_ms=N owner_pc=0x#
+     1/68 rows=1     last=11-17 20:50  venus: [VENUS] stall slots: none in flight
+     1/68 rows=1     last=11-17 20:50  venus: [VENUS] stall pid=N tid=N waits_ms=N ctx=N
+-- kdiag
+    68/68 rows=1321  last=11-18 01:59  badelr: elr~0x140000000 in Cyberpunk2077.e
+    14/68 rows=15    last=11-17 22:25  badelr: elr~0x140000000 in services.exe
+     2/68 rows=2     last=11-17 20:54  badelr: elr~0x140000000 in wineboot.exe
+     1/68 rows=1     last=11-17 14:45  badelr: elr~0x140000000 in vkcube.exe
+-- exitpc
+    68/68 rows=68    last=11-18 01:59  wine code=0xC0000135 DLL_NOT_FOUND
+     5/68 rows=5     last=11-17 18:33  services.exe code=0x1 exit(1)
+     5/68 rows=5     last=11-17 18:33  explorer.exe code=0x1 exit(1)
+     4/68 rows=4     last=11-17 18:18  svchost.exe code=0x1 exit(1)
+     2/68 rows=2     last=11-17 18:33  plugplay.exe code=0x1 exit(1)
+     1/68 rows=1     last=11-17 18:33  REDEngineErrorR code=0x1 exit(1)
+     1/68 rows=1     last=11-17 14:58  winedevice.exe code=0x1 exit(1)
+-- red
+    68/68 rows=73    last=11-18 01:59  REDEngineErrorReporter exited
+    68/68 rows=68    last=11-18 01:59  REDEngineErrorReporter.exe loaded
+-- dxvk
+    68/68 rows=133   last=11-18 01:59  warn: DxgiAdapter::QueryInterface: Unknown interface query
+    68/68 rows=133   last=11-18 01:59  warn: #-fe5a-42a2-bd62-#
+    65/68 rows=65    last=11-18 01:59  warn: CreateDXGIFactory2: Ignoring flags
+    65/68 rows=65    last=11-18 01:59  warn: DXGI: MakeWindowAssociation: Ignoring flags
+
+## P8/P9 run logs (== run-p8 headers, deduplicated): verdicts and the game process's lifetime when it ended before a menu
+     25 main-menu
+     16 script-stop
+     16 
+      5 launcher-done
+      1 game-exited-before-menu
+gpu=lavapipe phase=game run=console-lvp1 2026-11-17T12:38:35-06:00 tree=/home/sarah/cp/lanes/console|launcher-done|ms=23606|menu=0
+gpu=lavapipe phase=game run=integ13-lvp1 2026-11-17T18:31:18-06:00 tree=/home/sarah/cp/integ|launcher-done|ms=2579|menu=0
+gpu=lavapipe phase=game run=integ15-lvp2 2026-11-18T01:55:59-06:00 tree=/home/sarah/cp/integ|launcher-done|ms=2886|menu=0
+gpu=venus phase=game run=integ10-venus 2026-11-17T06:20:04-06:00 tree=/home/sarah/cp/integ|launcher-done|ms=20049|menu=0
+gpu=venus phase=game run=k6-venus 2026-11-17T11:58:56-06:00 tree=/home/sarah/cp/lanes/k6|launcher-done|ms=20634|menu=0
+gpu=venus phase=game run=k7l-1 2026-11-17T20:22:18-06:00 tree=/home/sarah/cp/lanes/k6|game-exited-before-menu|ms=2467|menu=0

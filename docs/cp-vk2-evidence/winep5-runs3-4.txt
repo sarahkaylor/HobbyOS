@@ -1,0 +1,110 @@
+################ Wine P5 run 3 (cyberpunk 8b9fc2c9 kernel: NFS hard mount; C4-x2 one-screen XHOBBY.BIN 935c760f..c97 + HB_SECOND_SCREEN=0; warm-up launcher)
+# quiesce after wineboot 3600 s (default): the launcher waited on the wedged wineboot tree; stopped by me at +1500 s
+## NFS summary (grader --grade-only)
+[P5W] NFS: no-reply rows=179 [NFSHARD] retry rows=34 longest waited_ms=18271 GIVE UP=0 NFLK rc=-1=0
+## launcher + Wine error rows
+[P5] winep5 launcher (C5-vk2)
+[P5] mount 10.0.2.2:/srv/nfs/cp-vk2-p5c -> /CP ok
+[P5] begin wineboot : wineboot -i
+[X] 002c:err:winediag:nodrv_CreateWindow Application tried to create a window, but no driver could be loaded.
+[X] 002c:err:winediag:nodrv_CreateWindow L"The explorer process failed to start."
+[X] 0044:err:winediag:nodrv_CreateWindow Application tried to create a window, but no driver could be loaded.
+[X] 0044:err:winediag:nodrv_CreateWindow L"The explorer process failed to start."
+[X] epoll_ctl: No space left on device
+[X] epoll_ctl: No space left on device
+[X] epoll_ctl: No space left on device
+[X] 004c:err:ole:StdMarshalImpl_MarshalInterface Failed to create ifstub, hr 0x80004002
+[X] 004c:err:ole:CoMarshalInterface Failed to marshal the interface {6d5140c1-7436-11ce-8034-00aa006009fa}, hr 0x80004002
+[X] 004c:err:ole:apartment_get_local_server_stream Failed: 0x80004002
+[X] 0054:err:ole:StdMarshalImpl_MarshalInterface Failed to create ifstub, hr 0x80004002
+[X] 0054:err:ole:CoMarshalInterface Failed to marshal the interface {6d5140c1-7436-11ce-8034-00aa006009fa}, hr 0x80004002
+[X] 0054:err:ole:apartment_get_local_server_stream Failed: 0x80004002
+[X] epoll_ctl: No space left on device
+[X] epoll_ctl: No space left on device
+[X] 005c:err:service:process_send_command receiving command result timed out
+[X] 004c:err:ole:start_rpcss Failed to open RpcSs service
+[X] 0024:err:environ:run_wineboot boot event wait timed out
+[P5] end wineboot status=53 ms=313674
+[X] 0084:err:winediag:nodrv_CreateWindow Application tried to create a window, but no driver could be loaded.
+[X] 0084:err:winediag:nodrv_CreateWindow L"The explorer process failed to start."
+## live processes at the last [ALIVE-SET] dump
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=0 pc=0x100000696b mod=0x1000000000+0x696b XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=1 pc=0x100020f64b mod=0x1000000000+0x20f64b /XHOBBY.BIN
+  [ALIVE-SET] slot=9 pid=9 st=3 parent=1 claimed_by=3 pc=0x100033ae2e mod=0x1000000000+0x33ae2e /ICEWM.BIN
+  [ALIVE-SET] slot=12 pid=12 st=5 parent=1 claimed_by=-1 pc=0x10000758f4 mod=0x1000000000+0x758f4 /XEYESR.BIN
+  [ALIVE-SET] slot=14 pid=14 st=5 parent=1 claimed_by=-1 pc=0x10000054e4 mod=0x1000000000+0x54e4 /WINEP5.BIN
+  [ALIVE-SET] slot=18 pid=18 st=3 parent=17 claimed_by=4 pc=0x1080127648 mod=0x1080008000+0x11f648 wineserver
+  [ALIVE-SET] slot=20 pid=20 st=5 parent=19 claimed_by=-1 pc=0x1080050390 mod=0x108003d000+0x13390 wineboot.exe
+  [ALIVE-SET] slot=22 pid=22 st=5 parent=21 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca services.exe
+  [ALIVE-SET] slot=23 pid=23 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca services.exe
+  [ALIVE-SET] slot=24 pid=24 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca services.exe
+  [ALIVE-SET] slot=30 pid=30 st=5 parent=29 claimed_by=-1 pc=0x1080050390 mod=0x108003d000+0x13390 explorer.exe
+  [ALIVE-SET] slot=37 pid=37 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca winedevice.exe
+  [ALIVE-SET] slot=39 pid=39 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca services.exe
+  [ALIVE-SET] slot=40 pid=40 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca services.exe
+  [ALIVE-SET] slot=42 pid=42 st=3 parent=41 claimed_by=2 pc=0x108017d07e mod=0x1080060000+0x11d07e rundll32.exe
+## IDLESTUCK dumps: 926; epoll_ctl ENOSPC rows: 5
+
+################ Wine P5 run 4 (cyberpunk 8b9fc2c9 kernel: NFS hard mount; C4-x2 one-screen XHOBBY.BIN 935c760f..c97 + HB_SECOND_SCREEN=0; warm-up launcher)
+# P5_CFLAGS=-DP5_BOOT_QUIESCE_S=60: the keepalive + winprobe loop ran; stopped by me during winprobe05 (+1800 s)
+## NFS summary (grader --grade-only)
+[P5W] NFS: no-reply rows=134 [NFSHARD] retry rows=34 longest waited_ms=1504 GIVE UP=0 NFLK rc=-1=0
+## launcher + Wine error rows
+[P5] winep5 launcher (C5-vk2)
+[P5] mount 10.0.2.2:/srv/nfs/cp-vk2-p5d -> /CP ok
+[P5] begin wineboot : wineboot -i
+[X] 002c:err:winediag:nodrv_CreateWindow Application tried to create a window, but no driver could be loaded.
+[X] 002c:err:winediag:nodrv_CreateWindow L"The explorer process failed to start."
+[X] 0024:err:environ:run_wineboot boot event wait timed out
+[P5] end wineboot status=53 ms=327730
+[X] 0044:err:winediag:nodrv_CreateWindow Application tried to create a window, but no driver could be loaded.
+[X] 0044:err:winediag:nodrv_CreateWindow L"The explorer process failed to start."
+[P5] quiesce after wineboot: extra=7
+[P5] begin keepalive (background) : wine Z:\CP\P5\VK\vkcube.exe --idle 7200
+[P5] keepalive pid=36
+[P5] begin winprobe01 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+[X] 005c:err:service:process_send_start_message service L"Winedevice1" failed to start
+[X] 0054:err:ole:StdMarshalImpl_MarshalInterface Failed to create ifstub, hr 0x80004002
+[X] 0054:err:ole:CoMarshalInterface Failed to marshal the interface {6d5140c1-7436-11ce-8034-00aa006009fa}, hr 0x80004002
+[X] 0054:err:ole:apartment_get_local_server_stream Failed: 0x80004002
+[X] 0054:err:ole:start_rpcss Failed to open RpcSs service
+[X] 004c:err:ole:StdMarshalImpl_MarshalInterface Failed to create ifstub, hr 0x80004002
+[X] 004c:err:ole:CoMarshalInterface Failed to marshal the interface {6d5140c1-7436-11ce-8034-00aa006009fa}, hr 0x80004002
+[X] 004c:err:ole:apartment_get_local_server_stream Failed: 0x80004002
+[X] 004c:err:ole:start_rpcss Failed to open RpcSs service
+[X] 006c:err:winediag:nodrv_CreateWindow Application tried to create a window, but no driver could be loaded.
+[X] 006c:err:winediag:nodrv_CreateWindow L"The explorer process failed to start."
+[X] 0074:err:environ:run_wineboot boot event wait timed out
+[X] 007c:err:environ:run_wineboot boot event wait timed out
+[P5] end winprobe01 status=53 ms=333230
+[P5] begin winprobe02 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+[X] 0094:err:environ:run_wineboot boot event wait timed out
+[P5] end winprobe02 status=53 ms=319864
+[P5] begin winprobe03 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+[P5] timeout winprobe03 after 300s: SIGKILL pid=48
+[P5] end winprobe03 status=timeout ms=316533
+[P5] begin winprobe04 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+[X] 00a4:err:environ:run_wineboot boot event wait timed out
+[X] 00a4:err:module:import_dll Library user32.dll (which is needed by L"Z:\\CP\\P5\\VK\\vkcube.exe") not found
+[X] 00a4:err:module:loader_init Importing dlls for L"Z:\\CP\\P5\\VK\\vkcube.exe" failed, status c0000135
+[P5] end winprobe04 status=53 ms=313507
+[P5] begin winprobe05 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+[X] 00ac:err:environ:run_wineboot boot event wait timed out
+[P5] timeout winprobe05 after 300s: SIGKILL pid=52
+[P5] end winprobe05 status=timeout ms=323289
+[P5] begin winprobe06 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+## live processes at the last [ALIVE-SET] dump
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=-1 pc=0x100000696b mod=0x1000000000+0x696b XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=3 parent=1 claimed_by=1 pc=0x100020f64b mod=0x1000000000+0x20f64b /XHOBBY.BIN
+  [ALIVE-SET] slot=9 pid=9 st=3 parent=1 claimed_by=3 pc=0x100033ae2e mod=0x1000000000+0x33ae2e /ICEWM.BIN
+  [ALIVE-SET] slot=12 pid=12 st=5 parent=1 claimed_by=-1 pc=0x10000758f4 mod=0x1000000000+0x758f4 /XEYESR.BIN
+  [ALIVE-SET] slot=14 pid=14 st=5 parent=1 claimed_by=-1 pc=0x10000054e4 mod=0x1000000000+0x54e4 /WINEP5.BIN
+  [ALIVE-SET] slot=18 pid=18 st=3 parent=17 claimed_by=0 pc=0x1080127648 mod=0x1080008000+0x11f648 wineserver
+  [ALIVE-SET] slot=20 pid=20 st=5 parent=19 claimed_by=-1 pc=0x1080050390 mod=0x108003d000+0x13390 wineboot.exe
+  [ALIVE-SET] slot=22 pid=22 st=5 parent=21 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca services.exe
+  [ALIVE-SET] slot=23 pid=23 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca services.exe
+  [ALIVE-SET] slot=24 pid=24 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca services.exe
+  [ALIVE-SET] slot=40 pid=40 st=3 parent=39 claimed_by=7 pc=0x108017d07e mod=0x1080060000+0x11d07e rundll32.exe
+  [ALIVE-SET] slot=54 pid=54 st=3 parent=14 claimed_by=6 pc=0x1080023cea mod=0x1080005000+0x1ecea wine
+## IDLESTUCK dumps: 985; epoll_ctl ENOSPC rows: 0
+

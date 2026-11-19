@@ -6,6 +6,7 @@
 #include "pipe.h"
 #include "process.h"
 #include "errno.h"
+#include "frame.h"
 
 /* P4 (docs/browser/p4-ipc-design.md section 8, Tier 2): the usock state
  * machine + fd-accounting + codec + poll engine, driven directly.  Blocking
@@ -16,6 +17,24 @@
 extern int process_kill(int pid); /* fs_test precedent (not in process.h) */
 extern struct usock *fs_test_usock(struct process *p, int fd); /* fs.c */
 extern int usock_test_live(void);                              /* unix.c */
+
+/* Large scratch buffers come from the frame pool, never from .bss.  The ARM
+ * kernel's whole static footprint must stay under the limine placement line
+ * (linker.ld ASSERT, docs/blk-cache.md section 11), and the three ring-sized
+ * statics this file used to hold (2 x 512 KiB + 512 KiB + 16 B, 1.5 MiB) put the
+ * MODE=unit_tests image 1.05 MiB over it: the ARM unit tier could not link. */
+#define UT_RING_FRAMES (K_UNIX_RING / FRAME_SIZE)
+
+static uint8_t *ut_scratch_alloc(int frames) {
+  uint64_t pa = frame_alloc_contig(frames);
+  return pa ? (uint8_t *)phys_to_virt(pa) : 0;
+}
+
+static void ut_scratch_free(uint8_t *base, int frames) {
+  if (!base) return;
+  for (int i = 0; i < frames; i++)
+    frame_free(virt_to_phys(base) + (uint64_t)i * FRAME_SIZE);
+}
 
 /* Runtime-computed address of a kernel symbol.  The AArch64 kernel boots
  * relocated (limine places the raw image at a slide; boot.s's adrp-based
@@ -106,18 +125,23 @@ static void test_unix_stream_basic(void) {
 
   /* Full-ring write reports a partial write (65536), the remainder is not
    * lost: the caller retries. */
-  static uint8_t big[K_UNIX_RING + 16];
-  for (int i = 0; i < (int)sizeof big; i++) big[i] = (uint8_t)(i & 0xFF);
+  /* big: K_UNIX_RING + 16 bytes (one extra frame); drain: K_UNIX_RING. */
+  const int scratch_frames = 2 * UT_RING_FRAMES + 1;
+  uint8_t *scratch = ut_scratch_alloc(scratch_frames);
+  ASSERT(scratch != 0);
+  uint8_t *big = scratch;
+  char *drain = (char *)(scratch + (uint64_t)(UT_RING_FRAMES + 1) * FRAME_SIZE);
+  for (int i = 0; i < K_UNIX_RING + 16; i++) big[i] = (uint8_t)(i & 0xFF);
   EXPECT_EQ(usock_send(u, 0, big, K_UNIX_RING + 16, 1), K_UNIX_RING);
   EXPECT_EQ(usock_available(u, 1), K_UNIX_RING);
   EXPECT_EQ(usock_send(u, 0, big, 1, 1), -EAGAIN); /* ring is full */
 
-  /* 64 KiB: keep it static — a stack array this size overflows the kernel
-   * stack (64 KiB per core) and faults nondeterministically. */
-  static char drain[K_UNIX_RING];
+  /* Never a stack array: K_UNIX_RING overflows the kernel stack (64 KiB per
+   * core) and faults nondeterministically.  drain is frame-pool scratch. */
   EXPECT_EQ(usock_recv(u, 1, drain, K_UNIX_RING, 1), K_UNIX_RING);
   EXPECT_EQ(drain[0], (char)big[0]);
   EXPECT_EQ(drain[K_UNIX_RING - 1], (char)big[K_UNIX_RING - 1]);
+  ut_scratch_free(scratch, scratch_frames);
 
   /* Nonblock flag round-trip (fcntl F_SETFL plumbing). */
   usock_set_nonblock(u, 1, 1);
@@ -258,8 +282,10 @@ static void test_unix_park_marks(void) {
   pid_mask_zero(&u->chan[1].rwait);
 
   /* Full ring: a writer parks on chan[0]'s writer mask. */
-  static uint8_t big[K_UNIX_RING];
+  uint8_t *big = ut_scratch_alloc(UT_RING_FRAMES);
+  ASSERT(big != 0);
   EXPECT_EQ(usock_send(u, 0, big, K_UNIX_RING, 1), K_UNIX_RING);
+  ut_scratch_free(big, UT_RING_FRAMES);
   r = usock_send(u, 0, buf, 1, 0);
   EXPECT_EQ(r, -2);
   EXPECT_EQ(process_get_pcb(pid)->state, PROC_STATE_BLOCKED);
@@ -386,7 +412,10 @@ static void test_file_poll_engine(void) {
   /* Argument validation. */
   struct k_pollfd fds[2];
   EXPECT_EQ(file_poll(cur, fds, -1, 0), -EINVAL);
-  EXPECT_EQ(file_poll(cur, fds, K_FD_SETSIZE + 1, 0), -EINVAL);
+  /* C1-k5: the engine's own bound is the fd table now (the native sys_poll
+     still refuses nfds > K_FD_SETSIZE before calling it; the compat poll
+     bounds nfds by RLIMIT_NOFILE). */
+  EXPECT_EQ(file_poll(cur, fds, MAX_OPEN_FDS + 1, 0), -EINVAL);
 
   /* Pipe with data reports POLLIN; empty pipe with 0 timeout reports 0. */
   int pfd[2];

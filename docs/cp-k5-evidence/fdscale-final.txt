@@ -1,0 +1,17 @@
+# fdscale on the FINAL lane tree (cp-k5 f98ffad7), strix, LP_TIMEOUT=600, qemu-slot
+[LP] info F1 initial soft=1024 hard=4096
+[LP] PASS F1 rlimit (85 ms)
+[LP] PASS F2 soft_limit (71 ms)
+[LP] info F3 3000 pipes live, parent maxfd=4005
+[LP] PASS F3 pipes3000 (841 ms)
+[LP] PASS F4 poll2000 (552 ms)
+[LP] PASS F5 epoll2000 (579 ms)
+[LP] PASS F6 select_big (465 ms)
+[LP] PASS F7 fd_kinds (74 ms)
+[LP] PASS F8 dup_high (67 ms)
+[LP] info F9 spinner=349ms self=352ms child=374ms nvcsw=0->5
+[LP] PASS F9 rusage (992 ms)
+[LP] PASS F10 wine_shape (987 ms)
+[LP] PASS F11 pipe_race (2084 ms)
+[LP] done rc=0
+t3_linux_probe: PASS — fdscale reached its done marker

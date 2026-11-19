@@ -1,13 +1,32 @@
 #include "arch/cpu.h"
 #include "process.h"
 
-static uint64_t user_sp[MAX_CPUS];
+/* C1-k7: written on every trap entry: one line per CPU. */
+static struct { uint64_t v; } __attribute__((aligned(64))) user_sp[MAX_CPUS];
 
 /**
  * Returns the logical ID of the current CPU core (0 to MAX_CPUS-1).
  * Queries CPUID leaf 1 to extract the initial APIC ID.
  */
+/* C1-k6 (docs/cp-k6.md §10): once every CPU the boot started has loaded its
+ * cpu_locals block into GS_BASE (trap_init_core_with_id counts them;
+ * smp_init says how many there are), ring-0 GS is always that block -- the
+ * entry stubs swapgs before any C code -- and the id is one %gs load.  The
+ * GS_BASE rdmsr below was 6-7 % of all guest samples in the P9 profile: the
+ * lock audit asks for the CPU id on every lock operation. */
+volatile uint32_t x64_gs_ready_mask;    /* bit c: CPU c's GS_BASE is set */
+volatile uint32_t x64_gs_expected;      /* CPUs the boot started (0 = not yet known) */
+static volatile int x64_cpuid_fast;
+
 uint32_t get_cpuid(void) {
+  if (__builtin_expect(x64_cpuid_fast, 1)) {
+    uint64_t id;
+    __asm__ volatile("mov %%gs:32, %0" : "=r"(id));
+    return (uint32_t)id;
+  }
+  if (x64_gs_expected &&
+      (uint32_t)__builtin_popcount(x64_gs_ready_mask) >= x64_gs_expected)
+    x64_cpuid_fast = 1;
   uint64_t gs_base = 0;
   uint32_t low, high;
   __asm__ volatile(
@@ -40,6 +59,12 @@ uint32_t get_cpuid(void) {
  * Safely executes standard wait for interrupt (sti; hlt) in a thread-safe manner.
  */
 void safe_wfi(void) {
+  /* C1-k6: a halt on behalf of a task wakes within 1 ms even when CPU 0's
+     broadcast tick has stopped (process.c sched_wfi_bound).  IF=0 from the
+     arm to the hlt, so the one-shot cannot fire before this CPU halts. */
+  extern void sched_wfi_bound(void);
+  __asm__ volatile("cli" ::: "memory");
+  sched_wfi_bound();
   __asm__ volatile("sti; hlt" ::: "memory");
 }
 
@@ -90,14 +115,14 @@ void interrupts_restore(uint64_t state) {
  * Retrieves the thread-local user-space stack pointer.
  */
 uint64_t arch_get_user_sp(void) {
-  return user_sp[get_cpuid()];
+  return user_sp[get_cpuid()].v;
 }
 
 /**
  * Sets the thread-local user-space stack pointer.
  */
 void arch_set_user_sp(uint64_t sp) {
-  user_sp[get_cpuid()] = sp;
+  user_sp[get_cpuid()].v = sp;
 }
 
 /**
@@ -125,6 +150,14 @@ void arch_kernel_thread_exit_handler(void) {
  * Transitions into user space (Ring 3) via structured iretq.
  */
 void arch_enter_user_mode(uint64_t entry_point, uint64_t stack_pointer) {
+  /* cp P1: every ring-3 entry swaps GS (trap.c's swapgs discipline); this
+     legacy v1 entry carries no user GS base, so make the value it swaps in
+     0 rather than whatever KERNEL_GS_BASE last held. */
+  __asm__ volatile("cli\n"
+                   "wrmsr"
+                   :
+                   : "a"(0u), "d"(0u), "c"(0xC0000102u)
+                   : "memory");
   __asm__ volatile(
       "cli\n"
       "mov $0x23, %%ax\n"
@@ -151,6 +184,7 @@ void arch_enter_user_mode(uint64_t entry_point, uint64_t stack_pointer) {
       "xor %%r13, %%r13\n"
       "xor %%r14, %%r14\n"
       "xor %%r15, %%r15\n"
+      "swapgs\n"
       "iretq\n"
       :
       : [entry] "r" (entry_point),

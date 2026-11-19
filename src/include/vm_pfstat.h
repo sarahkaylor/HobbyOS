@@ -1,0 +1,111 @@
+/* vm_pfstat.h -- H7-fault: what a demand fault costs (docs/cp-fault.md §2).
+ *
+ * The [PF*] rows: faults by kind, a latency histogram, the time a fault spends
+ * waiting for its page's I/O, for vm_lock and holding it, zeroing frames, TLB
+ * shootdowns, and the interrupts that land on user threads.  Diagnostic only:
+ * no hook changes what the fault path does.  x86_64 (the Linux ABI, where the
+ * game runs); every hook is an empty inline elsewhere, so ARM builds the same
+ * call sites. */
+#ifndef VM_PFSTAT_H
+#define VM_PFSTAT_H
+
+#include <stdint.h>
+
+enum pf_kind {
+  PFK_ANON = 0, /* private anonymous zero-fill */
+  PFK_SHOBJ,    /* a shared object's page (shm, memfd, tmpfs MAP_SHARED) */
+  PFK_NFS,      /* file-backed, NFS (the game copy, Wine's tree) */
+  PFK_EXT2,     /* file-backed, ext2 (the prefix) */
+  PFK_FAT,      /* file-backed, FAT16 (disk.img) */
+  PFK_IMG,      /* a native v2 IMAGE page */
+  PFK_COW,      /* write to a COW leaf (fork share, or a private file page) */
+  PFK_PRIV,     /* MAP_PRIVATE over memfd/tmpfs: read-through or copy */
+  PFK_RETRY,    /* the leaf was already present: TLB race / prot-up / refault */
+  PFK_ERR,      /* no page: hole, protection, EIO, OOM, BUS */
+  PFK_N
+};
+
+#define PF_HB 17 /* histogram buckets: < 1,2,4,...,32768 us, and the rest */
+
+/* H7-fault round 2 (H7-08): where a timer interrupt's time goes ([PFR]) */
+enum pf_tseg {
+  PFR_HRT_FLUSH = 0, /* 0x84: EOI + sched_sync_flush_ex */
+  PFR_HRT_FIRE,      /* 0x84: sched_hrt_fire (expire the due sleepers) */
+  PFR_HRT_LTIMER,    /* 0x84: linux_compat_timer_tick */
+  PFR_HRT_SCHED,     /* 0x84: kick idle CPUs / schedule */
+  PFR_T32_CONS,      /* 32: cons_tick */
+  PFR_T32_SAMPLE,    /* 32, CPU 0: cp_wait_sample (+ the 5 s census) */
+  PFR_T32_REST,      /* 32: after cons_tick to the end (includes the two below) */
+  PFR_T32_CENSUS,    /* 32, CPU 0, every 5 s: rw_thr_sample + virtio_gpu_health_tick */
+  PFR_N
+};
+
+/* H7-fault round 2: who asked for a TLB shootdown ([PFS] rows) */
+enum pf_shoot_site {
+  PFS_OTHER = 0, PFS_MUNMAP, PFS_JIT, PFS_MMAP, PFS_MPROT, PFS_ZAP, PFS_FIXED,
+  PFS_COW, PFS_COWSHARE, PFS_RETRY, PFS_FORK, PFS_TRUNC, PFS_N
+};
+
+#if defined(__x86_64__)
+static inline uint64_t pf_tsc(void) {
+  uint32_t lo, hi;
+  __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+  return ((uint64_t)hi << 32) | lo;
+}
+/* vm_handle_fault: open and close one fault on this CPU (nested
+   opens are folded into the outermost). */
+void pfstat_begin(int kmode, uint64_t va);
+void pfstat_end(void);
+void pfstat_kind(int kind);    /* the path that resolved it (last call wins) */
+/* I/O inside the open fault: the page's source read (cache or device). */
+void pfstat_io(uint64_t tsc);
+void pfstat_rpc(void);         /* nfs.c: one READ/RPC went on the wire */
+/* vm_lock, every site in vm.c (vm_lock_acq/rel wrappers). */
+void pfstat_lock_acquired(uint64_t t_before, int site);
+void pfstat_lock_releasing(void);
+/* frame.c */
+void pfstat_frame_alloc(uint64_t phys);
+void pfstat_zeroed(uint64_t phys, uint64_t tsc);
+/* mmu.c */
+void pfstat_shoot_site(int site); /* the next shootdown on this CPU is `site`'s */
+int pfstat_pid_in_fault(int pid);  /* thread `pid` is inside vm_handle_fault */
+void pfstat_shoot_infault(int n);  /* n slow targets were inside a fault */
+void pfstat_shoot_pv(int n);       /* n targets were flushed by the host (preempted) */
+void pfstat_tseg(int seg, uint64_t tsc);
+/* targets: CPUs IPI'd; running: ... of which ran a thread of the AS;
+   slow: ... of which took >= 1 ms to acknowledge; slowmask: which */
+void pfstat_shoot(uint64_t tsc, int targets, int running, int slow, uint32_t slowmask);
+/* trap.c: a trap from user mode that returned to the same thread. */
+void pfstat_trap(uint64_t vector, uint64_t tsc);
+/* per-thread totals (tsc), for [AWAY] */
+uint64_t pfstat_thr_pf(int slot);
+uint64_t pfstat_thr_irq(int slot);
+uint64_t pfstat_tsc_to_us(uint64_t tsc);
+void pfstat_emit_now(void);    /* test syscall / probe: one row set now */
+#else
+static inline uint64_t pf_tsc(void) { return 0; }
+static inline void pfstat_begin(int kmode, uint64_t va) { (void)kmode; (void)va; }
+static inline void pfstat_end(void) {}
+static inline void pfstat_kind(int kind) { (void)kind; }
+static inline void pfstat_io(uint64_t tsc) { (void)tsc; }
+static inline void pfstat_rpc(void) {}
+static inline void pfstat_lock_acquired(uint64_t t, int site) { (void)t; (void)site; }
+static inline void pfstat_lock_releasing(void) {}
+static inline void pfstat_frame_alloc(uint64_t phys) { (void)phys; }
+static inline void pfstat_zeroed(uint64_t phys, uint64_t tsc) { (void)phys; (void)tsc; }
+static inline void pfstat_shoot_site(int site) { (void)site; }
+static inline int pfstat_pid_in_fault(int pid) { (void)pid; return 0; }
+static inline void pfstat_shoot_infault(int n) { (void)n; }
+static inline void pfstat_shoot_pv(int n) { (void)n; }
+static inline void pfstat_tseg(int seg, uint64_t tsc) { (void)seg; (void)tsc; }
+static inline void pfstat_shoot(uint64_t tsc, int targets, int running, int slow, uint32_t slowmask) {
+  (void)tsc; (void)targets; (void)running; (void)slow; (void)slowmask;
+}
+static inline void pfstat_trap(uint64_t vector, uint64_t tsc) { (void)vector; (void)tsc; }
+static inline uint64_t pfstat_thr_pf(int slot) { (void)slot; return 0; }
+static inline uint64_t pfstat_thr_irq(int slot) { (void)slot; return 0; }
+static inline uint64_t pfstat_tsc_to_us(uint64_t tsc) { return tsc; }
+static inline void pfstat_emit_now(void) {}
+#endif
+
+#endif

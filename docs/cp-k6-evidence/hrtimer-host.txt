@@ -1,0 +1,33 @@
+== strix Linux host (7.0.0-43-generic), unprivileged, static musl probe_hrtimer.elf (the same source as the guest run)
+[LP] hrtimer probe: start (mono=235721179900us real=1794934192047354us)
+[LP] H1 nanosleep 1000us                   n=200 err_us p50=53 p90=54 p99=59 min=3 max=73 hist[<50:15 <100:185 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] H2 nanosleep 100us                    n=200 err_us p50=51 p90=53 p99=68 min=12 max=72 hist[<50:10 <100:190 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] H3 nanosleep 10us                     n=200 err_us p50=51 p90=53 p99=69 min=2 max=71 hist[<50:11 <100:189 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] H4 clock_nanosleep MONO ABSTIME 1ms   n=200 err_us p50=54 p90=57 p99=66 min=51 max=66 hist[<50:0 <100:200 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] H5 futex WAIT timeout 1000us          n=200 err_us p50=54 p90=57 p99=70 min=8 max=242 hist[<50:9 <100:190 <200:0 <500:1 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] H6 poll(0 fds, 1ms)                   n=200 err_us p50=54 p90=57 p99=62 min=16 max=64 hist[<50:3 <100:197 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] H7 ppoll(0 fds, 100us)                n=200 err_us p50=55 p90=56 p99=62 min=11 max=63 hist[<50:9 <100:191 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] H8 select(0, {0,1000})                n=200 err_us p50=56 p90=57 p99=61 min=17 max=62 hist[<50:6 <100:194 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] H9 epoll_wait(empty, 1ms)             n=200 err_us p50=55 p90=57 p99=62 min=6 max=89 hist[<50:10 <100:190 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] H10 epoll_pwait2(empty, 200us)         n=200 err_us p50=51 p90=54 p99=59 min=35 max=60 hist[<50:39 <100:161 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] H11 timerfd 1ms period, read           n=200 err_us p50=6 p90=12 p99=19 min=2 max=21 hist[<50:200 <100:0 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] H12 poll(timerfd one-shot 1ms)         n=200 err_us p50=6 p90=12 p99=19 min=1 max=22 hist[<50:200 <100:0 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] C1 clock_nanosleep REALTIME        rel2ms rc=0 took=2057us  abs+2ms rc=0 took=2054us  abs-past rc=0 took=12us PASS
+[LP] C2 clock_nanosleep MONOTONIC       rel2ms rc=0 took=2061us  abs+2ms rc=0 took=2057us  abs-past rc=0 took=12us PASS
+[LP] C3 clock_nanosleep BOOTTIME        rel2ms rc=0 took=2099us  abs+2ms rc=0 took=2054us  abs-past rc=0 took=12us PASS
+[LP] C4 clock_nanosleep TAI             rel2ms rc=0 took=2052us  abs+2ms rc=0 took=2056us  abs-past rc=0 took=15us PASS
+[LP] C5 clock_nanosleep REALTIME_ALARM  rc=-1 (no CAP_WAKE_ALARM here) PASS
+[LP] C6 clock_nanosleep BOOTTIME_ALARM  rc=-1 (no CAP_WAKE_ALARM here) PASS
+[LP] C7 clock_nanosleep MONOTONIC_RAW   rel rc=-95 abs rc=-95 want=-95 PASS
+[LP] C7 clock_nanosleep REALTIME_COARSE rel rc=-95 abs rc=-95 want=-95 PASS
+[LP] C7 clock_nanosleep MONOTONIC_COARSE rel rc=-95 abs rc=-95 want=-95 PASS
+[LP] C7 clock_nanosleep THREAD_CPUTIME  rel rc=-95 abs rc=-95 want=-95 PASS
+[LP] C8 clock_nanosleep id 10           rel rc=-22 abs rc=-22 want=-22 PASS
+[LP] C8 clock_nanosleep id 12           rel rc=-22 abs rc=-22 want=-22 PASS
+[LP] C8 clock_nanosleep tv_nsec=1e9 rc=-22 want=-22 PASS
+[LP] C9 clock_nanosleep PROCESS_CPUTIME rel30ms rc=0 cpu_advanced=30011us wall=29120us PASS
+[LP] L1 nanosleep 1000us                   n=200 err_us p50=55 p90=56 p99=59 min=3 max=66 hist[<50:9 <100:191 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] L2 futex WAIT timeout 1000us          n=200 err_us p50=54 p90=57 p99=59 min=3 max=59 hist[<50:14 <100:186 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] L3 epoll_wait(empty, 1ms)             n=200 err_us p50=52 p90=52 p99=55 min=14 max=56 hist[<50:8 <100:192 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] done rc=0
+exit=0

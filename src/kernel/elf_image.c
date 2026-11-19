@@ -413,6 +413,28 @@ const char *elf_strerror(int err) {
  */
 int elf_apply_relocations(const struct elf_image *img, uint8_t *stage,
                           uint64_t span, uint64_t base) {
+  return elf_apply_relocations_ex(img, stage, span, base, 0, 0);
+}
+
+/* cp/exec: the same pass with a policy for R_X86_64_IRELATIVE (37).
+ *
+ * A glibc -static-pie carries IRELATIVE entries (memcpy, strlen, ... -- 24 in
+ * glibc 2.31's) whose value is "call the resolver at base+addend and store what
+ * it returns".  Only the program can do that: the resolver reads the CPU
+ * features glibc's startup has just measured.  On Linux the kernel applies no
+ * relocation at all to such an image; _dl_relocate_static_pie() walks the whole
+ * DT_RELA table in user space, RELATIVE and IRELATIVE alike.
+ *
+ * With ELF_RELOC_DEFER_IRELATIVE the pass applies every RELATIVE as before,
+ * leaves each IRELATIVE slot exactly as the file has it and counts it in
+ * *deferred.  The caller must then leave DT_RELA/DT_RELASZ intact so the
+ * program's own startup applies them (re-applying a RELA RELATIVE stores the
+ * same base+addend again: idempotent).  Without the flag an IRELATIVE is
+ * refused like any other unsupported type -- the GB-013 contract. */
+int elf_apply_relocations_ex(const struct elf_image *img, uint8_t *stage,
+                             uint64_t span, uint64_t base, uint32_t flags,
+                             uint32_t *deferred) {
+  if (deferred) *deferred = 0;
   if (!img || !stage) return ELF_ERR_ARGS;
   if (img->dyn_vaddr == 0 || img->dyn_size == 0) return ELF_OK;  /* no dynamic */
 
@@ -445,11 +467,21 @@ int elf_apply_relocations(const struct elf_image *img, uint8_t *stage,
     const uint64_t r_addend = rd64(e + 16);
     const uint32_t type = (uint32_t)(r_info & 0xffffffffu);
     if (type == 0) continue;                       /* R_*_NONE */
+    const int irel = type == 37 /* R_X86_64_IRELATIVE */ &&
+                     img->machine == ELF_EM_X86_64 &&
+                     (flags & ELF_RELOC_DEFER_IRELATIVE);
     /* R_X86_64_RELATIVE = 8, R_AARCH64_RELATIVE = 1027: both mean base+addend. */
-    if (type != 8 && type != 1027) return ELF_ERR_RELOC;
+    if (type != 8 && type != 1027 && !irel) return ELF_ERR_RELOC;
     if (r_offset < vb) return ELF_ERR_RELOC;
     const uint64_t dst = r_offset - vb;
     if (dst > span || span - dst < 8) return ELF_ERR_RELOC;
+    if (irel) {
+      /* The resolver's address must lie inside the image, or the program's
+         own pass would call into nothing. */
+      if (r_addend < vb || r_addend - vb >= span) return ELF_ERR_RELOC;
+      if (deferred) (*deferred)++;
+      continue;
+    }
     wr64(stage + dst, base + r_addend);
   }
   return ELF_OK;

@@ -1,0 +1,23 @@
+== strix guest (KVM -cpu host, 8 vCPU, 12 GiB), tools/gate/t3_linux_probe.sh killgrp, tree base (cyberpunk 058fd3d5 + the probe source), 2026-11-17T10:20:45-06:00
+qemu-slot: slot 3 of 4 held by pid 1666463 16:15:11
+t3_linux_probe: building /home/sarah/cp/lanes/k6-base/obj/intel/probe_killgrp.elf
+make: Entering directory '/home/sarah/cp/lanes/k6-base'
+musl-gcc -static-pie -fPIE -O1 -g -Wall -Wextra -o obj/intel/probe_killgrp.elf src/user/linux_probe_killgrp.c
+make: Leaving directory '/home/sarah/cp/lanes/k6-base'
+=== t3_linux_probe: killgrp (deadline 300s, log /home/sarah/cp/lanes/k6-base/obj/linux_probe_killgrp.log) ===
+--- probe rows ---
+[LP] K3 kill(pid,0) on a leader-exited group     rc=-1 errno=3 -> FAIL
+[LP] K1 SIGKILL: the group is reaped             kill rc=-1 waited=-2ms -> FAIL
+[LP] K2 SIGKILL: status is killed-by-9           status=0x0 -> FAIL
+[LP] K4 SIGTERM (SIG_DFL) terminates it          kill rc=-1 waited=-2ms status=0x0 -> FAIL
+[LP] K5 SIGUSR1 (handler) runs on a worker       kill rc=-1 waited=-2ms status=0x0 -> FAIL
+[LP] K6 a worker's exit_group(7)                 waited=350ms status=0x700 -> PASS
+[LP] K7 the last thread returns                  waited=-2ms status=0x700 -> FAIL
+[LP] done rc=6
+--- unhandled Linux syscalls (name the next handler) ---
+[LCOMPAT] argv argc=1 a0=PROBE.ELF execfn=PROBE.ELF
+--- faults / exits ---
+[EXITPC] pid=13 last_user_pc=0x1000002281 code=0x7
+[EXITPC] pid=14 last_user_pc=0x1000002281 code=0x7
+[EXITPC] pid=2 last_user_pc=0x100000451E code=0x6
+t3_linux_probe: FAIL — killgrp never printed '[LP] done rc=0' (tier rc=1)

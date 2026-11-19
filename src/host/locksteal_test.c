@@ -56,6 +56,7 @@ int cpu_current_pids[16];               /* lockscale: "who runs on this CPU" */
 void uart_puts(const char *s) { (void)s; }  /* its dumps: not exercised here */
 void print_int(int v) { (void)v; }
 struct process *process_get_pcb(int pid) { (void)pid; return 0; }
+void blk_token_diag_row(const char *why) { (void)why; } /* lockscale wedge hook (cp-fat) */
 uint64_t timer_get_us(void) { return host_now_ms * 1000; }
 
 

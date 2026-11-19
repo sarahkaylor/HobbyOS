@@ -1,0 +1,41 @@
+# Gate P2 on the FINAL lane tree (cp-k5 f98ffad7), strix, KVM, 12 GiB; cmd: LO_ON_DISK= WINE_EXPORT=/srv/nfs/cp-k5-p2 bash tools/cp/run-wine-p2.sh
+== the P2 rows
+[P2] winep2 launcher (C2-wine2)
+[P2] mount 10.0.2.2:/srv/nfs/cp-k5-p2 -> /CP ok
+[P2] begin nfscount : pfxls -c /CP/WINE/lib/wine/x86_64-windows /CP/WINE/lib/wine/x86_64-unix /CP/WINE/share/wine
+[P2] end nfscount status=0 ms=200
+[P2] begin nfshash : pfxls -h /CP/WINE/lib/wine/x86_64-unix/ntdll.so /CP/WINE/lib/wine/x86_64-windows/kernelbase.dll /CP/WINE/lib/wine/x86_64-windows/ntdll.dll /CP/WINE/lib/wine/x86_64-windows/wineboot.exe /CP/WINE/lib/wine/x86_64-windows/setupapi.dll /CP/WINE/share/wine/wine.inf
+[P2] end nfshash status=0 ms=101
+[P2] begin wineboot : wineboot -i
+[P2] end wineboot status=0 ms=33861
+[P2] quiesce after wineboot: extra=0
+[P2] begin pfxls : pfxls /tmp/pfx
+[P2] end pfxls status=0 ms=46
+[P2] begin echo : wine cmd /c echo hello
+hello
+[P2] end echo status=0 ms=8465
+[P2] quiesce after echo: extra=0
+[P2] begin winprobe : wine Z:\CP\WPROBE\winprobe.exe
+[WP] done rc=0
+[P2] end winprobe status=0 ms=8179
+[P2] begin copy : wine cmd /c copy /y Z:\CP\WPROBE\winprobe.exe C:\winprobe.exe
+[P2] end copy status=0 ms=1601
+[P2] begin winprobe-c : wine C:\winprobe.exe
+[WP] done rc=0
+[P2] end winprobe-c status=0 ms=944
+[P2] begin kill : wineserver -k
+[P2] end kill status=0 ms=494
+[P2] done
+
+G1 wine cmd /c echo hello prints hello : PASS   ([P2] end echo status=0 ms=8465)
+G2 winprobe.exe every marker + exit 0  : PASS   ([P2] end winprobe status=0 ms=8179; 41 markers, 0 missing/failed)
+G3 wineserver -k leaves no processes   : PASS   ([P2] end kill status=0 ms=494; [P2] ps-extra count=0)
+extra: winprobe from C:\ (the prefix) : [WP] done rc=0 ([P2] end winprobe-c status=0 ms=944)
+
+== ps before / after
+[P2] ps-before count=1
+[P2] ps-after count=1
+
+raw serial: /home/sarah/cp/lanes/k5/obj/wine-p2/serial.log
+== exports.sh: remove /srv/nfs/cp-k5-p2 ok (non-cp lines unchanged)
+== removed /srv/nfs/cp-k5-p2

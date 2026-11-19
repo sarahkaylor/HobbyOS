@@ -1,0 +1,42 @@
+# cp-hunt round 3, item 2: h3-soakA (strix, integ21, P9 32 GiB Venus, r3/soak60.p9 + audio to the wav backend)
+   game_end: [P8] end game status=0 ms=3979463
+-- kernel faults: 0 rows, 0 signatures
+-- kernel stalls / lost wakes / timeouts: 5 rows, 1 signatures
+-- launcher census: 134 rows (t 5..3979 s), procs n 12 -> max 12 -> 9; fd probe below its cap in 134/134 (first t=5 opened=1021/4096 errno=24); free MiB 30723 -> min 27372 -> 31444
+   clean exit: yes (game status=0, wineserver -k 236 ms, left after -k: none + exited-unreaped vkcube.exe/17:s4, sync yes, [P8] done yes)
+-- [THRS] trend: 4000 rows = the kernel cap (4000): the census STOPPED at serial L27196; per name: rows, threads / regions / anon MiB / res MiB at 0, 25, 50, 75, 100 %
+-- [AWAY] rows 400, [AWAY-Z] rows 27, [SND] zeros rows 6
+-- fps rows per phase (fps.csv): rows, median, p10, min, longest guest-time gap s, gaps > 2.5 s
+   launch              56   184.9   107.0     0.0       -    -
+   menu                11   215.9   203.6   202.9    1.51    0
+   loading             63   205.6    34.9    22.9    1.54    0
+   soak01             177    38.0    33.7    22.4    1.55    0
+   soak02             177    43.2    39.9    31.9    1.53    0
+   soak03             176    34.6    32.4    28.6    1.54    0
+   soak04             177    33.6    28.3    23.9    1.56    0
+   soak05             176    41.9    28.2    19.5    1.54    0
+   soak06             177    43.5    38.4    27.7    1.55    0
+   soak07             177    31.9    24.4    19.1    1.55    0
+   soak08             177    27.2    23.8    14.9    1.61    0
+   soak09             178    23.6    19.2     6.2    3.07    1
+   soak10             175    23.4    19.6    17.1    1.56    0
+   soak11             176    26.9    24.2    19.2    1.56    0
+   soak12             177    34.6    30.3    15.9    1.54    0
+   soak13             176    38.9    36.0    28.4    1.54    0
+   soak14             176    41.0    34.5    27.7    1.53    0
+   quit                13   238.7    93.3    40.3    1.52    0
+   Cyberpunk2077.e      496  thr [15, 48, 48, 48, 48]  regs [667, 1382, 1442, 1450, 1474]  anon [135451, 141081, 141113, 141113, 141144]  res [510, 4564, 4626, 4623, 4668]  (max thr 51, regs 1481, slots 103)
+--- wavgaps / wavcheck (the WAV was deleted after):
+wavgaps: duration_s=3966.55
+wavgaps: dropouts=5
+wavgaps: edge_clicks=0
+wavgaps: gaps_ge_500ms=0
+wavgaps: wav_over_wall=0.9879
+wavgaps: dropouts_game_s=[155.2, 156.8, 165.2, 197.1, 241.1]
+--- [SND] xrun rows:
+[SND] xrun n=1 frames_done=128032 chunks=283 t_ms=2668 wr_ago_us=27081 io_ago_us=2 done100ms=4672 done40ms=227
+[SND] xrun n=2 frames_done=134592 chunks=298 t_ms=2806 wr_ago_us=23839 io_ago_us=5459 done100ms=4640 done40ms=
+[SND] xrun n=3 frames_done=135072 chunks=299 t_ms=2821 wr_ago_us=10015 io_ago_us=0 done100ms=4640 done40ms=176
+[SND] xrun n=4 frames_done=135552 chunks=300 t_ms=2832 wr_ago_us=10011 io_ago_us=10008 done100ms=4640 done40ms
+[SND] xrun n=5 frames_done=137600 chunks=305 t_ms=2886 wr_ago_us=34933 io_ago_us=34932 done100ms=3808 done40ms
+[SND] xrun n=6 frames_done=124058720 chunks=258722 t_ms=2587103 wr_ago_us=742648 io_ago_us=742643 done100ms=96

@@ -1,0 +1,46 @@
+# P8 lavapipe, integ21 (5f8c4b76, ~/cp/lanes/fault-i21) vs cp-fault round 1 (45832325 = the integ22 kernel, ~/cp/lanes/fault-base)
+# booted at the same time, two pairs, strix 2026-11-18; H6-hunt3 Venus game guest running beside both pairs (3 game guests on the host)
+# same seeded prefix image (copied), same Wine stage; tNNN = game seconds since launch
+pair1 start 18:59:47
+pr-r1-1 rc=0 19:07:06
+pr-i21-1 rc=0 19:07:29
+pair2 start 19:07:29
+pr-r1-2 rc=0 19:13:07
+pr-i21-2 rc=0 19:13:23
+PAIR8DONE
+== pr-i21-1
+[P8W] +     0.0 s  19:00:19  slot 3 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 2
+[P8W] +   338.0 s  19:05:57  title prompt 'PRESS ... TO CONTINUE' at s015-t000307: sent one Space (#1)
+[P8W] +   385.1 s  19:06:44  title prompt 'PRESS ... TO CONTINUE' at s018-t000354: sent one Space (#2)
+[P8W] +   400.8 s  19:06:59  main menu OCR at s019-t000370: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   421.5 s  19:07:20  main menu OCR at s020-t000391: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   427.0 s  19:07:26  main menu OCR at s021-t000396: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   429.1 s  19:07:28  verdict: main-menu; QEMU stopped, slot released; guests on the host now: 1
+== pr-r1-1
+[P8W] +     0.0 s  19:00:01  slot 1 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 1
+[P8W] +   317.4 s  19:05:18  title prompt 'PRESS ... TO CONTINUE' at s016-t000293: sent one Space (#1)
+[P8W] +   348.8 s  19:05:49  title prompt 'PRESS ... TO CONTINUE' at s018-t000324: sent one Space (#2)
+[P8W] +   364.5 s  19:06:05  main menu OCR at s019-t000340: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   400.4 s  19:06:41  main menu OCR at s020-t000376: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   421.5 s  19:07:02  main menu OCR at s021-t000397: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   423.7 s  19:07:04  verdict: main-menu; QEMU stopped, slot released; guests on the host now: 2
+== pr-i21-2
+[P8W] +     0.0 s  19:07:47  slot 3 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 2
+[P8W] +   244.5 s  19:11:52  title prompt 'PRESS ... TO CONTINUE' at s013-t000216: sent one Space (#1)
+[P8W] +   275.8 s  19:12:23  title prompt 'PRESS ... TO CONTINUE' at s015-t000247: sent one Space (#2)
+[P8W] +   291.4 s  19:12:39  main menu OCR at s016-t000263: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   312.1 s  19:12:59  main menu OCR at s017-t000283: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   332.7 s  19:13:20  main menu OCR at s018-t000304: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   334.9 s  19:13:22  verdict: main-menu; QEMU stopped, slot released; guests on the host now: 1
+== pr-r1-2
+[P8W] +     0.0 s  19:07:46  slot 1 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 1
+[P8W] +   259.3 s  19:12:05  title prompt 'PRESS ... TO CONTINUE' at s012-t000231: sent one Space (#1)
+[P8W] +   290.5 s  19:12:36  title prompt 'PRESS ... TO CONTINUE' at s014-t000262: sent one Space (#2)
+[P8W] +   306.2 s  19:12:52  main menu OCR at s015-t000277: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   311.9 s  19:12:58  main menu OCR at s016-t000283: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   317.5 s  19:13:03  main menu OCR at s017-t000289: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   319.6 s  19:13:05  verdict: main-menu; QEMU stopped, slot released; guests on the host now: 2
+fault-i21/obj/cp-p8/pr-i21-1: [NFSRS] rows=0; stalls=0; NFSPIPE rows with resent>0: 0
+fault-base/obj/cp-p8/pr-r1-1: [NFSRS] rows=0; stalls=0; NFSPIPE rows with resent>0: 0
+fault-i21/obj/cp-p8/pr-i21-2: [NFSRS] rows=0; stalls=0; NFSPIPE rows with resent>0: 0
+fault-base/obj/cp-p8/pr-r1-2: [NFSRS] rows=0; stalls=0; NFSPIPE rows with resent>0: 0

@@ -6,6 +6,8 @@
 #include "process.h"
 #include "errno.h"
 #include "kline.h"
+#include "vm.h"       /* cp/ext2w: live mappings follow a truncate */
+#include "file_obj.h"
 
 /* Wall-clock for dirent timestamps (selfhost w10-fstime): the kernel's
  * RTC-anchored REALTIME clock (kernel/time.c — the same clock sysinfo 6
@@ -350,6 +352,43 @@ static void write_fat(uint16_t cluster, uint16_t val) {
      A device command must never run under fat_lock. */
   if (!fat_lock.locked)
     fat16_flush_pending();
+}
+
+/* cp-fat (P9-8): leaked-hold detector (see fat16.h).  P9-8's [YLOCK-OWNER]
+ * row named the fat_lock holder's LAST syscall as 23 -- a Linux number
+ * (select), not SYS_RENAME -- i.e. the holder may already have left the FAT
+ * call that took the lock.  This names such a leak at the syscall that
+ * returned with it, with the acquire site, instead of minutes later from a
+ * waiter's spin. */
+static void fat_leak_row(const char *nm, const ylock_t *lk, long sysno) {
+  static volatile uint32_t rows;
+  uint32_t n = __atomic_add_fetch(&rows, 1, __ATOMIC_SEQ_CST);
+  if (n > 8 && (n & 255) != 0) return;
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[FAT-LEAK] ");
+  kl_s(&kl, nm);
+  kl_s(&kl, " held at syscall exit: pid=");
+  kl_i(&kl, (long)lk->owner_pid);
+  kl_s(&kl, " sys=");
+  kl_i(&kl, sysno);
+  kl_s(&kl, " site=");
+  kl_hex(&kl, lock_audit_held_site(lk));
+  kl_s(&kl, " n=");
+  kl_i(&kl, (long)n);
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+}
+void fat16_syscall_exit_check(long sysno) {
+  uint32_t c = get_cpuid();
+  int32_t me = (c < MAX_CPUS) ? cpu_current_pids[c] : -1;
+  if (me <= 0) return;
+  if (fat_lock.locked && fat_lock.owner_pid == me)
+    fat_leak_row("fat_lock", &fat_lock, sysno);
+  if (fat_wr_lock.locked && fat_wr_lock.owner_pid == me)
+    fat_leak_row("fat_wr_lock", &fat_wr_lock, sysno);
+  if (fat_io_lock.locked && fat_io_lock.owner_pid == me)
+    fat_leak_row("fat_io_lock", &fat_io_lock, sysno);
 }
 
 /* Write dirty FAT sectors to the device.  MUST be called with no filesystem
@@ -1038,6 +1077,22 @@ static void lfn_place_run(struct fat16_dir_entry *e1, struct fat16_dir_entry *e2
    first 0x00 slot is too small for the whole run, the run continues in the
    next sector instead of skipping ahead.  Returns the location of the
    short entry, or -1. */
+/* cp-fat (P9-8 reproducer, R1): a VFAT run that does not fit in the sector
+ * holding the directory's 0x00 end marker is placed in a LATER sector (the next
+ * cluster, or a freshly extended one).  Every lookup stops at the first 0x00
+ * slot, so the marker must go first or the new entry is invisible: create
+ * succeeds, the very next rename/open of that name gets ENOENT.  Measured with
+ * linux_probe_fatren: fontconfig's TMP -> NEW rename failed with errno 2 at
+ * generation ~100, when the marker reached the last slots of the directory's
+ * first cluster.  The marker's free slots become "deleted" (0xE5), which every
+ * scan skips; the later sector's own 0x00 is the new end. */
+static int lfn_retire_terminator(uint32_t sector_num, uint8_t *buf, int term) {
+  struct fat16_dir_entry *entries = (struct fat16_dir_entry *)buf;
+  for (unsigned int j = (unsigned int)term; j < SECTOR_SIZE / 32; j++)
+    if (entries[j].name[0] == 0x00) entries[j].name[0] = (char)0xE5;
+  return virtio_blk_write_sector(sector_num, buf, 1);
+}
+
 static int alloc_lfn_run_locked(uint16_t dir_cluster, const char *longname,
                                 const char *short83, int nchunks,
                                 const struct fat16_dir_entry *short_entry,
@@ -1093,6 +1148,10 @@ static int alloc_lfn_run_locked(uint16_t dir_cluster, const char *longname,
           return 0;
         }
       }
+      /* Not placed here: the run goes past this sector's end marker. */
+      if (term >= 0 && i + 1 < root_dir_sectors &&
+          lfn_retire_terminator(root_dir_sector + i, buf, term) != 0)
+        return -1;
     }
     return -1;
   }
@@ -1148,6 +1207,10 @@ static int alloc_lfn_run_locked(uint16_t dir_cluster, const char *longname,
           return 0;
         }
       }
+      /* Not placed here (typically the cluster's LAST sector): the run goes
+         to a later sector or a new cluster, past this end marker. */
+      if (term >= 0 && lfn_retire_terminator(sector_num, buf, term) != 0)
+        return -1;
     }
     prev_cluster = cluster;
     cluster = read_fat(cluster);
@@ -1309,14 +1372,20 @@ int fat16_resolve_parent(const char *path, struct fat16_dir_entry *out_parent_en
       out_parent_entry->start_cluster = 0;
       out_parent_entry->file_size = 0;
     }
-    const char *comp = path;
-    if (*comp == '/') comp++;
-    int idx = 0;
-    while (comp[idx] && idx < 63) {
-      out_last_component[idx] = comp[idx];
-      idx++;
+    /* out_last_component may be NULL: fat16_rename asks only for the old
+       path's parent.  Writing through it was a kernel store to VA 0, which
+       faults (IF=0, CPU hung) from any process's address space now that the
+       identity map is gone -- every FAT rename(2) from user space. */
+    if (out_last_component) {
+      const char *comp = path;
+      if (*comp == '/') comp++;
+      int idx = 0;
+      while (comp[idx] && idx < 63) {
+        out_last_component[idx] = comp[idx];
+        idx++;
+      }
+      out_last_component[idx] = '\0';
     }
-    out_last_component[idx] = '\0';
     return 0;
   }
 
@@ -1334,13 +1403,15 @@ int fat16_resolve_parent(const char *path, struct fat16_dir_entry *out_parent_en
     parent_path[idx] = '\0';
   }
 
-  const char *comp = last_slash + 1;
-  int idx = 0;
-  while (comp[idx] && idx < 63) {
-    out_last_component[idx] = comp[idx];
-    idx++;
+  if (out_last_component) {
+    const char *comp = last_slash + 1;
+    int idx = 0;
+    while (comp[idx] && idx < 63) {
+      out_last_component[idx] = comp[idx];
+      idx++;
+    }
+    out_last_component[idx] = '\0';
   }
-  out_last_component[idx] = '\0';
 
   return fat16_resolve_path(parent_path, out_parent_entry, 0, 0);
 }
@@ -1843,18 +1914,45 @@ int fat16_rmdir(const char *path) {
   return r == 0 ? 0 : -EIO;
 }
 
-static int name11_equal(const char *a, const char *b) {
-  for (int i = 0; i < 11; i++)
-    if (a[i] != b[i]) return 0;
-  return 1;
+/* Does directory `cluster` (0 = root) already hold an entry named `comp`?
+ * The entry's slot (sector, offset) is reported when asked for. */
+static int dir_contains_name(uint16_t cluster, const char *comp,
+                             struct fat16_dir_entry *out,
+                             uint32_t *out_sector, uint32_t *out_offset) {
+  if (cluster == 0)
+    return find_entry_in_root(comp, out, out_sector, out_offset) == 0;
+  return find_entry_in_subdir(cluster, comp, out, out_sector, out_offset) == 0;
 }
 
-/* Does directory `cluster` (0 = root) already hold an entry named `comp`? */
-static int dir_contains_name(uint16_t cluster, const char *comp,
-                             struct fat16_dir_entry *out) {
-  if (cluster == 0)
-    return find_entry_in_root(comp, out, 0, 0) == 0;
-  return find_entry_in_subdir(cluster, comp, out, 0, 0) == 0;
+/* cp-fat (P9-8 reproducer, R1): place a renamed entry's VFAT run.  The short
+ * name gets a ~N alias exactly as a create does when another long name in
+ * the directory already truncates to the same 8.3 form; before this, rename
+ * wrote the bare truncation, so every fontconfig cache file in a directory
+ * ("<hash>-x86_64.cache-12", its ".NEW" and its ".TMP-XXXXXX") carried the
+ * SAME 11 bytes, and the replace-existing check below could not tell them
+ * apart.  An exhausted alias space (more than nine such names) keeps the old
+ * behaviour, a duplicate short name, rather than failing the rename. */
+static int rename_place_lfn(uint16_t dir_cluster, const char *last_comp,
+                            const char *formatted_name,
+                            struct fat16_dir_entry *moved,
+                            uint32_t *new_sector, uint32_t *new_offset,
+                            int same_slot) {
+  int ln = 0;
+  while (last_comp[ln]) ln++;
+  int nchunks = (ln + 12) / 13;
+  if (nchunks < 1) nchunks = 1;
+  if (!same_slot) {
+    char alias[11];
+    int rc = alloc_lfn_run(dir_cluster, last_comp, formatted_name, nchunks,
+                           moved, new_sector, new_offset, 1, alias);
+    if (rc == 0) {
+      for (int k = 0; k < 11; k++) moved->name[k] = alias[k];
+      return 0;
+    }
+    if (rc != -2) return -1;
+  }
+  return alloc_lfn_run(dir_cluster, last_comp, formatted_name, nchunks, moved,
+                       new_sector, new_offset, 0, 0);
 }
 
 /* Is `ancestor_cluster` (the potential target parent) inside the directory
@@ -1957,10 +2055,22 @@ int fat16_rename(const char* oldname, const char* newname) {
     /* In-place rename.  POSIX rename(2) replaces an existing destination:
        when the new name belongs to a different, existing entry, unlink
        that entry first (freeing its clusters) so the name rewrite below
-       performs the replacement.  sed -i's temp-file rename needs this. */
-    if (!name11_equal(entry.name, formatted_name) &&
-        dir_contains_name(new_parent.start_cluster, last_comp, 0)) {
-      if (fat16_unlink(abs_new) != 0) {
+       performs the replacement.  sed -i's temp-file rename needs this.
+
+       cp-fat (P9-8 reproducer, R1): "different entry" is decided by the
+       destination's SLOT, not by comparing 8.3 names.  Two long names that
+       truncate to the same short form (fontconfig's "...cache-12.NEW" and
+       "...cache-12") compared equal, the unlink was skipped, and the rename
+       left two entries with the final name: the OLD one, first in directory
+       order, kept answering every lookup, and a stale entry was added per
+       update until the directory outgrew its cluster. */
+    uint32_t dst_sector = 0, dst_offset = 0;
+    int same_slot = 0;
+    if (dir_contains_name(new_parent.start_cluster, last_comp, 0,
+                          &dst_sector, &dst_offset)) {
+      if (dst_sector == sector && dst_offset == offset) {
+        same_slot = 1; /* the destination IS the source (e.g. a case change) */
+      } else if (fat16_unlink(abs_new) != 0) {
         return -1;
       }
     }
@@ -2003,12 +2113,8 @@ int fat16_rename(const char* oldname, const char* newname) {
         return -1;
       }
     } else {
-      int ln = 0;
-      while (last_comp[ln]) ln++;
-      int nchunks = (ln + 12) / 13;
-      if (nchunks < 1) nchunks = 1;
-      if (alloc_lfn_run(new_parent.start_cluster, last_comp, formatted_name,
-                        nchunks, &moved, &new_sector, &new_offset, 0, 0) != 0) {
+      if (rename_place_lfn(new_parent.start_cluster, last_comp, formatted_name,
+                           &moved, &new_sector, &new_offset, same_slot) != 0) {
         return -1;
       }
     }
@@ -2033,7 +2139,7 @@ int fat16_rename(const char* oldname, const char* newname) {
   /* Cross-directory move.  Replace an existing destination (POSIX rename
    * semantics), refuse moving a directory into its own subtree, then place
    * a copy in the target directory and mark the old slot deleted. */
-  if (dir_contains_name(new_parent.start_cluster, last_comp, 0)) {
+  if (dir_contains_name(new_parent.start_cluster, last_comp, 0, 0, 0)) {
     if (fat16_unlink(abs_new) != 0) {
       return -1;
     }
@@ -2054,13 +2160,9 @@ int fat16_rename(const char* oldname, const char* newname) {
     }
   } else {
     /* A long destination name needs its own 0x0F run in the target
-       directory, exactly like fat16_open's create path. */
-    int ln = 0;
-    while (last_comp[ln]) ln++;
-    int nchunks = (ln + 12) / 13;
-    if (nchunks < 1) nchunks = 1;
-    if (alloc_lfn_run(new_parent.start_cluster, last_comp, formatted_name,
-                      nchunks, &moved, &new_sector, &new_offset, 0, 0) != 0) {
+       directory, exactly like fat16_open's create path (alias included). */
+    if (rename_place_lfn(new_parent.start_cluster, last_comp, formatted_name,
+                         &moved, &new_sector, &new_offset, 0) != 0) {
       return -1;
     }
   }
@@ -2273,6 +2375,38 @@ int fat16_close(struct file* f) {
   return fat16_sync_entry(f);
 }
 
+/* cp/ext2w (docs/cp-ext2w.md section 4; docs/cyberpunk.md §0.2 item 18): a
+ * truncate of a file that is mapped.  Linux keeps one page cache: a mapped
+ * page wholly past the new end is unmapped and a later touch is SIGBUS
+ * (truncate_pagecache), the page holding the new end reads zeros after it,
+ * and a later extension reads zeros.  Here every live VM_OBJ_FILE object of
+ * the file (found by its first cluster, cached or detached) is resized with
+ * vm_object_truncate -- a shrink drops the cut pages from every address
+ * space, a grow makes the range fillable again -- and the materialized frame
+ * holding the new end is zeroed past it.  The cache slots are dropped so the
+ * next fill reads with the object's new size.  Called with no lock held,
+ * after the chain and the entry are updated; `cluster` is the chain's first
+ * cluster before the call (O_TRUNC frees it). */
+static void fat16_mapped_resize(uint16_t cluster, uint32_t new_size) {
+  if (cluster < 2) return;
+  struct vm_object *objs[16];
+  int n = vm_object_file_writers(cluster, objs, 16); /* bumps wgen: racing fills re-read */
+  for (int k = 0; k < n; k++) {
+    struct vm_object *o = objs[k];
+    if ((uint64_t)new_size != o->size) (void)vm_object_truncate(o, new_size);
+    uint32_t tail = new_size & (FRAME_SIZE - 1);
+    if (tail) {
+      uint64_t fr = vm_object_peek(o, (uint64_t)new_size & ~(uint64_t)(FRAME_SIZE - 1));
+      if (fr) {
+        volatile uint8_t *pg = (volatile uint8_t *)phys_to_virt(fr);
+        for (uint32_t i = tail; i < FRAME_SIZE; i++) pg[i] = 0;
+      }
+    }
+    vm_object_unref(o);
+  }
+  if (n) file_obj_invalidate_all();
+}
+
 /**
  * Empties an existing file (open with O_TRUNC): frees its whole cluster
  * chain and resets the directory entry to zero length, so a subsequent
@@ -2288,6 +2422,8 @@ int fat16_truncate(struct file* f) {
 
   ylock_acquire(&fat_lock);
   uint16_t c = f->fat16.entry.start_cluster;
+  uint16_t first = c;
+  uint32_t had = f->fat16.entry.file_size;
   while (c >= 2 && c < 0xFFF8) {
     ylock_release(&fat_lock);
     uint16_t next = read_fat(c);
@@ -2303,6 +2439,7 @@ int fat16_truncate(struct file* f) {
   f->fat16.dirty = 1;
 
   fat16_sync_entry(f);
+  if (had) fat16_mapped_resize(first, 0); /* cp/ext2w */
   return 0;
 }
 
@@ -2395,6 +2532,7 @@ int fat16_truncate_to(struct file* f, uint32_t new_size) {
     fat16_stamp_entry(&f->fat16.entry);  /* ftruncate extend is a modification */
     f->fat16.dirty = 1;
     fat16_sync_entry(f);
+    fat16_mapped_resize(f->fat16.entry.start_cluster, new_size); /* cp/ext2w */
     return 0;
   }
 
@@ -2428,6 +2566,7 @@ int fat16_truncate_to(struct file* f, uint32_t new_size) {
   fat16_stamp_entry(&f->fat16.entry);  /* ftruncate shrink is a modification */
   f->fat16.dirty = 1;
   fat16_sync_entry(f);
+  fat16_mapped_resize(f->fat16.entry.start_cluster, new_size); /* cp/ext2w */
   return 0;
 }
 
@@ -2564,7 +2703,7 @@ static int fat16_read_direct_locked(struct file *f, uint64_t dest, int size,
 
       uint32_t chunk = SECTOR_SIZE - offset_in_sector;
       if (chunk > (uint32_t)size) chunk = size;
-      uint8_t* o = (uint8_t*)out;
+      uint8_t* o = (uint8_t*)phys_to_virt(out);
       for (uint32_t i = 0; i < chunk; i++) o[i] = sec_buf[offset_in_sector + i];
       out += chunk;
       read_bytes += chunk;
@@ -2589,7 +2728,7 @@ static int fat16_read_direct_locked(struct file *f, uint64_t dest, int size,
     uint32_t lba = data_sector + (c - 2) * bpb_sectors_per_cluster
     + (offset_in_cluster / SECTOR_SIZE);
     ylock_release(&fat_lock);
-    int res = virtio_blk_read_sector(lba, (void*)out, sectors);
+    int res = virtio_blk_read_sector(lba, phys_to_virt(out), sectors);
     ylock_acquire(&fat_lock);
     if (res != 0) break;
 
@@ -2676,7 +2815,7 @@ int fat16_read_direct_pos(uint16_t start_cluster, uint32_t file_size,
     if (fat16_inj_mode == 1)
       return 64;
     if (fat16_inj_mode == 2) {
-      volatile uint8_t *p = (volatile uint8_t *)dest;
+      volatile uint8_t *p = (volatile uint8_t *)phys_to_virt(dest);
       for (int i = 0; i < size; i++)
         p[i] = 0;
       return size;
@@ -2776,14 +2915,14 @@ int fat16_read_direct_pos_raw(uint16_t start_cluster, uint32_t file_size,
     if (fat16_inj_mode == 1)
       return (int)want > 64 ? 64 : (int)want;
     if (fat16_inj_mode == 2) {
-      volatile uint8_t *p = (volatile uint8_t *)dest;
+      volatile uint8_t *p = (volatile uint8_t *)phys_to_virt(dest);
       for (uint32_t i = 0; i < want; i++)
         p[i] = 0;
       return (int)want;
     }
   }
 #endif
-  if (fat16_page_raw_read(start_cluster, pos, (uint8_t *)dest, want) != 0)
+  if (fat16_page_raw_read(start_cluster, pos, (uint8_t *)phys_to_virt(dest), want) != 0)
     return -1;
   return (int)want;
 }
@@ -2841,12 +2980,12 @@ int fat16_page_probe(uint16_t start_cluster, uint32_t file_size,
   uint8_t *rb = out;
   if (!rb) {
     scratch = frame_alloc();
-    rb = (uint8_t *)scratch;
+    rb = scratch ? (uint8_t *)phys_to_virt(scratch) : 0;
   }
   int raw_rc = -1;
   if (rb && len == PROBE_PAGE)
     raw_rc = fat16_read_direct_pos_raw(start_cluster, file_size,
-                                       (uint64_t)rb, (int)len, pos) ==
+                                       virt_to_phys(rb), (int)len, pos) ==
                      (int)len
                  ? 0
                  : -1;
@@ -2863,7 +3002,7 @@ int fat16_page_probe(uint16_t start_cluster, uint32_t file_size,
     refill_n = fat16_read_direct_pos(start_cluster, file_size, rfbuf, (int)len,
                                      pos);
     if (refill_n > 0)
-      refill_nz = nz_bytes((const uint8_t *)rfbuf, (uint32_t)refill_n,
+      refill_nz = nz_bytes((const uint8_t *)phys_to_virt(rfbuf), (uint32_t)refill_n,
                            &refill_sum);
   }
 
@@ -2929,7 +3068,7 @@ int fat16_page_probe(uint16_t start_cluster, uint32_t file_size,
                                          (int)len, pos);
       if (n2 == (int)len) {
         const uint8_t *a = rb;
-        const uint8_t *b = (const uint8_t *)chk;
+        const uint8_t *b = (const uint8_t *)phys_to_virt(chk);
         ok = 1;
         second_zero = 1;
         for (uint32_t i = 0; i < len; i++) {
@@ -2955,7 +3094,7 @@ int fat16_page_probe(uint16_t start_cluster, uint32_t file_size,
          publish, so the publisher's identity check compares like with like
          (there is no copy between the verdict and the caller). */
       if (id) {
-        id->buf = (uint64_t)out;
+        id->buf = virt_to_phys(out); /* the page's physical identity (vm.c compares frames) */
         id->off = pos;
         id->nz = nz_bytes(out, len, &id->sum);
       }
@@ -3391,7 +3530,8 @@ int fat16_getdents64(struct file *f, int start_index, void *ubuf, int bufsize) {
       uint32_t sector_num = root_dir_sector + i;
       ylock_release(&fat_lock);
       if (virtio_blk_read_sector(sector_num, buf, 1) != 0) {
-        ylock_acquire(&fat_lock);
+        /* cp-fat: an I/O error returns with NO lock held (it used to
+           re-take fat_lock and return, leaking it to user space). */
         return used > 0 ? used : -1;
       }
       ylock_acquire(&fat_lock);
@@ -3441,7 +3581,7 @@ int fat16_getdents64(struct file *f, int start_index, void *ubuf, int bufsize) {
         uint32_t sector_num = data_sector + (c - 2) * bpb_sectors_per_cluster + s;
         ylock_release(&fat_lock);
         if (virtio_blk_read_sector(sector_num, buf, 1) != 0) {
-          ylock_acquire(&fat_lock);
+          /* cp-fat: no lock held on this error return (see above). */
           return used > 0 ? used : -1;
         }
         ylock_acquire(&fat_lock);

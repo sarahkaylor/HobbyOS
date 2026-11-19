@@ -1,0 +1,17 @@
+== strix guest (KVM -cpu host, 8 vCPU, 12 GiB), tools/gate/t3_linux_probe.sh fdrace, tree lane (cp-k6 working tree), 2026-11-17T10:27:13-06:00
+qemu-slot: slot 3 of 4 held by pid 1759876 16:27:06
+t3_linux_probe: building /home/sarah/cp/lanes/k6/obj/intel/probe_fdrace.elf
+make: Entering directory '/home/sarah/cp/lanes/k6'
+make: 'obj/intel/probe_fdrace.elf' is up to date.
+make: Leaving directory '/home/sarah/cp/lanes/k6'
+=== t3_linux_probe: fdrace (deadline 300s, log /home/sarah/cp/lanes/k6/obj/linux_probe_fdrace.log) ===
+--- probe rows ---
+[LP] D1 eventfd/timerfd/epoll/memfd x16 threads rounds=300 fds=19200 dup_numbers=0 wrong_type=0 failed_creates=0 -> PASS
+[LP] D2 AF_UNIX connect/accept x16 threads   rounds=300 fds=19200 dup_numbers=0 wrong_type=0 failed_creates=0 -> PASS
+[LP] D3 *_CLOEXEC sets FD_CLOEXEC                epoll=1 eventfd=1 timerfd=1 memfd=1 -> PASS
+[LP] done rc=0
+--- unhandled Linux syscalls (name the next handler) ---
+[LCOMPAT] argv argc=1 a0=PROBE.ELF execfn=PROBE.ELF
+--- faults / exits ---
+[EXITPC] pid=2 last_user_pc=0x1000004B5E code=0x0
+t3_linux_probe: PASS — fdrace reached its done marker

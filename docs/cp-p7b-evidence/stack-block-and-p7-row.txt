@@ -1,0 +1,33 @@
+C6-p7b: (1) whose stack is 0xFFFF800023FFD930, and (3) is the "[P7] ... 4196101 125830200" row garbage?
+Source: strix:~/cp/integ12/p5.1.serial (integ9 Gate P5, strix KVM, -m 12G); code at adb81ee4.
+
+(1) The stack
+  [FRAME] frames=2949120 ... ext0=0x0x0000000020000000-0x0x0000000070000000 ...   (p5.1.serial)
+  USER_REGION_SIZE = 0x2000000 (process.h:101); frame_block_base_phys(idx) = ext0.base + idx*32 MiB
+  => block 1 = [0x22000000, 0x24000000).  A kernel task's stack top is
+     user_phys_base + USER_REGION_SIZE - 0x1000 (process.c, process_create_kernel_internal) = 0x23FFF000,
+     used through the direct map: 0xFFFF800023FFF000.
+  Both faulting CPUs: RSP=0xFFFF800023FFD930, trap frame 0xFFFF800023FFD7F0
+     = 0x16D0 (5840) bytes below that top: inside block 1's kernel-task stack.
+  v2 user processes hold no block (fork: "user_phys_base stays 0"); per-CPU stacks are in the image
+  (__stack_top - cpu*64K, 0x76F.....).  So both CPUs were on ONE kernel task's own stack.
+  pid 270 (cpu 6, CR3 0x76F8F000 = the kernel root) is that kernel task; by the timing it is
+  sys_spawn_worker loading /CP/WINE/bin/wine for '[P5] begin fscheck' (the worker never reported ->
+  [SPAWNTIME] ... /WINEP5.BIN -> -EAGAIN; '[P5] end fscheck status=spawn-failed errno=11').
+  pid 9 (cpu 7) is ICEWM.BIN, picked by cpu 7 in schedule() after the worker yielded there; cpu 7 was
+  still in the switch tail on the worker's stack (re-taking proc_lock) when cpu 6 resumed the worker.
+  The lock both CPUs fault in is proc_lock itself (llvm-nm: 74d56948 B proc_lock), not a freed object.
+  This is the mechanism C3-ext2w's [KSTACK-RELEASE] probe names; see kstack-probe-before-after.txt
+  and p5-repro-and-detector.txt for it measured (a resume while another CPU is still on the stack).
+
+(3) The P7 row is not garbage
+  src/kernel/virtio_gpu_x64.c:1407  vgpu_so_row("X fullscreen window/size", win, (w << 16) | h);
+  -> two decimal ints: the X window id, and width<<16 | height.
+     4196101   = 0x00400705  -> the next X row: "[X] hobbyos: fullscreen window 0x400705 1920x1080"
+     125830200 = 0x07800438  -> 1920x1080   (83886800 = 0x050002D0 -> 1280x720)
+  0x400705 appears right after ICEWMBG.BIN (pid 272) starts on the restored 1920x1080 screen: by timing,
+  icewmbg's screen-sized window (inferred, not traced).  vgpu_fsctl_flush only stores (win,w,h) under gpu_lock and, if a blob
+  scanout were active, would hand the scanout back; seq=0 on every row of this boot means no
+  SET_SCANOUT_BLOB was ever taken on lavapipe, so no P7 resource existed to tear down.
+  The faulting lock is proc_lock, the faulting stack a kernel task's: nothing of P7's is involved.
+  No P7 lifetime bug found; no P7 code change.

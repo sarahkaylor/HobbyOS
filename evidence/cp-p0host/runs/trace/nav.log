@@ -1,0 +1,6 @@
+[    0.0] nav start
+[   37.7] press-to-continue seen (n0026)
+[   50.5] press-to-continue seen (n0034)
+[   58.9] main menu seen (n0039)
+[   89.1] snapshot menu pid=98491 threads=87 fds=432 run_processes=16 run_threads=176
+[   89.1] nav done (menu)

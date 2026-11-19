@@ -1,0 +1,83 @@
+     13 warn:vkd3d-proton:d3d12_pipeline_state_init_graphics_create_info: DSV format is DXGI_FORMAT_UNKNOWN.
+      8 warn:vkd3d-proton:d3d12_command_list_DiscardResource: Not supported for resource 000000010597f5f0.
+      8 warn:vkd3d-proton:d3d12_command_list_DiscardResource: Not supported for resource 000000010597f2f0.
+      8 warn:vkd3d-proton:d3d12_command_list_DiscardResource: Not supported for resource 000000010597eff0.
+      6 info:vkd3d-proton:vkd3d_bindless_state_add_binding: Device supports VK_EXT_descriptor_buffer!
+      5 warn:vkd3d-proton:d3d12_command_list_DiscardResource: Not supported for resource 000000010597f8f0.
+      4 warn:vkd3d-proton:openxr_vulkan_extensions: Failed to get OpenXR extensions size from wineopenxr.
+      3 info:  DXVK: v3.1.1-209-g1039f682058fa71
+      3   pEngineName: DXVK
+      2 warn:vkd3d-proton:vkd3d_supports_minimum_coopmat_caps: 8-bit Accumulator type not exposed, but assuming it works anyway. This is required for FSR4 and happens to work in practice on AMD GPUs.
+      2 warn:vkd3d-proton:vkd3d_init_depth_stencil_formats: Mapping VK_FORMAT_D24_UNORM_S8_UINT to VK_FORMAT_D32_SFLOAT_S8_UINT.
+      2 warn:vkd3d-proton:openvr_instance_extensions: Failed to wait for VR registry key ready.
+      2 warn:vkd3d-proton:openvr_device_extensions: Failed to wait for VR registry key ready.
+      2 warn:vkd3d-proton:d3d12_device_QueryInterface: {74eaee3f-2f4b-476d-82ba-2b85cb49e310} not implemented, returning E_NOINTERFACE.
+      2 warn:vkd3d-proton:d3d12_device_CheckFeatureSupport: Assuming device does not support tile based rendering.
+      2 warn:vkd3d-proton:d3d12_command_queue_QueryInterface: {22c3768e-ab10-4870-b03b-2b52e21b1063} not implemented, returning E_NOINTERFACE.
+      2 info:vkd3d-proton:vkd3d_pipeline_library_init_disk_cache: Remapping VKD3D_SHADER_CACHE to: Z:\home\sarah\cp\p0host\cache\vkd3d\vkd3d-proton.Cyberpunk2077.exe.cache.
+      2 info:vkd3d-proton:vkd3d_pipeline_library_init_disk_cache: Attempting to load disk cache from: Z:\home\sarah\cp\p0host\cache\vkd3d\vkd3d-proton.Cyberpunk2077.exe.cache.
+      2 info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Performing async setup of stream archive ...
+      2 info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Done performing async setup of stream archive.
+      2 info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_merge: No write cache exists. No need to merge any disk caches.
+      2 info:vkd3d-proton:vkd3d_physical_device_info_init_maint9: Implementation supports eliding QFOT for non-compressed optimal images.
+      2 info:vkd3d-proton:vkd3d_physical_device_info_init_maint10: Implementation can copy stencil aspect on compute queue.
+      2 info:vkd3d-proton:vkd3d_physical_device_info_init_maint10: Implementation can copy depth aspect on compute queue.
+      2 info:vkd3d-proton:vkd3d_memory_info_upload_hvv_memory_properties: Topology: HVV usage is allowed, using DEVICE_LOCAL | HOST_COHERENT for UPLOAD.
+      2 info:vkd3d-proton:vkd3d_memory_info_init_budgets: Applying resizable BAR budget to memory types: 0x218.
+      2 info:vkd3d-proton:vkd3d_memory_info_decide_hvv_usage: Topology: No more than 1 device local heap, HVV access is viable.
+      2 info:vkd3d-proton:vkd3d_instance_init: vkd3d-proton - build: 2576c0b4adfae4a.
+      2 info:vkd3d-proton:vkd3d_get_vk_version: vkd3d-proton - applicationVersion: 3.2.0.
+      2 info:vkd3d-proton:vkd3d_bindless_state_get_bindless_flags: Enabling fast paths for advanced ExecuteIndirect() graphics and compute (EXT_dgc).
+      2 info:vkd3d-proton:vkd3d_bindless_state_get_bindless_flags: Device supports ultra-fast path for descriptor copies.
+      2 info:vkd3d-proton:vkd3d_bindless_state_get_bindless_flags: Device supports VK_EXT_mutable_descriptor_type.
+      2 info:vkd3d-proton:dxgi_vk_swap_chain_recreate_swapchain_in_present_task: Got 4 swapchain images.
+      2 info:vkd3d-proton:d3d12_device_init_workarounds: Nooping SV_ShadingRate on RDNA4 due to unknown HW quirk causing hangs.
+      2 info:vkd3d-proton:d3d12_device_init_workarounds: Detected Linux kernel version 7.0.0
+      2 info:vkd3d-proton:d3d12_device_init_workarounds: Broken NULL PRT with SMEM detected, per-game workarounds may apply.
+      2 info:vkd3d-proton:d3d12_device_init_vendor_hacks: Loaded amdxc64.dll successfully.
+      2 info:vkd3d-proton:d3d12_device_determine_ray_tracing_tier: DXR support enabled.
+      2 info:vkd3d-proton:d3d12_device_determine_ray_tracing_tier: DXR 1.1 support enabled.
+      2 info:vkd3d-proton:d3d12_device_caps_init_shader_model: Enabling support for SM 6.8.
+      2 info:vkd3d-proton:d3d12_device_caps_init_shader_model: Enabling support for SM 6.7.
+      2 info:vkd3d-proton:d3d12_device_caps_init_shader_model: Enabling support for SM 6.6.
+      2 info:vkd3d-proton:d3d12_device_caps_init_feature_level: DX Ultimate supported!
+      2 fixme:vkd3d-proton:d3d12_device_caps_init_feature_options1: TotalLaneCount = 4096, may be inaccurate.
+      1 warn:vkd3d-proton:d3d12core_GetDebugInterface: Returning DXGI_ERROR_SDK_COMPONENT_MISSING.
+      1 warn:vkd3d-proton:d3d12_device_QueryInterface: {db6f6ddb-ac77-4e88-8253-819df9bbf140} not implemented, returning E_NOINTERFACE.
+      1 warn:vkd3d-proton:d3d12_device_QueryInterface: {adec44e2-61f0-45c3-ad9f-1b37379284ff} not implemented, returning E_NOINTERFACE.
+      1 warn:vkd3d-proton:d3d12_device_QueryInterface: {a9b71770-d099-4a65-a698-3dee10020f88} not implemented, returning E_NOINTERFACE.
+      1 warn:vkd3d-proton:d3d12_device_QueryInterface: {10b90151-4435-4004-9fad-19361488899a} not implemented, returning E_NOINTERFACE.
+      1 warn:vkd3d-proton:d3d12_command_queue_QueryInterface: {db6f6ddb-ac77-4e88-8253-819df9bbf140} not implemented, returning E_NOINTERFACE.
+      1 warn:vkd3d-proton:d3d12_command_list_DiscardResource: Not supported for resource 0000000111c15460.
+      1 warn:vkd3d-proton:d3d12_command_list_DiscardResource: Not supported for resource 0000000111c15160.
+      1 warn:vkd3d-proton:d3d12_command_list_DiscardResource: Not supported for resource 000000010c5c3890.
+      1 warn:vkd3d-proton:d3d12_command_list_DiscardResource: Not supported for resource 000000010c5c3590.
+      1 warn:vkd3d-proton:d3d12_command_list_DiscardResource: Not supported for resource 00000001075e17b0.
+      1 warn:vkd3d-proton:d3d12_command_list_DiscardResource: Not supported for resource 00000001075e11b0.
+      1 warn:vkd3d-proton:d3d12_command_list_DiscardResource: Not supported for resource 0000000106e155e0.
+      1 warn:vkd3d-proton:d3d12_command_list_DiscardResource: Not supported for resource 0000000106da2f50.
+      1 warn:vkd3d-proton:d3d12_command_list_DiscardResource: Not supported for resource 0000000106da2c50.
+      1 warn:vkd3d-proton:d3d12_command_list_DiscardResource: Not supported for resource 000000010597fef0.
+      1 warn:vkd3d-proton:d3d12_command_list_DiscardResource: Not supported for resource 000000010597fbf0.
+      1 warn:vkd3d-proton:d3d12_command_list_DiscardResource: Not supported for resource 000000007c9b7470.
+      1 warn:vkd3d-proton:d3d12_command_list_DiscardResource: Not supported for resource 000000007c9b6870.
+      1 warn:vkd3d-proton:d3d12_command_list_DiscardResource: Not supported for resource 000000007c9b6270.
+      1 warn:vkd3d-proton:d3d12_command_list_DiscardResource: Not supported for resource 000000007c9b5c70.
+      1 info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Parsing stream archive took 2.803 ms.
+      1 info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Parsing stream archive took 0.006 ms.
+      1 info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Merging pipeline libraries took 0.117 ms.
+      1 info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Merging pipeline libraries took 0.104 ms.
+      1 info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Mapping read-only cache took 0.253 ms.
+      1 info:vkd3d-proton:vkd3d_pipeline_library_disk_cache_initial_setup: Mapping read-only cache took 0.081 ms.
+      1 info:vkd3d-proton:vkd3d_instance_deduce_config_flags_from_environment: shader_cache is used, global_pipeline_cache is enforced.
+      1 info:vkd3d-proton:vkd3d_instance_apply_application_workarounds: Detected game Cyberpunk2077.exe, adding 1 configs, removing 0 configs.
+      1 info:vkd3d-proton:vkd3d_instance_apply_application_workarounds: Detected SteamAppID 1091500
+      1 info:vkd3d-proton:vkd3d_config_flags_init_once: VKD3D_CONFIG=''.
+      1 info:vkd3d-proton:dxgi_vk_swap_chain_init_sync_objects: Ensure maximum latency of 3 frames with KHR_present_wait.
+      1 info:vkd3d-proton:dxgi_vk_swap_chain_init_sync_objects: Enabling frame latency handles.
+      1 info:vkd3d-proton:dxgi_vk_swap_chain_init_sleep_state: Timer interval is 1.0 ms.
+      1 info:vkd3d-proton:dxgi_vk_swap_chain_init: Creating swapchain (1280 x 720), BufferCount = 3.
+      1 info:vkd3d-proton:d3d12_pipeline_library_read_blob_stream_format: Device teardown request received, stopping parse early.
+      1 fixme:vkd3d-proton:d3d12_dred_settings_SetPageFaultEnablement: iface 0000000000d3b230, enablement 2 stub!
+      1 fixme:vkd3d-proton:d3d12_dred_settings_SetAutoBreadcrumbsEnablement: iface 0000000000d3b230, enablement 0 stub!
+      1 err:ntoskrnl:ZwLoadDriver failed to create driver L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\winebth": c0000142

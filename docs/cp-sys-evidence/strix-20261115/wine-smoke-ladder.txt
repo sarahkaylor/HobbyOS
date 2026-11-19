@@ -1,0 +1,38 @@
+484:[WS] cp/sys Wine smoke launcher
+489:[WS] mount 10.0.2.2:/srv/nfs/wine-smoke -> /CP ok
+490:[WS] run /CP/WINE/bin/wineserver --version
+651:elf loader: PT_INTERP mapped: interp_base=0x1008000000 exe_base=0x1000000000 exe_entry=0x1000022D30 start=0x1008001100
+831:Wine 11.0
+837:[EXITPC] pid=3 last_user_pc=0x10800EB146 code=0x0
+839:[WS] /CP/WINE/bin/wineserver exit status=0
+840:[WS] run /CP/WINE/bin/wine --version
+882:elf loader: PT_INTERP mapped: interp_base=0x1008000000 exe_base=0x1000000000 exe_entry=0x1000001160 start=0x1008001100
+1028:wine-11.0
+1031:[EXITPC] pid=3 last_user_pc=0x10800EB146 code=0x0
+1033:[WS] /CP/WINE/bin/wine exit status=0
+1034:[WS] run /CP/WINE/bin/wineserver -f -p5 (background)
+1184:elf loader: PT_INTERP mapped: interp_base=0x1008000000 exe_base=0x1000000000 exe_entry=0x1000022D30 start=0x1008001100
+1191:[WS] server pid=3
+1260:[LCOMPAT] ENOSYS nr=90 name=/CP/WINE/bin/wineserver pid=3 rip=0x1080115D8B rdi=0x100008129F
+1274:[LCOMPAT] mmap fail fd=19 len=4096 off=0 -> -95 path=/tmp/.wine-0/server-101-22c8/tmpmap-5467673f
+1275:/CPPFX/tmpmap-a8ceecdf
+1277:/CPPFX/tmpmap-fd36727f
+1279:/CPPFX/tmpmap-519df81f
+1297:[WS] server alive after 4s: yes
+1298:[WS] run /CP/WINE/bin/wineserver -k
+1440:elf loader: PT_INTERP mapped: interp_base=0x1008000000 exe_base=0x1000000000 exe_entry=0x1000022D30 start=0x1008001100
+1510:[SIGIN] pid=3 sig=2 st=5 h=0x0x100005DC20 abi=1 kn=1 thr=0
+1511:[SIG] send pid=3 sig=2 st=5 futex=0x0
+1513:[SIGIN] pid=3 sig=18 st=2 h=0x0x0 abi=1 kn=0 thr=0
+1514:[KERNEL] Process 3: /CP/WINE/bin/wineserver exited (signal 18).
+1515:[EXITPC] pid=3 last_user_pc=0x108012764A code=0x12 killed
+1524:[EXITPC] pid=4 last_user_pc=0x10800EB146 code=0x0
+1526:[WS] /CP/WINE/bin/wineserver exit status=0
+1528:[WS] server exit status=18
+1529:[WS] done
+1531:[EXITPC] pid=2 last_user_pc=0x1000001B0F code=0x0
+
+raw serial: /home/sarah/cp/lanes/sys/obj/wine-smoke/serial.log
+== /etc/exports restored (cmp identical to /etc/exports.cp-sys-backup.20261115113621)
+== removed /srv/nfs/wine-smoke
+SMOKE3_RC=0

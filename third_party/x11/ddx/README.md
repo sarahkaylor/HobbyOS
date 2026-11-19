@@ -37,9 +37,12 @@ xkeyboard-config is not installed in `/usr/share/X11/xkb`.
 - **Listening:** unix only. `listen_local=true` is required: without
   LOCALCONN and abstract sockets, xtrans treats "unix" as an alias, and the
   real `/tmp/.X11-unix/X<n>` listener is the transport named "local".
-- **Extensions:** Render, Composite, Damage, XFixes, RandR (one fixed
-  output, "HOBBYFB"), XKB, XInput, XTEST, SHAPE, SYNC, DBE, RECORD, DPMS,
-  Present, X-Resource, MIT-SCREEN-SAVER, XINERAMA, BIG-REQUESTS, XC-MISC.
+- **Extensions:** Render, Composite, Damage, XFixes, RandR (one output,
+  "HOBBYFB", with real mode sets; see RandR below), XKB, XInput, XTEST, SHAPE,
+  SYNC, DBE, RECORD, DPMS, Present, X-Resource, MIT-SCREEN-SAVER, XINERAMA,
+  BIG-REQUESTS, XC-MISC.  Composite and RandR's Xinerama shim are only
+  advertised in a ONE-screen session (`HB_SECOND_SCREEN=0`): Composite refuses
+  any PseudoColor root and the shim skips multi-screen servers.
 - **Fonts:** the default font path is `built-ins`, served by libXfont2's
   compiled-in "fixed" and "cursor" fonts. No font files are needed.
 
@@ -68,9 +71,17 @@ xkeyboard-config is not installed in `/usr/share/X11/xkb`.
 - Buttons: BTN_LEFT, BTN_MIDDLE, BTN_RIGHT, BTN_SIDE and BTN_EXTRA map to
   buttons 1, 2, 3, 8 and 9. BTN_TOUCH maps to button 1.
 - Wheel: REL_WHEEL up/down maps to buttons 4/5. REL_HWHEEL maps to 6/7.
-- Pointer position: ABS 0..32767 is scaled to the screen, and REL_X/REL_Y
-  move the same position. Motion is coalesced per SYN packet and flushed
-  before each button event.
+- Pointer position: ABS 0..32767 is scaled to the framebuffer (the glass)
+  and posted on "HobbyOS pointer" (Absolute valuators, screen pixels).
+- Relative motion (lane C4-x2): REL_X/REL_Y -- the kernel's PS/2 decoder
+  reports every packet's raw deltas, and QMP "rel" events arrive that way --
+  go to a second slave, "HobbyOS relative pointer", with two Relative,
+  unbounded valuators (REL_X/REL_Y labels).  They are posted with
+  POINTER_RELATIVE and no acceleration, so XI_RawMotion carries the exact,
+  unclamped device deltas (Wine's mouselook).  A packet with REL rows is a
+  relative packet: its ABS rows (the kernel's integration) are ignored and
+  its buttons go to the relative slave.  Motion is coalesced per SYN packet
+  and flushed before each button event.
 - **Kernel defect workaround:** `SYS_INPUT_READ` returns `-EFAULT` for
   valid buffers. `sys_input_read` in `src/kernel/arch/{x64,arm}/trap.c`
   tests `if (sys_user_range(..))`, but that function returns 1 when the
@@ -88,6 +99,16 @@ xkeyboard-config is not installed in `/usr/share/X11/xkb`.
   clients, and `ErrorF()` would write into a client's protocol stream.
 - With 0-2 pinned, `os/log.c` sends stderr text to the console through
   `hbConsoleWrite()` (`SYS_WRITE_CONSOLE`).
+
+**RandR** (lane C4-x2)
+- Screen 0 (depth 24) offers the framebuffer's size (preferred) plus every
+  common size that fits (2560x1440 ... 640x480), synthetic 60 Hz timings, and
+  a 96 dpi physical size.  The shadow is allocated once at the largest size.
+- `RRSetScreenSize` resizes the root window and the screen pixmap (row
+  stride unchanged); `RRSetCrtcConfig` selects the part of the screen on the
+  glass, top-left aligned, 1:1, black around it -- no scaling.  Rotation, a
+  CRTC offset or a size outside 320x200..max fail with RandR's own error.
+- The depth-8 `:0.1` keeps one fixed mode.
 
 **No lock file** (FAT16 has no `link()`).
 
@@ -114,6 +135,7 @@ DDX-specific options:
 | `+/-render` | Turn RENDER on or off. |
 | `-xkm FILE` | Keymap file to load (default `/X11/US.XKM`). |
 | `-pollms N` | Input poll interval while idle. |
+| `HB_SECOND_SCREEN=0` (environment) | One screen: never add the depth-8 `:0.1` (Wine sessions). Unset: add it when `:0.0` is depth 24. Other values: always add it. |
 | `-verbose [N]` | stderr log verbosity. |
 
 ## Pins (2026-10-30)

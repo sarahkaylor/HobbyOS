@@ -93,6 +93,10 @@ def qemu_cmd(work, disk):
            "-qmp", f"unix:{qmp},server,nowait"]
     if os.path.exists("/dev/kvm") and not os.environ.get("SKIP_KVM"):
         cmd.append("-enable-kvm")
+        # cp P1 (AD-4): KVM's default qemu64 model has no XSAVE/AVX; give the
+        # guest the host CPU (as the Makefile's X64_KVM_CPU does).  DOOM_ELF_CPU
+        # overrides it, e.g. DOOM_ELF_CPU=qemu64 for the FXSAVE fallback.
+        cmd += ["-cpu", os.environ.get("DOOM_ELF_CPU", "host")]
     return cmd, qmp, serial
 
 

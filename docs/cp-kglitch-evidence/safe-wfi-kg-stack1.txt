@@ -1,0 +1,33 @@
+# H4-kglitch §2: one fpsprobe-stack boot (tools/cp/kglitch/fpsprobe-stack.p9 = fpsprobe.p9 with "prof 60 10 fp-world stack"),
+# strix, lane tree kglitch-s2 (63b6ca73 code), P9 Venus, -m 32768M, run kg-stack1, 2026-11-18 03:12-03:21.
+# host during the walk: 9070 XT gpu_busy median 34 p90 42; one other guest (~/cp/integ, 12 GiB); loadavg 13.9
+
+fps (n p50-range mean p10 p1 max p90?) as summarize.py prints: world             62         219-310     27.8    24.3    22.6    40.8    29.0
+fps (n p50-range mean p10 p1 max p90?) as summarize.py prints: prof-fp-world     41         313-372     33.6    31.0    26.2    40.7    34.2
+
+== obj/cp-p9/kg-stack1/prof-fp-world.txt: 4480 vCPU samples
+   idle (HLT)     2844   63.5 %
+   user            855   19.1 %
+   kernel          781   17.4 %
+== per vCPU (idle / kernel / user %)
+   cpu0:   80 /   20 /    0
+   cpu1:   52 /   23 /   25
+   cpu2:   55 /   24 /   21
+   cpu3:   58 /   19 /   23
+   cpu4:   63 /   16 /   21
+   cpu5:   64 /   15 /   22
+   cpu6:   68 /   12 /   20
+   cpu7:   68 /   11 /   21
+== kernel, top symbols (% of all samples)
+     6.0 %  gpu_m2_fence_wait2
+     1.5 %  virtio_gpu_x64_handle_irq
+     1.2 %  spin_acquire_raw
+     1.0 %  safe_wfi
+     0.9 %  sched_wake_idle_cpu
+     0.6 %  general_interrupt_inner
+...
+
+== safe_wfi samples (CPL 0, HLT 0, RIP in safe_wfi) by the kernel symbols among their stack words (uart_puts/safe_wfi/sched_wfi_bound dropped: stale words)
+safe_wfi samples 45 of 4480 (1.0 %), per vCPU {'0': 3, '1': 17, '2': 8, '3': 3, '4': 6, '5': 5, '6': 3}
+    42  start_scheduler
+     3  flusher_task

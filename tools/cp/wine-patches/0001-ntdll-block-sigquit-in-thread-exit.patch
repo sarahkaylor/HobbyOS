@@ -1,0 +1,64 @@
+From: HobbyOS H3-winefix
+Subject: [PATCH] ntdll: Block SIGQUIT once a thread has started to exit.
+
+wineserver's kill_thread() SIGQUITs every thread still on the process list
+when it terminates a process.  A thread that exits on its own
+(NtTerminateThread(self) -> exit_thread()) stays listed until the server
+processes its request-fd hangup, and exit_thread()/abort_thread() block only
+server_block_set, which has no SIGQUIT.  The signal can then land:
+ - after glibc's pthread_exit() cleared the teb_key TSD slot:
+   quit_handler() -> is_inside_syscall() -> NtCurrentTeb() == NULL
+   -> read of NULL+0x3a8 (ntdll_thread_data.kernel_stack) -> SIGSEGV;
+ - earlier in the exit: abort_thread() runs a second time, decrementing
+   nb_threads twice and closing the server fds twice.
+Seen on HobbyOS as "services.exe memory fault VA=0x3A8 PC=quit_handler+0x40"
+in ~0.7 % of Wine boots (docs/cp-winefix.md).
+
+Applies to wine-11.0 (dlls/ntdll/unix/thread.c).  Build: CP_WINE_PATCHES=
+tools/cp/wine-patches bash tools/cp/build-wine.sh all.
+---
+--- a/dlls/ntdll/unix/thread.c
++++ b/dlls/ntdll/unix/thread.c
+@@ -1469,11 +1469,32 @@
+ 
+ 
+ /***********************************************************************
++ *           block_exit_signals
++ *
++ * Block the server signals and SIGQUIT for a thread that has started to exit.
++ * The server sends SIGQUIT to every thread still on the process list when it
++ * terminates the process (or the thread), and a thread that is exiting on its
++ * own stays on that list until the server notices its request fd was closed.
++ * A SIGQUIT in that window re-enters abort_thread() (nb_threads is decremented
++ * twice and the server fds are closed twice), or, once glibc has cleared the
++ * teb_key slot in pthread_exit(), faults in quit_handler() on NtCurrentTeb()
++ * returning NULL.  The thread is exiting anyway, so the signal can wait.
++ */
++static void block_exit_signals(void)
++{
++    sigset_t set = server_block_set;
++
++    sigaddset( &set, SIGQUIT );
++    pthread_sigmask( SIG_BLOCK, &set, NULL );
++}
++
++
++/***********************************************************************
+  *           abort_thread
+  */
+ void abort_thread( int status )
+ {
+-    pthread_sigmask( SIG_BLOCK, &server_block_set, NULL );
++    block_exit_signals();
+     if (InterlockedDecrement( &nb_threads ) <= 0) abort_process( status );
+     pthread_exit_wrapper( status );
+ }
+@@ -1496,7 +1517,7 @@
+     static void *prev_teb;
+     TEB *teb;
+ 
+-    pthread_sigmask( SIG_BLOCK, &server_block_set, NULL );
++    block_exit_signals();
+ 
+     if (InterlockedDecrement( &nb_threads ) <= 0) exit_process( status );
+ 

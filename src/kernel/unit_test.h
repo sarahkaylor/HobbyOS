@@ -54,6 +54,7 @@ void virtio_blk_test_suite(void);
 void blk_cache_test_suite(void);
 void blk_cache_press_suite(void);
 void virtio_gpu_test_suite(void);
+void gpu_abi_m2_test_suite(void);
 void virtio_input_test_suite(void);
 void fb_ioctl_test_suite(void);
 void vdisplay_test_suite(void);

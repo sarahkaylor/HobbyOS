@@ -1,0 +1,6 @@
+== strix Linux host (7.0.0-43-generic), unprivileged, static musl probe_fdrace.elf (the same source as the guest run)
+[LP] D1 eventfd/timerfd/epoll/memfd x16 threads rounds=300 fds=19200 dup_numbers=0 wrong_type=0 failed_creates=0 -> PASS
+[LP] D2 AF_UNIX connect/accept x16 threads   rounds=300 fds=19200 dup_numbers=0 wrong_type=0 failed_creates=0 -> PASS
+[LP] D3 *_CLOEXEC sets FD_CLOEXEC                epoll=1 eventfd=1 timerfd=1 memfd=1 -> PASS
+[LP] done rc=0
+exit=0

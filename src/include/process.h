@@ -15,7 +15,19 @@
  * docs/rimworld-m2-thread-ceiling.md.  Keep this a multiple of 64: pid
  * bitmaps are word arrays (src/include/pidmask.h) and slot allocation is a
  * linear scan, so 192 keeps both cheap. */
+#ifdef __x86_64__
+/* C1-k4: 512 on x86_64.  Cyberpunk under Wine runs 173-190 game threads
+ * plus ~18 Wine processes (docs/cyberpunk.md §0.2 item 13), and every thread
+ * is a slot.  Measured cost (strix, nm of the intel kernel): proc_table
+ * 11,776 B/slot, spawn_ex_pool 4,720, spawn_args_pool 1,072, the compat
+ * signal tables ~1.6 KiB, the rest small -- about 19 KiB per slot, so
+ * 192 -> 512 adds ~6.2 MiB of BSS (docs/cp-k4.md §3).  The ARM build stays
+ * at 192: its address spaces use 8-bit ASIDs keyed by tgid (vm_as_create),
+ * which a pid >= 256 would alias, and the compat class is x86_64-only. */
+#define MAX_PROCESSES 512 // Maximum number of concurrent processes
+#else
 #define MAX_PROCESSES 192 // Maximum number of concurrent processes
+#endif
 #define MAX_CPUS 8       // Maximum number of CPU cores supported
 
 _Static_assert(MAX_PROCESSES <= PID_MASK_BITS,
@@ -37,13 +49,32 @@ struct cpu_local {
   uint64_t cpu_id;
   struct process *current_proc;
   uint64_t initialized;  /* 48: set by trap_init_core_with_id on each core */
+  /* 56 (C6-p7b): slot + 1 of the KERNEL TASK whose stack this CPU is still
+     executing on after schedule() gave that task up (saved it, made it
+     READY or parked it, and claimed the next slot); 0 = none.  enter_user_space
+     clears it (`mov qword ptr gs:[56], 0`) once it has finished with the old
+     stack.  See kstack_pin_set() in process.c. */
+  uint64_t kstack_pin;
 } __attribute__((packed));
 
 extern struct cpu_local cpu_locals[];
+
 /* Number of cores that have actually run trap_init_core_with_id.  AP bring-up
  * is sequential, so ids 0..n-1 are exactly the initialized ones. */
 uint32_t smp_init_count(void);
 #endif
+
+/* C1-k7 (docs/cp-k7.md §3): per-CPU scheduler words touched on every trap
+   (the sync-wake nesting and deferral, process.c / trap.c), one cache line
+   per CPU. */
+struct sched_trap_pc {
+  volatile int trap_depth;     /* trap nesting depth on this CPU */
+  volatile int trap_sys;       /* the outermost trap is a user syscall */
+  volatile int defer_slot;     /* sync wake: woken slot + 1; 0 = none */
+  volatile uint8_t kick_pending;
+  volatile uint64_t defer_until;
+} __attribute__((aligned(64)));
+extern struct sched_trap_pc sched_tpc[];
 
 /* GB-021: the Linux clone(2) flag bits the x64 compat bridge accepts.  musl's
  * pthread_create passes exactly this set; anything else (namespaces, a new
@@ -164,7 +195,23 @@ uint32_t smp_init_count(void);
  * below, so widening the table cannot silently lose a CLOEXEC bit past fd 63.
  * Native processes are unaffected: they use the same table, and every access
  * goes through the same helpers. */
+/* C1-k5 (docs/cp-k5.md §1): 4096 on x86_64.  Wine keeps three pipes per
+ * thread (request/reply/wait) and the game runs 173-190 threads, and Wine
+ * raises RLIMIT_NOFILE's soft limit to the hard one at startup -- 4096 is
+ * Linux's own default hard limit.  The table is no longer inline in struct
+ * process: 4096 ints x 512 slots would add 8 MiB of BSS to an image that has
+ * ~25 MiB left below CP_KHOLE_HI.  Each slot's open_fds points into one
+ * frame-pool region process_init() allocates (process.c).  ARM keeps 256:
+ * the compat class is x86_64-only. */
+#ifdef __x86_64__
+#define MAX_OPEN_FDS 4096
+#else
 #define MAX_OPEN_FDS 256
+#endif
+/* RLIMIT_NOFILE defaults (Linux: soft 1024, hard 4096).  The hard limit is
+ * the table; the soft limit is what fd allocation honours. */
+#define FD_RLIM_HARD_DEFAULT MAX_OPEN_FDS
+#define FD_RLIM_SOFT_DEFAULT (MAX_OPEN_FDS < 1024 ? MAX_OPEN_FDS : 1024)
 #define FD_CLOEXEC_WORDS ((MAX_OPEN_FDS + 63) / 64)
 
 static inline int fd_cloexec_test(const uint64_t *m, int fd) {
@@ -223,7 +270,22 @@ struct addr_space;
  * every one of those rt_sigaction calls answered -EINVAL (measured: Mono 6.12
  * printed `[LCOMPAT] sigaction refused sig=32/33/35` and never reached managed
  * code).  The pending set therefore had to widen from uint32_t to uint64_t. */
-#define HO_ENV_LEN 512
+/* C1-k5 (C8-game stop 1): 2048, was 512.  The P8 launcher's env (Wine + DXVK
+ * + vkd3d + cache paths) is 626 bytes; past the blob spawn_ex/execve now fail
+ * with E2BIG instead of truncating.  Cost: struct process and spawn_ex_pool
+ * each grow 1.5 KiB per slot (x86_64: 2 x 768 KiB of BSS).  The native
+ * execve keeps its copy in a frame, not on the kernel stack (trap.c).  ARM
+ * keeps 512 (and the old truncating behaviour, process_read_envp). */
+#ifdef __x86_64__
+#define HO_ENV_LEN 2048
+#else
+#define HO_ENV_LEN 512 /* ARM: its .bss must stay inside the limine placement
+                          window (linker.ld), and the compat class is x86-only */
+#endif
+
+/* cp/exec: the cwd and the /proc/self/exe path hold a full VFS path
+ * (VFS_PATH_MAX in vfs.h; equality asserted where both headers meet). */
+#define PROC_PATH_MAX 1024
 #define HO_SIG_MAX 64
 
 /* P5 (D6): the frozen signal numbers (the Linux set the sysroot shares).
@@ -243,6 +305,17 @@ struct addr_space;
 #define HO_SIGCHLD 17
 #define HO_SIGSTOP 19
 
+/* cp P1: signals whose LINUX default action is "ignore" for a process that is
+ * not stopped (signal(7): SIGCHLD 17, SIGCONT 18 -- "continue", and compat
+ * processes have no job-control stop -- SIGURG 23, SIGWINCH 28).  A Linux-ABI
+ * target with SIG_DFL for one of these must not be killed, neither when the
+ * signal is sent (process_signal_directed) nor when it is delivered
+ * (linux_compat_signal_deliver).  Measured: a fork()ed child's SIGCHLD killed
+ * its parent, and `wineserver -k`'s SIGCONT killed wineserver. */
+static inline int ho_linux_sig_dfl_ignored(int sig) {
+  return sig == 17 || sig == 18 || sig == 23 || sig == 28;
+}
+
 /* Disposition sentinels stored in sig_handler[]: everything else is a user
  * handler address. */
 #define HO_SIG_DFL 0
@@ -261,7 +334,10 @@ struct process {
   int is_kernel_process; /**< Flag indicating if this is a kernel-only thread */
   char name[32];  /**< Name of the binary running in this process */
   char args[HO_FLAT_ARGS_LEN]; /**< Command line args (w5 vi: flat cap 1024) */
-  char cwd[128];  /**< Current working directory */
+  /** Current working directory.  cp/exec: VFS_PATH_MAX (vfs.h, 1024) bytes,
+   *  checked in program_loader.c -- a cwd that does not fit is refused by the
+   *  chdir rows, never truncated (a truncated cwd names another directory). */
+  char cwd[PROC_PATH_MAX];
 
   /**
    * The path the loader was asked to execute, resolved to an absolute path
@@ -274,7 +350,7 @@ struct process {
    * display name) makes it report "There is no data folder".  Empty for a
    * kernel process / before the first exec.
    */
-  char exe_path[160];
+  char exe_path[PROC_PATH_MAX]; /* cp/exec: VFS_PATH_MAX, was 160 */
 
   /**
    * Positional-parameter blob (SYS_GETARGV).  eargv holds argv[0..eargc-1]
@@ -313,7 +389,7 @@ struct process {
    * Local file descriptor table.
    * Maps local FDs to indices in the global file table.
    */
-  int open_fds[MAX_OPEN_FDS];
+  int *open_fds; /* C1-k5: MAX_OPEN_FDS entries in the frame pool (process_init) */
 
   int num_open_fds; /**< Number of currently open file descriptors */
 
@@ -423,11 +499,21 @@ struct process {
    * A zeroed entry (fresh process) restores as all-zero registers plus
    * default control/status words.
    *
-   * x86_64 (src/kernel/arch/x64/fpu.c): the first 512 bytes hold the
-   * FXSAVE64 image; arch_fpu_reset() fills the architectural defaults
-   * (FCW/FTW/MXCSR) for fresh processes; offsets 512+ are unused there.
+   * x86_64 (src/kernel/arch/x64/fpu.c): an XSAVE standard-format image
+   * (cp P1 / AD-4) when the CPU has XSAVE -- [0,512) legacy FXSAVE region,
+   * [512,576) XSAVE header, [576,832) the AVX upper halves for XCR0 =
+   * x87|SSE|AVX -- or, without XSAVE, a plain FXSAVE64 image in the first
+   * 512 bytes.  1024 bytes, 64-byte aligned: XSAVE/XRSTOR #GP on a memory
+   * operand that is not 64-byte aligned (FXSAVE needs only 16).
+   * arch_fpu_reset() writes one image that is valid for BOTH instructions.
+   * FPU_PCB_IMAGE_BYTES is the capacity; the XSAVE area actually used is
+   * arch_fpu_xsave_size(), checked against it at boot.
    */
+#ifdef __x86_64__
+  uint64_t fpu_state[128] __attribute__((aligned(64)));
+#else
   uint64_t fpu_state[66] __attribute__((aligned(16)));
+#endif
 
   /* --- P1 (p1-threads-design.md section 1): thread / group / futex ------
    * Appended at the END of the struct so parallel lanes merge additively.
@@ -468,7 +554,7 @@ struct process {
    * closed at exec.  fcntl F_GETFD/F_SETFD read/write bit 0; dup2/dup and
    * spawn2's 0/1/2 grants clear the bit on the new fd; P5's execve runs
    * the sweep.  Appended at the END so parallel lanes merge additively. */
-  uint64_t fd_cloexec[FD_CLOEXEC_WORDS]; /* L55: one bit per fd, word array (MAX_OPEN_FDS 256) */
+  uint64_t fd_cloexec[FD_CLOEXEC_WORDS]; /* L55: one bit per fd, word array (MAX_OPEN_FDS) */
 
   /* --- P5 (docs/browser/p5-exec-signals-design.md D7): exec + signals --- *
    * Appended at the END so parallel lanes merge additively.  All of this
@@ -573,7 +659,172 @@ struct process {
    * Both appended at the END so parallel lanes merge additively. */
   uint64_t park_since_ms;
   int sig_frame_sig;
+
+  /* --- cp P1 (docs/cyberpunk.md AD-4 / P1): user GS base -------------- *
+   * The thread's IA32_GS_BASE while it runs in ring 3 (arch_prctl
+   * ARCH_SET_GS; Windows x64 code reaches its TEB through %gs).  The x86_64
+   * entry/exit paths keep the kernel's per-CPU block in GS_BASE while in
+   * ring 0 and the user's value in IA32_KERNEL_GS_BASE (swapgs), so this
+   * word is what restore_context() installs into KERNEL_GS_BASE and what the
+   * return-to-user swapgs then makes live.  Authoritative per PCB, exactly
+   * like tls_base: never re-read from the MSR.  fork/clone copy it (Linux
+   * semantics), exec zeroes it.  0 on ARM and for native processes.
+   * Appended at the END so parallel lanes merge additively. */
+  uint64_t gs_base;
+
+  /* --- C1-thr (docs/cp-thr.md): CLONE_VM|CLONE_VFORK ----------------- *
+   * glibc 2.31's posix_spawn is clone(CLONE_VM|CLONE_VFORK|SIGCHLD, stack)
+   * and vfork(2) is the same with the caller's stack.  The child is its own
+   * process (fd table, dispositions, mask copied as fork copies them) but
+   * runs in the PARENT's memory: `as` points at the parent group's AS while
+   * the child's own, empty AS waits in vfork_own_as.  exec (before it
+   * replaces the AS) and the exit/kill paths call process_vfork_release(),
+   * which hands the child its own AS back and wakes the parent.
+   *   vfork_own_as : child: its own AS while it borrows the parent's
+   *   vfork_parent : child: the suspended calling thread (pid), else 0
+   *   vfork_child  : parent thread: the child it waits for, 0 = released
+   *   vfork_ret    : parent thread: the child's pid, clone's return value
+   * Appended at the END so parallel lanes merge additively. */
+  struct addr_space *vfork_own_as;
+  int vfork_parent;
+  int vfork_child;
+  int vfork_ret;
+  /* C1-thr: the user PC after the `syscall` of the compat syscall this
+     thread entered last (linux_compat_dispatch).  A BLOCKED park whose saved
+     PC is two bytes before it was rewound for restart; the signal path uses
+     that to pick Linux's restart rule (docs/cp-thr.md §3). */
+  uint64_t sys_entry_pc;
+  /* C1-k4: this thread is parked in poll/select/epoll_wait and registered
+     with poll_notify() (process.c).  Cleared on every compat syscall entry
+     and whenever the park is re-evaluated, so a stale registration can
+     never wake an unrelated park. */
+  int poll_waiting;
+  /* C1-k4: a blocking pipe write(v) that parked after writing part of its
+     buffer (Linux writes a blocking pipe write in full).  The restarted
+     syscall resumes at pw_done when (pipe, buffer, length) match. */
+  void *pw_pipe;
+  uint64_t pw_key;
+  uint32_t pw_total;
+  uint32_t pw_done;
+  /* C1-k4: the siginfo a CPU fault delivers, decided where the fault is
+     understood (trap.c / vm_handle_fault) and consumed by the compat signal
+     frame (linux_compat_fault): Linux si_code and si_addr. */
+  int fault_si_set;
+  int fault_si_code;
+  uint64_t fault_si_addr;
+  /* C1-k4: the pid of the thread that owns this group's exit_group (group
+     anchor only; 0 = none yet). */
+  int exit_owner;
+  /* C1-k5 (docs/cp-k5.md §2): RLIMIT_NOFILE, group anchor only.  fd
+     allocation honours the soft limit (process_fd_limit); fork copies both,
+     exec keeps them, a fresh process gets FD_RLIM_*_DEFAULT. */
+  uint32_t rlim_nofile_cur;
+  uint32_t rlim_nofile_max;
+  /* C1-k5 (docs/cp-k5.md §4): CPU accounting for getrusage/wait4, kept by
+     schedule() at the switch points (timer_get_us).  ru_* is this thread;
+     ru_grp_* the whole group including exited threads (anchor only);
+     ru_ch_* the reaped children's totals (anchor only).  nvcsw counts
+     switches away from a thread that blocked, nivcsw from one that was still
+     runnable (preempted or sched_yield) -- Wine's NtYieldExecution compares
+     both around sched_yield(). */
+  uint64_t ru_run_us, ru_nvcsw, ru_nivcsw;
+  uint64_t ru_grp_us, ru_grp_nvcsw, ru_grp_nivcsw;
+  uint64_t ru_ch_us, ru_ch_nvcsw, ru_ch_nivcsw;
+  /* C1-k6 (docs/cp-k6.md §1): a sub-millisecond deadline.  wake_ms stays the
+     one field every park site and every waker reads and clears; wake_us is
+     the precise deadline behind it, honoured only while wake_ms is exactly
+     its ceiling in ms (proc_deadline_us).  A site that writes wake_ms alone
+     (or clears it) therefore never sees a stale wake_us. */
+  uint64_t wake_us;
+  /* C1-k6: a relative clock_nanosleep on the group's CPU clock parks in
+     slices and re-runs; its absolute target is anchored once per call
+     (keyed by the call site and the req pointer). */
+  uint64_t cns_cpu_pc, cns_cpu_req, cns_cpu_target;
+  /* C1-k6 (docs/cp-k6.md §5): system time.  ru_kin_us is when this thread
+     last entered the kernel from user mode (0 = in user mode); ru_ksl_us
+     the kernel time of the current slice not yet charged; ru_sys_us /
+     ru_grp_sys_us / ru_ch_sys_us the system-time parts of ru_run_us /
+     ru_grp_us / ru_ch_us.  ru_utime is the rest. */
+  uint64_t ru_kin_us, ru_ksl_us, ru_sys_us, ru_grp_sys_us, ru_ch_sys_us;
+  /* C1-k7 (docs/cp-k7.md §4): 1 from a syscall's entry (x86_64 sync_lower)
+     until it returns to user mode, by the trap exit or by a resume after a
+     park (ru_resume_user).  [THRW] tells a thread's kernel time in a syscall
+     from a fault or an interrupt by it. */
+  volatile int in_sys;
+  /* C1-k6 round 2 (docs/cp-k6.md §12): the 64-bit key filter of a parked
+     poller -- the objects (pipes, eventfds) its scan found, one bit each
+     (poll_key_bit).  A keyed poll_notify_obj() wakes only pollers whose
+     filter has that bit; ~0 is "wake me for anything". */
+  uint64_t poll_bloom;
+  /* C1-k6 round 2: nanosleep/clock_nanosleep's `rem` (relative sleeps):
+     the user pointer and the deadline of the current sleep, and "a signal
+     ended it" -- the remaining time is written at the resume, in the
+     thread's own address space (process_signal_resume_deliver). */
+  uint64_t ns_rem_uptr, ns_rem_deadline;
+  int ns_rem_pending;
+  /* C1-k6 round 2: who sent each pending signal (the sender's tgid), for
+     signalfd's ssi_pid. */
+  int16_t sig_sender[HO_SIG_MAX];
 };
+
+/* C1-k6 round 2 (docs/cp-k6.md §12): a 512-bit "maybe READY" hint, one bit
+ * per slot (pid == slot).  Every transition to READY goes through
+ * proc_mark_ready(), which sets the bit; the scheduler's pick and the idle
+ * loop read the eight words instead of the state field of 512 PCBs of
+ * ~11 KiB each (512 cache misses under proc_lock on every pick), and clear a
+ * bit whose slot is not READY.  A transition that bypasses this helper (a
+ * unit test) is caught by the full scan the scheduler still does every
+ * 10 ms. */
+#define PROC_HINT_WORDS ((MAX_PROCESSES + 63) / 64)
+extern uint64_t sched_ready_hint[PROC_HINT_WORDS];
+static inline void proc_hint_ready(int pid) {
+  if (pid >= 0 && pid < MAX_PROCESSES)
+    __atomic_fetch_or(&sched_ready_hint[pid >> 6], 1ull << (pid & 63),
+                      __ATOMIC_SEQ_CST);
+}
+#define proc_mark_ready(p)                                                   \
+  do {                                                                       \
+    struct process *pmr_ = (p);                                              \
+    pmr_->state = PROC_STATE_READY;                                          \
+    proc_hint_ready(pmr_->pid);                                              \
+  } while (0)
+
+/* C1-k6: set / read a park deadline in microseconds (timer_get_us base). */
+static inline void proc_set_deadline_us(struct process *p, uint64_t us) {
+  if (!us) {
+    p->wake_ms = 0;
+    p->wake_us = 0;
+    return;
+  }
+  p->wake_us = us;
+  p->wake_ms = (us + 999) / 1000;
+  if (!p->wake_ms) p->wake_ms = 1;
+}
+static inline uint64_t proc_deadline_us(const struct process *p) {
+  uint64_t ms = p->wake_ms;
+  if (!ms) return 0;
+  uint64_t us = p->wake_us;
+  if (us && (us + 999) / 1000 == ms) return us;
+  return ms * 1000;
+}
+
+/* C1-k5: the group's soft RLIMIT_NOFILE, clamped to [FD_STDIO_FIRST+1 ..
+ * MAX_OPEN_FDS]; every fd-allocating path scans [3, limit). */
+static inline int process_fd_limit(const struct process *pg) {
+  int lim = pg ? (int)pg->rlim_nofile_cur : MAX_OPEN_FDS;
+  if (lim <= 0 || lim > MAX_OPEN_FDS) lim = MAX_OPEN_FDS;
+  return lim;
+}
+/* C1-k5: reset a slot's rlimit/rusage state (fresh process or thread). */
+static inline void process_k5_reset(struct process *p) {
+  p->rlim_nofile_cur = FD_RLIM_SOFT_DEFAULT;
+  p->rlim_nofile_max = FD_RLIM_HARD_DEFAULT;
+  p->ru_run_us = p->ru_nvcsw = p->ru_nivcsw = 0;
+  p->ru_grp_us = p->ru_grp_nvcsw = p->ru_grp_nivcsw = 0;
+  p->ru_ch_us = p->ru_ch_nvcsw = p->ru_ch_nivcsw = 0;
+  p->ru_kin_us = p->ru_ksl_us = p->ru_sys_us = 0;
+  p->ru_grp_sys_us = p->ru_ch_sys_us = 0;
+}
 
 /* Linux-compat process flag (GB-013): route syscalls through the Linux
  * translation table (GB-014).  See linux-abi.md §2. */
@@ -600,6 +851,10 @@ int current_pid_of_cpu(uint32_t cpu);
  * flipped a thread READY, so it is not left waiting for the 100 Hz tick.
  * Safe to call without proc_lock; no-op when every other CPU is busy. */
 void sched_wake_idle_cpu(void);
+/* C1-thr: reschedule-IPI the CPU running `pid` in user mode, if any (Linux's
+ * kick_process: a signal for a running thread is noticed now, not at its
+ * next tick). */
+void sched_kick_pid_cpu(int pid);
 
 // Number of free physical blocks (advisory; see program_loader.c's
 // boot-wave headroom reserve).
@@ -644,6 +899,10 @@ struct ho_rusage {
   int64_t ru_inblock, ru_oublock, ru_msgsnd, ru_msgrcv;
   int64_t ru_nsignals, ru_nvcsw, ru_nivcsw;
 };
+
+/* C1-k5: getrusage(2) totals (who: 0 SELF, -1 CHILDREN, 1 THREAD); CPU time
+ * in ru_utime (docs/cp-k5.md §4).  O(1), no lock. */
+void process_rusage(struct process *p, int who, struct ho_rusage *ru);
 
 /* W2-5: waitpid(2) + a rusage out-param.  Same pid/status/options
  * semantics as process_waitpid -- the rusage pointer rides tf->regs[3]
@@ -784,6 +1043,21 @@ int process_set_tls(struct process *caller, uint64_t tls);
 // tf: The trap frame containing the parent's CPU state.
 int process_fork(struct trap_frame *tf);
 
+/* C1-thr: CLONE_VM|CLONE_VFORK.  Like process_fork(), but the child borrows
+ * the caller's address space instead of a copy, and the calling thread's
+ * vfork_child is set before the child can run.  Returns the child pid or
+ * -1.  The caller (the compat clone) parks the calling thread until
+ * process_vfork_release() runs for the child. */
+int process_fork_vm(struct trap_frame *tf);
+
+/* C1-thr: end a CLONE_VFORK borrow.  Called with `child` = the group anchor
+ * that is about to exec (before its AS is torn down or replaced) or exit;
+ * a no-op for any process that is not a borrowing vfork child.  Gives the
+ * child its own AS back (`as` = vfork_own_as) and makes the suspended
+ * parent thread READY.  Takes proc_lock; the _locked form expects it held. */
+void process_vfork_release(struct process *child);
+void process_vfork_release_locked(struct process *child);
+
 // Perform a round-robin context switch.
 // tf: The trap frame of the interrupted process to be saved.
 void schedule(struct trap_frame *tf, int is_yield);
@@ -845,6 +1119,44 @@ void process_sleep(void);
 // Wake up a specific process.
 void process_wakeup(int pid);
 
+/* C1-k4: readiness notification for poll/select/epoll_wait.  Every state
+ * change of a pipe, AF_UNIX socket or eventfd calls poll_notify() with no
+ * spinlock held; a poller takes poll_seq_snapshot() BEFORE its readiness
+ * scan and, under proc_lock, poll_park_locked() refuses the park (returns 1:
+ * scan again) when any event happened since.  Dekker-ordered: either the
+ * notifier sees the registration or the poller sees the event. */
+void poll_notify(void);
+/* C1-k6 round 2: a readiness change of ONE object (a pipe, an eventfd).
+   poll_notify() is the keyless form (every poller, every epoll set). */
+void poll_notify_obj(const void *obj);
+static inline int poll_key_bit(const void *obj) {
+  return (int)(((((uint64_t)(uintptr_t)obj >> 4) * 0x9E3779B97F4A7C15ULL) >> 58) % 63);
+}
+/* Bit 63 of a key filter: "an fd here notifies without a key" (AF_UNIX,
+   signalfd).  Keyless notifications carry every bit, so they reach it; a
+   keyed one (0..62) reaches only its own bit. */
+#define POLL_KEYLESS_BIT (1ull << 63)
+uint64_t poll_seq_snapshot(void);
+int poll_park_locked(struct process *p, uint64_t seen);
+int poll_park_bloom_locked(struct process *p, uint64_t seen, uint64_t bloom);
+void poll_unpark(struct process *p);
+void process_cancel_park(struct process *p);
+/* C1-k4: may a blocking syscall commit its park?  Not when a kill
+ * (process_kill_group_sig / exit_group / exec) already made the task EXITED
+ * or THREAD_DONE while it was inside the syscall on its CPU: parking would
+ * resurrect it (C1-thr2 fixed futex/nanosleep/sigsuspend; this covers pipe,
+ * AF_UNIX, poll/select/epoll, eventfd, timerfd, pause, flock).  The park site
+ * then returns its "parked" code without parking; the trap exit's
+ * schedule() drops the dead task.  Caller holds proc_lock. */
+static inline int process_park_ok_locked(const struct process *p) {
+  return p->state != PROC_STATE_EXITED && p->state != PROC_STATE_THREAD_DONE &&
+         p->state != PROC_STATE_FREE;
+}
+/* C1-k4: execve from a secondary thread moves the caller onto the leader's
+ * pid (Linux de_thread); returns the PCB that is now current. */
+struct process *process_exec_become_leader(struct process *grp,
+                                           struct process *cur);
+
 // Wake up all kernel threads that are in the BLOCKED state.
 void process_wake_all(void);
 
@@ -878,6 +1190,9 @@ extern int cpu_current_pids[];
 int process_state_locked(int pid);
 int process_try_wake_locked(int pid); /* 1 = was BLOCKED, now READY */
 void set_current_process_pid(uint32_t cpu, int pid);
+/* cp/ext2w: 1 when any slot other than `self` is live or being created
+ * (not FREE/EXITED/THREAD_DONE).  The ext2 flusher's exit test. */
+int process_others_alive(int self);
 
 struct sys_procinfo {
   int pid;
@@ -922,6 +1237,49 @@ void arch_fpu_restore_from(const void *src);
 #define FPU_SIG_IMAGE_BYTES 512
 #else
 #define FPU_SIG_IMAGE_BYTES 528
+#endif
+
+#ifdef __x86_64__
+/* cp P1 (AD-4): XSAVE support, src/kernel/arch/x64/fpu.c.
+ *
+ * FPU_PCB_IMAGE_BYTES is the capacity of struct process.fpu_state; XSAVE is
+ * only switched on when CPUID.(EAX=0xD,ECX=0).EBX (the standard-format size
+ * for the XCR0 this kernel programs) fits it.  XCR0 is x87|SSE|AVX at most,
+ * whatever else the CPU offers (no AVX-512/AMX/PKRU state is ever enabled),
+ * so the real size is 832 and the capacity is never the limit in practice. */
+#define FPU_PCB_IMAGE_BYTES 1024
+
+int arch_fpu_xsave_enabled(void);   /* 1 = CR4.OSXSAVE set, XSAVE in use  */
+uint64_t arch_fpu_xcr0(void);        /* the XCR0 programmed (0 when off)   */
+uint32_t arch_fpu_xsave_size(void);  /* XSAVE area bytes (512 when off)    */
+uint32_t arch_fpu_mxcsr_mask(void);  /* FXSAVE MXCSR_MASK (0xFFBF default) */
+/* XSAVE/XRSTOR (RFBM = XCR0) against a 64-byte-aligned KERNEL buffer of at
+ * least arch_fpu_xsave_size() bytes.  Only valid when XSAVE is enabled. */
+void arch_fpu_xsave_to(void *dst64);
+void arch_fpu_xrstor_from(const void *src64);
+/* CPUID.1:EDX, what Linux reports as AT_HWCAP on x86_64. */
+uint64_t arch_linux_hwcap(void);
+
+/* cp P1 / F2: the Linux-shaped signal-frame FP image for a COMPAT thread.
+ * With XSAVE: an XSAVE standard-format image whose _fpstate sw_reserved bytes
+ * carry FP_XSTATE_MAGIC1/extended_size/xfeatures/xstate_size and with
+ * FP_XSTATE_MAGIC2 at +xstate_size (docs: src/include/linux_sigframe.h).
+ * Without: the 512-byte FXSAVE image, no magic.  arch_fpu_sig_image_bytes()
+ * is the number of bytes the image occupies at the fpstate pointer.  Both
+ * calls stage through a kernel buffer (never XSAVE/XRSTOR a user VA, M6/L63)
+ * and return 0 or -EFAULT.  The restore validates the magic words exactly as
+ * Linux's check_xstate_in_sigframe does and falls back to the legacy 512-byte
+ * image (AVX state re-initialised) when they do not validate.
+ * *xstate_used (optional) reports 1 when the restore took the XSAVE path. */
+uint32_t arch_fpu_sig_image_bytes(void);
+int arch_fpu_save_user_sig(struct process *p, uint64_t user_dst);
+int arch_fpu_restore_user_sig(struct process *p, uint64_t user_src,
+                              int *xstate_used);
+
+/* cp P1: user GS base (arch_prctl ARCH_SET_GS / ARCH_GET_GS).  set validates
+ * (canonical user half, never the kernel's per-CPU block) and updates both
+ * the PCB and the live IA32_KERNEL_GS_BASE; returns 0 or -EPERM. */
+int process_set_user_gs(struct process *caller, uint64_t base);
 #endif
 
 /* M6/L63: save/restore a signal frame's FP image WITHOUT ever executing an

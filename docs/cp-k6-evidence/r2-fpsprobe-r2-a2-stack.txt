@@ -1,0 +1,73 @@
+== /home/sarah/cp/lanes/k6-dev2/obj/cp-p9/r2-a2/prof-fp-stack.txt: 912 vCPU samples
+   idle (HLT)      576   63.2 %
+   kernel          187   20.5 %
+   user            149   16.3 %
+== per vCPU (idle / kernel / user %)
+   cpu0:  100 /    0 /    0
+   cpu1:   49 /   32 /   19
+   cpu2:   50 /   28 /   22
+   cpu3:   56 /   26 /   18
+   cpu4:   59 /   24 /   18
+   cpu5:   65 /   23 /   12
+   cpu6:   63 /   17 /   20
+   cpu7:   63 /   15 /   22
+== kernel, top symbols (% of all samples)
+     3.4 %  spin_acquire_raw
+     3.0 %  virtio_gpu_x64_transact_ex
+     1.8 %  virtio_gpu_x64_kick
+     1.6 %  safe_wfi
+     1.3 %  sched_wake_idle_cpu
+     1.3 %  general_interrupt_inner
+     0.9 %  hrt_arch_arm_us
+     0.5 %  gpu_m2_fence_wait2
+     0.5 %  schedule
+     0.3 %  l_futex_wake_locked
+     0.3 %  syscall_entry
+     0.3 %  process_check_sleeping_us
+     0.3 %  exception_129
+     0.3 %  vmmouse_drain_nolock
+     0.2 %  sys_gettime
+     0.2 %  lock_audit_irqoff_end
+     0.2 %  poll_notify_bits
+     0.2 %  proc_reap_parked_locked
+     0.2 %  vm_arch_switch
+     0.2 %  cons_hw_tx
+     0.2 %  vm_touch
+     0.2 %  timer_get_us
+     0.2 %  get_cpuid
+     0.1 %  virtio_gpu_x64_post_async
+     0.1 %  x64_v2_walk_alloc
+== user buckets (% of all samples)
+    10.6 %  user: game exe (Cyberpunk2077.exe image)
+     4.2 %  user: unix .so (glibc, Wine unix side, Mesa Venus, X11)
+     1.5 %  user: PE DLLs (Wine builtins, vkd3d-proton, DXVK, game DLLs)
+== kernel stack words (rough callers, innermost first) for the top leaves
+   spin_acquire_raw:
+          3  virtio_gpu_3d_fence_kick_check < uart_puts < spinlock_acquire_irqsave < lock_audit_held_pop < spin_release_raw
+          2  lock_audit_held_pop < uart_puts < general_interrupt_handler < common_trap_wrapper
+          2  uart_puts < lock_audit_held_push < lock_audit_held_pop < spin_release_raw < virtio_gpu_3d_fence_kick_check
+          2  l_thr_futex < uart_puts < spinlock_acquire_irqsave < lock_audit_held_pop < spin_release_raw
+          1  uart_puts < spin_release_raw < l_thr_futex < gpu_m2_fence_wait2
+          1  uart_puts < spinlock_acquire_irqsave < spin_acquire_raw < lock_audit_held_push < lock_audit_held_pop
+          1  uart_puts < lock_audit_held_pop < lock_audit_held_push < spinlock_acquire_irqsave < spin_release_raw
+          1  uart_puts < poll_notify_bits < lock_audit_held_pop < spin_release_raw < vm_touch
+   virtio_gpu_x64_transact_ex:
+          8  uart_puts < vm_kwrite < gpu_m2_submit2 < l_fd_ioctl
+          4  uart_puts < lock_audit_held_pop < lock_audit_held_push < spinlock_acquire_irqsave < spin_acquire_raw
+          2  uart_puts < l_thr_futex
+          2  uart_puts < l_thr_futex < gpu_m2_fence_wait2 < lock_audit_held_push
+          1  uart_puts < lock_audit_held_push < spinlock_acquire_irqsave < spin_acquire_raw < lock_audit_held_pop
+          1  uart_puts < lock_audit_held_pop < spin_release_raw < vm_kwrite
+          1  uart_puts < lock_audit_held_pop < spin_release_raw < virtio_gpu_3d_fence_kick_check < gpu_m2_fence_wait2
+          1  uart_puts < compat_writev < lock_audit_held_push < spinlock_acquire_irqsave < spin_acquire_raw
+   virtio_gpu_x64_kick:
+          3  uart_puts < virtio_gpu_3d_fence_kick_check < gpu_m2_fence_wait2 < gpu_m2_submit2 < l_fd_ioctl
+          1  vm_touch < uart_puts < enter_user_space < lock_audit_held_pop < spin_release_raw
+          1  uart_puts < virtio_gpu_3d_fence_kick_check < gpu_m2_fence_wait2 < l_fd_ioctl < lock_audit_held_push
+          1  uart_puts < vm_user_read < l_copy_from_user
+          1  uart_puts < gpu_m2_fence_wait2 < l_copy_from_user < l_proc_rt_sigprocmask
+          1  uart_puts < virtio_gpu_3d_fence_kick_check < gpu_m2_fence_wait2 < schedule < l_fd_ioctl
+          1  uart_puts < lock_audit_held_push < spinlock_acquire_irqsave < spin_acquire_raw
+          1  uart_puts < virtio_gpu_3d_fence_park < linux_compat_sig_deliverable < l_fd_ioctl
+   safe_wfi:
+         15  uart_puts < start_scheduler

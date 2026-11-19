@@ -1,0 +1,5 @@
+# tools/cp/p9/ctl.p9 -- interactive P9 boot (lane C9-play): from the main menu
+# on, commands appended to OUT/ctl.txt are run (boot_p9.py's language); used to
+# find the menu/load/save sequence that play.p9 then scripts.
+shot menu
+ctl

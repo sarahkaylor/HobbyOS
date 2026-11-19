@@ -10,6 +10,7 @@
 #include "blk_cache.h"
 #include "virtio_blk.h"
 #include "process.h"
+static int *vm_test_fdt_take(void); /* C1-k5: fake fd tables (below) */
 
 extern void uart_puts(const char *s);
 extern void print_int(int v);
@@ -449,6 +450,7 @@ static void test_vm_mmap_family(void) {
      suite may have left holding a real file — and a regular-file fd is now
      a legal (file-backed) mmap source.  fd 3 CLOSED is the deterministic
      "not a mappable fd" case: -ENOTSUP, unchanged. */
+  fake.open_fds = vm_test_fdt_take(); /* C1-k5: the table is a pointer */
   fake.open_fds[3] = -1;
   EXPECT_EQ(vm_mmap(&fake, 0, 0x1000, VM_PROT_READ, VM_MAP_PRIVATE, 3, 0),
             -ENOTSUP);
@@ -561,10 +563,10 @@ static void test_vm_shared_objects(void) {
   EXPECT_EQ(vm_object_page_locked(o, 0), l1);
 
   /* Write visibility both ways (one physical frame). */
-  *(volatile uint64_t *)l1 = 0x5A5A1234ULL;
-  EXPECT_EQ(*(volatile uint64_t *)l2, 0x5A5A1234ULL);
-  *(volatile uint64_t *)l2 = 0x0BADF00DULL;
-  EXPECT_EQ(*(volatile uint64_t *)l1, 0x0BADF00DULL);
+  *(volatile uint64_t *)phys_to_virt(l1) = 0x5A5A1234ULL;
+  EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(l2), 0x5A5A1234ULL);
+  *(volatile uint64_t *)phys_to_virt(l2) = 0x0BADF00DULL;
+  EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(l1), 0x0BADF00DULL);
 
   /* Page 1 is sparse and independent (fresh zero frame). */
   EXPECT_EQ(vm_touch(&f1, USER_MMAP_BASE_V2 + 0x1000, 8, 1), 0);
@@ -572,7 +574,7 @@ static void test_vm_shared_objects(void) {
   EXPECT_EQ(vm_arch_walk(f1.as, USER_MMAP_BASE_V2 + 0x1000, &l1b), 0);
   l1b = vm_arch_leaf_phys(l1b);
   EXPECT_EQ((l1b != 0 && l1b != l1), 1);
-  EXPECT_EQ(*(volatile uint64_t *)l1b, 0);
+  EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(l1b), 0);
 
   /* Teardown drops the region record refs; the create ref keeps the
      object (and its pages) alive until the final unref. */
@@ -614,7 +616,7 @@ static void test_vm_as_clone_fork(void) {
   uint64_t lp = 0;
   EXPECT_EQ(vm_arch_walk(as, (uint64_t)b, &lp), 0);
   lp = vm_arch_leaf_phys(lp); /* mask the leaf's attribute bits */
-  *(volatile uint64_t *)lp = 0xA1B2C3D4ULL;
+  *(volatile uint64_t *)phys_to_virt(lp) = 0xA1B2C3D4ULL;
 
   /* An object-backed (memfd-style) region as well. */
   struct vm_object *o = vm_object_create(VM_OBJ_MEMFD, 0x1000);
@@ -627,7 +629,7 @@ static void test_vm_as_clone_fork(void) {
   uint64_t lo = 0;
   EXPECT_EQ(vm_arch_walk(as, ob, &lo), 0);
   lo = vm_arch_leaf_phys(lo);
-  *(volatile uint64_t *)lo = 0x1111222233334444ULL;
+  *(volatile uint64_t *)phys_to_virt(lo) = 0x1111222233334444ULL;
 
   struct addr_space *c = vm_as_clone(as, VM_TEST_TAG); /* tag 60, free again */
   EXPECT_EQ((c != 0), 1);
@@ -637,15 +639,53 @@ static void test_vm_as_clone_fork(void) {
     return;
   }
 
-  /* Private page: present in the clone, DIFFERENT frame, same content. */
   uint64_t lc = 0;
   EXPECT_EQ(vm_arch_walk(c, (uint64_t)b, &lc), 0);
+#ifdef __x86_64__
+  /* C1-fork: the private page is SHARED copy-on-write: the same frame,
+     read-only + COW in both, counted twice. */
+  {
+    uint64_t lpl = 0;
+    EXPECT_EQ(vm_arch_walk(as, (uint64_t)b, &lpl), 0);
+    EXPECT_EQ(vm_arch_leaf_cow(lpl), 1);
+    EXPECT_EQ(vm_arch_leaf_writable(lpl), 0);
+    EXPECT_EQ(vm_arch_leaf_cow(lc), 1);
+    EXPECT_EQ(vm_arch_leaf_writable(lc), 0);
+    EXPECT_EQ((vm_arch_leaf_phys(lc) == lp), 1);
+    EXPECT_EQ(vm_cow_frame_shared(lp), 1);
+  }
+  /* A kernel-side write in the child breaks the share: a new frame with the
+     same content, the parent's frame untouched and no longer shared. */
+  {
+    struct process pc;
+    for (unsigned i = 0; i < sizeof(pc); i++)
+      ((unsigned char *)&pc)[i] = 0;
+    pc.as = c;
+    EXPECT_EQ(vm_touch(&pc, (uint64_t)b, 8, 1), 0);
+    EXPECT_EQ(vm_arch_walk(c, (uint64_t)b, &lc), 0);
+    EXPECT_EQ(vm_arch_leaf_cow(lc), 0);
+    EXPECT_EQ(vm_arch_leaf_writable(lc), 1);
+    EXPECT_EQ(vm_cow_frame_shared(lp), 0);
+  }
+#endif
+  /* Private page: present in the clone, DIFFERENT frame, same content. */
   lc = vm_arch_leaf_phys(lc);
   EXPECT_EQ((lc != 0 && lc != lp), 1);
-  EXPECT_EQ(*(volatile uint64_t *)lc, 0xA1B2C3D4ULL);
+  EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(lc), 0xA1B2C3D4ULL);
   /* ...and the copies are isolated. */
-  *(volatile uint64_t *)lc = 0xDEADULL;
-  EXPECT_EQ(*(volatile uint64_t *)lp, 0xA1B2C3D4ULL);
+  *(volatile uint64_t *)phys_to_virt(lc) = 0xDEADULL;
+  EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(lp), 0xA1B2C3D4ULL);
+#ifdef __x86_64__
+  /* The parent, now the frame's only mapper, takes its leaf back in place. */
+  EXPECT_EQ(vm_touch(&p, (uint64_t)b, 8, 1), 0);
+  {
+    uint64_t lpl = 0;
+    EXPECT_EQ(vm_arch_walk(as, (uint64_t)b, &lpl), 0);
+    EXPECT_EQ((vm_arch_leaf_phys(lpl) == lp), 1);
+    EXPECT_EQ(vm_arch_leaf_cow(lpl), 0);
+    EXPECT_EQ(vm_arch_leaf_writable(lpl), 1);
+  }
+#endif
   /* The untouched page of the same region stays a hole in the clone. */
   EXPECT_EQ(vm_arch_walk(c, (uint64_t)b + 0x1000, 0), -1);
   /* Object page: the SAME shared frame, not a copy. */
@@ -653,7 +693,7 @@ static void test_vm_as_clone_fork(void) {
   EXPECT_EQ(vm_arch_walk(c, ob, &lo2), 0);
   lo2 = vm_arch_leaf_phys(lo2);
   EXPECT_EQ((lo2 == lo), 1);
-  EXPECT_EQ(*(volatile uint64_t *)lo2, 0x1111222233334444ULL);
+  EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(lo2), 0x1111222233334444ULL);
 
   /* Teardowns return every private frame; the object survives on the
      create ref (both records dropped the child/parent refs). */
@@ -699,6 +739,218 @@ static void test_vm_teardown_leak_cycles(void) {
   EXPECT_EQ(frame_free_count(), free0);
 }
 
+/* cp/wine2: MAP_PRIVATE copy-on-write over a memfd / tmpfs object.
+ *   (a) a read fault maps the object's OWN frame, read-only;
+ *   (b) a later store into the object is visible through it (read-through);
+ *   (c) a write fault copies: new writable frame, object untouched;
+ *   (d) a write to a page the object never materialized is a private zero
+ *       page and does not materialize the object's page;
+ *   (e) vm_touch's kernel-side write breaks the copy the same way;
+ *   (f) fork: an object-frame leaf stays the object's frame AND read-only in
+ *       the child, a COW copy is copied again (isolated);
+ *   (g) teardown frees every private copy and never the object's frames. */
+static void test_vm_memfd_private_cow(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_memfd_private_cow...\n");
+
+  int free0 = frame_free_count();
+  struct vm_object *o = vm_object_create(VM_OBJ_MEMFD, 0x4000);
+  EXPECT_EQ((o != 0), 1);
+  if (!o)
+    return;
+  uint64_t of0 = vm_object_page_locked(o, 0);
+  uint64_t of3 = vm_object_page_locked(o, 0x3000);
+  EXPECT_EQ((of0 != 0 && of3 != 0), 1);
+  if (!of0 || !of3) {
+    vm_object_unref(o);
+    return;
+  }
+  *(volatile uint64_t *)phys_to_virt(of0) = 0x1111ULL;
+  *(volatile uint64_t *)phys_to_virt(of3) = 0x4444ULL;
+
+  struct process p;
+  for (unsigned i = 0; i < sizeof(p); i++)
+    ((unsigned char *)&p)[i] = 0;
+  p.as = vm_as_create(VM_TEST_TAG + 1);
+  EXPECT_EQ((p.as != 0), 1);
+  if (!p.as) {
+    vm_object_unref(o);
+    return;
+  }
+  uint64_t b = USER_MMAP_BASE_V2;
+  EXPECT_EQ(vm_region_insert(p.as, b, 0x4000, VM_PROT_READ | VM_PROT_WRITE,
+                             VMK_LIB, VM_MAP_PRIVATE, o, 0),
+            0);
+  const char *why = 0;
+  uint64_t lf = 0;
+
+  /* (a) */
+  EXPECT_EQ(vm_handle_fault(&p, b, 0, 0, &why), 0);
+  EXPECT_EQ(vm_arch_walk(p.as, b, &lf), 0);
+  EXPECT_EQ((vm_arch_leaf_phys(lf) == of0), 1);
+  EXPECT_EQ(vm_arch_leaf_writable(lf), 0);
+  /* (b) */
+  *(volatile uint64_t *)phys_to_virt(of0) = 0x2222ULL;
+  EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(vm_arch_leaf_phys(lf)), 0x2222ULL);
+  /* (c) */
+  EXPECT_EQ(vm_handle_fault(&p, b, 1, 0, &why), 0);
+  EXPECT_EQ(vm_arch_walk(p.as, b, &lf), 0);
+  uint64_t c0 = vm_arch_leaf_phys(lf);
+  EXPECT_EQ((c0 != 0 && c0 != of0), 1);
+  EXPECT_EQ((vm_arch_leaf_writable(lf) != 0), 1);
+  EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(c0), 0x2222ULL);
+  *(volatile uint64_t *)phys_to_virt(c0) = 0x3333ULL;
+  EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(of0), 0x2222ULL);
+  EXPECT_EQ((vm_object_peek(o, 0) == of0), 1);
+  /* (d) */
+  EXPECT_EQ(vm_handle_fault(&p, b + 0x1000, 1, 0, &why), 0);
+  EXPECT_EQ(vm_arch_walk(p.as, b + 0x1000, &lf), 0);
+  EXPECT_EQ((vm_arch_leaf_writable(lf) != 0), 1);
+  EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(vm_arch_leaf_phys(lf)), 0ULL);
+  EXPECT_EQ(vm_object_peek(o, 0x1000), 0ULL);
+  /* (e) read touch -> object frame; write touch -> private copy */
+  EXPECT_EQ(vm_touch(&p, b + 0x2000, 8, 0), 0);
+  EXPECT_EQ(vm_arch_walk(p.as, b + 0x2000, &lf), 0);
+  uint64_t of2 = vm_object_peek(o, 0x2000);
+  EXPECT_EQ((of2 != 0 && vm_arch_leaf_phys(lf) == of2), 1);
+  EXPECT_EQ(vm_arch_leaf_writable(lf), 0);
+  EXPECT_EQ(vm_touch(&p, b + 0x2000, 8, 1), 0);
+  EXPECT_EQ(vm_arch_walk(p.as, b + 0x2000, &lf), 0);
+  EXPECT_EQ((vm_arch_leaf_phys(lf) != of2), 1);
+  EXPECT_EQ((vm_arch_leaf_writable(lf) != 0), 1);
+  /* page 3 stays the object's frame (read-only) for the fork check */
+  EXPECT_EQ(vm_handle_fault(&p, b + 0x3000, 0, 0, &why), 0);
+
+  /* (f) */
+  struct addr_space *c = vm_as_clone(p.as, VM_TEST_TAG + 2);
+  EXPECT_EQ((c != 0), 1);
+  if (c) {
+    uint64_t cl = 0;
+    EXPECT_EQ(vm_arch_walk(c, b + 0x3000, &cl), 0);
+    EXPECT_EQ((vm_arch_leaf_phys(cl) == of3), 1);
+    EXPECT_EQ(vm_arch_leaf_writable(cl), 0);
+    EXPECT_EQ(vm_arch_walk(c, b, &cl), 0);
+#ifdef __x86_64__
+    /* C1-fork: the parent's private copy is shared copy-on-write; the
+       child's first write (here a kernel write) gives it its own frame. */
+    EXPECT_EQ((vm_arch_leaf_phys(cl) == c0 && vm_arch_leaf_cow(cl)), 1);
+    {
+      struct process pc;
+      for (unsigned i = 0; i < sizeof(pc); i++)
+        ((unsigned char *)&pc)[i] = 0;
+      pc.as = c;
+      EXPECT_EQ(vm_touch(&pc, b, 8, 1), 0);
+      EXPECT_EQ(vm_arch_walk(c, b, &cl), 0);
+    }
+#endif
+    uint64_t cc0 = vm_arch_leaf_phys(cl);
+    EXPECT_EQ((cc0 != c0 && cc0 != of0), 1);
+    EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(cc0), 0x3333ULL);
+    *(volatile uint64_t *)phys_to_virt(cc0) = 0x5555ULL;
+    EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(c0), 0x3333ULL);
+    vm_as_teardown(c);
+  }
+
+  /* (g) */
+  vm_as_teardown(p.as);
+  EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(of0), 0x2222ULL);
+  EXPECT_EQ((vm_object_peek(o, 0) == of0 && vm_object_peek(o, 0x3000) == of3), 1);
+  vm_object_unref(o);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
+/* cp/pfx (docs/cp-pfx.md): what an object far above the old 64 MiB cap costs
+ * the kernel, measured in frames against the real allocator.  A 200 MiB
+ * object (Wine's 64 MiB memfd x3, above P0's 192 MiB GPU BO) costs its frame
+ * array -- 8 bytes per page, 51,200 entries = 101 frames, allocated
+ * contiguously at create -- plus one frame per materialized page; a MAP_SHARED
+ * mapping of all of it costs each address space its page tables (one 4 KiB
+ * table per 2 MiB, ~100 + the upper levels).  Everything comes back at
+ * teardown + unref.  At the 4 GiB cap (cp-sync; 1 GiB before) the array is
+ * 2049 contiguous frames. */
+static void test_vm_big_object_cost(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_big_object_cost...\n");
+  const uint64_t big = 200ULL << 20, npg = big / FRAME_SIZE;
+  int free0 = frame_free_count();
+  struct vm_object *o = vm_object_create(VM_OBJ_MEMFD, big);
+  EXPECT_EQ((o != 0), 1);
+  if (!o)
+    return;
+  int arr = free0 - frame_free_count();
+  EXPECT_EQ(arr, 101);
+  struct process p;
+  for (unsigned i = 0; i < sizeof(p); i++)
+    ((unsigned char *)&p)[i] = 0;
+  p.as = vm_as_create(VM_TEST_TAG + 1);
+  EXPECT_EQ((p.as != 0), 1);
+  if (!p.as) {
+    vm_object_unref(o);
+    return;
+  }
+  int f_as = frame_free_count();
+  uint64_t b = USER_MMAP_BASE_V2;
+  EXPECT_EQ(vm_region_insert(p.as, b, big, VM_PROT_READ | VM_PROT_WRITE,
+                             VMK_SHARED, VM_MAP_SHARED, o, 0),
+            0);
+  /* Materialize every page through the object (no lock-holding fault-path
+     diagnostics: faulting all 51,200 pages through vm_handle_fault once held
+     vm_lock with IRQs off for 930 ms in one fault -- a [PUB]/[PUBS] console
+     row emitted under the lock -- and tripped the tier's IRQ-off budget), and
+     fault one page per 2 MiB through the mapping: that is what builds every
+     page table the full mapping needs. */
+  const char *why = 0;
+  int bad = 0;
+  for (uint64_t i = 0; i < npg; i++) {
+    uint64_t fr = vm_object_page_locked(o, i * FRAME_SIZE);
+    if (!fr) { bad++; continue; }
+    *(volatile uint64_t *)phys_to_virt(fr) = 0xB16B0000ULL + i;
+  }
+  for (uint64_t i = 0; i < npg; i += 512)
+    if (vm_handle_fault(&p, b + i * FRAME_SIZE, 1, 0, &why) != 0)
+      bad++;
+  if (vm_handle_fault(&p, b + (npg - 1) * FRAME_SIZE, 1, 0, &why) != 0)
+    bad++;
+  EXPECT_EQ(bad, 0);
+  uint64_t lf = 0;
+  EXPECT_EQ(vm_arch_walk(p.as, b + (npg - 1) * FRAME_SIZE, &lf), 0);
+  EXPECT_EQ(*(volatile uint64_t *)phys_to_virt(vm_arch_leaf_phys(lf)), 0xB16B0000ULL + npg - 1);
+  int used = f_as - frame_free_count();      /* data + this AS's tables + region array */
+  int tables = used - (int)npg;
+  uart_puts("  [VMCOST] 200 MiB object: frame array=");
+  print_int(arr);
+  uart_puts(" frames, data=");
+  print_int((int)npg);
+  uart_puts(" frames, mapping overhead (page tables + region array)=");
+  print_int(tables);
+  uart_puts(" frames\n");
+  EXPECT_EQ((tables >= 100 && tables <= 110), 1);
+  vm_as_teardown(p.as);
+  if (free0 - frame_free_count() != arr + (int)npg) {
+    uart_puts("  [VMCOST] after teardown: used=");
+    print_int(free0 - frame_free_count());
+    uart_puts(" want=");
+    print_int(arr + (int)npg);
+    uart_puts("\n");
+  }
+  EXPECT_EQ(free0 - frame_free_count(), arr + (int)npg); /* tables back; pages stay the object's */
+  vm_object_unref(o);
+  EXPECT_EQ(frame_free_count(), free0);
+  /* the ceiling itself: create costs only the array */
+  struct vm_object *g = vm_object_create(VM_OBJ_MEMFD, VM_OBJ_MAX_BYTES);
+  EXPECT_EQ((g != 0), 1);
+  if (g) {
+    int garr = free0 - frame_free_count();
+    uart_puts("  [VMCOST] 4 GiB (VM_OBJ_MAX_BYTES) object: frame array=");
+    print_int(garr);
+    uart_puts(" contiguous frames\n");
+    EXPECT_EQ(garr, (int)((VM_OBJ_MAX_FRAMES * 8) / FRAME_SIZE) + 1); /* 2049 at 4 GiB */
+    vm_object_unref(g);
+  }
+  EXPECT_EQ((vm_object_create(VM_OBJ_MEMFD, VM_OBJ_MAX_BYTES + FRAME_SIZE) == 0), 1);
+  EXPECT_EQ(frame_free_count(), free0);
+}
+
 /* L9 (prefetch): the eager first page — the entry page is resident right
  * after the loader mapped the image, everything else stays lazy. */
 static void test_v2_image_first_page(void) {
@@ -730,7 +982,7 @@ static void test_v2_image_first_page(void) {
   uint64_t leaf = 0;
   EXPECT_EQ(vm_arch_walk(as, USER_IMG_BASE, &leaf), 0);
   const char *pat = "HO_BIGLOAD_30MB\n"; /* BIG.BIN's 16-byte generator unit */
-  volatile uint8_t *p0 = (volatile uint8_t *)vm_arch_leaf_phys(leaf);
+  volatile uint8_t *p0 = (volatile uint8_t *)phys_to_virt(vm_arch_leaf_phys(leaf));
   int ok = 1;
   for (int i = 0; i < 16; i++) {
     if (p0[i] != (volatile uint8_t)pat[i])
@@ -818,8 +1070,8 @@ static void test_v2_image_prefetch(void) {
         bad++;
         continue;
       }
-      volatile uint8_t *a = (volatile uint8_t *)vm_arch_leaf_phys(leaf);
-      volatile uint8_t *b = (volatile uint8_t *)ref;
+      volatile uint8_t *a = (volatile uint8_t *)phys_to_virt(vm_arch_leaf_phys(leaf));
+      volatile uint8_t *b = (volatile uint8_t *)phys_to_virt(ref);
       for (int i = 0; i < (int)FRAME_SIZE; i++) {
         if (a[i] != b[i]) {
           bad++;
@@ -916,7 +1168,7 @@ static void test_vm_user_read(void) {
   EXPECT_EQ(vm_touch(&fake, USER_MMAP_BASE_V2, 1, 1), 0);
   uint64_t leaf = 0;
   EXPECT_EQ(vm_arch_walk(as, USER_MMAP_BASE_V2, &leaf), 0);
-  unsigned char *pa = (unsigned char *)vm_arch_leaf_phys(leaf);
+  unsigned char *pa = (unsigned char *)phys_to_virt(vm_arch_leaf_phys(leaf));
   for (int i = 0; i < 64; i++)
     pa[i] = (unsigned char)(i + 0xA0);
 
@@ -1005,7 +1257,7 @@ static void test_vm_kwrite(void) {
   EXPECT_EQ(vm_kwrite(&fake, USER_MMAP_BASE_V2, pat, 64), 0);
   uint64_t leaf = 0;
   EXPECT_EQ(vm_arch_walk(as, USER_MMAP_BASE_V2, &leaf), 0);
-  unsigned char *pa1 = (unsigned char *)vm_arch_leaf_phys(leaf);
+  unsigned char *pa1 = (unsigned char *)phys_to_virt(vm_arch_leaf_phys(leaf));
   int differs = 0;
   for (int i = 0; i < 64; i++)
     if (pa1[i] != pat[i])
@@ -1019,7 +1271,7 @@ static void test_vm_kwrite(void) {
       differs = 1;
   uint64_t leaf2 = 0;
   EXPECT_EQ(vm_arch_walk(as, USER_MMAP_BASE_V2 + 0x1000, &leaf2), 0);
-  unsigned char *pa2 = (unsigned char *)vm_arch_leaf_phys(leaf2);
+  unsigned char *pa2 = (unsigned char *)phys_to_virt(vm_arch_leaf_phys(leaf2));
   for (int i = 0; i < 8; i++)
     if (pa2[i] != pat[8 + i])
       differs = 1;
@@ -1109,12 +1361,22 @@ static int vm_file_fixture(uint16_t *cluster, uint32_t *size) {
   return (*cluster != 0 && *size == VM_FILE_LEN) ? 0 : -1;
 }
 
-/* A fake process with a usable fd table (open_fds[] must read -1 = free). */
+/* A fake process with a usable fd table (open_fds[] must read -1 = free).
+ * C1-k5: struct process holds a POINTER to its table now (process.c
+ * process_fdt_alloc); a fake takes the next of four static tables, so the
+ * two fakes a test holds at once never share one. */
+static int vm_test_fdt[4][MAX_OPEN_FDS];
+static int vm_test_fdt_next;
+static int *vm_test_fdt_take(void) {
+  int *t = vm_test_fdt[vm_test_fdt_next++ & 3];
+  for (int i = 0; i < MAX_OPEN_FDS; i++)
+    t[i] = -1;
+  return t;
+}
 static void vm_file_proc_init(struct process *p, struct addr_space *as) {
   for (unsigned i = 0; i < sizeof(*p); i++)
     ((unsigned char *)p)[i] = 0;
-  for (int i = 0; i < MAX_OPEN_FDS; i++)
-    p->open_fds[i] = -1;
+  p->open_fds = vm_test_fdt_take();
   p->num_open_fds = 0;
   p->as = as;
 }
@@ -1194,7 +1456,7 @@ static void test_vm_file_map_shared_frames(void) {
   {
     int bad = 0;
     for (int i = 0; i < 64; i++) {
-      if (((const volatile unsigned char *)ph1)[i] !=
+      if (((const volatile unsigned char *)phys_to_virt(ph1))[i] !=
           (unsigned char)((i * 7 + 3) & 0xFF))
         bad = 1;
     }
@@ -1211,23 +1473,23 @@ static void test_vm_file_map_shared_frames(void) {
   {
     int bad = 0;
     for (int i = 0; i < 64; i++) {
-      if (((const volatile unsigned char *)ph1b)[i] !=
+      if (((const volatile unsigned char *)phys_to_virt(ph1b))[i] !=
           (unsigned char)((i * 7 + 3) & 0xFF))
         bad = 1;
     }
     EXPECT_EQ(bad, 0); /* the copy carries the file's bytes */
   }
-  ((volatile unsigned char *)ph1b)[0] = 0xEE;
+  ((volatile unsigned char *)phys_to_virt(ph1b))[0] = 0xEE;
   /* Peer mapping and object page are untouched. */
-  EXPECT_EQ((int)(((const volatile unsigned char *)ph2)[0]), 3);
-  EXPECT_EQ((int)(((const volatile unsigned char *)vm_object_peek(r->obj, 0))[0]),
+  EXPECT_EQ((int)(((const volatile unsigned char *)phys_to_virt(ph2))[0]), 3);
+  EXPECT_EQ((int)(((const volatile unsigned char *)phys_to_virt(vm_object_peek(r->obj, 0)))[0]),
             3);
   /* The private page stays private: a second write never COWs again. */
   EXPECT_EQ(vm_touch(&p1, (uint64_t)b1, 1, 1), 0);
   uint64_t l1c = 0;
   EXPECT_EQ(vm_arch_walk(p1.as, (uint64_t)b1, &l1c), 0);
   EXPECT_EQ((vm_arch_leaf_phys(l1c) == ph1b), 1);
-  EXPECT_EQ((int)(((const volatile unsigned char *)ph1b)[0]), 0xEE);
+  EXPECT_EQ((int)(((const volatile unsigned char *)phys_to_virt(ph1b))[0]), 0xEE);
 
   /* (c) MAP_SHARED in both spaces: one frame, write-through both ways. */
   int64_t s1 = vm_mmap(&p1, 0, fsize, VM_PROT_READ | VM_PROT_WRITE,
@@ -1248,11 +1510,11 @@ static void test_vm_file_map_shared_frames(void) {
     uint64_t shp2 = vm_arch_leaf_phys(ls2);
     EXPECT_EQ((shp1 != 0 && shp1 == shp2), 1);
     EXPECT_EQ((shp1 == ph1), 1); /* the very same page-cache page */
-    *(volatile uint64_t *)shp1 = 0xCAFEF00D12345678ULL;
-    EXPECT_EQ((*(volatile uint64_t *)shp2 == 0xCAFEF00D12345678ULL), 1);
+    *(volatile uint64_t *)phys_to_virt(shp1) = 0xCAFEF00D12345678ULL;
+    EXPECT_EQ((*(volatile uint64_t *)phys_to_virt(shp2) == 0xCAFEF00D12345678ULL), 1);
     /* ... and a third view (the object page the private mapping bypassed)
        sees the same write: MAP_SHARED really is write-through. */
-    EXPECT_EQ((*(volatile uint64_t *)vm_object_peek(r->obj, 0) ==
+    EXPECT_EQ((*(volatile uint64_t *)phys_to_virt(vm_object_peek(r->obj, 0)) ==
                0xCAFEF00D12345678ULL),
               1);
   }
@@ -1310,7 +1572,7 @@ static void test_vm_file_map_tail_wx(void) {
     uint64_t leaf = 0;
     EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b + 0x1000, &leaf), 0);
     const volatile unsigned char *pa =
-        (const volatile unsigned char *)vm_arch_leaf_phys(leaf);
+        (const volatile unsigned char *)phys_to_virt(vm_arch_leaf_phys(leaf));
     EXPECT_EQ((int)pa[0], (int)((4096u * 7u + 3u) & 0xFFu));
     EXPECT_EQ((int)pa[903], (int)((4999u * 7u + 3u) & 0xFFu));
     EXPECT_EQ((int)pa[904], 0); /* first byte past EOF */
@@ -1338,7 +1600,7 @@ static void test_vm_file_map_tail_wx(void) {
     EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b + 0x1000, &leaf), 0);
     EXPECT_EQ((vm_arch_leaf_phys(leaf) != objph), 1);
     /* the object page still carries the file's byte, not our write */
-    EXPECT_EQ((int)(((const volatile unsigned char *)objph)[0]), 
+    EXPECT_EQ((int)(((const volatile unsigned char *)phys_to_virt(objph))[0]), 
               (int)((4096u * 7u + 3u) & 0xFFu));
   }
 
@@ -1496,7 +1758,7 @@ static void test_vm_file_map_fork(void) {
   EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b, &lp0), 0);
   uint64_t priv0 = vm_arch_leaf_phys(lp0);
   EXPECT_EQ((priv0 != 0 && priv0 != vm_object_peek(r->obj, 0)), 1);
-  ((volatile unsigned char *)priv0)[0] = 0x5A; /* parent-private edit */
+  ((volatile unsigned char *)phys_to_virt(priv0))[0] = 0x5A; /* parent-private edit */
 
   /* Page 1: read-touch only — still the object's shared frame. */
   EXPECT_EQ(vm_touch(&p, (uint64_t)b + 0x1000, 8, 0), 0);
@@ -1516,10 +1778,18 @@ static void test_vm_file_map_fork(void) {
      object page still holds the file's byte. */
   uint64_t lc0 = 0;
   EXPECT_EQ(vm_arch_walk(child, (uint64_t)b, &lc0), 0);
+#ifdef __x86_64__
+  /* C1-fork: the parent's private copy is shared copy-on-write; the child's
+     first write copies it. */
+  EXPECT_EQ((vm_arch_leaf_phys(lc0) == priv0 && vm_arch_leaf_cow(lc0)), 1);
+  EXPECT_EQ(vm_handle_fault(&pc, (uint64_t)b, 1, 0, &why), 0);
+  EXPECT_EQ(vm_arch_walk(child, (uint64_t)b, &lc0), 0);
+  EXPECT_EQ(vm_arch_leaf_cow(lc0), 0);
+#endif
   uint64_t c0phys = vm_arch_leaf_phys(lc0);
   EXPECT_EQ((c0phys != 0 && c0phys != priv0), 1);
-  EXPECT_EQ((int)(((const volatile unsigned char *)c0phys)[0]), 0x5A);
-  EXPECT_EQ((int)(((const volatile unsigned char *)vm_object_peek(r->obj, 0))[0]),
+  EXPECT_EQ((int)(((const volatile unsigned char *)phys_to_virt(c0phys))[0]), 0x5A);
+  EXPECT_EQ((int)(((const volatile unsigned char *)phys_to_virt(vm_object_peek(r->obj, 0)))[0]),
             3);
   /* The shared page keeps the SAME physical frame across the fork. */
   uint64_t lc1 = 0;
@@ -1530,7 +1800,7 @@ static void test_vm_file_map_fork(void) {
   uint64_t lc1b = 0;
   EXPECT_EQ(vm_arch_walk(child, (uint64_t)b + 0x1000, &lc1b), 0);
   EXPECT_EQ((vm_arch_leaf_phys(lc1b) != shared1), 1);
-  EXPECT_EQ((int)(((const volatile unsigned char *)shared1)[0]),
+  EXPECT_EQ((int)(((const volatile unsigned char *)phys_to_virt(shared1))[0]),
             (int)((4096u * 7u + 3u) & 0xFFu));
 
 out:
@@ -1542,6 +1812,13 @@ out:
     file_close(&p, fd);
   file_obj_invalidate_all();
   EXPECT_EQ(file_obj_count(), c0);
+  if (frame_free_count() != free0) {
+    uart_puts("  [VMFILE-FORK] frames: free0=");
+    print_int(free0);
+    uart_puts(" now=");
+    print_int(frame_free_count());
+    uart_puts("\n");
+  }
   EXPECT_EQ(frame_free_count(), free0);
 }
 
@@ -1601,7 +1878,7 @@ static void test_vm_file_cow_private_leaf(void) {
   uint64_t priv = vm_arch_leaf_phys(l1);
   EXPECT_EQ((priv != 0 && priv != objfr), 1);
   EXPECT_EQ(vm_arch_leaf_writable(l1), 1);
-  EXPECT_EQ((int)(((const volatile unsigned char *)priv)[0]),
+  EXPECT_EQ((int)(((const volatile unsigned char *)phys_to_virt(priv))[0]),
             (int)((0u * 7u + 3u) & 0xFFu));
 
   /* A protection change that leaves the PRIVATE page read-only while the VMA
@@ -1618,8 +1895,8 @@ static void test_vm_file_cow_private_leaf(void) {
              vm_object_peek(r2->obj, 0) != priv),
             1); /* VMA writable, leaf neither writable nor the object page */
 
-  ((volatile unsigned char *)priv)[0] = 0x5A; /* a private byte to carry */
-  EXPECT_EQ((int)(((const volatile unsigned char *)priv)[0]), 0x5A);
+  ((volatile unsigned char *)phys_to_virt(priv))[0] = 0x5A; /* a private byte to carry */
+  EXPECT_EQ((int)(((const volatile unsigned char *)phys_to_virt(priv))[0]), 0x5A);
   why = 0;
   EXPECT_EQ(vm_handle_fault(&p, (uint64_t)b, 1, 0, &why), 0);
   uint64_t l3 = 0;
@@ -1627,10 +1904,10 @@ static void test_vm_file_cow_private_leaf(void) {
   uint64_t priv2 = vm_arch_leaf_phys(l3);
   EXPECT_EQ((priv2 != 0 && priv2 != priv), 1);   /* a NEW private copy */
   EXPECT_EQ(vm_arch_leaf_writable(l3), 1);       /* and it is writable */
-  EXPECT_EQ((int)(((const volatile unsigned char *)priv2)[0]), 0x5A);
+  EXPECT_EQ((int)(((const volatile unsigned char *)phys_to_virt(priv2))[0]), 0x5A);
   /* The object's page-cache frame still carries the file's byte: the copy
      never touched the page every other mapping shares. */
-  EXPECT_EQ((int)(((const volatile unsigned char *)objfr)[0]),
+  EXPECT_EQ((int)(((const volatile unsigned char *)phys_to_virt(objfr))[0]),
             (int)((0u * 7u + 3u) & 0xFFu));
 
   /* REGRESSION (measured, docs/rimworld-launch-log.md §19.6/§20): a loader
@@ -1761,7 +2038,7 @@ static void test_vm_exec_page_eio(void) {
   if (vm_arch_walk(p.as, (uint64_t)b, &leaf) == 0) {
     uint64_t ph = vm_arch_leaf_phys(leaf);
     for (int i = 0; i < 64; i++)
-      if (((const volatile unsigned char *)ph)[i] !=
+      if (((const volatile unsigned char *)phys_to_virt(ph))[i] !=
           (unsigned char)((i * 7 + 3) & 0xFF))
         bad++;
     EXPECT_EQ(bad, 0); /* verified bytes, not zeros */
@@ -1814,7 +2091,7 @@ static void test_vm_exec_page_eio(void) {
     uint64_t ph = vm_arch_leaf_phys(leaf);
     int bad2 = 0;
     for (int i = 0; i < 64; i++)
-      if (((const volatile unsigned char *)ph)[i] !=
+      if (((const volatile unsigned char *)phys_to_virt(ph))[i] !=
           (unsigned char)((i * 7 + 3) & 0xFF))
         bad2++;
     EXPECT_EQ(bad2, 0);
@@ -1972,7 +2249,7 @@ static void test_vm_poisoned_cache_page(void) {
       uint64_t ph = vm_arch_leaf_phys(leaf);
       int bad = 0;
       for (int i = 0; i < 64; i++)
-        if (((const volatile unsigned char *)ph)[i] !=
+        if (((const volatile unsigned char *)phys_to_virt(ph))[i] !=
             (unsigned char)((i * 7 + 3) & 0xFF))
           bad++;
       EXPECT_EQ(bad, 0); /* the FILE's bytes, not the poisoned zeros */
@@ -1991,7 +2268,7 @@ static void test_vm_poisoned_cache_page(void) {
   /* And a cache-bypassing read agrees with the mapping (device == file). */
   {
     static uint8_t raw[512];
-    EXPECT_EQ(fat16_read_direct_pos_raw(cluster, fsize, (uint64_t)raw, 512, 0),
+    EXPECT_EQ(fat16_read_direct_pos_raw(cluster, fsize, virt_to_phys(raw), 512, 0),
               512);
     EXPECT_EQ(raw[0], (uint8_t)((0 * 7 + 3) & 0xFF));
     EXPECT_EQ(raw[5], (uint8_t)((5 * 7 + 3) & 0xFF));
@@ -2059,7 +2336,7 @@ static void test_vm_img_page_eio(void) {
   if (vm_arch_walk(as, va, &leaf) == 0) {
     uint64_t ph = vm_arch_leaf_phys(leaf);
     for (int i = 0; i < 16; i++)
-      if (((const volatile unsigned char *)ph)[i] !=
+      if (((const volatile unsigned char *)phys_to_virt(ph))[i] !=
           (unsigned char)"HO_BIGLOAD_30MB\n"[i])
         bad++;
     EXPECT_EQ(bad, 0);
@@ -2082,7 +2359,7 @@ static void test_vm_img_page_eio(void) {
     uint64_t ph = vm_arch_leaf_phys(leaf);
     int bad2 = 0;
     for (int i = 0; i < 16; i++)
-      if (((const volatile unsigned char *)ph)[i] !=
+      if (((const volatile unsigned char *)phys_to_virt(ph))[i] !=
           (unsigned char)"HO_BIGLOAD_30MB\n"[i])
         bad2++;
     EXPECT_EQ(bad2, 0);
@@ -2345,19 +2622,19 @@ static void test_vm_dso_bases_distinct(void) {
     }
     uint64_t li = 0;
     EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b[i], &li), 0);
-    ((volatile unsigned char *)vm_arch_leaf_phys(li))[0] =
+    ((volatile unsigned char *)phys_to_virt(vm_arch_leaf_phys(li)))[0] =
         (unsigned char)(0xA0 + i);
   }
   for (int i = 0; ok && i < DSO_N; i++) {
     uint64_t li = 0;
     EXPECT_EQ(vm_arch_walk(p.as, (uint64_t)b[i], &li), 0);
     EXPECT_EQ((int)(((const volatile unsigned char *)
-                         vm_arch_leaf_phys(li))[0]),
+                         phys_to_virt(vm_arch_leaf_phys(li)))[0]),
               (int)(0xA0 + i));
   }
   /* The file's page-cache page never saw any of those writes. */
   EXPECT_EQ((int)(((const volatile unsigned char *)
-                       vm_object_peek(ob0, 0))[0]),
+                       phys_to_virt(vm_object_peek(ob0, 0)))[0]),
             (int)((0u * 7u + 3u) & 0xFFu));
 #undef DSO_N
 
@@ -2589,18 +2866,18 @@ static void test_vm_publish_identity(void) {
     EXPECT_EQ((b1 != 0), 1);
     if (b1) {
       struct fat16_page_id id;
-      int r = fat16_page_probe(cluster, fsize, 0, (uint8_t *)b1, &id);
+      int r = fat16_page_probe(cluster, fsize, 0, (uint8_t *)phys_to_virt(b1), &id);
       EXPECT_EQ(r, 1);
       EXPECT_EQ((id.buf == b1), 1); /* pointer identity: same buffer */
       EXPECT_EQ((long)id.off, 0);
       uint32_t nz = 0, sum = 0;
-      pat_nz_sum((const unsigned char *)b1, 4096, &nz, &sum);
+      pat_nz_sum((const unsigned char *)phys_to_virt(b1), 4096, &nz, &sum);
       EXPECT_EQ((long)id.nz, (long)nz);
       EXPECT_EQ((long)id.sum, (long)sum);
       /* and the buffer really holds the file's bytes, not zeros */
       int bad = 0;
       for (int i = 0; i < 64; i++)
-        if (((const unsigned char *)b1)[i] !=
+        if (((const unsigned char *)phys_to_virt(b1))[i] !=
             (unsigned char)(((0 + (uint32_t)i) * 7u + 3u) & 0xFFu))
           bad++;
       EXPECT_EQ(bad, 0);
@@ -2652,7 +2929,7 @@ static void test_vm_publish_identity(void) {
       uint64_t ph = vm_arch_leaf_phys(leaf);
       int bad = 0;
       for (int i = 0; i < 64; i++)
-        if (((const volatile unsigned char *)ph)[i] !=
+        if (((const volatile unsigned char *)phys_to_virt(ph))[i] !=
             (unsigned char)(((0 + (uint32_t)i) * 7u + 3u) & 0xFFu))
           bad++;
       EXPECT_EQ(bad, 0);
@@ -2694,7 +2971,7 @@ static void test_vm_publish_identity(void) {
             uint64_t ph = vm_arch_leaf_phys(leaf);
             int bad = 0;
             for (int i = 0; i < 64; i++)
-              if (((const volatile unsigned char *)ph)[i] !=
+              if (((const volatile unsigned char *)phys_to_virt(ph))[i] !=
                   (unsigned char)(((0 + (uint32_t)i) * 7u + 3u) & 0xFFu))
                 bad++;
             EXPECT_EQ(bad, 0);
@@ -2746,6 +3023,8 @@ void vm_test_suite(void) {
   test_vm_shared_objects();
   test_vm_as_clone_fork();
   test_vm_teardown_leak_cycles();
+  test_vm_memfd_private_cow();
+  test_vm_big_object_cost(); /* cp/pfx */
   test_vm_user_read(); /* SEC-2 */
   test_vm_kwrite();    /* SEC-8 */
   /* so-vm lane A: file-backed shared mappings (docs/shared-libs.md §4) */

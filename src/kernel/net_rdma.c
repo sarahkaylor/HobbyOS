@@ -6,6 +6,7 @@
 #include "process.h"
 #include "timer.h"
 #include "mmu.h"
+#include "kmem.h"
 #include "arch/cpu.h"
 
 extern void uart_puts(const char* s);
@@ -341,7 +342,7 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
       for (int i = 0; i < MAX_MRS; i++) {
         if (!host_mrs[i].in_use) {
           host_mrs[i].guest_phys = pkt->addr;
-          host_mrs[i].host_phys = (uint64_t)&host_dma_buffers[i][0];
+          host_mrs[i].host_phys = kimg_pa(&host_dma_buffers[i][0]);
           host_mrs[i].host_virt = &host_dma_buffers[i][0];
           host_mrs[i].size = pkt->len;
           host_mrs[i].in_use = 1;
@@ -362,7 +363,7 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
     // (IOMMU/MR) are irrelevant for GPU DMA — they're only used for the
     // client's SYNC_FROM_HOST path. Skip them for maximum throughput.
     if (pkt->addr < 0x70000000ULL || pkt->addr >= 0x71300000ULL) {
-      uint8_t* ptr = (uint8_t*)pkt->addr;
+      uint8_t* ptr = (uint8_t*)phys_to_virt(pkt->addr);
       for (uint32_t j = 0; j < pkt->len; j++) {
         ptr[j] = pkt->data[j];
       }
@@ -379,7 +380,7 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
     // Compute CRC32 over host memory
     uint32_t crc = 0xFFFFFFFF;
     if (verify_addr < 0x70000000ULL || verify_addr >= 0x71300000ULL) {
-      uint8_t* ptr = (uint8_t*)(uintptr_t)verify_addr;
+      uint8_t* ptr = (uint8_t*)phys_to_virt(verify_addr);
       for (uint64_t j = 0; j < verify_len; j++) {
         crc ^= ptr[j];
         for (int b = 0; b < 8; b++) {
@@ -432,7 +433,7 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
       // Read from identity-mapped physical address (where GPU DMA writes responses),
       // not just the shadow buffer. The GPU writes directly to physical memory.
       if (pkt->addr < 0x70000000ULL || pkt->addr >= 0x71300000ULL) {
-        uint8_t* ptr = (uint8_t*)pkt->addr;
+        uint8_t* ptr = (uint8_t*)phys_to_virt(pkt->addr);
         for (uint32_t j = 0; j < pkt->len; j++) {
           resp.data[j] = ptr[j];
         }
@@ -508,7 +509,7 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
       if (use_identity) {
         // Identity: host_phys = iova (guest RAM is physically accessible on host)
         shadow_phys = iova;
-        shadow_virt = (uint8_t*)(uintptr_t)iova;
+        shadow_virt = (uint8_t*)phys_to_virt(iova);
       } else {
         // Allocate shadow buffer from pool (bump allocator)
         uint64_t aligned_offset = (iommu_shadow_pool_offset + 0xFFF) & ~0xFFFULL;
@@ -519,7 +520,7 @@ static void handle_host_rdma(struct rdma_packet* pkt) {
           goto send_resp;
         }
         shadow_virt = &iommu_shadow_pool[aligned_offset];
-        shadow_phys = (uint64_t)shadow_virt;
+        shadow_phys = kimg_pa(shadow_virt);
         iommu_shadow_pool_offset = aligned_offset + map_size;
 
         // Zero the shadow buffer
@@ -1153,10 +1154,9 @@ void net_rdma_init(void) {
       } else {
         size = (uint32_t)(~((uint32_t)size_mask_64) + 1);
       }
-      mmu_map_mmio_range(phys_addr, size);
       pci_bars_phys[i] = phys_addr;
       pci_bars_size[i] = size;
-      p_pci_bars[i] = (volatile uint8_t*)phys_addr;
+      p_pci_bars[i] = (volatile uint8_t*)mmu_map_mmio_range(phys_addr, size);
 
       uart_puts("[RDMA] Mapped Memory BAR ");
       print_int(i);
@@ -1182,10 +1182,9 @@ void net_rdma_init(void) {
       uint64_t rom_size = 1024 * 1024; // Standard 1MB size for GPU Expansion ROM
       pci_write_config(dev_bus, dev_slot, 0, 0x30, rom_val | 0x1); // Enable ROM
 
-      mmu_map_mmio_range(rom_phys, rom_size);
       pci_rom_phys = rom_phys;
       pci_rom_size = rom_size;
-      p_pci_rom = (volatile uint8_t*)rom_phys;
+      p_pci_rom = (volatile uint8_t*)mmu_map_mmio_range(rom_phys, rom_size);
 
       uart_puts("[RDMA] Mapped and Enabled Physical Expansion ROM at ");
       uart_print_hex(rom_phys);
@@ -1538,7 +1537,7 @@ int rdma_dma_sync(uint64_t guest_phys, uint32_t size, int to_device) {
 
     // Copy Guest RAM (identity mapped) into payload
     for (uint32_t i = 0; i < size; i++) {
-      req.data[i] = ((uint8_t*)guest_phys)[i];
+      req.data[i] = ((uint8_t*)phys_to_virt(guest_phys))[i];
     }
 
     if (rdma_transaction(&req, &resp) != 0 || resp.status != 0) {
@@ -1556,7 +1555,7 @@ int rdma_dma_sync(uint64_t guest_phys, uint32_t size, int to_device) {
 
     // Copy shadow data back into Guest RAM
     for (uint32_t i = 0; i < size; i++) {
-      ((uint8_t*)guest_phys)[i] = resp.data[i];
+      ((uint8_t*)phys_to_virt(guest_phys))[i] = resp.data[i];
     }
   }
   return 0;
@@ -1581,7 +1580,7 @@ uint32_t net_rdma_crc32(const uint8_t* p, uint32_t n) {
 // data at physical address == guest_phys (identity), so we verify the same address.
 // Returns 0 if the host matches, 1 on CRC mismatch, -1 on transport error.
 int rdma_dma_verify(uint64_t guest_phys, uint32_t size) {
-  uint32_t want = net_rdma_crc32((const uint8_t*)guest_phys, size);
+  uint32_t want = net_rdma_crc32((const uint8_t*)phys_to_virt(guest_phys), size);
   struct rdma_packet req = {0}, resp = {0};
   req.op = RDMA_OP_DMA_SYNC_RELIABLE;
   req.addr = guest_phys;

@@ -1,0 +1,23 @@
+tag=perf-1080p-b res=1920x1080 runner=proton pfx=/home/sarah/cp/p0host/pfx-proton/1091500
+WRAP= OUTER= XENV= MANGO=1 GAMEARGS=--launcher-skip
+date=2026-11-14T22:12:05-06:00 kernel=7.0.0-43-generic
+proton=1794497090 experimental-11.0-20261112-x86_64
+env: SteamAppId=1091500
+env: SteamGameId=1091500
+env: STEAM_COMPAT_APP_ID=1091500
+env: STEAM_COMPAT_DATA_PATH=/home/sarah/cp/p0host/pfx-proton/1091500
+env: STEAM_COMPAT_CLIENT_INSTALL_PATH=/home/sarah/.local/share/Steam
+env: STEAM_COMPAT_INSTALL_PATH=/mnt/fast/games/steamapps/common/Cyberpunk 2077
+env: MESA_VK_DEVICE_SELECT=1002:7550
+env: VKD3D_FILTER_DEVICE_NAME=RX 9070 XT
+env: DXVK_FILTER_DEVICE_NAME=RX 9070 XT
+env: PROTON_LOG=1
+env: PROTON_LOG_DIR=/home/sarah/cp/p0host/runs/perf-1080p-b/plog
+env: WAYLAND_DISPLAY=
+env: STEAM_COMPAT_SHADER_PATH=/home/sarah/cp/p0host/cache/shader
+env: VKD3D_SHADER_CACHE_PATH=/home/sarah/cp/p0host/cache/vkd3d
+env: DXVK_STATE_CACHE_PATH=/home/sarah/cp/p0host/cache/dxvk
+env: MESA_SHADER_CACHE_DIR=/home/sarah/cp/p0host/cache/mesa
+env: MANGOHUD=1
+env: MANGOHUD_CONFIG=log_interval=0,output_folder=/home/sarah/cp/p0host/runs/perf-1080p-b/mangohud,fps_only,position=bottom-right,toggle_logging=Shift_L+F2,toggle_hud=Shift_R+F12
+cmd: python3 /mnt/fast/games/steamapps/common/Proton - Experimental/proton waitforexitandrun /mnt/fast/games/steamapps/common/Cyberpunk 2077/bin/x64/Cyberpunk2077.exe --launcher-skip

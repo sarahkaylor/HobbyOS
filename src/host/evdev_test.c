@@ -17,6 +17,8 @@
  *   4. Mouse button edges emit EV_KEY 0x110/0x111 only on CHANGE.
  *   5. The overflow-drop rule: a set overflow bit drops THAT AXIS DELTA
  *      but still applies the button bits (never integrates a garbage jump).
+ *   6. Every moving packet also reports its raw deltas as EV_REL REL_X/REL_Y
+ *      (unclamped, evdev sign) right after the ABS pair (C4-x2).
  */
 
 #include <stdio.h>
@@ -214,13 +216,13 @@ static void test_mouse_move(void) {
   c.n = 0;
 
   feed3(&d, 0x08, 0x02, 0x01, &c); /* dx=+2, dy=+1 (up) */
-  check(c.n == 3 && px_of(c.value[0], 1920) == 962 &&
+  check(c.n == 5 && px_of(c.value[0], 1920) == 962 &&
             px_of(c.value[1], 1080) == 539,
         "mouse: +2,+1 packet moves (+2 px, -1 px)");
 
   CAP_RESET(c);
   feed3(&d, 0x08 | 0x10 | 0x20, 0xFD, 0xFC, &c); /* dx=-3, dy=-4 (down) */
-  check(c.n == 3 && px_of(c.value[0], 1920) == 959 &&
+  check(c.n == 5 && px_of(c.value[0], 1920) == 959 &&
             px_of(c.value[1], 1080) == 543,
         "mouse: negative-sign packet integrates correctly");
 
@@ -248,13 +250,14 @@ static void test_mouse_clamp(void) {
   c.n = 0;
 
   for (int i = 0; i < 10; i++) feed3(&d, 0x08 | 0x10, 0x80, 0x00, &c);
-  check(c.value[c.n - 3] == 0, "mouse: runaway -dx clamps x at 0 (not below)");
+  check(last_of(&c, EVDEV_EV_ABS, EVDEV_ABS_X) == 0,
+        "mouse: runaway -dx clamps x at 0 (not below)");
 
   CAP_RESET(c);
   evdev_decoder_init(&d);
   for (int i = 0; i < 10; i++) feed3(&d, 0x08 | 0x20, 0x00, 0x80, &c);
-  check(px_of(c.value[c.n - 2], 1080) == 1079 &&
-            c.value[c.n - 2] <= EVDEV_ABS_MAX,
+  check(px_of((uint32_t)last_of(&c, EVDEV_EV_ABS, EVDEV_ABS_Y), 1080) == 1079 &&
+            last_of(&c, EVDEV_EV_ABS, EVDEV_ABS_Y) <= EVDEV_ABS_MAX,
         "mouse: runaway +y clamps at the last row");
 
   /* Then moving back by one count leaves the edge by exactly one pixel. */
@@ -384,7 +387,7 @@ static void test_mouse_resync_lost_byte(void) {
   evdev_mouse_byte_at(&d, 0x08, 2000, cap_emit, &c); /* new packet later */
   evdev_mouse_byte_at(&d, 0x07, 2000, cap_emit, &c);
   evdev_mouse_byte_at(&d, 0x00, 2000, cap_emit, &c);
-  check(c.n == 3 && px_of(c.value[0], 1920) == 967,
+  check(count_of(&c, EVDEV_EV_ABS, EVDEV_ABS_X) == 1 && px_of(c.value[0], 1920) == 967,
         "resync: stale partial packet dropped after a time gap");
 }
 
@@ -434,9 +437,69 @@ static void test_vmmouse(void) {
   check(c.n == 0, "vmmouse: fake PS/2 packet swallowed (no release, no move)");
   /* Genuine relative motion still moves the shared position. */
   feed4(&d, 0x08, 10, 0, 0, &c);
-  check(c.n == 3 && count_of(&c, EVDEV_EV_KEY, EVDEV_BTN_LEFT) == 0 &&
+  check(c.n == 4 && count_of(&c, EVDEV_EV_KEY, EVDEV_BTN_LEFT) == 0 &&
             px_of(c.value[0], 1920) == px_of(1000, 1920) + 10,
         "vmmouse: real rel motion moves from the absolute position");
+}
+
+
+/* Raw relative deltas (lane C4-x2): every moving PS/2 packet also reports
+ * REL_X = dx and REL_Y = -dy (evdev +y down) right after the ABS pair,
+ * unclamped at the screen edge; a still packet reports none.  This is the
+ * kernel half of XI2 raw motion for mouselook. */
+static void test_mouse_rel_raw(void) {
+  struct evdev_decoder d;
+  struct evdev_cap c;
+  evdev_decoder_init(&d);
+  c.n = 0;
+
+  feed3(&d, 0x08, 5, 3, &c); /* dx=+5, dy=+3 (up) */
+  check(c.n == 5 && c.type[0] == EVDEV_EV_ABS && c.type[1] == EVDEV_EV_ABS &&
+            c.type[2] == EVDEV_EV_REL && c.code[2] == EVDEV_REL_X &&
+            (int32_t)c.value[2] == 5 && c.type[3] == EVDEV_EV_REL &&
+            c.code[3] == EVDEV_REL_Y && (int32_t)c.value[3] == -3 &&
+            c.type[4] == EVDEV_EV_SYN,
+        "rel: +5,+3(up) packet emits ABS x/y, REL_X +5, REL_Y -3, SYN");
+
+  CAP_RESET(c);
+  feed3(&d, 0x08 | 0x10, (uint8_t)-7, 0, &c); /* dx=-7 only */
+  check(count_of(&c, EVDEV_EV_REL, EVDEV_REL_X) == 1 &&
+            count_of(&c, EVDEV_EV_REL, EVDEV_REL_Y) == 0 &&
+            (int32_t)last_of(&c, EVDEV_EV_REL, EVDEV_REL_X) == -7,
+        "rel: one row per nonzero axis (dx=-7 -> REL_X -7, no REL_Y)");
+
+  CAP_RESET(c);
+  feed3(&d, 0x08, 0, 0, &c);
+  check(count_of(&c, EVDEV_EV_REL, EVDEV_REL_X) == 0 &&
+            count_of(&c, EVDEV_EV_REL, EVDEV_REL_Y) == 0,
+        "rel: a still packet reports no REL rows");
+
+  /* At the left edge ABS stops changing; REL keeps the device counts. */
+  evdev_decoder_init(&d);
+  for (int i = 0; i < 10; i++) feed3(&d, 0x08 | 0x10, 0x80, 0x00, &c);
+  CAP_RESET(c);
+  feed3(&d, 0x08 | 0x10, 0x80, 0x00, &c);
+  check(last_of(&c, EVDEV_EV_ABS, EVDEV_ABS_X) == 0 &&
+            (int32_t)last_of(&c, EVDEV_EV_REL, EVDEV_REL_X) == -128,
+        "rel: pinned at x=0, REL_X still -128 (unclamped)");
+
+  /* Left button in the same packet comes after the REL rows. */
+  CAP_RESET(c);
+  feed3(&d, 0x08 | 0x01, 2, 0, &c);
+  check(c.n == 5 && c.type[2] == EVDEV_EV_REL && c.type[3] == EVDEV_EV_KEY &&
+            c.code[3] == EVDEV_BTN_LEFT,
+        "rel: REL rows precede the packet's button edge");
+
+  /* vmmouse active: QMP "rel" motion arrives on PS/2 and reports REL too. */
+  evdev_decoder_init(&d);
+  evdev_mouse_set_packet_len(&d, 4);
+  evdev_vmmouse_packet(&d, 0, 1000 << 1, 1000 << 1, 0, 0xFFFF, cap_emit, &c);
+  CAP_RESET(c);
+  feed4(&d, 0x08 | 0x20, 10, (uint8_t)-4, 0, &c); /* dx=10, dy=-4 (down) */
+  check((int32_t)last_of(&c, EVDEV_EV_REL, EVDEV_REL_X) == 10 &&
+            (int32_t)last_of(&c, EVDEV_EV_REL, EVDEV_REL_Y) == 4 &&
+            c.type[c.n - 1] == EVDEV_EV_SYN,
+        "rel: vmmouse mode, PS/2 rel 10,-4 -> REL_X 10, REL_Y +4");
 }
 
 /* ---- init determinism ---- */
@@ -465,6 +528,7 @@ int main(void) {
   test_mouse_wheel();
   test_mouse_resync_lost_byte();
   test_vmmouse();
+  test_mouse_rel_raw();
 
   printf("evdev_test_host: %d checks, %d failed\n", checks_run, checks_failed);
   return checks_failed ? 1 : 0;

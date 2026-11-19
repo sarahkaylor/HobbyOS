@@ -33,6 +33,7 @@
 #include "process.h"
 #include "timer.h"
 #include "vm.h"
+#include "trapprof.h"
 
 /* Subsystem tables, defined by the lane that owns that file.  A missing file
    leaves the symbol undefined-and-weak: its address reads as 0 and the
@@ -43,6 +44,21 @@ extern const struct l_sysent l_tab_proc[] __attribute__((weak));
 extern const struct l_sysent l_tab_misc[] __attribute__((weak));
 extern const struct l_sysent l_tab_thr[] __attribute__((weak));
 extern const struct l_sysent l_tab_tmr[] __attribute__((weak));
+extern const struct l_sysent l_tab_shm[] __attribute__((weak)); /* cp/x3 */
+extern const struct l_sysent l_tab_cons[] __attribute__((weak)); /* C0-console probe stress */
+/* cp/ext2 (src/kernel/ext2_compat.c): consulted FIRST, and its handlers may
+   DECLINE (return 0) a number another table owns when the path/fd is not on
+   the ext2 volume -- the search then continues below as if it were absent. */
+extern const struct l_sysent l_tab_ext2[] __attribute__((weak));
+/* cp/sys (src/kernel/tmpfs_compat.c): the compat /tmp.  Consulted before
+   l_tab_ext2 with the same DECLINE contract: a row answers only for a path
+   (or fd) on the tmpfs and returns 0 for everything else. */
+extern const struct l_sysent l_tab_tmpfs[] __attribute__((weak));
+/* cp/ext2b (src/kernel/vfs_compat.c): the generic setattr and file-lock rows
+   (chmod/chown/utimensat families, flock, the fcntl lock commands).  Consulted
+   right after l_tab_ext2 with the same decline protocol (return 0 = "not
+   mine", e.g. a non-lock fcntl command). */
+extern const struct l_sysent l_tab_vfsx[] __attribute__((weak));
 
 /* ---- user-memory helpers ------------------------------------------------ */
 
@@ -56,6 +72,8 @@ int l_copy_from_user(struct process *p, void *kdst, uint64_t usrc,
                      uint64_t len) {
   if (len == 0) return 0;
   if (len > (uint64_t)(1 << 20)) return -EINVAL;
+  /* C1-k7: mapped and readable already -> no lock, no touch */
+  if (vm_copy_fast(p, usrc, kdst, (int)len, 0) == 0) return 0;
   if (!l_user_ok(p, usrc, len, 0)) return -EFAULT;
   return vm_user_read(p, usrc, kdst, (int)len) == 0 ? 0 : -EFAULT;
 }
@@ -64,6 +82,7 @@ int l_copy_to_user(struct process *p, uint64_t udst, const void *ksrc,
                    uint64_t len) {
   if (len == 0) return 0;
   if (len > (uint64_t)(1 << 20)) return -EINVAL;
+  if (vm_copy_fast(p, udst, (void *)ksrc, (int)len, 1) == 0) return 0;
   if (!l_user_ok(p, udst, len, 1)) return -EFAULT;
   return vm_kwrite(p, udst, ksrc, (int)len) == 0 ? 0 : -EFAULT;
 }
@@ -100,6 +119,23 @@ int l_timespec_to_ms(struct process *p, uint64_t uts, int64_t *out_ms) {
   return 0;
 }
 
+/* C1-k6: the same contract in microseconds, rounded UP (a deadline is never
+   early).  Relative waits saturate at L_US_FOREVER (27.8 h, the old cap). */
+#define L_US_FOREVER 100000000000LL
+int l_timespec_to_us(struct process *p, uint64_t uts, int64_t *out_us) {
+  int64_t ts[2]; /* tv_sec, tv_nsec */
+  if (l_copy_from_user(p, ts, uts, sizeof ts) != 0) return -EFAULT;
+  if (ts[0] < 0 || ts[1] < 0 || ts[1] >= 1000000000LL) return -EINVAL;
+  /* An absolute CLOCK_REALTIME value is ~1.8e15 us: well inside int64, so
+     only an absurd tv_sec saturates (callers cap relative waits). */
+  if (ts[0] > 9000000000000LL) {
+    *out_us = 9000000000000000000LL;
+    return 0;
+  }
+  *out_us = ts[0] * 1000000LL + (ts[1] + 999) / 1000;
+  return 0;
+}
+
 /* ---- l_tab_core --------------------------------------------------------- */
 
 /* Linux getpid() is the TGID, not the calling thread's tid.  In this kernel a
@@ -130,7 +166,15 @@ static int l_core_getuid(struct process *p, struct trap_frame *tf) {
   return 1;
 }
 
+/* set_tid_address(tidptr): C1-k6 (docs/cp-k6.md §3) -- the address is now
+   KEPT as the thread's clear_child_tid, as Linux does, so the thread's exit
+   zeroes it and futex-wakes a waiter (process_thread_exit, GB-021).  It was
+   only answered.  musl passes &__thread_list_lock for the main thread: a
+   main thread that pthread_exit()s holds that lock and relies on the kernel
+   to release it, so the remaining threads could never exit or create a
+   thread again (linux_probe_killgrp K7: the group was never reaped). */
 static int l_core_set_tid(struct process *p, struct trap_frame *tf) {
+  if (p) p->clear_child_tid = l_arg(tf, 0);
   tf->regs[0] = p ? (uint64_t)(int64_t)p->pid : 0;
   return 1;
 }
@@ -160,11 +204,11 @@ static int l_core_gettimeofday(struct process *p, struct trap_frame *tf) {
        at once.  Measured: sem_mono_deadline elapsed_ms=0 in the guest vs 50
        on the host (tools/gate/t3_linux_probe.sh clock).  time(2) below already
        used the RTC clock; this makes the two agree, as Linux does. */
-    extern uint64_t hb_clock_realtime_ms(void);
-    uint64_t ms = hb_clock_realtime_ms();
+    extern uint64_t hb_clock_realtime_us(void);
+    uint64_t us = hb_clock_realtime_us(); /* C1-k6: microseconds */
     uint64_t out[2];
-    out[0] = ms / 1000;
-    out[1] = (ms % 1000) * 1000;
+    out[0] = us / 1000000;
+    out[1] = us % 1000000;
     int r = l_copy_to_user(p, tv, out, sizeof out);
     if (r != 0) {
       tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
@@ -175,66 +219,194 @@ static int l_core_gettimeofday(struct process *p, struct trap_frame *tf) {
   return 1;
 }
 
-/* Block the caller for ms without spinning (the 30-second deadlock law: a
-   compat syscall that blocks must deschedule, exactly like SYS_SLEEP does).
-   tf->regs[0] is written BEFORE the switch: schedule(tf,0) saves this frame and
-   never returns here (the process resumes through enter_user_space with the
-   saved frame), so a value stored after the call is never what the guest sees.
-   Measured: with the store after the call, nanosleep returned rax == 35 (the
-   syscall number) and the probe read it as a positive error. */
-static void l_block_ms(struct trap_frame *tf, int ms, int nr) {
+/* Block the caller until `deadline_us` (timer_get_us base) without spinning
+   (the 30-second deadlock law: a compat syscall that blocks must deschedule,
+   exactly like SYS_SLEEP does).  tf->regs[0] is written BEFORE the switch:
+   schedule(tf,0) saves this frame and never returns here (the process resumes
+   through enter_user_space with the saved frame), so a value stored after the
+   call is never what the guest sees.  Measured: with the store after the call,
+   nanosleep returned rax == 35 (the syscall number) and the probe read it as a
+   positive error.  C1-k6: the deadline is in microseconds and a per-CPU
+   one-shot meets it (process.c hrt_cover_locked), so nanosleep(1 ms) costs
+   ~1 ms, not the next 10 ms tick. */
+static void l_block_until_us(struct trap_frame *tf, uint64_t deadline_us, int nr,
+                             int rewind) {
   struct process *cur = current_process();
-  tf->regs[0] = 0;
-  if (cur && ms > 0) {
-    /* M6/L33: Linux's nanosleep checks signal_pending() before it sleeps and
-       answers -EINTR when a signal the thread would take is already pending.
-       The handler runs at this syscall's trap exit, before user code sees the
-       return. */
-    if (linux_compat_sig_deliverable(cur)) {
-      tf->regs[0] = (uint64_t)(int64_t)-EINTR;
-      return;
-    }
-    uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-    cur->wake_ms = timer_get_ms() + (uint64_t)ms;
+  if (!cur || deadline_us <= timer_get_us()) {
+    tf->regs[0] = 0;
+    return;
+  }
+  /* M6/L33: Linux's nanosleep checks signal_pending() before it sleeps and
+     answers -EINTR when a signal the thread would take is already pending.
+     The handler runs at this syscall's trap exit, before user code sees the
+     return. */
+  if (linux_compat_sig_deliverable(cur)) {
+    tf->regs[0] = (uint64_t)(int64_t)-EINTR;
+    return;
+  }
+  uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
+  if (cur->state == PROC_STATE_EXITED || cur->state == PROC_STATE_THREAD_DONE) {
+    /* C1-thr: killed while inside the syscall; never re-park the dead. */
+    spinlock_release_irqrestore(&proc_lock, flags);
+    tf->regs[0] = (uint64_t)(int64_t)-EINTR;
+    return;
+  }
+  proc_set_deadline_us(cur, deadline_us);
+  if (rewind) {
+    /* A slice of a longer wait (the CPU-time clock): the syscall re-runs on
+       wake (rax is still its number) and re-checks its absolute target; a
+       signal wake re-runs it too and the entry check above answers -EINTR
+       (l_park's contract, kind 2). */
+    cur->sig_park_kind = 2;
+    cur->sig_park_nr = 0;
+  } else {
+    tf->regs[0] = 0;
     cur->sig_park_kind = 1; /* not rewound: a signal wake returns -EINTR */
     cur->sig_park_nr = nr;  /* identity for the SA_RESTART restart */
-    cur->state = PROC_STATE_BLOCKED;
-    spinlock_release_irqrestore(&proc_lock, flags);
-    schedule(tf, 0);
   }
+  cur->state = PROC_STATE_BLOCKED;
+  spinlock_release_irqrestore(&proc_lock, flags);
+  if (rewind) {
+#if defined(__x86_64__)
+    if ((tf->cs & 3) == 3) tf->elr -= 2;
+#else
+    tf->elr -= 4;
+#endif
+    save_context(cur, tf);
+  }
+  schedule(tf, 0);
 }
 
 static int l_core_nanosleep(struct process *p, struct trap_frame *tf) {
-  int64_t ms = 0;
-  int r = l_timespec_to_ms(p, l_arg(tf, 0), &ms);
+  int64_t us = 0;
+  int r = l_timespec_to_us(p, l_arg(tf, 0), &us);
   if (r != 0) {
     tf->regs[0] = (uint64_t)(int64_t)r;
     return 1;
   }
-  if (ms > 100000000) ms = 100000000; /* int wake_ms; 27.8 h is "forever" */
-  if (ms > 0) l_block_ms(tf, (int)ms, L_SYS_nanosleep);
-  tf->regs[0] = 0;
+  if (us > L_US_FOREVER) us = L_US_FOREVER;
+  /* C1-k6 round 2: `rem` is written if a signal ends the sleep */
+  p->ns_rem_uptr = l_arg(tf, 1);
+  p->ns_rem_deadline = timer_get_us() + (uint64_t)us;
+  if (us > 0) l_block_until_us(tf, p->ns_rem_deadline, L_SYS_nanosleep, 0);
+  else tf->regs[0] = 0;
   return 1;
 }
 
-/* clock_nanosleep(clockid, flags, const struct timespec *req, struct timespec *rem)
-   TIMER_ABSTIME (1) is not honoured: nothing in the target programs uses it and
-   silently sleeping the wrong duration is worse than saying so. */
+/* C1-k6 (docs/cp-k6.md §2): clock_nanosleep(clockid, flags, req, rem) for
+   every clock Linux sleeps on, relative and TIMER_ABSTIME:
+     REALTIME(0), TAI(11), REALTIME_ALARM(8): the realtime clock;
+     MONOTONIC(1), BOOTTIME(7), BOOTTIME_ALARM(9): timer_get_us (no suspend);
+     PROCESS_CPUTIME_ID(2) and a process CPU clock of this group: the group's
+       CPU time, met by parking in slices and re-checking.
+   Linux has no nsleep for MONOTONIC_RAW(4), REALTIME_COARSE(5),
+   MONOTONIC_COARSE(6) or THREAD_CPUTIME_ID(3): -EOPNOTSUPP (95).  Anything
+   else is -EINVAL.  An absolute deadline already past returns 0 at once.  A
+   relative REALTIME sleep does not follow clock_settime (there is none). */
+#define L_CLK_REALTIME 0
+#define L_CLK_MONOTONIC 1
+#define L_CLK_PROCESS_CPUTIME 2
+#define L_CLK_THREAD_CPUTIME 3
+#define L_CLK_MONOTONIC_RAW 4
+#define L_CLK_REALTIME_COARSE 5
+#define L_CLK_MONOTONIC_COARSE 6
+#define L_CLK_BOOTTIME 7
+#define L_CLK_REALTIME_ALARM 8
+#define L_CLK_BOOTTIME_ALARM 9
+#define L_CLK_TAI 11
+#define L_CPU_SLICE_US 1000
 static int l_core_clock_nanosleep(struct process *p, struct trap_frame *tf) {
+  extern uint64_t hb_clock_realtime_us(void);
+  int clk = (int)l_argi(tf, 0);
   int64_t flags = l_argi(tf, 1);
-  if (flags & 1) {
-    tf->regs[0] = (uint64_t)(int64_t)-ENOTSUP;
+  int abstime = (flags & 1) != 0; /* TIMER_ABSTIME; other bits are ignored */
+  int kind; /* 0 realtime, 1 monotonic, 2 group CPU time */
+  if (clk == L_CLK_REALTIME || clk == L_CLK_TAI || clk == L_CLK_REALTIME_ALARM)
+    kind = 0;
+  else if (clk == L_CLK_MONOTONIC || clk == L_CLK_BOOTTIME ||
+           clk == L_CLK_BOOTTIME_ALARM)
+    kind = 1;
+  else if (clk == L_CLK_PROCESS_CPUTIME)
+    kind = 2;
+  else if (clk == L_CLK_THREAD_CPUTIME || clk == L_CLK_MONOTONIC_RAW ||
+           clk == L_CLK_REALTIME_COARSE || clk == L_CLK_MONOTONIC_COARSE)
+    kind = -95;
+  else if (clk < 0) {
+    /* A dynamic CPU clock: ~pid << 3 | type, type 0 PROF 1 VIRT 2 SCHED,
+       bit 2 per-thread.  Linux: a per-thread clock has no nsleep (EINVAL
+       for the caller's own thread, EOPNOTSUPP otherwise -- EINVAL here);
+       a process clock sleeps on that process's CPU time.  Only this group
+       is supported; another pid is EINVAL. */
+    int type = clk & 7;
+    int pid = ~(clk >> 3);
+    struct process *g = process_group(p);
+    if ((type & 3) == 3 || (type & 4)) kind = -22;
+    else if (pid != 0 && (!g || pid != g->pid)) kind = -22;
+    else kind = 2;
+  } else
+    kind = -22;
+  if (kind < 0) {
+    tf->regs[0] = (uint64_t)(int64_t)kind;
     return 1;
   }
-  int64_t ms = 0;
-  int r = l_timespec_to_ms(p, l_arg(tf, 2), &ms);
+  int64_t us = 0;
+  int r = l_timespec_to_us(p, l_arg(tf, 2), &us);
   if (r != 0) {
     tf->regs[0] = (uint64_t)(int64_t)r;
     return 1;
   }
-  if (ms > 100000000) ms = 100000000;
-  if (ms > 0) l_block_ms(tf, (int)ms, L_SYS_clock_nanosleep);
-  tf->regs[0] = 0;
+  uint64_t mono = timer_get_us();
+  if (kind == 2) {
+    /* CPU time: the target is absolute in group-CPU microseconds.  A
+       relative request is anchored once per call (p->cns_cpu_*), keyed by
+       the call site and the req pointer so a restart re-uses it. */
+    struct ho_rusage ru;
+    process_rusage(p, 0, &ru);
+    uint64_t cpu_now = (uint64_t)(ru.ru_utime_sec + ru.ru_stime_sec) * 1000000ULL +
+                       (uint64_t)(ru.ru_utime_usec + ru.ru_stime_usec);
+    uint64_t target;
+    if (abstime) {
+      target = (uint64_t)us;
+    } else if (p->cns_cpu_pc == p->sys_entry_pc && p->cns_cpu_req == l_arg(tf, 2) &&
+               p->cns_cpu_target) {
+      target = p->cns_cpu_target;
+    } else {
+      if (us > L_US_FOREVER) us = L_US_FOREVER;
+      target = cpu_now + (uint64_t)us;
+      p->cns_cpu_pc = p->sys_entry_pc;
+      p->cns_cpu_req = l_arg(tf, 2);
+      p->cns_cpu_target = target;
+    }
+    if (cpu_now >= target) {
+      p->cns_cpu_target = 0;
+      tf->regs[0] = 0;
+      return 1;
+    }
+    uint64_t left = target - cpu_now;
+    if (left > L_CPU_SLICE_US) left = L_CPU_SLICE_US;
+    if (linux_compat_sig_deliverable(p)) p->cns_cpu_target = 0;
+    l_block_until_us(tf, mono + left, L_SYS_clock_nanosleep, 1);
+    return 1;
+  }
+  uint64_t deadline;
+  if (!abstime) {
+    if (us > L_US_FOREVER) us = L_US_FOREVER;
+    deadline = mono + (uint64_t)us;
+    /* C1-k6 round 2: a relative sleep's `rem` is written if a signal ends it */
+    p->ns_rem_uptr = l_arg(tf, 3);
+    p->ns_rem_deadline = deadline;
+  } else if (kind == 1) {
+    deadline = (uint64_t)us; /* CLOCK_MONOTONIC is timer_get_us (b8cc46c8) */
+  } else {
+    uint64_t rt = hb_clock_realtime_us();
+    deadline = ((uint64_t)us > rt) ? mono + ((uint64_t)us - rt) : 0;
+  }
+  if (deadline > mono) {
+    if (deadline - mono > (uint64_t)L_US_FOREVER) deadline = mono + L_US_FOREVER;
+    l_block_until_us(tf, deadline, L_SYS_clock_nanosleep, 0);
+  } else {
+    tf->regs[0] = 0;
+  }
   return 1;
 }
 
@@ -258,7 +430,32 @@ static int l_core_time(struct process *p, struct trap_frame *tf) {
   return 1;
 }
 
-static const struct l_sysent l_tab_core[] = { {L_SYS_time, l_core_time, "time"}, {L_SYS_gettimeofday, l_core_gettimeofday, "gettimeofday"}, {L_SYS_nanosleep, l_core_nanosleep, "nanosleep"}, {L_SYS_clock_nanosleep, l_core_clock_nanosleep, "clock_nanosleep"}, {L_SYS_getpid, l_core_getpid, "getpid"}, {L_SYS_getppid, l_core_getppid, "getppid"}, {L_SYS_getuid, l_core_getuid, "getuid"}, {L_SYS_getgid, l_core_getuid, "getgid"}, {L_SYS_geteuid, l_core_getuid, "geteuid"}, {L_SYS_getegid, l_core_getuid, "getegid"}, {L_SYS_gettid, l_core_gettid, "gettid"}, {L_SYS_set_tid_address, l_core_set_tid, "set_tid_address"}, {L_SYS_sched_yield, l_core_yield, "sched_yield"},
+#if defined(KERNEL_MODE_TEST) && defined(__x86_64__)
+/* C1-k6: private L_SYS_hb_wfi_test (0x4845, test kernels only, far above
+   every real x86_64 number): process.c sched_wfi_test_op, for
+   linux_probe_wfibound.  Release kernels answer -ENOSYS. */
+#define L_SYS_hb_wfi_test 0x4845
+static int l_core_wfi_test(struct process *p, struct trap_frame *tf) {
+  (void)p;
+  extern int64_t sched_wfi_test_op(int op, int64_t a);
+  tf->regs[0] = (uint64_t)sched_wfi_test_op((int)l_arg(tf, 0), (int64_t)l_arg(tf, 1));
+  return 1;
+}
+#define L_WFI_TEST_ENT {L_SYS_hb_wfi_test, l_core_wfi_test, "hb_wfi_test"}, L_TRAPPROF_ENT
+/* C1-k7: private L_SYS_hb_trapprof (0x4B37, test kernels only): the syscall
+   path's cycles per segment, for linux_probe_sysc (arch/x64/trapprof.c). */
+#define L_SYS_hb_trapprof 0x4B37
+static int l_core_trapprof(struct process *p, struct trap_frame *tf) {
+  extern int64_t trap_prof_op(struct process *p, int op, uint64_t a1, uint64_t a2);
+  tf->regs[0] = (uint64_t)trap_prof_op(p, (int)l_arg(tf, 0), l_arg(tf, 1), l_arg(tf, 2));
+  return 1;
+}
+#define L_TRAPPROF_ENT {L_SYS_hb_trapprof, l_core_trapprof, "hb_trapprof"},
+#else
+#define L_WFI_TEST_ENT
+#endif
+
+static const struct l_sysent l_tab_core[] = { L_WFI_TEST_ENT {L_SYS_time, l_core_time, "time"}, {L_SYS_gettimeofday, l_core_gettimeofday, "gettimeofday"}, {L_SYS_nanosleep, l_core_nanosleep, "nanosleep"}, {L_SYS_clock_nanosleep, l_core_clock_nanosleep, "clock_nanosleep"}, {L_SYS_getpid, l_core_getpid, "getpid"}, {L_SYS_getppid, l_core_getppid, "getppid"}, {L_SYS_getuid, l_core_getuid, "getuid"}, {L_SYS_getgid, l_core_getuid, "getgid"}, {L_SYS_geteuid, l_core_getuid, "geteuid"}, {L_SYS_getegid, l_core_getuid, "getegid"}, {L_SYS_gettid, l_core_gettid, "gettid"}, {L_SYS_set_tid_address, l_core_set_tid, "set_tid_address"}, {L_SYS_sched_yield, l_core_yield, "sched_yield"},
   L_SYSENT_END
 };
 
@@ -288,7 +485,13 @@ static void l_skw_check(struct process *p, struct trap_frame *tf) {
   if (!rip)
     return;
   struct l_skw_site *slot = 0;
-  for (int i = 0; i < 512; i++) {
+  /* C1-k6 round 2 (docs/cp-k6.md §12): a hashed probe of 8 entries, not a
+     linear search of all 512 on every Linux-ABI syscall (it was the largest
+     fixed cost of a syscall).  A site that finds its 8 entries full is not
+     recorded, as a full table never recorded one. */
+  uint32_t h = (uint32_t)(((rip >> 1) ^ (rip >> 13) ^ ((uint64_t)p->pid * 0x9E3779B1u)) & 511);
+  for (int k = 0; k < 8; k++) {
+    int i = (int)((h + (uint32_t)k) & 511);
     if (l_skw[i].used && l_skw[i].pid == (uint32_t)p->pid &&
         l_skw[i].rip == rip) {
       if (l_skw[i].par != par && l_skw_rows < 12) {
@@ -308,7 +511,9 @@ static void l_skw_check(struct process *p, struct trap_frame *tf) {
         kl_c(&kl, '\n');
         kl_emit(&kl);
       }
-      l_skw[i].par = par;
+      /* C1-k7: a global table: store only on a change (it is almost never) */
+      if (l_skw[i].par != par)
+        l_skw[i].par = par;
       return;
     }
     if (!l_skw[i].used && !slot)
@@ -325,6 +530,20 @@ static void l_skw_check(struct process *p, struct trap_frame *tf) {
 int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr) {
   if (p && nr != L_SYS_rt_sigreturn)
     l_skw_check(p, tf);
+  if (p) {
+    /* C1-thr: a park's signal bookkeeping belongs to ONE syscall.  It used
+       to outlive it: a nanosleep that ended by timeout left sig_park_kind=1
+       and sig_park_nr=35, a later read(2) parked through the native -2
+       restart, and the next SA_RESTART signal "restarted" that read as a
+       nanosleep -- rewinding the already-rewound PC two more bytes into the
+       middle of an instruction (measured: linux_probe_thr L-read, SIGSEGV at
+       a PC on the thread's stack).  Each park sets its own kind. */
+    p->sig_park_kind = 0;
+    p->sig_park_nr = 0;
+    p->sys_entry_pc = tf->elr;
+    p->poll_waiting = 0; /* C1-k4: a poll registration belongs to one syscall */
+    if (!p->ns_rem_pending) p->ns_rem_uptr = 0; /* C1-k6 round 2: one sleep's */
+  }
 #ifdef RW_SC_RING
   /* L85: open a history slot BEFORE the handler runs, so a fault inside the
      handler (or in its copy_to_user/copy_from_user) still names the call and
@@ -344,18 +563,33 @@ int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr)
   }
 #define L_DISPATCH_RET(v)                                                     \
   do {                                                                        \
+    TP_MARK(TP_HANDLER);                                                      \
     if (sh_ix >= 0) {                                                         \
       p->sc_hist[sh_ix].ret = (int64_t)tf->regs[0];                           \
       p->sc_hist[sh_ix].done = 1;                                             \
     }                                                                         \
     /* FAT flushes land here, on the way OUT of a syscall: no filesystem lock */\
     /* is held at this point, so a device write can never run under fat_lock. */\
+    fat16_syscall_exit_check((long)nr);                                       \
     fat16_flush_pending();                                                    \
     return (v);                                                               \
   } while (0)
 #else
-#define L_DISPATCH_RET(v) do { fat16_flush_pending(); return (v); } while (0)
+#define L_DISPATCH_RET(v) do { TP_MARK(TP_HANDLER); fat16_syscall_exit_check((long)nr); fat16_flush_pending(); return (v); } while (0)
 #endif
+  /* C1-k6 round 2 (docs/cp-k6.md §12): the table walk -- three optional
+     decline-capable tables, then the first match in the main tables -- was a
+     linear search of every table on every syscall (all of them, for a
+     number only the native switch handles, like read or write).  The tables
+     are link-time constants, so the walk's result per number is computed
+     once and kept: the same handlers, in the same order. */
+  struct l_dc_ent {
+    uint8_t built;
+    const struct l_sysent *pre[3];
+    const struct l_sysent *fin;
+    const struct l_sysent *fin_tab;
+  };
+  static struct l_dc_ent l_dc[512];
   const struct l_sysent *const tables[] = {
     l_tab_core,
     (const struct l_sysent *)l_tab_fd,
@@ -364,30 +598,59 @@ int linux_compat_dispatch(struct process *p, struct trap_frame *tf, uint64_t nr)
     (const struct l_sysent *)l_tab_misc,
     (const struct l_sysent *)l_tab_thr,
     (const struct l_sysent *)l_tab_tmr,
+    (const struct l_sysent *)l_tab_shm,
+    (const struct l_sysent *)l_tab_cons,
   };
-  for (unsigned t = 0; t < sizeof tables / sizeof tables[0]; t++) {
-    const struct l_sysent *tab = tables[t];
-    if (!tab) continue;
-    for (unsigned i = 0; tab[i].fn; i++) {
-      if ((uint64_t)(int64_t)tab[i].nr == nr) {
-#ifdef RW_TRACE_MEM
-        /* The memory table is traced here, not in each handler: every handler
-           has several exits and a second exit path would drift.  Arguments are
-           read BEFORE the call (the handler writes regs[0]) and the return
-           value is what the handler left in regs[0]. */
-        if (tab == (const struct l_sysent *)l_tab_mem) {
-          uint64_t a0 = l_arg(tf, 0), a1 = l_arg(tf, 1), a2 = l_arg(tf, 2);
-          uint64_t a3 = l_arg(tf, 3), a4 = l_arg(tf, 4), a5 = l_arg(tf, 5);
-          int64_t r = tab[i].fn(p, tf);
-          l_mem_trace(tab[i].name, p, a0, a1, a2, a3, a4, a5,
-                      (int64_t)tf->regs[0]);
-          L_DISPATCH_RET((int)r);
-        }
-#endif
-        int _r = tab[i].fn(p, tf);
-        L_DISPATCH_RET(_r);
-      }
+  struct l_dc_ent dcl;
+  struct l_dc_ent *dc = nr < 512 ? &l_dc[nr] : &dcl;
+  if (nr >= 512 || !__atomic_load_n(&dc->built, __ATOMIC_ACQUIRE)) {
+    struct l_dc_ent e = {0};
+    const struct l_sysent *const pres[3] = {l_tab_tmpfs, l_tab_ext2, l_tab_vfsx};
+    for (int k = 0; k < 3; k++) {
+      if (!pres[k]) continue;
+      for (unsigned i = 0; pres[k][i].fn; i++)
+        if ((uint64_t)(int64_t)pres[k][i].nr == nr) { e.pre[k] = &pres[k][i]; break; }
     }
+    for (unsigned t = 0; t < sizeof tables / sizeof tables[0] && !e.fin; t++) {
+      const struct l_sysent *tab = tables[t];
+      if (!tab) continue;
+      for (unsigned i = 0; tab[i].fn; i++)
+        if ((uint64_t)(int64_t)tab[i].nr == nr) { e.fin = &tab[i]; e.fin_tab = tab; break; }
+    }
+    if (nr < 512) {
+      dc->pre[0] = e.pre[0];
+      dc->pre[1] = e.pre[1];
+      dc->pre[2] = e.pre[2];
+      dc->fin = e.fin;
+      dc->fin_tab = e.fin_tab;
+      __atomic_store_n(&dc->built, 1, __ATOMIC_RELEASE);
+    } else {
+      dcl = e;
+    }
+  }
+  TP_MARK(TP_DISP_PRE);
+  for (int k = 0; k < 3; k++) {
+    if (!dc->pre[k]) continue;
+    int _t = dc->pre[k]->fn(p, tf);
+    if (_t) L_DISPATCH_RET(_t);
+  }
+  if (dc->fin) {
+#ifdef RW_TRACE_MEM
+    /* The memory table is traced here, not in each handler: every handler
+       has several exits and a second exit path would drift.  Arguments are
+       read BEFORE the call (the handler writes regs[0]) and the return
+       value is what the handler left in regs[0]. */
+    if (dc->fin_tab == (const struct l_sysent *)l_tab_mem) {
+      uint64_t a0 = l_arg(tf, 0), a1 = l_arg(tf, 1), a2 = l_arg(tf, 2);
+      uint64_t a3 = l_arg(tf, 3), a4 = l_arg(tf, 4), a5 = l_arg(tf, 5);
+      int64_t r = dc->fin->fn(p, tf);
+      l_mem_trace(dc->fin->name, p, a0, a1, a2, a3, a4, a5,
+                  (int64_t)tf->regs[0]);
+      L_DISPATCH_RET((int)r);
+    }
+#endif
+    int _r = dc->fin->fn(p, tf);
+    L_DISPATCH_RET(_r);
   }
   L_DISPATCH_RET(0);
 #undef L_DISPATCH_RET

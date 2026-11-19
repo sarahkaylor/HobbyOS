@@ -1,0 +1,48 @@
+# H1-hunt round 2: play -> save -> reload -> world, with the H1-12 workaround (strix, integ17 bdf39e33, wine-cp2; tools/cp/hunt/reload2.p9 = CONTINUE from the fresh main menu)
+## h2-play1 (play.p9): saves on its data disk afterwards (tools/cp/p9/saves.sh)
+QuickSave-0      name=QuickSave-0 time=14:15:52, 18.11.2026 playTime=4703.3 pos=(-1451.42, 1214.90, 23.06)
+## h2-rl1 (reload2.p9 on h2-play1's disk)
+[P9W] focus s014-t000152-menu-continue0: no highlighted row
+[P9W] focus s015-t000154-menu-continue1: rows 489..524 centre 506 -> NEW GAME
+[P9W] focus s016-t000156-menu-continue2: rows 451..488 centre 470 -> CONTINUE
+[P9W] +   180.9 s  08:31:52  seek menu-continue: main menu focus on CONTINUE after 2 taps
+[P9W] +   257.9 s  08:33:09  expect loaded: matched /PRESS\b.{0,24}\bTO\s+CONTINUE/ at s032-t000232-loaded
+[P9W] +   273.3 s  08:33:24  expect inworld: matched /RIPPERDOC|Jackie/ at s035-t000247-inworld
+[P9W] +   417.9 s  08:35:49  verdict: script-done; QEMU stopped, slot released; guests on the host now: 0
+== verdict: script-done
+QuickSave-0      name=QuickSave-0 time=14:15:52, 18.11.2026 playTime=4703.3 pos=(-1451.42, 1214.90, 23.06)
+QuickSave-1      name=QuickSave-1 time=14:33:37, 18.11.2026 playTime=4731.1 pos=(-1451.42, 1214.90, 23.06)
+# QuickSave-1 was written by F5 right after the reload, without moving: same playerPosition as h2-play1's QuickSave-0 -> the reload put the player where boot A saved.
+
+## round 2, h2-rl2 (reload2.p9 = CONTINUE from the FRESH main menu, on h2-play2's disk): fails too
+[P9W] focus s014-t000151-menu-continue0: no highlighted row
+[P9W] focus s015-t000153-menu-continue1: rows 489..524 centre 506 -> NEW GAME
+[P9W] focus s016-t000155-menu-continue2: rows 451..555 centre 503 -> NEW GAME
+[P9W] focus s017-t000156-menu-continue3: no highlighted row
+[P9W] focus s018-t000159-menu-continue4: no highlighted row
+[P9W] focus s019-t000160-menu-continue5: no highlighted row
+[P9W] focus s020-t000163-menu-continue6: no highlighted row
+[P9W] +   186.7 s  09:43:38  SEEK FAILED menu-continue: main menu row 'CONTINUE' not focused after 6 x up
+# the reading after the 2nd Up is one 104 px frame (rows 451..555: CONTINUE and NEW GAME together; a normal frame is 35-37 px) -> the highlight was caught moving; focus_in() labels it NEW GAME by its centre, seek taps Up again and the focus overshoots CONTINUE onto the frameless button above it; the further Ups find nothing.
+# round 1 h-rl1b had the same shape (rows 524..578, 54 px, then nothing); h2-rl1 (pass) read a normal 37 px CONTINUE frame. So H1-12's reload failures are a focus read during the highlight's move plus a tap too many, not lost keys.
+# workaround in reload2.p9 (from h2-rl2b on): no seek; two Ups with 1.6 s settle (every fresh menu answered Up -> NEW GAME, Up -> CONTINUE), guarded by the expect on the loading screen.
+
+## h2-rl2b (reload2.p9 with the two settled Ups, same disk as h2-rl2): PASS
+focusprobe s013-t000134-menu-continue-a.png 1280x720: rows 489..524 centre 506 -> NEW GAME
+focusprobe s014-t000138-menu-continue-b.png 1280x720: rows 451..555 centre 503 -> NEW GAME
+[P9W] +   227.0 s  10:08:48  expect loaded: matched /PRESS\b.{0,24}\bTO\s+CONTINUE/ at s029-t000202-loaded
+[P9W] +   234.9 s  10:08:56  expect inworld: matched /RIPPERDOC|Jackie/ at s030-t000210-inworld
+[P9W] +   368.6 s  10:11:09  verdict: script-done; QEMU stopped, slot released; guests on the host now: 1
+== verdict: script-done
+h2-play2: QuickSave-0      name=QuickSave-0 time=15:38:09, 18.11.2026 playTime=4701.3 pos=(-1413.00, 1268.48, 23.07)
+h2-rl2b:  QuickSave-0      name=QuickSave-0 time=15:38:09, 18.11.2026 playTime=4701.3 pos=(-1413.00, 1268.48, 23.07)
+h2-rl2b:  QuickSave-1      name=QuickSave-1 time=16:09:08, 18.11.2026 playTime=4721.5 pos=(-1413.00, 1268.48, 23.07)
+# the 104 px frame is still there 1.6 s after the 2nd Up: it is how the focused CONTINUE row is drawn with this save set (taller, with the save's line under it), not a move. focus_in() labels a frame by its centre (503 -> NEW GAME 506), so seek believes it is still on NEW GAME and taps once more. Enter on it loads the newest save (QuickSave-0); the immediate F5 lands on the same playerPosition.
+
+## offline: boot_p9.focus_in() on these shots, and with a top-anchored label for frames taller than 50 px (label by y0 + 18):
+h2-rl2 s015-t000153-menu-continue1.png (489, 524) now: NEW GAME | top-anchored: NEW GAME
+h2-rl2 s016-t000155-menu-continue2.png (451, 555) now: NEW GAME | top-anchored: CONTINUE
+h2-rl2b s013-t000134-menu-continue-a.png (489, 524) now: NEW GAME | top-anchored: NEW GAME
+h2-rl2b s014-t000138-menu-continue-b.png (451, 555) now: NEW GAME | top-anchored: CONTINUE
+h2-rl1 s015-t000154-menu-continue1.png (489, 524) now: NEW GAME | top-anchored: NEW GAME
+h2-rl1 s016-t000156-menu-continue2.png (451, 488) now: CONTINUE | top-anchored: CONTINUE

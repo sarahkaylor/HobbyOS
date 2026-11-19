@@ -1,0 +1,25 @@
+# tools/cp/audio2/pace-host-test.sh A/B on strix (host only, no boot; LSND_HOST_QEMU=1 model of QEMU 10.2's audio path), 2026-11-18
+# base = src/kernel/linux_snd.c at d4608be1 (integ16 + timing rows) in a scratch copy; lane = a213a9c1
+# an earlier pair (lane = 44b83122): base calm 1 / stall 12 / lowpad 1795 xruns after the first second; lane 0 / 1 / 3
+=== BASE (integ16 + timing rows, d4608be1)
+  calm: [SND] stat t_ms=10015 frames=480480 wall_frames=480265 max100ms=10560 maxgap_us=232548 maxlat_us=247744 maxwr_us=227603 minq=480 dry=+0 xruns=+1
+  calm: [SND] pcm closed: chunks=1856 frames=890880 xruns=1 sync_ptr=12814 writei=1798 status=0 refine=42 parks=26 irqs=0 tx=1856 ctl=5 ctl_timeouts=1
+pace-host-test: calm PASS -- 0 xruns after the first second (1 in all), 0 stalls
+  stall: [SND] stat t_ms=10019 frames=471360 wall_frames=480476 max100ms=10560 maxgap_us=307856 maxlat_us=324203 maxwr_us=312884 minq=0 dry=+28 xruns=+29
+  stall: [SND] pcm closed: chunks=2003 frames=961440 xruns=33 sync_ptr=13200 writei=1822 status=0 refine=42 parks=18 irqs=0 tx=2003 ctl=5 ctl_timeouts=0
+pace-host-test: stall FAIL -- rc=0, 31 xruns after the first second (33 in all), 5 stalls
+  lowpad: [SND] stat t_ms=10016 frames=478560 wall_frames=480322 max100ms=9600 maxgap_us=471688 maxlat_us=469177 maxwr_us=10000 minq=0 dry=+916 xruns=+916
+  lowpad: [SND] pcm closed: chunks=1993 frames=956640 xruns=1870 sync_ptr=30845 writei=2001 status=0 refine=42 parks=10 irqs=0 tx=1993 ctl=5 ctl_timeouts=0
+pace-host-test: lowpad FAIL -- rc=0, 1837 xruns after the first second (1870 in all), 0 stalls
+pace-host-test: FAIL
+=== LANE (a213a9c1)
+  calm: [SND] stat t_ms=10012 frames=480480 wall_frames=480113 max100ms=10560 maxgap_us=220871 maxlat_us=238878 maxwr_us=218741 minq=0 dry=+5 xruns=+1 held=+5 maxahead=1920
+  calm: [SND] pcm closed: chunks=1946 frames=934080 xruns=1 sync_ptr=13212 writei=1889 status=0 refine=42 parks=15 held=6 irqs=0 tx=1946 ctl=5 ctl_timeouts=0
+pace-host-test: calm PASS -- 0 xruns after the first second (1 in all), 0 stalls
+  stall: [SND] stat t_ms=10009 frames=469920 wall_frames=480001 max100ms=10560 maxgap_us=311268 maxlat_us=329178 maxwr_us=313417 minq=0 dry=+3 xruns=+1 held=+4 maxahead=1920
+  stall: [SND] pcm closed: chunks=2003 frames=961440 xruns=1 sync_ptr=13437 writei=1921 status=0 refine=42 parks=26 held=7 irqs=0 tx=2003 ctl=5 ctl_timeouts=0
+pace-host-test: stall PASS -- 0 xruns after the first second (1 in all), 5 stalls
+  lowpad: [SND] stat t_ms=10012 frames=479040 wall_frames=480126 max100ms=9600 maxgap_us=289554 maxlat_us=280425 maxwr_us=37356 minq=0 dry=+957 xruns=+3 held=+45 maxahead=1920
+  lowpad: [SND] pcm closed: chunks=1997 frames=958560 xruns=4 sync_ptr=14055 writei=2001 status=0 refine=42 parks=2 held=79 irqs=0 tx=1997 ctl=5 ctl_timeouts=0
+pace-host-test: lowpad PASS -- 1 xruns after the first second (4 in all), 0 stalls
+pace-host-test: PASS

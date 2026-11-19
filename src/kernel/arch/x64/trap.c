@@ -1,3 +1,4 @@
+#include "wd_silence.h"
 #include "trap.h"
 #include "kline.h"
 #include "fs.h"
@@ -43,6 +44,10 @@
 #include "rw_watch.h"
 #include "blk_cache.h"
 #include "fb_mmap.h"
+#include "kmem.h"
+#include "pipe.h" /* C1-k4: struct pipe_seg for writev on a pipe */
+#include "trapprof.h" /* C1-k7: per-segment syscall cycles (test kernels) */
+#include "vm_pfstat.h" /* H7-fault: [PFI] trap time from user mode */
 #include <stdint.h>
 
 extern void uart_puts(const char *s);
@@ -90,6 +95,9 @@ static int copy_user_path(const char *user, char *kbuf, int cap);
    gs: offsets are pinned by the typedefs below). */
 
 struct cpu_local cpu_locals[MAX_CPUS];
+/* cp P1: the byte span of cpu_locals[], read by trap_gs_fixup (asm cannot see
+   sizeof) and by process_set_user_gs(). */
+const uint64_t cpu_locals_span = sizeof(cpu_locals);
 
 void save_user_sp_helper(void) {
   uint32_t cpu = get_cpuid();
@@ -149,7 +157,10 @@ void trap_exit_frame_check(uint64_t *frame) {
     if (rip >= 0x1000u)
       return;
   } else {
-    implausible = (rip < 0x1000u) || (rip >= 0x70000000u && rip < USER_VA_BASE);
+    /* cp/wine2: the compat layout (F1) maps user code anywhere from 0x10000
+       up except the kernel-image hole -- Wine's PE images sit at 0x140000000,
+       below USER_VA_BASE -- so only the hole is implausible for a user RIP. */
+    implausible = (rip < 0x1000u) || (rip >= KIMG_BASE && rip < CP_KHOLE_HI);
     if (!implausible)
       return;
   }
@@ -173,6 +184,8 @@ void trap_exit_frame_check(uint64_t *frame) {
    per-trap log -- a diagnostic that reports on every trap exit would be a
    per-trap cost and a per-trap flood). */
 volatile uint64_t trap_exit_bad_rip_seen;
+/* C1-k7: the hole bounds the inline exit check compares against (asm). */
+const uint64_t trap_khole_lo = KIMG_BASE, trap_khole_hi = CP_KHOLE_HI;
 
 void restore_user_sp_helper(void) {
   uint32_t cpu = get_cpuid();
@@ -323,7 +336,21 @@ static void compat_open(struct trap_frame *tf) {
     return;
   }
   const char *staged = compat_soname_staged(kpath);
-  int fd = file_open(caller, staged ? staged : kpath, flags);
+  /* cp/exec: open(2) with O_CLOEXEC must arm FD_CLOEXEC, exactly as the openat
+     row does (l_fd_openat).  Without this a Linux program that opens through
+     open(2) kept its close-on-exec fds open across execve (the CLOEXEC probe
+     row).  Strip the flag (it is not an open mode) and set the bit after. */
+  /* cp/wine2: the real path first; the SONAME translation only when it does
+     not open.  Wine's static preloader open(2)s "/lib64/ld-linux-x86-64.so.2"
+     by its full path, and translating that to a cwd-relative "LD64.SO" made
+     it ENOENT although the file is staged at exactly that path. */
+  int fd = file_open(caller, kpath, flags & ~02000000 /* O_CLOEXEC */);
+  if (fd < 0 && staged)
+    fd = file_open(caller, staged, flags & ~02000000);
+  else
+    staged = 0; /* no row: the real path did the work */
+  if (fd >= 0 && (flags & 02000000))
+    (void)file_fcntl(caller, fd, K_F_SETFD, K_FD_CLOEXEC);
   if (staged) {
     /* One record: the guest's SONAME, the file it resolved to, and the fd —
        the evidence the open path (not a staged rename) did the work. */
@@ -1053,6 +1080,11 @@ static void sys_gettime(struct trap_frame *tf) {
     tf->regs[0] = -EFAULT;
     return;
   }
+  /* C1-k6: the alarm clocks and TAI read as their base clocks (no suspend,
+     TAI offset 0 -- Linux's default until adjtimex sets one); they are the
+     clocks clock_nanosleep now sleeps on. */
+  if (clk == 8 || clk == 11) clk = 0;      /* REALTIME_ALARM, TAI */
+  else if (clk == 9) clk = 7;              /* BOOTTIME_ALARM */
   if (clk == 0) {               /* CLOCK_REALTIME */
     ms = hb_clock_realtime_ms();
   } else if (clk == 1) {        /* CLOCK_MONOTONIC */
@@ -1069,10 +1101,61 @@ static void sys_gettime(struct trap_frame *tf) {
     ms = timer_get_ms();
   } else if (clk == 5) {        /* CLOCK_REALTIME_COARSE */
     ms = hb_clock_realtime_ms();
+  } else if (clk == 2 || clk == 3 || clk < 0) {
+    /* H7-fault round 3: PROCESS_CPUTIME_ID (2), THREAD_CPUTIME_ID (3) and
+       the dynamic CPU clocks (~id << 3 | type, bit 2 per-thread; type 3 is
+       invalid) of this group or this thread: the rusage totals schedule()
+       keeps (user + system), with the running slice.  They used to be
+       -EINVAL, and a caller that did not check read its own stack
+       (linux_probe_cpus: "65 s" over 2 s of 8 threads, a thread "0"). */
+    struct process *cp = current_process();
+    struct process *g = cp ? process_group(cp) : 0;
+    int thread = clk == 3;
+    if (clk < 0) {
+      int type = clk & 7, id = ~(clk >> 3);
+      thread = (type & 4) != 0;
+      if ((type & 3) == 3 || !cp || (thread ? (id != 0 && id != cp->pid)
+                                            : (id != 0 && (!g || id != g->pid)))) {
+        tf->regs[0] = -EINVAL;
+        return;
+      }
+    }
+    if (!cp) {
+      tf->regs[0] = -EINVAL;
+      return;
+    }
+    struct ho_rusage ru;
+    process_rusage(cp, thread ? 1 : 0, &ru);
+    uint64_t us = (uint64_t)(ru.ru_utime_sec + ru.ru_stime_sec) * 1000000ULL +
+                  (uint64_t)(ru.ru_utime_usec + ru.ru_stime_usec);
+    *sec = (int64_t)(us / 1000000);
+    *nsec = (int64_t)((us % 1000000) * 1000);
+    tf->regs[0] = 0;
+    return;
   } else {
-    /* 2/3 are PROCESS/THREAD_CPUTIME: answering them with wall time would be
-       a lie, and nothing in the target set uses them. */
     tf->regs[0] = -EINVAL;
+    return;
+  }
+  if (clk == 0 || clk == 5) {
+    /* C1-k6: CLOCK_REALTIME at microsecond resolution too (Wine's
+       NtQuerySystemTime, which paces NtDelayExecution's select loop). */
+    extern uint64_t hb_clock_realtime_us(void);
+    uint64_t us = hb_clock_realtime_us();
+    *sec = (int64_t)(us / 1000000);
+    *nsec = (int64_t)((us % 1000000) * 1000);
+    tf->regs[0] = 0;
+    return;
+  }
+  if (clk == 1 || clk == 4 || clk == 6 || clk == 7) {
+    /* P8 stop 11 (C6-venus): the monotonic clocks at microsecond resolution
+     * (the TSC timer_get_ms() already floors), not whole milliseconds -- a
+     * Windows game's QueryPerformanceCounter is this clock under Wine, and a
+     * 1 ms QPC makes every interval below 1 ms read as zero. */
+    extern uint64_t timer_get_us(void);
+    uint64_t us = timer_get_us();
+    *sec = (int64_t)(us / 1000000);
+    *nsec = (int64_t)((us % 1000000) * 1000);
+    tf->regs[0] = 0;
     return;
   }
   *sec = (int64_t)(ms / 1000);
@@ -1139,7 +1222,9 @@ static void sys_write(struct trap_frame *tf) {
          rich negative errno (e.g. -EPIPE from a closed pipe peer) passes
          through; only the legacy -1 keeps the historical EBADF mapping
          for the older backends.  -2 is the restart marker handled above. */
-      tf->regs[0] = (ret == -1) ? (uint64_t)-EBADF : (uint64_t)(int64_t)ret;
+      /* H4-kglitch K8: a memfd/tmpfs write's -1 is a real EPERM (a seal) */
+      tf->regs[0] = (ret == -1) ? (uint64_t)-(int64_t)file_fail_errno(caller, fd)
+                                : (uint64_t)(int64_t)ret;
     } else {
       tf->regs[0] = ret;
     }
@@ -1165,6 +1250,45 @@ static void compat_writev(struct trap_frame *tf) {
   if (cnt < 0 || cnt > 1024) { tf->regs[0] = (uint64_t)(int64_t)-EINVAL; return; }
   if (cnt == 0) { tf->regs[0] = 0; return; }
   if (!sys_user_range_ok(iov, (uint64_t)cnt * 16)) { tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return; }
+  /* C1-k4: a pipe gets the whole gather as ONE write (Linux pipe_write: a
+     <= PIPE_BUF writev is atomic and a blocking one completes in full).  The
+     per-segment loop below wrote wineserver's 64-byte reply header and its
+     data as two writes, and a park in the second segment returned a short
+     count with the thread still marked BLOCKED. */
+  {
+    extern int file_fd_pipe_wend(struct process *, int);
+    extern int file_writev_pipe(struct process *, int, const struct pipe_seg *,
+                                int, uint64_t, struct trap_frame *);
+    if (cnt <= 64 && file_fd_pipe_wend(c, fd)) {
+      struct pipe_seg sg[64];
+      int ns = 0;
+      uint64_t sum = 0;
+      for (long i = 0; i < cnt; i++) {
+        uint64_t base = 0, len = 0;
+        if (vm_user_read(c, iov + (uint64_t)i * 16, &base, 8) != 0 ||
+            vm_user_read(c, iov + (uint64_t)i * 16 + 8, &len, 8) != 0) {
+          tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return;
+        }
+        if (len == 0) continue;
+        if (len > COMPAT_MAX_RW_COUNT - sum) len = COMPAT_MAX_RW_COUNT - sum;
+        if (!sys_user_range(base, len, 0)) { tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return; }
+        sg[ns].base = (const uint8_t *)(uintptr_t)base;
+        sg[ns].len = (uint32_t)len;
+        ns++;
+        sum += len;
+        if (sum >= COMPAT_MAX_RW_COUNT) break;
+      }
+      int r = file_writev_pipe(c, fd, sg, ns, iov, tf);
+      if (r == -2) {
+        if ((tf->cs & 3) == 3) tf->elr -= 2;
+        save_context(c, tf);
+        schedule(tf, 0);
+        return;
+      }
+      tf->regs[0] = (uint64_t)(int64_t)r;
+      return;
+    }
+  }
   int64_t total = 0;
   for (long i = 0; i < cnt; i++) {
     uint64_t base = 0, len = 0;
@@ -1174,18 +1298,26 @@ static void compat_writev(struct trap_frame *tf) {
     }
     if (len == 0) continue;
     if (len > COMPAT_MAX_RW_COUNT) len = COMPAT_MAX_RW_COUNT; /* clamp one write() */
+    /* P1: validate (and demand-fill, file-backed pages included) the segment
+       before file_write copies from it in kernel mode (C4-x noprefault hang). */
+    if (!sys_user_range(base, len, 0)) { tf->regs[0] = (uint64_t)(int64_t)(total > 0 ? total : -EFAULT); return; }
     int r = file_write(c, fd, (const void *)(uintptr_t)base, (int)len, tf);
     if (r == -2) {
       /* A parked write (full pipe / unix socket).  Mirror sys_write: rewind the
          2-byte `syscall` and re-schedule so the write RESTARTS on wake; the parked
          segment resumes as if nothing was written.  A subsequent iovec segment that
          already advanced total is a short write, not a park — see below. */
-      if (total > 0) { tf->regs[0] = (uint64_t)total; return; }
+      if (total > 0) {
+        process_cancel_park(c); /* C1-k4: a short write, not a park */
+        tf->regs[0] = (uint64_t)total;
+        return;
+      }
       if ((tf->cs & 3) == 3) tf->elr -= 2;
       save_context(c, tf);
       schedule(tf, 0);
       return;
     }
+    if (r == -1) r = -file_fail_errno(c, fd); /* H4-kglitch K9: not -EPERM for a closed fd */
     if (r < 0) { tf->regs[0] = (uint64_t)(int64_t)r; return; }
     total += r;
     /* Short write: Linux stops here and returns the partial total, NOT the next
@@ -1217,15 +1349,22 @@ static void compat_readv(struct trap_frame *tf) {
     }
     if (len == 0) continue;
     if (len > COMPAT_MAX_RW_COUNT) len = COMPAT_MAX_RW_COUNT;
-    if (!sys_user_range_ok(base, len)) { tf->regs[0] = (uint64_t)(int64_t)-EFAULT; return; }
+    /* P1: write=1 -- the kernel stores into it, so a MAP_PRIVATE file page
+       must be copied-on-write here, not materialised read-only. */
+    if (!sys_user_range(base, len, 1)) { tf->regs[0] = (uint64_t)(int64_t)(total > 0 ? total : -EFAULT); return; }
     int r = file_read(c, fd, (void *)(uintptr_t)base, (int)len, tf);
     if (r == -2) {
-      if (total > 0) { tf->regs[0] = (uint64_t)total; return; }
+      if (total > 0) {
+        process_cancel_park(c); /* C1-k4: a short read, not a park */
+        tf->regs[0] = (uint64_t)total;
+        return;
+      }
       if ((tf->cs & 3) == 3) tf->elr -= 2;
       save_context(c, tf);
       schedule(tf, 0);
       return;
     }
+    if (r == -1) r = -EBADF; /* H4-kglitch K9: fs.c's generic -1, as read(2) maps it */
     if (r < 0) { tf->regs[0] = (uint64_t)(int64_t)(total > 0 ? total : r); return; }
     total += r;
     if ((uint64_t)r < len) { tf->regs[0] = (uint64_t)total; return; }
@@ -1263,7 +1402,7 @@ static void sys_spawn_worker(void *arg) {
     if (caller->state == PROC_STATE_WAIT_SPAWN) {
       caller->spawn_retval = child_pid;
       caller->context[0] = child_pid; // return value in rax / x0
-      caller->state = PROC_STATE_READY;
+      proc_mark_ready(caller);
     }
     spinlock_release_irqrestore(&proc_lock, flags);
   }
@@ -1379,7 +1518,7 @@ static void sys_spawn(struct trap_frame *tf) {
       flags = spinlock_acquire_irqsave(&proc_lock);
       caller->spawn_retval = -1;
       caller->context[0] = (uint64_t)-1;
-      caller->state = PROC_STATE_READY;
+      proc_mark_ready(caller);
       spinlock_release_irqrestore(&proc_lock, flags);
       tf->regs[0] = (uint64_t)-1;
     }
@@ -1411,7 +1550,7 @@ static void sys_spawn_ex_worker(void *arg) {
     if (caller->state == PROC_STATE_WAIT_SPAWN) {
       caller->spawn_retval = r;
       caller->context[0] = (uint64_t)(int64_t)r; /* return value in rax */
-      caller->state = PROC_STATE_READY;
+      proc_mark_ready(caller);
     }
     spinlock_release_irqrestore(&proc_lock, flags);
   }
@@ -1473,10 +1612,15 @@ static void sys_spawn_ex(struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
     return;
   }
-  if (process_read_envp(caller, (const char *const *)envp, ex->env,
-                        (int)sizeof ex->env, &ex->envc) != 0) {
-    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
-    return;
+  {
+    /* C1-k5: an env larger than the 2048-byte blob is -E2BIG, not a silent
+       truncation (C8-game stop 1). */
+    int er = process_read_envp(caller, (const char *const *)envp, ex->env,
+                               (int)sizeof ex->env, &ex->envc);
+    if (er != 0) {
+      tf->regs[0] = (uint64_t)(int64_t)(er == -2 ? -E2BIG : -EFAULT);
+      return;
+    }
   }
   for (int k = 0; k < n; k++) {
     /* L73: read the pair through the safe accessor, not by dereferencing the
@@ -1536,7 +1680,7 @@ static void sys_spawn_ex(struct trap_frame *tf) {
     flags = spinlock_acquire_irqsave(&proc_lock);
     caller->spawn_retval = -EAGAIN;
     caller->context[0] = (uint64_t)(int64_t)-EAGAIN;
-    caller->state = PROC_STATE_READY;
+    proc_mark_ready(caller);
     spinlock_release_irqrestore(&proc_lock, flags);
     tf->regs[0] = (uint64_t)(int64_t)-EAGAIN;
   }
@@ -1580,7 +1724,7 @@ extern int virtio_gpu_flush_args_ok(const struct virtio_gpu_xrect *rects,
                                     int count); /* SEC-7 */
 
 static void sys_map_fb(struct trap_frame *tf) {
-  uint64_t phys_addr = (uint64_t)virtio_gpu_get_framebuffer();
+  uint64_t phys_addr = kimg_pa(virtio_gpu_get_framebuffer());
   {
     /* icewm.md §9: an attached process maps its private surface. */
     int vd = vdisp_attached(current_process());
@@ -1628,7 +1772,7 @@ static void sys_map_fb(struct trap_frame *tf) {
 void sys_fb_ioctl(struct trap_frame *tf) {
   unsigned long req = (unsigned long)tf->regs[5];     /* rdi */
   void *arg = (void *)tf->regs[4];                    /* rsi */
-  uint64_t smem_start = (uint64_t)virtio_gpu_get_framebuffer();
+  uint64_t smem_start = kimg_pa(virtio_gpu_get_framebuffer());
 
   size_t sz = hb_fb_ioctl_arg_size(req);
   if (sz == (size_t)-1) {
@@ -2162,9 +2306,13 @@ static void compat_newfstatat(struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)(int64_t)(-EBADF);
     return;
   }
+  uint64_t s5 = tf->regs[5], s4 = tf->regs[4];
   tf->regs[5] = (uint64_t)(uintptr_t)path;
   tf->regs[4] = (uint64_t)(uintptr_t)out;
   compat_stat_path(tf);
+  /* cp/wine2: put the caller's rdi/rsi back -- Linux preserves them */
+  tf->regs[5] = s5;
+  tf->regs[4] = s4;
 }
 
 /* GB-165: openat(dirfd, path, flags, mode).  The clang/musl-target build of
@@ -2180,9 +2328,13 @@ static void compat_openat(struct trap_frame *tf) {
     tf->regs[0] = (uint64_t)(int64_t)(-EBADF);
     return;
   }
+  uint64_t s5 = tf->regs[5], s4 = tf->regs[4];
   tf->regs[5] = (uint64_t)(uintptr_t)path;
   tf->regs[4] = (uint64_t)(uintptr_t)(int64_t)flags;
   compat_open(tf);
+  /* cp/wine2: put the caller's rdi/rsi back -- Linux preserves them */
+  tf->regs[5] = s5;
+  tf->regs[4] = s4;
 }
 
 static void sys_chdir(struct trap_frame *tf) {
@@ -2404,13 +2556,23 @@ static void sys_exec(struct trap_frame *tf) {
 
   /* P5 (D3.1/D3.5): marshal envp (rdx, regs[3]) into the kernel env blob; a
      bad pointer anywhere is -EFAULT (argv keeps its truncating behavior). */
-  char envbuf[HO_ENV_LEN];
-  for (int i = 0; i < HO_ENV_LEN; i++)
-    envbuf[i] = 0;
+  /* C1-k5: HO_ENV_LEN is 2048 now, and this frame already holds three
+     HO_EXEC_ARGV_LEN (4 KiB) buffers, so the env blob lives in one frame
+     instead of the 64 KiB kernel stack (process_exec_current copies it into
+     the PCB before returning).  An env larger than the blob is -E2BIG
+     (process_read_envp -2), not a silent truncation. */
+  uint64_t env_pa = frame_alloc_zeroed();
+  if (!env_pa) {
+    tf->regs[0] = (uint64_t)(int64_t)-ENOMEM;
+    return;
+  }
+  char *envbuf = (char *)phys_to_virt(env_pa);
   int envc = 0;
-  if (process_read_envp(cur, (const char *const *)tf->regs[3], envbuf,
-                        HO_ENV_LEN, &envc) != 0) {
-    tf->regs[0] = (uint64_t)(int64_t)-EFAULT;
+  int er = process_read_envp(cur, (const char *const *)tf->regs[3], envbuf,
+                             HO_ENV_LEN, &envc);
+  if (er != 0) {
+    frame_free(env_pa);
+    tf->regs[0] = (uint64_t)(int64_t)(er == -2 ? -E2BIG : -EFAULT);
     return;
   }
 
@@ -2418,6 +2580,7 @@ static void sys_exec(struct trap_frame *tf) {
      the exec return); the argv/env blobs were installed kernel-side. */
   int r = process_exec_current(tf, pathbuf, argbuf, namebuf, envbuf, envc,
                                argvblob, argvc);
+  frame_free(env_pa);
   if (r < 0)
     tf->regs[0] = (uint64_t)r;  /* success redirects elr + sets regs[0]=0 */
 }
@@ -2638,7 +2801,13 @@ static void compat_mkdirat(struct trap_frame *tf) {
 
 /* Last syscall each core entered; 0 = not in a syscall.  A core wedged
    inside a syscall leaves this set, which the stall watchdog prints. */
-static volatile int core_in_syscall[MAX_CPUS];
+/* C1-k7: one line per CPU (written on every syscall); cleared when the
+   syscall returns by either dispatch path (the table path used to leave the
+   number behind). */
+static struct { volatile int v; } __attribute__((aligned(64))) core_in_syscall_pc[MAX_CPUS];
+/* C6-present: [THRW] (process.c) tells a running thread's kernel time in a
+ * syscall from a fault or an interrupt by its CPU's entry here. */
+int cp_core_in_syscall(uint32_t cpu) { return cpu < MAX_CPUS ? core_in_syscall_pc[cpu].v : 0; }
 
 /* L73: name the kernel path that dereferenced a user VA.
  *
@@ -2813,6 +2982,7 @@ static void kpf_user_report(struct trap_frame *tf, struct process *p,
 }
 
 void sync_lower_handler_c(struct trap_frame *tf) {
+  TP_MARK(TP_INNER_ROUTE);
   /* GB-014: latch the user PC on every trap from user mode so the exit report
      can name where a program actually got to. A silently-stopping program
      otherwise reports its entry point as its last PC, because the PCB context
@@ -2875,13 +3045,20 @@ void sync_lower_handler_c(struct trap_frame *tf) {
      Writes only; process.c owns the array. */
   extern volatile uint64_t cpu_heartbeat_ms[];
   extern uint64_t timer_get_ms(void);
-  cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
+  {
+    /* C1-k7: store only when the millisecond moved (a shared line). */
+    uint32_t hc = get_cpuid();
+    uint64_t hn = timer_get_ms();
+    if (hc < MAX_CPUS && cpu_heartbeat_ms[hc] != hn)
+      cpu_heartbeat_ms[hc] = hn;
+  }
 
   uint64_t syscall_num = tf->regs[0]; // rax
-  core_in_syscall[get_cpuid()] = (int)syscall_num;
+  core_in_syscall_pc[get_cpuid()].v = (int)syscall_num;
   {
     struct process *sc = current_process();
     if (sc) {
+      sc->in_sys = 1; /* C1-k7: cleared at the trap exit / ru_resume_user */
       sc->last_syscall = (int64_t)syscall_num;
       /* L73: the whole entry tuple, so a fault INSIDE this syscall can name
          the call and its arguments instead of guessing from a clobbered
@@ -2925,7 +3102,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
          with LINUX semantics and writes tf->regs[0] itself.  The switch below
          is the older number-translation path and stays as the fallback; a
          handler that returns 0 means "not mine", not "fail". */
-      if (linux_compat_dispatch(lp, tf, syscall_num)) {
+      TP_MARK(TP_SYS_PRE);
+      int disp_hit = linux_compat_dispatch(lp, tf, syscall_num);
+      TP_MARK(TP_DISP_POST);
+      if (disp_hit) {
         /* Linux delivers a signal raised BY a syscall at syscall exit, so the
            frame the handler sees carries the syscall's return value in rax.
            Returning straight to user mode skipped the leader's return-to-user
@@ -2934,6 +3114,8 @@ void sync_lower_handler_c(struct trap_frame *tf) {
            measured by the proc lane as handler entry up to one tick late.  The
            hook is a no-op unless a deliverable handler signal is pending. */
         process_signal_trap_exit(tf);
+        core_in_syscall_pc[get_cpuid()].v = 0;
+        TP_MARK(TP_SIG_EXIT);
         return;
       }
       switch (syscall_num) {
@@ -3155,6 +3337,18 @@ void sync_lower_handler_c(struct trap_frame *tf) {
           return;
         }
         default:
+#ifdef KERNEL_MODE_TEST
+          /* C6-p7b: LX_HB_TEST_KSTACK ('KST'), test kernels only -- the kstack
+             probe's handle on the kernel-task stack stress (process.c,
+             kstack_stress_op).  rdi = op, rsi/rdx = its arguments.  Release
+             kernels answer -ENOSYS like any other unknown number. */
+          if (syscall_num == 0x4B5354u) {
+            extern int64_t kstack_stress_op(int op, int64_t a, int64_t b);
+            tf->regs[0] = (uint64_t)kstack_stress_op((int)tf->regs[5], (int64_t)tf->regs[4],
+                                                     (int64_t)tf->regs[3]);
+            return;
+          }
+#endif
           /* Nothing owns this number: name it on the console once, then answer
              -ENOSYS as Linux does.  Bring-up of a real Linux program is this
              line plus the next handler, never a guess. */
@@ -3367,6 +3561,10 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     sys_shutdown(tf);
   } else if (syscall_num == SYS_VDISPLAY) {
     sys_vdisplay(tf);
+  } else if (syscall_num == SYS_SHM) { /* cp/x3: linux_compat_shm.c */
+    extern int64_t hb_shm_native(struct process *, int, uint64_t, uint64_t, uint64_t);
+    tf->regs[0] = (uint64_t)hb_shm_native(current_process(), (int)tf->regs[5],
+                                          tf->regs[4], tf->regs[3], tf->regs[9]);
   } else {
     uart_puts("Unknown System Call Invoked!\n");
     tf->regs[0] = -ENOSYS;
@@ -3376,7 +3574,7 @@ void sync_lower_handler_c(struct trap_frame *tf) {
     if (sc)
       sc->last_ret = (int64_t)tf->regs[0];
   }
-  core_in_syscall[get_cpuid()] = 0;
+  core_in_syscall_pc[get_cpuid()].v = 0;
 }
 
 static void safe_print_int(int val) {
@@ -3414,22 +3612,25 @@ static void safe_print_hex(uint64_t val) {
 #define WATCHDOG_SILENCE_MS 20000
 #define WATCHDOG_COOLDOWN_MS 30000
 
-static volatile uint64_t wd_last_seen_ms[MAX_CPUS];
-static volatile uint64_t wd_last_seen_rip[MAX_CPUS];
-static volatile uint64_t wd_last_seen_rflags[MAX_CPUS];
-static volatile uint64_t wd_last_vector[MAX_CPUS];
-static volatile uint64_t wd_last_err[MAX_CPUS];
-static volatile uint64_t wd_last_cr2[MAX_CPUS];
-static volatile int wd_last_seen_pid[MAX_CPUS];
+/* C1-k7 (docs/cp-k7.md §3): every trap writes these, so each CPU's record
+   is its own cache lines.  They were ten [MAX_CPUS] arrays, i.e. ten lines
+   that all eight CPUs wrote on every syscall and interrupt: each write
+   pulled the line from the CPU that wrote it last. */
+struct wd_cpu {
+  volatile uint64_t seen_ms, seen_rip, rflags, vector, err, cr2, tfp, ticks;
+  volatile int pid;
+  struct trap_frame frame; /* the full last frame (see wd_dump) */
+} __attribute__((aligned(64)));
+static struct wd_cpu wd_pc[MAX_CPUS];
 
 /* GB-229: the owner CPU's last-seen context, read by the scheduler's
    [LOCKDIAG]/[PROCLOCK-HOLD] rows so "the owner is idle/user" is printed from
    the watchdog record rather than inferred from a missing pid. */
 uint64_t watchdog_cpu_rip(uint32_t cpu) {
-  return cpu < MAX_CPUS ? wd_last_seen_rip[cpu] : 0;
+  return cpu < MAX_CPUS ? wd_pc[cpu].seen_rip : 0;
 }
 int watchdog_cpu_pid(uint32_t cpu) {
-  return cpu < MAX_CPUS ? wd_last_seen_pid[cpu] : -1;
+  return cpu < MAX_CPUS ? wd_pc[cpu].pid : -1;
 }
 static volatile uint64_t wd_next_report_ms = 0;
 /* L41: served by the scheduler's idle loop (process.c), which can take
@@ -3442,9 +3643,8 @@ volatile int wd_dump_request = 0;
    interrupted RIP.  Key offsets (see save_context / the asm wrapper): the
    frame mirrors the push order of the interrupt wrapper — for x64 the
    generic layout is signed-off in trap.S; we record the whole struct. */
-static struct trap_frame wd_last_frame[MAX_CPUS];
-static volatile uint64_t wd_last_tfp[MAX_CPUS]; /* stack addr of that frame */
-static volatile uint64_t wd_ticks[MAX_CPUS];     /* interrupt count per core */
+/* (wd_pc[c].frame / .tfp: stack addr of that frame / .ticks: interrupt
+   count per core) */
 
 /* Is `top` a plausible kernel-stack address for the watchdog's caller-chain
    scans?  Cores that never powered on leave cpu_locals[c].kernel_stack == 0
@@ -3504,23 +3704,23 @@ void watchdog_stack_arena(uint64_t *lo, uint64_t *hi) {
 int kpml_present(uint64_t va) {
   uint64_t cr3;
   __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
-  uint64_t *pml4 = (uint64_t *)(cr3 & ~0xFFFULL);
+  uint64_t *pml4 = (uint64_t *)phys_to_virt(cr3 & ~0xFFFULL);
   uint64_t e = pml4[(va >> 39) & 511];
   if (!(e & 1))
     return 0;
-  uint64_t *pdpt = (uint64_t *)(e & ~0xFFFULL);
+  uint64_t *pdpt = (uint64_t *)phys_to_virt(e & 0x000FFFFFFFFFF000ULL);
   e = pdpt[(va >> 30) & 511];
   if (!(e & 1))
     return 0;
   if (e & (1ULL << 7))
     return 1; /* 1 GiB page */
-  uint64_t *pd = (uint64_t *)(e & ~0xFFFULL);
+  uint64_t *pd = (uint64_t *)phys_to_virt(e & 0x000FFFFFFFFFF000ULL);
   e = pd[(va >> 21) & 511];
   if (!(e & 1))
     return 0;
   if (e & (1ULL << 7))
     return 1; /* 2 MiB page */
-  uint64_t *pt = (uint64_t *)(e & ~0xFFFULL);
+  uint64_t *pt = (uint64_t *)phys_to_virt(e & 0x000FFFFFFFFFF000ULL);
   e = pt[(va >> 12) & 511];
   return (e & 1) ? 1 : 0;
 }
@@ -3543,33 +3743,36 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
      running CPU passes through here on every timer interrupt, so a stale
      heartbeat means the CPU is either dead (triple-fault reset) or frozen
      in an IRQ-off spin for the grace period — both count as 'dead' for
-     reclaiming the RUNNING process it owns. */
-  cpu_heartbeat_ms[cpu] = now;
+     reclaiming the RUNNING process it owns.
+     C1-k7: one array line for all CPUs, so write it only when the
+     millisecond moved (a trap-rate store pulled the line every trap). */
+  if (cpu_heartbeat_ms[cpu] != now)
+    cpu_heartbeat_ms[cpu] = now;
 
-  wd_last_seen_ms[cpu] = now;
-  wd_last_seen_rip[cpu] = tf->elr;
+  wd_pc[cpu].seen_ms = now;
+  wd_pc[cpu].seen_rip = tf->elr;
   /* GB-057: RFLAGS at the last tick.  A core that stops taking timer interrupts
      while sitting in kernel asm cannot be diagnosed from RIP alone: if IF is
      clear here, the timer could not have preempted it and 'stuck in the frame
      copy' is a scheduling/masking defect, not a memory one.  Measured (intel,
      parked cores) the only way to tell the two apart without a monitor. */
-  wd_last_seen_rflags[cpu] = tf->spsr;
+  wd_pc[cpu].rflags = tf->spsr;
   /* GB-057: the fault that put this core where it is.  A parked core whose
      RFLAGS carries RF (0x10000) is being RE-RUN after a fault, and RIP alone
      cannot say which fault: measured rflags=0x10046 on three parked cores with
      IF clear, i.e. a retry loop with interrupts masked.  Vector/error/CR2 name
      the class without another hypothesis. */
-  wd_last_vector[cpu] = tf->vector;
-  wd_last_err[cpu] = tf->error_code;
+  wd_pc[cpu].vector = tf->vector;
+  wd_pc[cpu].err = tf->error_code;
   if (tf->vector == 14) {
     uint64_t cr2v;
     __asm__ volatile("mov %%cr2, %0" : "=r"(cr2v));
-    wd_last_cr2[cpu] = cr2v;
+    wd_pc[cpu].cr2 = cr2v;
   }
-  wd_last_seen_pid[cpu] = cur ? cur->pid : -1;
-  wd_last_frame[cpu] = *tf;
-  wd_last_tfp[cpu] = (uint64_t)tf;
-  wd_ticks[cpu]++;
+  wd_pc[cpu].pid = cur ? cur->pid : -1;
+  wd_pc[cpu].frame = *tf;
+  wd_pc[cpu].tfp = (uint64_t)tf;
+  wd_pc[cpu].ticks++;
 
   if (now < wd_next_report_ms) {
     return;
@@ -3593,7 +3796,10 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
       wd_puts("\n");
     }
   }
-  if (now - uart_last_activity_ms < WATCHDOG_SILENCE_MS) {
+  /* H4-kglitch (cp-hunt H1-14): a stamp after `now` (this tick's own
+     [NFSIO] row above, or another CPU) is not silence; the unsigned
+     difference wrapped (src/include/wd_silence.h, wd_silence_test). */
+  if (!wd_console_silent(now, uart_last_activity_ms, WATCHDOG_SILENCE_MS)) {
     return;
   }
   wd_next_report_ms = now + WATCHDOG_COOLDOWN_MS;
@@ -3613,21 +3819,21 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
     wd_puts("  CPU");
     wd_int((int)c);
     wd_puts(" rip=");
-    wd_hex(wd_last_seen_rip[c]);
+    wd_hex(wd_pc[c].seen_rip);
     wd_puts(" rflags=");
-    wd_hex(wd_last_seen_rflags[c]);
-    if (wd_last_seen_pid[c] >= 0 && wd_last_vector[c] != 0) {
+    wd_hex(wd_pc[c].rflags);
+    if (wd_pc[c].pid >= 0 && wd_pc[c].vector != 0) {
       wd_puts(" vec=");
-      wd_int((int)wd_last_vector[c]);
+      wd_int((int)wd_pc[c].vector);
       wd_puts(" err=");
-      wd_hex(wd_last_err[c]);
-      if (wd_last_cr2[c]) {
+      wd_hex(wd_pc[c].err);
+      if (wd_pc[c].cr2) {
         wd_puts(" cr2=");
-        wd_hex(wd_last_cr2[c]);
+        wd_hex(wd_pc[c].cr2);
       }
     }
     wd_puts(" pid=");
-    wd_int(wd_last_seen_pid[c]);
+    wd_int(wd_pc[c].pid);
     /* GB-057: the resume mark the CPU itself wrote immediately before
        enter_user_space.  If this names a different pid than the watchdog's
        `pid=`, the RIP above is a stale trap frame and every "parked in the
@@ -3639,10 +3845,10 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
       wd_hex(resume_mark_sp[c]);
     }
     wd_puts(" age_ms=");
-    wd_int((int)(now - wd_last_seen_ms[c]));
-    if (core_in_syscall[c] != 0) {
+    wd_int((int)(now - wd_pc[c].seen_ms));
+    if (core_in_syscall_pc[c].v != 0) {
       wd_puts(" syscall=");
-      wd_int(core_in_syscall[c]);
+      wd_int(core_in_syscall_pc[c].v);
     }
     if (lock_wait_addr[c] != 0) {
       wd_puts(" wait_lock=");
@@ -3669,19 +3875,19 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
     panic_puts2(" CPU");
     print_int_raw2((int)c);
     panic_puts2(" rip=");
-    panic_print_hex2(wd_last_seen_rip[c]);
+    panic_print_hex2(wd_pc[c].seen_rip);
     panic_puts2(" pid=");
-    print_int_raw2(wd_last_seen_pid[c]);
+    print_int_raw2(wd_pc[c].pid);
     panic_puts2(" tks=");
-    print_int_raw2((int)wd_ticks[c]);
+    print_int_raw2((int)wd_pc[c].ticks);
     panic_puts2(" cs=");
-    panic_print_hex2(wd_last_frame[c].cs);
+    panic_print_hex2(wd_pc[c].frame.cs);
     panic_puts2(" fl=");
-    panic_print_hex2(wd_last_frame[c].spsr);
+    panic_print_hex2(wd_pc[c].frame.spsr);
     panic_puts2(" age=");
-    print_int_raw2((int)(now - wd_last_seen_ms[c]));
+    print_int_raw2((int)(now - wd_pc[c].seen_ms));
     panic_puts2(" vec=");
-    print_int_raw2((int)wd_last_frame[c].vector);
+    print_int_raw2((int)wd_pc[c].frame.vector);
     if (lock_wait_addr[c] != 0) {
       panic_puts2(" wl=");
       panic_print_hex2(lock_wait_addr[c]);
@@ -3698,12 +3904,12 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
     panic_puts2("   fr:");
     for (int r = 0; r < 10; r++) {
       panic_puts2(" ");
-      panic_print_hex2(wd_last_frame[c].regs[r]);
+      panic_print_hex2(wd_pc[c].frame.regs[r]);
     }
     panic_puts2("\n");
     /* The last interrupt's kernel stack region (below the frame) — the
        caller chain of what the core was actually executing. */
-    uint64_t frp = wd_last_tfp[c];
+    uint64_t frp = wd_pc[c].tfp;
     panic_puts2("  deep:");
     if (frp >= 0x70000000ULL && frp < 0x75000000ULL) {
       for (uint64_t a = frp + 8; a < frp + 8 + 96; a += 8) {
@@ -3739,7 +3945,7 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
      return addresses into .text ([0x70000000,0x7001c000)).  The lowest hit
      approximates the deepest (newest) frame = where the core sits right now. */
   for (uint32_t c = 1; c < MAX_CPUS; c++) {
-    if (now - wd_last_seen_ms[c] < 60000) continue;
+    if (now - wd_pc[c].seen_ms < 60000) continue;
     uint64_t top = cpu_locals[c].kernel_stack;
     /* Same guard as the WD2 stall dump: a core that never powered on has
        kernel_stack == 0, and the scan below would read (top - 8) = -8. */
@@ -3786,7 +3992,7 @@ static void watchdog_tick(uint32_t cpu, struct trap_frame *tf) {
  * every further interrupt of that priority class.
  */
 void lapic_send_eoi(void) {
-  *(volatile uint32_t *)0xFEE000B0 = 0;
+  *(volatile uint32_t *)phys_to_virt(0xFEE000B0) = 0;
 }
 
 /* GB-068 (2026-10-19): a fault record must be ONE write.
@@ -3831,6 +4037,31 @@ static void fl_dec(struct fl_buf *f, int v) {
  * window.  Rate-limited to the first four faults of a boot; one uart_puts per
  * line so SMP cannot shred it (rule: a fault record must be one write).
  */
+#ifdef CP_FAULT_PTRS
+/* C6-venus (P8 stop 11): the MSVC RTTI class name of vtable `vt`, if it has
+ * one.  x64 layout: vt[-1] -> RTTICompleteObjectLocator {u32 signature (1),
+ * offset, cdOffset, i32 pTypeDescriptor, pClassDescriptor, pSelf} with
+ * image-relative RVAs; image base = COL - pSelf; TypeDescriptor =
+ * {pVFTable, spare, char name[]}.  Appends " <tag>=<name>" and returns 1. */
+static int fl_rtti(struct fl_buf *f, struct process *p, const char *tag, uint64_t vt) {
+  uint64_t col = 0;
+  uint32_t c[6];
+  char nm[72];
+  if (vt < 0x10000 || (vt & 7) || vm_user_read(p, vt - 8, &col, 8) != 0) return 0;
+  if (col < 0x10000 || (col & 3) || vm_user_read(p, col, c, sizeof c) != 0) return 0;
+  if (c[0] != 1 || c[5] == 0 || c[5] > col) return 0;
+  uint64_t base = col - c[5];
+  if ((base & 0xFFFF) || vm_user_read(p, base + c[3] + 16, nm, sizeof nm - 1) != 0) return 0;
+  nm[sizeof nm - 1] = 0;
+  if (nm[0] != '.' || nm[1] != '?') return 0;
+  fl_c(f, ' ');
+  fl_s(f, tag);
+  fl_c(f, '=');
+  fl_s(f, nm);
+  return 1;
+}
+#endif /* CP_FAULT_PTRS */
+
 static void fl_qwords(struct fl_buf *f, struct process *p, uint64_t va, int n) {
   uint64_t q[16];
   if (n > 16) n = 16;
@@ -4128,6 +4359,108 @@ static void compat_fault_dump(struct process *cur, struct trap_frame *tf,
   f.b[f.n] = 0;
   uart_puts(f.b);
 
+#ifdef CP_FAULT_PTRS
+  /* C6-venus (P8 stop 11): what every register and the first stack words
+   * point at -- region kind and 8 qwords around it -- and the code bytes
+   * before the return address and at the PC, so a call through a clobbered
+   * pointer can be decoded and the clobbered object read. */
+  {
+    extern struct vm_region *vm_region_find(struct addr_space *, uint64_t);
+    static const char *pk[] = {"?", "img", "heap", "anon", "shared", "stack", "fb", "lib"};
+    static const char *rn[] = {"rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "r8",
+                               "r9",  "r10", "r11", "r12", "r13", "r14", "r15"};
+    uint64_t stk[4] = {0, 0, 0, 0};
+    vm_user_read(cur, rsp, stk, sizeof stk);
+    for (int i = 0; i < 15 + 4; i++) {
+      uint64_t v = i < 15 ? tf->regs[i] : stk[i - 15];
+      struct vm_region *r = (cur->as && v >= 0x10000) ? vm_region_find(cur->as, v) : 0;
+      if (!r) continue;
+      f.n = 0;
+      fl_s(&f, "[SPTR] ");
+      if (i < 15) fl_s(&f, rn[i]);
+      else { fl_s(&f, "stk"); fl_dec(&f, i - 15); }
+      fl_s(&f, "=");
+      fl_hex(&f, v);
+      fl_s(&f, " kind=");
+      fl_s(&f, (r->kind < 8) ? pk[r->kind] : "?");
+      fl_s(&f, " prot=");
+      fl_dec(&f, (int)r->prot);
+      fl_s(&f, " base=");
+      fl_hex(&f, r->base);
+      fl_s(&f, " off=");
+      fl_hex(&f, v - r->base);
+      fl_s(&f, " @-10:");
+      fl_qwords(&f, cur, (v & ~7ull) - 0x10, 8);
+      {
+        uint64_t q0 = 0;
+        fl_rtti(&f, cur, "vt", v);
+        if (vm_user_read(cur, v & ~7ull, &q0, 8) == 0) fl_rtti(&f, cur, "obj", q0);
+      }
+      fl_c(&f, '\n');
+      f.b[f.n] = 0;
+      uart_puts(f.b);
+    }
+    /* Objects named by their vtables among the first 64 stack words (the
+     * callers' `this` pointers), and the fields of r8's object around the
+     * array (+0x100..+0x140) that the faulting code read. */
+    {
+      uint64_t sw[64];
+      int named = 0;
+      if (vm_user_read(cur, rsp, sw, sizeof sw) == 0) {
+        for (int j = 0; j < 64 && named < 12; j++) {
+          uint64_t q0 = 0;
+          if (sw[j] < 0x10000 || (sw[j] & 7) || vm_user_read(cur, sw[j], &q0, 8) != 0) continue;
+          f.n = 0;
+          fl_s(&f, "[SOBJ] stk+");
+          fl_hex(&f, (uint64_t)j * 8);
+          fl_s(&f, " p=");
+          fl_hex(&f, sw[j]);
+          if (!fl_rtti(&f, cur, "obj", q0)) continue;
+          fl_s(&f, " +0:");
+          fl_qwords(&f, cur, sw[j], 6);
+          fl_c(&f, '\n');
+          f.b[f.n] = 0;
+          uart_puts(f.b);
+          named++;
+        }
+      }
+      for (int k = 0; k < 15; k++) {
+        uint64_t v = tf->regs[k];
+        uint64_t q0 = 0;
+        if (v < 0x10000 || (v & 7) || vm_user_read(cur, v, &q0, 8) != 0) continue;
+        f.n = 0;
+        fl_s(&f, "[SFLD] ");
+        fl_s(&f, rn[k]);
+        fl_s(&f, " +100:");
+        fl_qwords(&f, cur, v + 0x100, 8);
+        fl_c(&f, '\n');
+        f.b[f.n] = 0;
+        uart_puts(f.b);
+      }
+    }
+    uint64_t pcs[2] = {stk[0] - 24, tf->elr - 16};
+    for (int k = 0; k < 2; k++) {
+      uint8_t cb[40];
+      if (vm_user_read(cur, pcs[k], cb, sizeof cb) != 0) continue;
+      f.n = 0;
+      fl_s(&f, k == 0 ? "[SCODE] ret-24=" : "[SCODE] pc-16=");
+      fl_hex(&f, pcs[k]);
+      fl_c(&f, ':');
+      static const char hx[] = "0123456789abcdef";
+      for (int j = 0; j < (int)sizeof cb; j++) {
+        fl_c(&f, ' ');
+        fl_c(&f, hx[cb[j] >> 4]);
+        fl_c(&f, hx[cb[j] & 15]);
+      }
+      fl_c(&f, '\n');
+      f.b[f.n] = 0;
+      uart_puts(f.b);
+    }
+    extern void gpu_m2_dump_maps(struct process *p);
+    gpu_m2_dump_maps(cur);
+  }
+#endif /* CP_FAULT_PTRS */
+
   /* Where does rsp live, and is the fault address inside any region at all?
    * `region=NONE` for cr2 is the "in=HOLE" verdict in numbers. */
   {
@@ -4252,7 +4585,7 @@ struct badvec_stamp {
   uint64_t vector;
   uint64_t cs;
   int64_t pid;
-};
+} __attribute__((aligned(64))); /* C1-k7: one line per CPU (every trap stamps it) */
 static struct badvec_stamp badvec_at_entry[MAX_CPUS];
 
 struct badvec_eu_note {
@@ -4260,7 +4593,7 @@ struct badvec_eu_note {
   uint64_t dst;
   uint64_t pc;
   int64_t pid;
-};
+} __attribute__((aligned(64))); /* C1-k7: one line per CPU */
 static struct badvec_eu_note badvec_eu[MAX_CPUS];
 
 /* GB-146-A (bounce 2026-11-08T17:56Z): the entry stamp can only say "the
@@ -4325,8 +4658,19 @@ static inline uint64_t badvec_rd_dr7(void) {
    each CPU's stack bounds; every entry-stamped frame measured so far
    (0x23FFE2A0, 0x25FFB640) is aligned.  Exported for the unit proof. */
 int badvec_frame_window(uint64_t p) {
+  /* P1 (S5): kernel-task stacks are reached through the direct map now; the
+     window is the same physical range, seen through either alias. */
+  if (p - DMAP_BASE < DMAP_SIZE)
+    p -= DMAP_BASE;
   if ((p & 7ULL) != 0 || p < 0x1000ULL)
     return 0;
+  /* cp-sync (merge of main): both windows.  Kernel-task stacks are frames
+     below the image (the 0x23FFE2A0 / 0x25FFB640 stamps, the unit proof);
+     the per-CPU trap stacks live INSIDE the image above 0x70000000 and are
+     asked for explicitly (GB-308 below).  Kernel text between the two is
+     never a frame. */
+  if (p < 0x70000000ULL)
+    return 1;
   /* GB-308: ask the stacks instead of testing a constant.
    *
    * This was `p < 0x70000000ULL`, a bound that does not describe this image:
@@ -4344,6 +4688,8 @@ int badvec_frame_window(uint64_t p) {
    * never powered on has kernel_stack == 0 and contributes no window. */
   for (uint32_t c = 0; c < MAX_CPUS; c++) {
     uint64_t top = cpu_locals[c].kernel_stack;
+    if (top - DMAP_BASE < DMAP_SIZE)
+      top -= DMAP_BASE;
     if (!top || p > top)
       continue;
     if (p + sizeof(struct trap_frame) > top - 64u * 1024u)
@@ -4526,6 +4872,25 @@ void enter_user_space_note(uint64_t src, uint64_t dst) {
 }
 
 void general_interrupt_handler(struct trap_frame *tf) {
+  /* C1-k6 (docs/cp-k6.md §5): a trap from user mode starts a stretch of
+     system time; returning to the same user frame ends it.  A switch away
+     in between is charged by schedule() (ru_charge_locked). */
+  extern void ru_trap_enter(void);
+  extern void ru_trap_exit(void);
+  TP_BEGIN_TF(tf);
+  int from_user = (tf->cs & 3) == 3;
+  if (from_user) ru_trap_enter();
+  /* H7-fault ([PFI], [AWAY] pf=/irq=): a user thread's time in this trap */
+  uint64_t pf_t0 = from_user ? pf_tsc() : 0;
+  uint64_t pf_vec = tf->vector;
+  struct process *pf_cur0 = from_user ? current_process() : 0;
+  /* C1-k6 round 2: trap nesting, for the sync wake (process.c
+     sched_wake_sync defers a wake only inside a user thread's own syscall). */
+  extern void sched_sync_flush(void);
+  uint32_t tcpu = get_cpuid();
+  if (tcpu < MAX_CPUS) {
+    if (sched_tpc[tcpu].trap_depth++ == 0) sched_tpc[tcpu].trap_sys = from_user && tf->vector == 0x80;
+  }
   /* Always-on lock audit: an IRQ handler must never try to park on a ylock_t,
    * and rank rules do not govern acquisitions from exception context (see
    * lock.h).  Both instruments are told, in every build. */
@@ -4538,6 +4903,26 @@ void general_interrupt_handler(struct trap_frame *tf) {
   lockdbg_irq_exit();
 #endif
   lock_audit_irq_exit();
+  /* C1-k6 round 2: back to the interrupted context on this CPU; a wake the
+     syscall deferred and no park consumed gets its IPI now. */
+  if (tcpu < MAX_CPUS && tcpu == get_cpuid()) {
+    if (--sched_tpc[tcpu].trap_depth <= 0) {
+      sched_tpc[tcpu].trap_depth = 0;
+      sched_tpc[tcpu].trap_sys = 0;
+      sched_sync_flush();
+    }
+  }
+  TP_MARK(TP_UNWIND);
+  if (from_user && pf_vec != 0x80 && pf_cur0 && current_process() == pf_cur0)
+    pfstat_trap(pf_vec, pf_tsc() - pf_t0);
+  if (from_user) {
+    ru_trap_exit();
+    if (tf->vector == 0x80) {
+      struct process *xc = current_process();
+      if (xc) xc->in_sys = 0;
+    }
+  }
+  TP_MARK(TP_END);
 }
 
 /* GB-101/GB-243: the user-mode classifier decision, isolated so the kernel
@@ -4553,7 +4938,11 @@ static void general_interrupt_inner(struct trap_frame *tf) {
   extern uint32_t gic_acknowledge_interrupt(void);
   extern void gic_end_interrupt(uint32_t intid);
   extern int virtio_net_irq;
+  extern int virtio_gpu_x64_irq_vector;      /* P6: -1 = polled */
+  extern void virtio_gpu_x64_handle_irq(void);
+  extern int virtio_snd_irq_vector;          /* C4-audio: -1 = no device */
 
+  TP_MARK(TP_TRAP_ENTER);
   uint32_t cpu = get_cpuid();
   if (cpu < MAX_CPUS && tf->vector != 1) {
     badvec_at_entry[cpu].frame = (uint64_t)tf;
@@ -4756,6 +5145,7 @@ static void general_interrupt_inner(struct trap_frame *tf) {
   }
   gic_set_current_vector(cpu, tf->vector);
   watchdog_tick(cpu, tf);
+  TP_MARK(TP_INNER_DIAG);
 
   /* RW-WATCH: DR0 data-write breakpoint.  Two hooks, both compiled out
      without -DRW_WATCH_ADDR:
@@ -4775,7 +5165,16 @@ static void general_interrupt_inner(struct trap_frame *tf) {
 
   if (tf->vector == 32) {
     // PIT/LAPIC timer interrupt
+    uint64_t ts0 = pf_tsc(); /* H7-fault round 2 (H7-08): [PFR] segments */
     uint32_t intid = gic_acknowledge_interrupt();
+    {
+      /* C0-console: push this CPU's stale partial console lines out
+         (printing only; src/kernel/kconsole.c). */
+      extern void cons_tick(uint32_t cpu);
+      cons_tick(cpu);
+    }
+    uint64_t ts1 = pf_tsc();
+    pfstat_tseg(PFR_T32_CONS, ts1 - ts0);
 
     if (cpu == 0) {
       // The PIT is the global time base and is wired to the boot core only.
@@ -4787,8 +5186,29 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       {
         extern void rw_thr_sample(void);
         static uint32_t thr_ticks;
+        /* C6-present: [THRW] thread-state sampler, every tick, a row per
+           busy group every 5 s (process.c, docs/cp-present.md). */
+        {
+          extern void cp_wait_sample(int emit);
+          extern volatile int cpw_tick_user;
+          cpw_tick_user = (tf->cs & 3) == 3;
+          uint64_t tw0 = pf_tsc();
+          cp_wait_sample(thr_ticks + 1 >= 500);
+          pfstat_tseg(PFR_T32_SAMPLE, pf_tsc() - tw0);
+        }
         if (++thr_ticks >= 500) {
+          uint64_t tc0 = pf_tsc();
           thr_ticks = 0;
+          /* H7-fault round 3 (H7-08): while the census task runs (a
+             Linux-ABI process is alive) it prints the census; the IRQ only
+             asks.  Otherwise (boot, native-only waves) as before. */
+          extern int census_task_running(void);
+          extern void census_kick(void);
+          if (census_task_running()) {
+            census_kick();
+            pfstat_tseg(PFR_T32_CENSUS, pf_tsc() - tc0);
+            goto census_done;
+          }
           rw_thr_sample();
           /* M6/L72: the display mode is the kernel's, and a lost mode is
              silent from inside the guest (presents still "work").  Read the
@@ -4799,12 +5219,14 @@ static void general_interrupt_inner(struct trap_frame *tf) {
             if (virtio_gpu_health_tick)
               virtio_gpu_health_tick();
           }
+          pfstat_tseg(PFR_T32_CENSUS, pf_tsc() - tc0);
+        census_done:;
         }
       }
 
       // Broadcast rescheduling IPI (vector 0x81) to all other cores.
       // Bit 14 stays clear: it is defined for level-triggered delivery only.
-      *(volatile uint32_t*)(0xFEE00300) = 0x000C0081;
+      *(volatile uint32_t*)phys_to_virt(0xFEE00300) = 0x000C0081;
 #ifdef PANIC_IPI_TEST
       /* GB-207: fire the two-CPU panic injection once the wave is running
          (a secondary sits in an IF=0 wait before there is a process). */
@@ -4834,6 +5256,7 @@ static void general_interrupt_inner(struct trap_frame *tf) {
         gic_end_interrupt(intid);
       }
       schedule(tf, 0);
+      pfstat_tseg(PFR_T32_REST, pf_tsc() - ts1);
       /* P5 S3 (D8.4a): schedule() returns only when this process kept the
          CPU; a switch resumes via enter_user_space's own boundary. */
       process_signal_trap_exit(tf);
@@ -4842,10 +5265,35 @@ static void general_interrupt_inner(struct trap_frame *tf) {
     if (cpu == 0) {
       gic_end_interrupt(intid);
     }
+    pfstat_tseg(PFR_T32_REST, pf_tsc() - ts1);
   } else if (tf->vector == 33 || tf->vector == 44) {
     uint32_t intid = gic_acknowledge_interrupt();
     extern void virtio_input_handle_irq(int irq);
     virtio_input_handle_irq(intid);
+    gic_end_interrupt(intid);
+  } else if (virtio_snd_irq_vector != -1 && tf->vector == (uint32_t)virtio_snd_irq_vector) {
+    /* C4-audio (docs/cp-audio.md): virtio-sound TX completions.  q35 shares
+       INTx lines, so a GPU/net device on the same line is served too. */
+    extern void virtio_snd_handle_irq(void);
+    uint32_t intid = gic_acknowledge_interrupt();
+    virtio_snd_handle_irq();
+    if (virtio_gpu_x64_irq_vector != -1 && tf->vector == (uint32_t)virtio_gpu_x64_irq_vector)
+      virtio_gpu_x64_handle_irq();
+    if (virtio_net_irq != -1 && tf->vector == (uint32_t)virtio_net_irq) {
+      extern void virtio_net_handle_irq(void);
+      virtio_net_handle_irq();
+    }
+    gic_end_interrupt(intid);
+  } else if (virtio_gpu_x64_irq_vector != -1 &&
+             tf->vector == (uint32_t)virtio_gpu_x64_irq_vector) {
+    /* P6 (docs/gpu-abi.md §10.5): virtio-gpu INTx retires async fences.
+       A line shared with the legacy net device serves both. */
+    uint32_t intid = gic_acknowledge_interrupt();
+    virtio_gpu_x64_handle_irq();
+    if (virtio_net_irq != -1 && tf->vector == (uint32_t)virtio_net_irq) {
+      extern void virtio_net_handle_irq(void);
+      virtio_net_handle_irq();
+    }
     gic_end_interrupt(intid);
   } else if (virtio_net_irq != -1 && tf->vector == (uint32_t)virtio_net_irq) {
     uint32_t intid = gic_acknowledge_interrupt();
@@ -4875,6 +5323,48 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       return;
     }
     schedule(tf, 1);
+  } else if (tf->vector == 0x84) {
+    /* C1-k6 (docs/cp-k6.md §1): this CPU's high-resolution one-shot.
+       LAPIC-delivered: EOI first.  Expire the due sleepers, then get them a
+       CPU: this one if it is idle, otherwise idle CPUs by IPI, otherwise
+       preempt this CPU's user-mode thread (never a kernel-mode window: the
+       0x81 rule above).  The woken slot is this CPU's next pick. */
+    uint64_t hs0 = pf_tsc(); /* H7-fault round 2 (H7-08): [PFR] segments */
+    lapic_send_eoi();
+    extern int sched_hrt_fire(void);
+    extern int sched_kick_idle_cpus(int n);
+    extern void sched_sync_flush_ex(int now_ipi);
+    sched_sync_flush_ex(0); /* C1-k6 round 2: a sync-wake window that ended */
+    uint64_t hs1 = pf_tsc();
+    pfstat_tseg(PFR_HRT_FLUSH, hs1 - hs0);
+    int woke = sched_hrt_fire();
+    uint64_t hs2 = pf_tsc();
+    pfstat_tseg(PFR_HRT_FIRE, hs2 - hs1);
+    {
+      /* A Linux timer due now raises its signal / counts its expiry here,
+         not at the next 10 ms tick (re-checked under lt_lock). */
+      extern void linux_compat_timer_tick(uint64_t now);
+      linux_compat_timer_tick(timer_get_us());
+    }
+    uint64_t hs3 = pf_tsc();
+    pfstat_tseg(PFR_HRT_LTIMER, hs3 - hs2);
+    if (woke > 0) {
+      struct process *hcur = current_process();
+      if (!hcur) {
+        if (woke > 1) (void)sched_kick_idle_cpus(woke - 1);
+        schedule(tf, 1);
+        return;
+      }
+      int kicked = sched_kick_idle_cpus(woke);
+      if (kicked < woke && !hcur->is_kernel_process && (tf->cs & 3) == 3 &&
+          kernel_preempt_count() == 0) {
+        schedule(tf, 0);
+        pfstat_tseg(PFR_HRT_SCHED, pf_tsc() - hs3);
+        process_signal_trap_exit(tf);
+        return;
+      }
+      pfstat_tseg(PFR_HRT_SCHED, pf_tsc() - hs3);
+    }
   } else if (tf->vector == 0x82) {
     // P2.2 (S2/OQ5) TLB shootdown IPI: LAPIC-delivered, so EOI first.
     // The handler never schedules and never preempts anything: it may
@@ -4893,6 +5383,45 @@ static void general_interrupt_inner(struct trap_frame *tf) {
   } else if (tf->vector < 32) {
     // Exception
     struct process *cur = current_process();
+    /* P1 (D11 + the C4-x noprefault hang): a kernel-mode #PF on a valid user
+       address of the current address space is a demand fault exactly like a
+       user one -- anonymous, file-backed (FAT/NFS page cache, COW) and object
+       pages alike -- so any syscall that copies straight from/to user memory
+       is safe, whatever the VA (compat processes live below USER_VA_BASE).
+       It runs BEFORE the fatal-dump machinery (panic_claim/record): that path
+       is for faults nothing can resolve.  Unresolved (hole, protection, I/O
+       error) or repeating at one page falls through to it, which kills the
+       process (SIGSEGV) instead of halting. */
+    if (tf->vector == 14 && cur && (tf->cs & 3) != 3) {
+      uint64_t kcr2;
+      __asm__ volatile("mov %%cr2, %0" : "=r"(kcr2));
+      struct process *kg = process_group(cur);
+      if (kg && kg->as && vm_va_is_user(kg->as, kcr2)) {
+        static uint64_t kdf_last[MAX_CPUS];
+        static uint32_t kdf_rep[MAX_CPUS];
+        static uint64_t kdf_t[MAX_CPUS];
+        uint32_t kc = get_cpuid();
+        if (kc >= MAX_CPUS) kc = 0;
+        /* C1-k6: a REPEAT is the same page faulting again at once (a
+           resolution that does not stick: microseconds apart).  The same page
+           faulting again after a peer thread re-mapped it is a new fault: a
+           pread into a window another thread keeps MAP_FIXED-replacing every
+           few hundred microseconds (linux_probe_e2fault, now that usleep(200)
+           sleeps 200 us instead of a 10 ms tick) counted every one of them as
+           a repeat and was killed with SIGSEGV after the 4th
+           (docs/cp-k6.md §9). */
+        uint64_t kdf_now = timer_get_us();
+        if (kdf_last[kc] == (kcr2 & ~0xFFFULL) && kdf_now - kdf_t[kc] < 100) kdf_rep[kc]++;
+        else { kdf_last[kc] = kcr2 & ~0xFFFULL; kdf_rep[kc] = 0; }
+        kdf_t[kc] = kdf_now;
+        if (kdf_rep[kc] < 4) {
+          const char *why = "PROT";
+          int pf_w = (int)((tf->error_code >> 1) & 1);
+          if (vm_handle_fault(kg, kcr2, pf_w, 0, &why) == 0)
+            return; /* PTE live; iretq retries the kernel access */
+        }
+      }
+    }
     /* P2.3 (S3, design section 5.2): a v2 process's user #PF is either a
        demand fault (materialize + retry) or a kill with an exact reason.
        Error code: bit0 P (0 = not-present), bit1 W/R, bit4 I/D. */
@@ -4969,6 +5498,9 @@ static void general_interrupt_inner(struct trap_frame *tf) {
         fl_s(&fe, " -> SIGBUS (EIO, not a protection fault)\n");
         fe.b[fe.n] = 0;
         uart_puts(fe.b);
+        cur->fault_si_set = 1; /* C1-k4: BUS_ADRERR at the faulting address */
+        cur->fault_si_code = 2;
+        cur->fault_si_addr = cr2;
         process_fault_exit(tf, 7); /* SIGBUS: a failed file load, not SIGSEGV */
         return;
       }
@@ -5097,6 +5629,22 @@ static void general_interrupt_inner(struct trap_frame *tf) {
         sc_hist_dump(cur);
 #endif
         compat_fault_dump(cur, tf, cr2);
+      }
+      /* C1-k4: Linux's siginfo for the fault.  No region at all is
+         SEGV_MAPERR; a region that refuses the access is SEGV_ACCERR; a
+         mapped page wholly past the end of its file/object is SIGBUS
+         BUS_ADRERR (vm_handle_fault says "BUS").  si_addr is CR2. */
+      {
+        int bus = why && why[0] == 'B' && why[1] == 'U' && why[2] == 'S';
+        int hole = why && why[0] == 'H' && why[1] == 'O';
+        cur->fault_si_set = 1;
+        cur->fault_si_code = bus ? 2 /* BUS_ADRERR */
+                                 : hole ? 1 /* SEGV_MAPERR */ : 2 /* SEGV_ACCERR */;
+        cur->fault_si_addr = cr2;
+        if (bus && (cur->abi_flags & PROC_FLAG_LINUX_ABI)) {
+          process_fault_exit(tf, 7);
+          return;
+        }
       }
       process_fault_exit(tf, 11); /* SIGSEGV status byte */
       return;
@@ -5313,10 +5861,10 @@ static void general_interrupt_inner(struct trap_frame *tf) {
             cn = fat16_read_direct_pos(ur->obj->file_start_cluster,
                                        (uint32_t)ur->obj->size, cpage,
                                        FRAME_SIZE, (uint32_t)ur->obj_off);
-          const uint8_t *cbt = (const uint8_t *)cpage;
+          const uint8_t *cbt = cpage ? (const uint8_t *)phys_to_virt(cpage) : 0;
           int obj_ok = objfr && frame_is_alloced(objfr);
-          const uint8_t *ob = (const uint8_t *)(obj_ok ? objfr : 0);
-          const uint8_t *fp = (const uint8_t *)fpage;
+          const uint8_t *ob = obj_ok ? (const uint8_t *)phys_to_virt(objfr) : 0;
+          const uint8_t *fp = fpage ? (const uint8_t *)phys_to_virt(fpage) : 0;
           int same = 1;
           if (fn != (int)FRAME_SIZE) {
             same = 0;
@@ -5412,7 +5960,62 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       }
       /* w5 (ii): a user-mode exception (BRK/#UD/#GP/...) kills with a
          signal status, never a stale-x0 exit code (rc=0 false pass). */
-      process_fault_exit(tf, 11); /* SIGSEGV status byte */
+      /* cp/wine2: a Linux-ABI process gets Linux's signal for the vector
+         (arch/x86 traps.c): #DE/#MF/#XM -> SIGFPE, #UD -> SIGILL, #DB/#BP ->
+         SIGTRAP, #AC -> SIGBUS, the rest SIGSEGV.  Wine maps SIGFPE+trapno 0
+         to EXCEPTION_INT_DIVIDE_BY_ZERO; a SIGSEGV for #DE was "Got unexpected
+         trap 0" and a dead winprobe.exe.  Native processes keep status 11. */
+      int fsig = 11;
+      if (cur->abi_flags & PROC_FLAG_LINUX_ABI) {
+        switch ((unsigned)tf->vector) {
+        case 0: case 16: case 19: fsig = 8; break;  /* SIGFPE  */
+        case 6:                   fsig = 4; break;  /* SIGILL  */
+        case 1: case 3:           fsig = 5; break;  /* SIGTRAP */
+        case 17:                  fsig = 7; break;  /* SIGBUS  */
+        default: break;
+        }
+        /* C1-k4: and Linux's si_code / si_addr for it (traps.c, fpu/core.c
+           fpu__exception_code): #DE FPE_INTDIV, #UD ILL_ILLOPN, #MF/#XM the
+           FPE_FLT* code of the first unmasked pending exception (x87 FSW &
+           ~FCW, or MXCSR flags & ~masks), si_addr the faulting RIP; #AC
+           BUS_ADRALN; #DB TRAP_TRACE; #BP, #GP and the rest SI_KERNEL with
+           si_addr 0. */
+        int code = 0x80; /* SI_KERNEL */
+        uint64_t addr = 0;
+        switch ((unsigned)tf->vector) {
+        case 0: code = 1; addr = tf->elr; break;  /* FPE_INTDIV */
+        case 6: code = 2; addr = tf->elr; break;  /* ILL_ILLOPN */
+        case 16:
+        case 19: {
+          uint32_t err;
+          if (tf->vector == 16) {
+            uint16_t swd = 0, cwd = 0;
+            __asm__ volatile("fnstsw %0" : "=m"(swd));
+            __asm__ volatile("fnstcw %0" : "=m"(cwd));
+            err = (uint32_t)(swd & ~cwd);
+          } else {
+            uint32_t mx = 0;
+            __asm__ volatile("stmxcsr %0" : "=m"(mx));
+            err = ~(mx >> 7) & mx;
+          }
+          if (err & 0x001) code = 7;      /* FPE_FLTINV (incl. stack fault) */
+          else if (err & 0x004) code = 3; /* FPE_FLTDIV */
+          else if (err & 0x008) code = 4; /* FPE_FLTOVF */
+          else if (err & 0x012) code = 5; /* FPE_FLTUND (underflow/denormal) */
+          else if (err & 0x020) code = 6; /* FPE_FLTRES */
+          else code = 0;
+          addr = tf->elr;
+          break;
+        }
+        case 17: code = 1; break;          /* BUS_ADRALN */
+        case 1: code = 2; break;           /* TRAP_TRACE */
+        default: break;
+        }
+        cur->fault_si_set = 1;
+        cur->fault_si_code = code;
+        cur->fault_si_addr = addr;
+      }
+      process_fault_exit(tf, fsig); /* the signal status byte */
     } else if (trap_user_cs_no_process(tf, cur)) {
       /* GB-101 (classifier clause): a user-mode frame whose CPU has no
          current process is still a user-mode fault.  GB-147 measured one:
@@ -5462,6 +6065,31 @@ static void general_interrupt_inner(struct trap_frame *tf) {
            panic_claim), write nothing, and stop this CPU rather than
            interleave fields into the one record. */
         for (;;) __asm__ volatile("hlt");
+      }
+      /* P1 (S5, docs/cp-address-space.md section 3.8): the identity tripwire.
+         Native v2 roots map nothing below 8 GiB except the kernel-image hole,
+         so a kernel-mode #PF there that is not a user VA of the current
+         address space is a leftover identity dereference (a physical address
+         used as a pointer): tag it so the gates can count it.  The dump and
+         the halt below are unchanged. */
+      if (tf->vector == 14) {
+        uint64_t tcr2;
+        __asm__ volatile("mov %%cr2, %0" : "=r"(tcr2));
+        struct addr_space *tas = cur ? process_group(cur)->as : 0;
+        if (tcr2 < 0x200000000ULL && (tcr2 < KIMG_BASE || tcr2 >= CP_KHOLE_HI) &&
+            !(tas && vm_va_is_user(tas, tcr2))) {
+          uint64_t tcr3;
+          __asm__ volatile("mov %%cr3, %0" : "=r"(tcr3));
+          panic_puts("[IDMAP-TRIP] cr2=");
+          panic_print_hex(tcr2);
+          panic_puts(" rip=");
+          panic_print_hex((uint64_t)tf->elr);
+          panic_puts(" cr3=");
+          panic_print_hex(tcr3);
+          panic_puts(" pid=");
+          print_int_raw(cur ? (int)cur->pid : -1);
+          panic_puts("\n");
+        }
       }
       /* GB-247: capture the frame pointer ONCE and read every slot through
          this value only.  The GB-146-V2 record printed `fatal frame=0x1F36`
@@ -5732,7 +6360,8 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       if (tf->vector == 14 && cur) {
         uint64_t kcr2;
         __asm__ volatile("mov %%cr2, %0" : "=r"(kcr2));
-        if (kcr2 >= USER_VA_BASE) {
+        if (kcr2 >= USER_VA_BASE ||
+            (process_group(cur)->as && vm_va_is_user(process_group(cur)->as, kcr2))) {
           /* GB-057: a kernel-mode #PF at the SAME address that keeps being
              "handled" is a retry loop, not a fix: measured live, a CPU sat on
              the `rep movsq` inside enter_user_space (RIP 0x7003B1CF) for 14
@@ -6020,14 +6649,28 @@ void trap_init_core_with_id(uint32_t cpu) {
   extern void arch_fpu_enable_core(void);
   arch_fpu_enable_core();
 
-  // Write &cpu_locals[cpu] to Kernel GS base MSR (0xC0000102)
+  /* cp P1: swapgs discipline.  In ring 0, GS_BASE (0xC0000101) is this
+     core's cpu_locals block (every gs:[n] in the entry asm and
+     current_process()/get_cpuid() depend on it).  IA32_KERNEL_GS_BASE
+     (0xC0000102) holds the user GS base of the thread that will run next in
+     ring 3: restore_context() writes it from p->gs_base, and the
+     return-to-user paths swapgs so that value is live in ring 3 while this
+     block waits in KERNEL_GS_BASE.  Entry from ring 3 swaps back
+     (syscall_entry unconditionally, the exception stubs via trap_gs_fixup).
+     Before this, both MSRs held cpu_locals and no swapgs ran anywhere, so
+     ring 3 could read the kernel's per-CPU block through %gs and no user GS
+     base could exist.  Start KERNEL_GS_BASE at 0: a user entry before any
+     restore_context() then sees GS_BASE = 0, the native default. */
   uint64_t gs_base = (uint64_t)&cpu_locals[cpu];
   uint32_t low = (uint32_t)gs_base;
   uint32_t high = (uint32_t)(gs_base >> 32);
-  __asm__ volatile("wrmsr" : : "a"(low), "d"(high), "c"(0xC0000102));
-
-  // Also write it to Active GS base MSR (0xC0000101) so we are safe
   __asm__ volatile("wrmsr" : : "a"(low), "d"(high), "c"(0xC0000101));
+  __asm__ volatile("wrmsr" : : "a"(0u), "d"(0u), "c"(0xC0000102));
+  {
+    /* C1-k6: this CPU's GS is live (get_cpuid's fast path waits for all). */
+    extern volatile uint32_t x64_gs_ready_mask;
+    if (cpu < 32) __atomic_fetch_or(&x64_gs_ready_mask, 1u << cpu, __ATOMIC_SEQ_CST);
+  }
 
   // Load IDT for this CPU
   struct idt_ptr ptr;
@@ -6040,6 +6683,10 @@ void trap_init_core_with_id(uint32_t cpu) {
 
   // Initialize syscall instruction extensions
   syscall_init();
+
+  /* H7-fault round 2 (H7-07): KVM steal-time record for the PV TLB flush */
+  extern void vm_arch_pv_init_cpu(uint32_t cpu);
+  vm_arch_pv_init_cpu(cpu);
 }
 
 void trap_init_core(void) {
@@ -6076,9 +6723,55 @@ void syscall_init(void) {
   uint32_t lstar_high = (uint32_t)(handler_addr >> 32);
   __asm__ volatile("wrmsr" : : "a"(lstar_low), "d"(lstar_high), "c"(0xC0000082));
 
-  // 4. Set SFMASK MSR (0xC0000084) (mask IF 0x200)
-  __asm__ volatile("wrmsr" : : "a"(0x200), "d"(0), "c"(0xC0000084));
+  // 4. Set SFMASK MSR (0xC0000084).  cp P1: Linux's mask, not just IF:
+  //    TF 0x100 | IF 0x200 | DF 0x400 | IOPL 0x3000 | NT 0x4000 | AC 0x40000.
+  //    A user-set DF used to survive into the kernel, whose memcpy/memset are
+  //    `rep movsb/stosb` (arch/x64/cpu.c): a copy would run BACKWARDS; TF
+  //    would single-step the entry path.  The user's RFLAGS is in r11 and is
+  //    restored from the frame on the way out, so masking costs nothing.
+  __asm__ volatile("wrmsr" : : "a"(0x47700), "d"(0), "c"(0xC0000084));
 }
+
+/* cp P1: make GS_BASE the kernel's on every exception/IRQ entry.
+ *
+ * The decision is made from the GS base itself, not from the interrupted CS:
+ * if GS_BASE already points into cpu_locals[] we are on the kernel GS (an
+ * entry from ring 0), otherwise the CPU is still on a ring-3 GS base and
+ * swapgs brings the kernel's back.  Linux's paranoid_entry uses the same
+ * idea for the same reason: a CS-based test is wrong in the one window that
+ * matters, a fault on the return-to-user `iretq` after its swapgs (#GP on a
+ * bad frame), which arrives with CS = kernel but GS = user and would then run
+ * the whole handler on the user's GS.  The exit paths need no mirror of this
+ * test: they swapgs exactly when the iretq frame returns to ring 3, with
+ * interrupts disabled, and restore_context()/the entry swapgs keep
+ * KERNEL_GS_BASE holding the right user value for that.
+ * ARCH_SET_GS refuses user values inside cpu_locals[] (process_set_user_gs),
+ * so the range test cannot be fooled.  Preserves every register (flags are
+ * already in the hardware frame). */
+__asm__(
+".intel_syntax noprefix\n"
+".global trap_gs_fixup\n"
+"trap_gs_fixup:\n"
+"    cld\n"   /* DF is not cleared by interrupt/trap gates; C assumes DF=0 */
+"    push rax\n"
+"    push rcx\n"
+"    push rdx\n"
+"    mov ecx, 0xC0000101\n"
+"    rdmsr\n"
+"    shl rdx, 32\n"
+"    or rax, rdx\n"
+"    lea rcx, [rip + cpu_locals]\n"
+"    sub rax, rcx\n"
+"    cmp rax, qword ptr [rip + cpu_locals_span]\n"
+"    jb 1f\n"
+"    swapgs\n"
+"1:\n"
+"    pop rdx\n"
+"    pop rcx\n"
+"    pop rax\n"
+"    ret\n"
+".att_syntax prefix\n"
+);
 
 // Exception assembly entries
 #define EXCEPTION_NO_ERR(num) \
@@ -6089,6 +6782,7 @@ void syscall_init(void) {
         "exception_" #num ":\n" \
         "    push 0\n" \
         "    push " #num "\n" \
+        "    call trap_gs_fixup\n" \
         "    jmp common_trap_wrapper\n" \
         ".att_syntax prefix\n" \
     )
@@ -6100,6 +6794,7 @@ void syscall_init(void) {
         ".global exception_" #num "\n" \
         "exception_" #num ":\n" \
         "    push " #num "\n" \
+        "    call trap_gs_fixup\n" \
         "    jmp common_trap_wrapper\n" \
         ".att_syntax prefix\n" \
     )
@@ -6136,6 +6831,8 @@ EXCEPTION_NO_ERR(47);
 EXCEPTION_NO_ERR(129); // 0x81
 // P2.2 (S2/OQ5): TLB shootdown IPI
 EXCEPTION_NO_ERR(130); // 0x82
+// C1-k6: high-resolution one-shot (LAPIC timer)
+EXCEPTION_NO_ERR(132); // 0x84
 #ifdef PANIC_IPI_TEST
 EXCEPTION_NO_ERR(131); // 0x83 (GB-207 two-CPU panic-injection vehicle)
 #endif
@@ -6144,6 +6841,7 @@ __asm__(
 ".intel_syntax noprefix\n"
 ".global syscall_entry\n"
 "syscall_entry:\n"
+"    swapgs\n"               /* cp P1: ring 3 -> kernel GS (always from CPL3) */
 "    mov gs:[8], rsp\n"       /* Save User RSP */
 "    mov rsp, gs:[0]\n"       /* Load Kernel Stack Pointer */
 "    \n"
@@ -6314,12 +7012,46 @@ __asm__(
 "       [rsp+264]/[rsp+272]/[rsp+256] -- the vector, error and spsr slots\n"
 "       (measured live: [EXITFRAME] spsr_slot=0x7003D87F).  Push below the\n"
 "       frame, run the check, then advance past the frame. */\n"
+"    /* C1-k7: the GB-057 check inline (it was a call and 16 stack ops on\n"
+"       every return); the C reporter runs only for a suspect RIP: below\n"
+"       0x1000 at either privilege, or a user RIP in the kernel hole. */\n"
+"    push rax\n"
+"    mov rax, [rsp + 288]\n"
+"    cmp rax, 0x1000\n"
+"    jb 61f\n"
+"    test byte ptr [rsp + 296], 3\n"
+"    jz 62f\n"
+"    cmp rax, qword ptr [rip + trap_khole_lo]\n"
+"    jb 62f\n"
+"    cmp rax, qword ptr [rip + trap_khole_hi]\n"
+"    jae 62f\n"
+"61:\n"
+"    pop rax\n"
 "    push rax\n"
 "    push rcx\n"
-"    lea rdi, [rsp + 296]\n"
+"    /* cp/wine2: and every other caller-saved register the C check may\n"\
+"       clobber -- the user's rsi/rdx/r8-r11 are already live here (a [BADIRET]\n"\
+"       row handed the user rsi = &\"\\n\" from the kernel's rodata) */\n"\
+"    push rsi\n"
+"    push rdx\n"
+"    push r8\n"
+"    push r9\n"
+"    push r10\n"
+"    push r11\n"
+"    lea rdi, [rsp + 344]\n"
 "    call trap_exit_frame_check\n"
+"    pop r11\n"
+"    pop r10\n"
+"    pop r9\n"
+"    pop r8\n"
+"    pop rdx\n"
+"    pop rsi\n"
 "    pop rcx\n"
 "    pop rax\n"
+"    jmp 63f\n"
+"62:\n"
+"    pop rax\n"
+"63:\n"
 "    add rsp, 264\n"
 "    add rsp, 16\n"
 "    /* restore the process's rdi from its saved slot: the frame_check\n"\
@@ -6327,6 +7059,17 @@ __asm__(
 "       kernel-frame address (kstack_top-0x28) unless reloaded -> user\n"\
 "       faults at the trap frame's own RIP slot (0x755xDBxx). */\n"\
 "    mov rdi, [rsp - 240]\n"
+"    /* cp P1: returning to ring 3 -> swapgs, so the thread's user GS base\n"
+"       (KERNEL_GS_BASE, installed by restore_context/ARCH_SET_GS) is live\n"
+"       and cpu_locals waits in KERNEL_GS_BASE for the next entry.  cli\n"
+"       first: a handler may have left IF=1 (safe_wfi), and an interrupt\n"
+"       between the swapgs and the iretq would run on the user GS (iretq\n"
+"       reloads IF from the frame).  [rsp + 8] is the frame's CS. */\n"
+"    cli\n"
+"    test byte ptr [rsp + 8], 3\n"
+"    jz 4f\n"
+"    swapgs\n"
+"4:\n"
 "    iretq\n"
 ".att_syntax prefix\n"
 );
@@ -6343,8 +7086,12 @@ int resume_preflight_c(struct trap_frame *tf) {
   struct process *p = current_process();
   if (!tf || !p)
     return 1;
-  if (vm_arch_resume_va_ok(p->as, tf->elr, tf->cs))
+  if (vm_arch_resume_va_ok(p->as, tf->elr, tf->cs)) {
+    /* C1-k7: the resumed thread leaves the kernel here (docs/cp-k7.md §4) */
+    extern void ru_resume_user(void);
+    if ((tf->cs & 3) == 3) ru_resume_user();
     return 1;
+  }
   {
     static int reported;
     if (reported < 8) {
@@ -6516,12 +7263,46 @@ __asm__(
 "    mov rax, [rsp]\n"
 "    /* GB-123: see the common_trap_exit note -- the check pushes below the\n"
 "       frame, never into it; advance past the frame only afterwards. */\n"
+"    /* C1-k7: the GB-057 check inline (it was a call and 16 stack ops on\n"
+"       every return); the C reporter runs only for a suspect RIP: below\n"
+"       0x1000 at either privilege, or a user RIP in the kernel hole. */\n"
+"    push rax\n"
+"    mov rax, [rsp + 288]\n"
+"    cmp rax, 0x1000\n"
+"    jb 71f\n"
+"    test byte ptr [rsp + 296], 3\n"
+"    jz 72f\n"
+"    cmp rax, qword ptr [rip + trap_khole_lo]\n"
+"    jb 72f\n"
+"    cmp rax, qword ptr [rip + trap_khole_hi]\n"
+"    jae 72f\n"
+"71:\n"
+"    pop rax\n"
 "    push rax\n"
 "    push rcx\n"
-"    lea rdi, [rsp + 296]\n"
+"    /* cp/wine2: and every other caller-saved register the C check may\n"\
+"       clobber -- the user's rsi/rdx/r8-r11 are already live here (a [BADIRET]\n"\
+"       row handed the user rsi = &\"\\n\" from the kernel's rodata) */\n"\
+"    push rsi\n"
+"    push rdx\n"
+"    push r8\n"
+"    push r9\n"
+"    push r10\n"
+"    push r11\n"
+"    lea rdi, [rsp + 344]\n"
 "    call trap_exit_frame_check\n"
+"    pop r11\n"
+"    pop r10\n"
+"    pop r9\n"
+"    pop r8\n"
+"    pop rdx\n"
+"    pop rsi\n"
 "    pop rcx\n"
 "    pop rax\n"
+"    jmp 73f\n"
+"72:\n"
+"    pop rax\n"
+"73:\n"
 "    add rsp, 264\n"
 "    add rsp, 16\n"
 "    /* restore the process's rdi from its saved slot: the frame_check\n"\
@@ -6529,6 +7310,26 @@ __asm__(
 "       kernel-frame address (kstack_top-0x28) unless reloaded -> user\n"\
 "       faults at the trap frame's own RIP slot (0x755xDBxx). */\n"\
 "    mov rdi, [rsp - 240]\n"
+"    /* cp P1: returning to ring 3 -> swapgs, so the thread's user GS base\n"
+"       (KERNEL_GS_BASE, installed by restore_context/ARCH_SET_GS) is live\n"
+"       and cpu_locals waits in KERNEL_GS_BASE for the next entry.  cli\n"
+"       first: a handler may have left IF=1 (safe_wfi), and an interrupt\n"
+"       between the swapgs and the iretq would run on the user GS (iretq\n"
+"       reloads IF from the frame).  [rsp + 8] is the frame's CS. */\n"
+"    cli\n"
+"    /* C6-p7b: the last C call on the outgoing stack is behind us.  When\n"
+"       schedule() switched away from a kernel task, that stack was the\n"
+"       task's own (an int 0x81 from ring 0 does not switch stacks), and\n"
+"       until here the task must not be resumed elsewhere: its resume\n"
+"       writes and runs below its saved RSP, over the frames this CPU was\n"
+"       still using.  Drop the pin before the swapgs (it is gs-relative);\n"
+"       what is left only pops the 5-word iretq frame, which lies a whole\n"
+"       schedule() call chain below that saved RSP. */\n"
+"    mov qword ptr gs:[56], 0\n"
+"    test byte ptr [rsp + 8], 3\n"
+"    jz 4f\n"
+"    swapgs\n"
+"4:\n"
 "    iretq\n"
 "8:  pop r13\n"
 "    pop r12\n"
@@ -6560,6 +7361,12 @@ void trap_init(void) {
   SET_EXCEPTION(20); SET_EXCEPTION(21); SET_EXCEPTION(22); SET_EXCEPTION(23);
   SET_EXCEPTION(24); SET_EXCEPTION(25); SET_EXCEPTION(26); SET_EXCEPTION(27);
   SET_EXCEPTION(28); SET_EXCEPTION(29); SET_EXCEPTION(30); SET_EXCEPTION(31);
+  /* cp/wine2: #BP (int3) and #OF (into) are raised BY user code as software
+     interrupts, so their gates need DPL 3 (Linux: set_system_intr_gate).
+     With DPL 0 a ring-3 int3 was a #GP -> SIGSEGV, never SIGTRAP: Windows
+     breakpoints / DebugBreak under Wine arrive as access violations. */
+  idt_set_gate(3, (uint64_t)exception_3, 0x08, 0xEE);
+  idt_set_gate(4, (uint64_t)exception_4, 0x08, 0xEE);
 
   // Register PIC interrupts (vectors 32-47)
   idt_set_gate(32, (uint64_t)exception_32, 0x08, 0x8E);
@@ -6583,6 +7390,8 @@ void trap_init(void) {
   idt_set_gate(129, (uint64_t)exception_129, 0x08, 0xEE);
   // P2.2 (S2): TLB shootdown IPI on vector 0x82 (kernel-only gate, 0x8E).
   idt_set_gate(130, (uint64_t)exception_130, 0x08, 0x8E);
+  // C1-k6: the one-shot timer on vector 0x84 (kernel-only gate).
+  idt_set_gate(132, (uint64_t)exception_132, 0x08, 0x8E);
 #ifdef PANIC_IPI_TEST
   // GB-207: test vehicle vector 0x83 (kernel-only gate, 0x8E).
   idt_set_gate(131, (uint64_t)exception_131, 0x08, 0x8E);

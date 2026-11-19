@@ -48,17 +48,50 @@
 #include "errno.h"
 #include "fb_mmap.h" /* GB-025 / M3: FBIOGET_* on /dev/fb0 */
 #include "file_obj.h" /* GB-025 / M3: file_is_devfb(); M1: file_is_devgpu() */
+#include "ntsync.h"  /* C2-ntsync: /dev/ntsync ioctls */
 #include "gpu_abi.h" /* M1: /dev/gpu GPU_IOC_* surface */
+#include "linux_snd.h" /* C4-audio: /dev/snd ALSA ioctls */
 #include "fs.h"
 #include "kline.h"
+#include "kmem.h"
 #include "ipc_proto.h"
 #include "linux_fb.h"
 #include "linux_syscall.h"
 #include "process.h"
+
+/* H4-kglitch: a park sentinel that equals a Linux errno turns that errno into
+   an endless restart (C4-audio's -2 == -ENOENT).  Unit test: gpu_abi_m2_test.c. */
+_Static_assert(GPU_ABI_PARKED < -4095 && LSND_PARKED < -4095 && GPU_ABI_PARKED != LSND_PARKED,
+               "ioctl park sentinels must not be errno values");
 #include "vfs.h"
 #include "frame.h"  /* GB-308: FRAME_SIZE for fsync write-back */
 #include "vm.h"      /* GB-308: struct vm_object, vm_object_unref */
 #include "virtio_gpu.h" /* GB-025 / M3: the scanout address for FBIOGET_* */
+#include "timer.h"
+#include "tmpfs.h" /* cp/sys: bind(2) socket inodes in the compat /tmp */
+#include "unix.h"  /* cp/sys: K_UNIX_SUN_LEN / K_UNIX_PATH_MAX */
+
+/* C1-k4: AF_NETLINK / NETLINK_ROUTE (linux_compat_netlink.c). */
+extern int linux_netlink_is(struct process *p, int fd);
+extern int linux_netlink_socket(struct process *p, int type, int protocol);
+extern int linux_netlink_bind(struct process *p, int fd, const uint8_t *sa, int len);
+extern void linux_netlink_name(struct process *p, int fd, int self, uint8_t *sa);
+extern int linux_netlink_send(struct process *p, int fd, const uint8_t *req, int len);
+
+/* Write a 12-byte sockaddr_nl to (usa, *ulenp) the way getsockname does. */
+static int l_nl_name_out(struct process *p, int fd, int self, uint64_t usa,
+                         uint64_t ulenp) {
+  if (!usa || !ulenp) return 0;
+  uint32_t ulen = 0;
+  if (l_copy_from_user(p, &ulen, ulenp, 4) != 0) return -EFAULT;
+  uint8_t sa[12];
+  linux_netlink_name(p, fd, self, sa);
+  uint32_t n = ulen < 12 ? ulen : 12;
+  if (n && l_copy_to_user(p, usa, sa, n) != 0) return -EFAULT;
+  uint32_t full = 12;
+  if (l_copy_to_user(p, ulenp, &full, 4) != 0) return -EFAULT;
+  return 0;
+}
 
 /* close_range(2) flags (Linux values; not syscall numbers, so local). */
 #define L_CLOSE_RANGE_UNSHARE 0x2u
@@ -80,8 +113,18 @@ static int l_park(struct process *p, struct trap_frame *tf) {
      NOW must end the wait with -EINTR instead of parking again: the syscall
      entry re-runs after a wake, so this is also the check that answers EINTR
      for the restarted instruction.  The handler itself is planted at this
-     trap exit, i.e. before the guest sees the return. */
-  if (linux_compat_sig_deliverable(p)) return l_ret(tf, -EINTR);
+     trap exit, i.e. before the guest sees the return.
+     C1-k4: the backend (usock_park & co.) has already committed the park --
+     BLOCKED, pid bit set -- so answering EINTR must undo it, or the thread
+     runs on in user space marked BLOCKED and the next tick parks it with
+     nothing left to wake it. */
+  if (linux_compat_sig_deliverable(p)) {
+    uint64_t pf = spinlock_acquire_irqsave(&proc_lock);
+    if (p->state == PROC_STATE_BLOCKED)
+      p->state = PROC_STATE_RUNNING;
+    spinlock_release_irqrestore(&proc_lock, pf);
+    return l_ret(tf, -EINTR);
+  }
 #ifdef __x86_64__
   if ((tf->cs & 3) == 3) tf->elr -= 2; /* rewind over the 2-byte `syscall` */
 #else
@@ -98,26 +141,27 @@ static int l_park(struct process *p, struct trap_frame *tf) {
 }
 
 /* Read a Linux timeout (struct timeval for select, struct timespec for
- * pselect6) into milliseconds: -1 = wait forever, rounded UP like Linux.
- * Returns 0 or -errno. */
-static int l_timeout_ms(struct process *p, uint64_t uptr, int is_timespec,
-                        int64_t *out_ms) {
+ * pselect6/ppoll) into microseconds: -1 = wait forever, rounded UP like
+ * Linux.  C1-k6: was milliseconds, which made select({0,100}) a 1 ms wait
+ * and every sub-tick timeout a tick.  Returns 0 or -errno. */
+static int l_timeout_us(struct process *p, uint64_t uptr, int is_timespec,
+                        int64_t *out_us) {
   if (uptr == 0) {
-    *out_ms = -1;
+    *out_us = -1;
     return 0;
   }
-  int64_t tv[2]; /* { sec, usec } or { sec, nsec } — 16 bytes either way */
+  int64_t tv[2];
   int r = l_copy_from_user(p, tv, uptr, sizeof tv);
   if (r != 0) return -EFAULT;
   if (tv[0] < 0 || tv[1] < 0) return -EINVAL;
+  if (tv[0] > 100000LL) tv[0] = 100000LL; /* 27.8 h is "forever" (the old cap) */
   if (is_timespec) {
     if (tv[1] >= 1000000000LL) return -EINVAL;
-    *out_ms = tv[0] * 1000 + (tv[1] + 999999) / 1000000;
+    *out_us = tv[0] * 1000000LL + (tv[1] + 999) / 1000;
   } else {
     if (tv[1] >= 1000000LL) return -EINVAL;
-    *out_ms = tv[0] * 1000 + (tv[1] + 999) / 1000;
+    *out_us = tv[0] * 1000000LL + tv[1];
   }
-  if (*out_ms < 0 || *out_ms > 100000000LL) *out_ms = 100000000LL;
   return 0;
 }
 
@@ -156,6 +200,8 @@ static int l_fd_socket(struct process *p, struct trap_frame *tf) {
   int domain = (int)l_argi(tf, 0);
   int type = (int)l_argi(tf, 1);
   int protocol = (int)l_argi(tf, 2);
+  if (domain == 16 /* AF_NETLINK */)
+    return l_ret(tf, linux_netlink_socket(p, type, protocol));
   return l_ret(tf, file_socket(p, domain, type, protocol));
 }
 
@@ -182,13 +228,83 @@ static int l_fd_socketpair(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, 0);
 }
 
-/* bind(fd, const struct sockaddr *addr, socklen_t len). */
+/* cp/sys: pathname AF_UNIX addresses.
+ *
+ * unix.c keys its namespace on the sun_path BYTES, which is right for an
+ * absolute name and wrong for a relative one: wineserver binds "socket"
+ * after chdir()ing into its server directory and every client connects to
+ * "socket" from the same directory (server/request.c:814-818,
+ * dlls/ntdll/unix/server.c:1446-1460), so two servers for two prefixes
+ * would collide on the same key.  A relative name is therefore resolved
+ * against the caller's cwd here, exactly as Linux resolves it, before the
+ * namespace sees it.  `ksa` is a kernel copy of the caller's address
+ * (K_UNIX_SUN_LEN bytes of room); *klen is updated.  `abs_out` receives the
+ * canonical path for a pathname address ("" for abstract/unnamed/INET).
+ * Returns 0 or -errno. */
+static int l_unix_sa_prepare(struct process *p, uint64_t usa, int salen,
+                             uint8_t *ksa, int *klen, char *abs_out) {
+  abs_out[0] = '\0';
+  if (salen < 2 || salen > K_UNIX_SUN_LEN) return -EINVAL;
+  if (!usa) return -EFAULT;
+  int r = l_copy_from_user(p, ksa, usa, (uint64_t)salen);
+  if (r) return r;
+  *klen = salen;
+  uint16_t fam = (uint16_t)(ksa[0] | ((uint16_t)ksa[1] << 8));
+  if (fam != K_AF_UNIX || salen == 2 || ksa[2] == 0) return 0;
+  char path[K_UNIX_PATH_MAX + 1];
+  int n = 0;
+  while (n < salen - 2 && n < K_UNIX_PATH_MAX && ksa[2 + n]) {
+    path[n] = (char)ksa[2 + n];
+    n++;
+  }
+  path[n] = '\0';
+  char abs[VFS_PATH_MAX];
+  if (vfs_abs_path(path, abs, sizeof abs) != 0) return -ENAMETOOLONG;
+  int an = 0;
+  while (abs[an]) an++;
+  if (path[0] != '/') {
+    if (an >= K_UNIX_PATH_MAX) return -ENAMETOOLONG;
+    for (int i = 0; i < an; i++) ksa[2 + i] = (uint8_t)abs[i];
+    ksa[2 + an] = 0;
+    *klen = 2 + an + 1;
+  }
+  for (int i = 0; i <= an; i++) abs_out[i] = abs[i];
+  return 0;
+}
+
+/* bind(fd, const struct sockaddr *addr, socklen_t len).
+ * cp/sys: a pathname bound inside the compat /tmp also creates the socket
+ * INODE there (S_IFSOCK, 0777 & ~umask, like Linux): Wine's client lstat()s
+ * the name and refuses anything that is not a socket owned by the caller
+ * (dlls/ntdll/unix/server.c:1432-1443).  An existing name is EADDRINUSE,
+ * which is the answer acquire_lock() expects (server/request.c:821-828). */
 static int l_fd_bind(struct process *p, struct trap_frame *tf) {
   int fd = (int)l_argi(tf, 0);
   uint64_t usa = l_arg(tf, 1);
   int salen = (int)l_argi(tf, 2);
   if (salen < 2) return l_ret(tf, -EINVAL);
-  return l_ret(tf, file_bind_user(p, fd, usa, salen));
+  if (linux_netlink_is(p, fd)) { /* C1-k4 */
+    uint8_t nsa[12] = {0};
+    if (salen < 12 || l_copy_from_user(p, nsa, usa, 12) != 0) return l_ret(tf, -EINVAL);
+    return l_ret(tf, linux_netlink_bind(p, fd, nsa, salen));
+  }
+  if (salen > K_UNIX_SUN_LEN) return l_ret(tf, file_bind_user(p, fd, usa, salen));
+  uint8_t ksa[K_UNIX_SUN_LEN + 1];
+  int klen = salen;
+  char abs[VFS_PATH_MAX];
+  int r = l_unix_sa_prepare(p, usa, salen, ksa, &klen, abs);
+  if (r) return l_ret(tf, r);
+  int made = 0;
+  if (abs[0] && tmpfs_owns(abs)) {
+    if (l_is_socket(p, fd) <= 0) return l_ret(tf, l_is_socket(p, fd) < 0 ? -EBADF : -ENOTSOCK);
+    r = tmpfs_mksock(abs, (int)(0777u & ~linux_compat_umask()));
+    if (r == TMPFS_EXTERNAL) r = 0; /* a symlinked dir leading off /tmp */
+    else if (r) return l_ret(tf, r);
+    else made = 1;
+  }
+  r = file_bind(p, fd, ksa, klen);
+  if (r != 0 && made) tmpfs_unmksock(abs);
+  return l_ret(tf, r);
 }
 
 /* listen(fd, backlog). */
@@ -228,11 +344,38 @@ static int l_fd_accept4(struct process *p, struct trap_frame *tf) {
 static int l_connect(struct process *p, int fd, uint64_t usa, int salen,
                      int *parked) {
   *parked = 0;
+  /* cp/sys: a relative AF_UNIX pathname is resolved against the cwd first
+     (see l_unix_sa_prepare); INET and sockaddr_storage-sized callers keep
+     the user-pointer path. */
+  uint8_t ksa[K_UNIX_SUN_LEN + 1];
+  int klen = 0;
+  int use_k = 0;
+  int is_unix = 0;
+  if (salen >= 2 && usa) {
+    uint8_t fam[2];
+    if (l_copy_from_user(p, fam, usa, 2) == 0 && fam[0] == K_AF_UNIX && fam[1] == 0)
+      is_unix = 1;
+  }
+  if (!is_unix) {
+    /* H4-kglitch round 2 (K10): only unix connect needs the non-blocking
+       probe below (its -2 is ambiguous).  Forcing O_NONBLOCK on an AF_INET
+       socket made a BLOCKING TCP connect return EINPROGRESS (fs.c
+       file_socket_connect takes the pcb->nonblock branch), where Linux
+       blocks until the handshake ends (linux_probe_tcpconn C1). */
+    return file_connect_user(p, fd, usa, salen); /* INET never parks: it is synchronous */
+  }
+  if (salen >= 2 && salen <= K_UNIX_SUN_LEN && usa) {
+    char abs[VFS_PATH_MAX];
+    int pr = l_unix_sa_prepare(p, usa, salen, ksa, &klen, abs);
+    if (pr) return pr;
+    use_k = 1;
+  }
   int fl = file_fcntl(p, fd, K_F_GETFL, 0);
   int was_nonblock = (fl >= 0) && (fl & K_O_NONBLOCK);
   if (!was_nonblock) (void)file_fcntl(p, fd, K_F_SETFL, K_O_NONBLOCK);
 
-  int r = file_connect_user(p, fd, usa, salen);
+  int r = use_k ? file_connect_sa(p, fd, ksa, klen)
+                : file_connect_user(p, fd, usa, salen);
   if (r == -2) {
     /* Non-blocking: fs.c can only mean "no such name" here. */
     r = -ENOENT;
@@ -240,7 +383,8 @@ static int l_connect(struct process *p, int fd, uint64_t usa, int salen,
     /* Backlog full on a blocking socket: re-enter with the flag cleared so
      * usock_connect() parks us (blocking connect blocks, as Linux). */
     (void)file_fcntl(p, fd, K_F_SETFL, 0);
-    r = file_connect_user(p, fd, usa, salen);
+    r = use_k ? file_connect_sa(p, fd, ksa, klen)
+              : file_connect_user(p, fd, usa, salen);
     if (r == -2) *parked = 1;
   }
   if (!was_nonblock) (void)file_fcntl(p, fd, K_F_SETFL, 0);
@@ -259,6 +403,8 @@ static int l_fd_connect(struct process *p, struct trap_frame *tf) {
 
 /* getsockname(51) / getpeername(52): (fd, addr, socklen_t *lenp). */
 static int l_fd_sockname(struct process *p, struct trap_frame *tf, int peer) {
+  if (linux_netlink_is(p, (int)l_argi(tf, 0))) /* C1-k4 */
+    return l_ret(tf, l_nl_name_out(p, (int)l_argi(tf, 0), !peer, l_arg(tf, 1), l_arg(tf, 2)));
   return l_ret(tf, file_sockname_user(p, (int)l_argi(tf, 0), peer,
                                       l_arg(tf, 1), l_arg(tf, 2)));
 }
@@ -289,6 +435,7 @@ static int l_fd_setsockopt(struct process *p, struct trap_frame *tf) {
   int64_t len = l_argi(tf, 4);
 
   if (len < 0) return l_ret(tf, -EINVAL);
+  if (linux_netlink_is(p, fd)) return l_ret(tf, 0); /* C1-k4: SO_RCVBUF, NETLINK_* */
   uint8_t kbuf[L_SOCKOPT_MAX];
   int klen = (int)len;
   if (klen > L_SOCKOPT_MAX) klen = L_SOCKOPT_MAX;
@@ -349,6 +496,13 @@ static int l_fd_sendto(struct process *p, struct trap_frame *tf) {
   int64_t dlen = l_argi(tf, 5);
 
   if (len < 0) return l_ret(tf, -EINVAL);
+  if (linux_netlink_is(p, fd)) { /* C1-k4: a request to the kernel */
+    static uint8_t nreq[4096];
+    int n = len > (int64_t)sizeof nreq ? (int)sizeof nreq : (int)len;
+    if (n > 0 && l_copy_from_user(p, nreq, ubuf, (uint64_t)n) != 0) return l_ret(tf, -EFAULT);
+    (void)udest; (void)dlen;
+    return l_ret(tf, linux_netlink_send(p, fd, nreq, n));
+  }
   if (flags & ~(K_MSG_DONTWAIT | K_MSG_NOSIGNAL)) return l_ret(tf, -EOPNOTSUPP);
   if (udest != 0 && dlen > 0) return l_ret(tf, -EOPNOTSUPP);
   if (len > 0 && !l_user_ok(p, ubuf, (uint64_t)len, 0))
@@ -401,7 +555,8 @@ static int l_fd_recvfrom(struct process *p, struct trap_frame *tf) {
   if (r >= 0 && usrc != 0 && ulenp != 0) {
     /* Best effort, like Linux for a connected socket: the peer's name.  A
      * socket with no peer leaves the address untouched. */
-    (void)file_sockname_user(p, fd, 1, usrc, ulenp);
+    if (linux_netlink_is(p, fd)) (void)l_nl_name_out(p, fd, 0, usrc, ulenp); /* C1-k4 */
+    else (void)file_sockname_user(p, fd, 1, usrc, ulenp);
   }
   return l_ret(tf, r);
 }
@@ -416,9 +571,41 @@ static int l_msg_common(struct process *p, struct trap_frame *tf, int recv) {
 
   if (!l_user_ok(p, umsg, sizeof(struct k_msghdr), 1))
     return l_ret(tf, -EFAULT);
+  int nl = linux_netlink_is(p, fd);
+  struct k_msghdr mh;
+  if (nl && l_copy_from_user(p, &mh, umsg, sizeof mh) != 0) return l_ret(tf, -EFAULT);
+  if (nl && !recv) { /* C1-k4: gather the request datagram, answer it */
+    static uint8_t nreq[4096];
+    int n = 0;
+    for (uint64_t i = 0; i < mh.iovlen && i < 64; i++) {
+      uint64_t iv[2];
+      if (l_copy_from_user(p, iv, mh.iov + i * 16, 16) != 0) return l_ret(tf, -EFAULT);
+      uint64_t take = iv[1];
+      if (take > sizeof nreq - (uint64_t)n) take = sizeof nreq - (uint64_t)n;
+      if (take && l_copy_from_user(p, nreq + n, iv[0], take) != 0) return l_ret(tf, -EFAULT);
+      n += (int)take;
+    }
+    return l_ret(tf, linux_netlink_send(p, fd, nreq, n));
+  }
+  if (nl && recv) {
+    /* the unix engine refuses msg_name/msg_namelen (connected sockets
+       only): hide them for the call and answer the name ourselves below */
+    uint64_t z[2] = {0, 0};
+    (void)l_copy_to_user(p, umsg, z, 12);
+  }
   int r = recv ? file_recvmsg(p, fd, umsg, flags)
                : file_sendmsg(p, fd, umsg, flags);
+  if (nl && recv)
+    (void)l_copy_to_user(p, umsg, &mh, 12); /* name + namelen back */
   if (r == -2) return l_park(p, tf);
+  if (nl && recv && mh.name && r >= 0) {
+    uint8_t sa[12];
+    linux_netlink_name(p, fd, 0, sa);
+    uint32_t n = mh.namelen < 12 ? mh.namelen : 12;
+    if (n) (void)l_copy_to_user(p, mh.name, sa, n);
+    uint32_t full = 12;
+    (void)l_copy_to_user(p, umsg + 8, &full, 4);
+  }
   return l_ret(tf, r);
 }
 
@@ -473,7 +660,7 @@ static int l_fd_pipe2(struct process *p, struct trap_frame *tf) {
 
   int kfds[2] = {-1, -1};
   int r = file_pipe(p, kfds);
-  if (r != 0) return l_ret(tf, -EMFILE);
+  if (r != 0) return l_ret(tf, r < -1 ? r : -EMFILE); /* C1-k5: EMFILE/ENFILE */
   if (flags & L_O_NONBLOCK) {
     (void)file_fcntl(p, kfds[0], K_F_SETFL, K_O_NONBLOCK);
     (void)file_fcntl(p, kfds[1], K_F_SETFL, K_O_NONBLOCK);
@@ -509,7 +696,11 @@ static int l_fd_close_range(struct process *p, struct trap_frame *tf) {
     fs_fd_ev_range(p, (int)first, (int)last);
   }
 
+  struct process *pg = process_group(p);
   for (uint32_t fd = first; fd <= last; fd++) {
+    /* C1-k5: 4096 slots -- skip the closed ones (and never mark a closed
+       slot CLOEXEC: the next fd allocated there would inherit the bit). */
+    if (pg && pg->open_fds[fd] == -1) continue;
     if (flags & L_CLOSE_RANGE_CLOEXEC)
       (void)file_fcntl(p, (int)fd, K_F_SETFD, K_FD_CLOEXEC);
     else
@@ -522,27 +713,46 @@ static int l_fd_close_range(struct process *p, struct trap_frame *tf) {
 
 /* poll(struct pollfd *fds, nfds_t nfds, int timeout_ms).  fs.c's engine
  * writes revents through the guest pointer (the same pointer the native
- * sys_poll passes), so only the range/alignment is checked here. */
-static int l_fd_poll(struct process *p, struct trap_frame *tf) {
-  uint64_t ufds = l_arg(tf, 0);
-  int64_t nfds = l_argi(tf, 1);
-  int timeout = (int)l_argi(tf, 2);
-
-  if (nfds < 0 || nfds > K_FD_SETSIZE) return l_ret(tf, -EINVAL);
+ * sys_poll passes), so only the range/alignment is checked here.
+ * C1-k5: nfds is bounded by RLIMIT_NOFILE (Linux do_sys_poll: EINVAL above
+ * it), not by the native 256-entry cap. */
+static int l_poll_common(struct process *p, struct trap_frame *tf, uint64_t ufds,
+                         int64_t nfds, int64_t timeout_us) {
+  if (nfds < 0 || nfds > (int64_t)process_fd_limit(process_group(p)))
+    return l_ret(tf, -EINVAL);
   if (nfds > 0) {
     if (!ufds || (ufds & 3) != 0) return l_ret(tf, -EFAULT);
     if (!l_user_ok(p, ufds, (uint64_t)nfds * sizeof(struct k_pollfd), 1))
       return l_ret(tf, -EFAULT);
   }
-  int r = file_poll(p, (struct k_pollfd *)ufds, (int)nfds, timeout);
+  int r = file_poll_us(p, (struct k_pollfd *)ufds, (int)nfds, timeout_us);
   if (r == -2) return l_park(p, tf);
   return l_ret(tf, r);
 }
 
-/* select(23) / pselect6(270).  The native engine speaks the kernel's 256-bit
- * fd_set (struct fd_set_k, 32 bytes); Linux's fd_set is 1024 bits but only
- * the first nfds bits are ever examined, so a 32-byte copy is exact for
- * nfds <= 256 and EINVAL (like Linux's nfds > FD_SETSIZE) beyond that. */
+static int l_fd_poll(struct process *p, struct trap_frame *tf) {
+  int tmo = (int)l_argi(tf, 2); /* ms; any negative value is "forever" */
+  return l_poll_common(p, tf, l_arg(tf, 0), l_argi(tf, 1),
+                       tmo < 0 ? -1 : (int64_t)tmo * 1000);
+}
+
+/* C1-k5: ppoll(fds, nfds, const struct timespec *tmo, sigmask, sigsetsize).
+ * A NULL timeout waits forever; the signal mask is not applied (the same
+ * limitation as pselect6 below). */
+static int l_fd_ppoll(struct process *p, struct trap_frame *tf) {
+  int64_t us = -1;
+  int err = l_timeout_us(p, l_arg(tf, 2), 1, &us);
+  if (err != 0) return l_ret(tf, err);
+  return l_poll_common(p, tf, l_arg(tf, 0), l_argi(tf, 1), us);
+}
+
+/* select(23) / pselect6(270).  C1-k5: Linux semantics for any nfds: the sets
+ * are FDS_BYTES(nfds) = ceil(nfds/64) longs (a glibc fd_set is 1024 bits, a
+ * program that wants more passes a bigger array), nfds is clamped to the fd
+ * table (Linux clamps to the table's max_fds), and only the first nfds bits
+ * are examined or written back.  The kernel copies hold up to MAX_OPEN_FDS
+ * bits (3 x 512 bytes on the syscall stack). */
+#define L_SEL_WORDS64 ((MAX_OPEN_FDS + 63) / 64)
 static int l_select_common(struct process *p, struct trap_frame *tf,
                            int is_timespec) {
   int64_t nfds = l_argi(tf, 0);
@@ -551,40 +761,48 @@ static int l_select_common(struct process *p, struct trap_frame *tf,
   uint64_t uex = l_arg(tf, 3);
   uint64_t utimeout = l_arg(tf, 4);
 
-  if (nfds < 0 || nfds > K_FD_SETSIZE) return l_ret(tf, -EINVAL);
+  if (nfds < 0) return l_ret(tf, -EINVAL);
+  if (nfds > (int64_t)MAX_OPEN_FDS) nfds = MAX_OPEN_FDS;
 
-  int64_t ms = -1;
-  int err = l_timeout_ms(p, utimeout, is_timespec, &ms);
+  int64_t us = -1;
+  int err = l_timeout_us(p, utimeout, is_timespec, &us);
   if (err != 0) return l_ret(tf, err);
 
-  struct fd_set_k rd, wr, ex;
-  struct fd_set_k *prd = 0, *pwr = 0, *pex = 0;
-  if (urd) {
-    if (l_copy_from_user(p, &rd, urd, sizeof rd) != 0)
-      return l_ret(tf, -EFAULT);
-    prd = &rd;
+  uint64_t rd[L_SEL_WORDS64], wr[L_SEL_WORDS64], ex[L_SEL_WORDS64];
+  int nl = (int)((nfds + 63) / 64);
+  uint64_t bytes = (uint64_t)nl * 8u;
+  uint64_t *prd = 0, *pwr = 0, *pex = 0;
+  if (urd && nl) {
+    if (l_copy_from_user(p, rd, urd, bytes) != 0) return l_ret(tf, -EFAULT);
+    prd = rd;
   }
-  if (uwr) {
-    if (l_copy_from_user(p, &wr, uwr, sizeof wr) != 0)
-      return l_ret(tf, -EFAULT);
-    pwr = &wr;
+  if (uwr && nl) {
+    if (l_copy_from_user(p, wr, uwr, bytes) != 0) return l_ret(tf, -EFAULT);
+    pwr = wr;
   }
-  if (uex) {
-    if (l_copy_from_user(p, &ex, uex, sizeof ex) != 0)
-      return l_ret(tf, -EFAULT);
-    pex = &ex;
+  if (uex && nl) {
+    if (l_copy_from_user(p, ex, uex, bytes) != 0) return l_ret(tf, -EFAULT);
+    pex = ex;
+  }
+  /* Bits at or past nfds are not examined (Linux); they come back as 0 in
+     the last long, as Linux's whole-long write-back leaves them. */
+  if (nl && (nfds & 63)) {
+    uint64_t mask = (1ull << (nfds & 63)) - 1;
+    if (prd) rd[nl - 1] &= mask;
+    if (pwr) wr[nl - 1] &= mask;
+    if (pex) ex[nl - 1] &= mask;
   }
 
-  int r = file_select(p, (int)nfds, prd, pwr, pex, (int)ms);
+  /* x86_64 is little-endian: a long array is the same bits as 2*nl u32. */
+  int r = file_select_words_us(p, (int)nfds, (uint32_t *)(void *)prd, (uint32_t *)(void *)pwr,
+                               (uint32_t *)(void *)pex, nl * 2, us);
   if (r == -2) return l_park(p, tf);
   if (r >= 0) {
-    /* Ready sets (or all-zero on timeout) go back to the guest. */
-    if (prd && l_copy_to_user(p, urd, prd, sizeof *prd) != 0)
-      return l_ret(tf, -EFAULT);
-    if (pwr && l_copy_to_user(p, uwr, pwr, sizeof *pwr) != 0)
-      return l_ret(tf, -EFAULT);
-    if (pex && l_copy_to_user(p, uex, pex, sizeof *pex) != 0)
-      return l_ret(tf, -EFAULT);
+    /* Ready sets (or all-zero on timeout) go back to the guest: exactly
+       FDS_BYTES(nfds), as Linux writes them. */
+    if (prd && l_copy_to_user(p, urd, prd, bytes) != 0) return l_ret(tf, -EFAULT);
+    if (pwr && l_copy_to_user(p, uwr, pwr, bytes) != 0) return l_ret(tf, -EFAULT);
+    if (pex && l_copy_to_user(p, uex, pex, bytes) != 0) return l_ret(tf, -EFAULT);
   }
   return l_ret(tf, r);
 }
@@ -597,6 +815,23 @@ static int l_fd_select(struct process *p, struct trap_frame *tf) {
  * compat surface has no signal-mask swap. */
 static int l_fd_pselect6(struct process *p, struct trap_frame *tf) {
   return l_select_common(p, tf, 1);
+}
+
+/* C1-k5 (C8-game: the wineserver calls it once per boot): fadvise64(fd,
+ * offset, len, advice).  Advice is only a hint and this kernel has no
+ * readahead policy to tune, so a valid call is 0 -- Linux's answers for the
+ * invalid ones: EBADF for a closed fd, ESPIPE for a pipe, EINVAL for an
+ * unknown advice (POSIX_FADV_NORMAL..NOREUSE = 0..5) or a negative len. */
+static int l_fd_fadvise64(struct process *p, struct trap_frame *tf) {
+  int fd = (int)l_argi(tf, 0);
+  int64_t len = l_argi(tf, 2);
+  int advice = (int)l_argi(tf, 3);
+  struct process *pg = process_group(p);
+  if (!pg || fd < 0 || fd >= MAX_OPEN_FDS || pg->open_fds[fd] < 0)
+    return l_ret(tf, -EBADF);
+  if (file_gfd_is_pipe(pg->open_fds[fd])) return l_ret(tf, -ESPIPE);
+  if (advice < 0 || advice > 5 || len < 0) return l_ret(tf, -EINVAL);
+  return l_ret(tf, 0);
 }
 
 /* ---- ioctl / fcntl ------------------------------------------------------ */
@@ -634,6 +869,9 @@ static int l_fd_ioctl(struct process *p, struct trap_frame *tf) {
   }
   if (req == L_TCGETS || req == L_TCSETS || req == L_TIOCGWINSZ)
     return l_ret(tf, -ENOTTY);
+  /* C2-ntsync (docs/cp-ntsync.md): /dev/ntsync and its objects.  The driver
+     answers (tf->regs[0]) or parks a wait with the -2 convention itself. */
+  if (file_is_ntsync(p, fd)) return ntsync_ioctl(p, tf, fd, req, arg);
   /* GB-025 / M3: the /dev/fb0 ioctl surface (docs/linux-abi.md §9).  A
    * compat X11 client reads its geometry with FBIOGET_VSCREENINFO before
    * mmap, and SDL's fbcon driver reads both structs.  The node answers the
@@ -650,7 +888,7 @@ static int l_fd_ioctl(struct process *p, struct trap_frame *tf) {
     if (!arg) return l_ret(tf, -EFAULT);
     unsigned char kbuf[160];
     int rr = hb_fb_ioctl_route((unsigned long)req, kbuf,
-                               (uint64_t)virtio_gpu_get_framebuffer());
+                               kimg_pa(virtio_gpu_get_framebuffer()));
     if (rr != 0) return l_ret(tf, rr);
     int cr = l_copy_to_user(p, arg, kbuf, sz);
     return l_ret(tf, cr != 0 ? cr : 0);
@@ -659,24 +897,50 @@ static int l_fd_ioctl(struct process *p, struct trap_frame *tf) {
    * debugfs structs are read-modify-write (ctx/res ids out, submit fence out),
    * so the handler owns the copy-in/copy-out: gpu_abi_ioctl() takes the user
    * pointer and does every access through vm_user_read/vm_kwrite. */
-  if (file_is_devgpu(p, fd))
-    return l_ret(tf, gpu_abi_ioctl(p, fd, (unsigned long)req, arg));
+  if (file_is_devgpu(p, fd)) {
+    int gr = gpu_abi_ioctl(p, fd, (unsigned long)req, arg);
+    /* P6 (docs/gpu-abi.md §10.5): FENCE_WAIT2 parks (GPU_ABI_PARKED, never
+       an errno); the ioctl restarts on wake and re-checks its fence. */
+    if (gr == GPU_ABI_PARKED) return l_park(p, tf);
+    return l_ret(tf, gr);
+  }
+  /* C4-audio (docs/cp-audio.md): the ALSA control/PCM request set.  A blocking
+     WRITEI/DRAIN parks (LSND_PARKED, never an errno) and restarts on the TX
+     completion wake. */
+  {
+    int sminor = file_devsnd_minor(p, fd);
+    if (sminor >= 0) {
+      uint32_t of = 0;
+      (void)file_open_flags(p, fd, &of);
+      int sr = linux_snd_ioctl(p, sminor, of, req, arg);
+      if (sr == LSND_PARKED) return l_park(p, tf);
+      return l_ret(tf, sr);
+    }
+  }
   if (req == (uint32_t)L_F_GETFL) return l_ret(tf, file_fcntl(p, fd, K_F_GETFL, 0));
   if (req == (uint32_t)L_F_SETFL) return l_ret(tf, file_fcntl(p, fd, K_F_SETFL, arg));
   return l_ret(tf, -ENOTTY);
 }
 
 /* fcntl(72): (fd, cmd, arg64).  file_fcntl owns the real work (fd flags,
- * status flags, record locks, memfd seals); F_DUPFD/F_DUPFD_CLOEXEC are the
- * one command it cannot express — "lowest free fd at or above N" has no
- * native entry point — so they are refused explicitly instead of returning
- * a wrong number. */
+ * status flags, record locks, memfd seals).  C1-k5: F_DUPFD and
+ * F_DUPFD_CLOEXEC are fs.c's file_dup_min ("lowest free fd >= arg", bounded
+ * by RLIMIT_NOFILE: arg at or past it is EINVAL, a full table EMFILE); they
+ * used to be refused with EINVAL. */
+#define L_F_DUPFD_CLOEXEC 1030
 static int l_fd_fcntl(struct process *p, struct trap_frame *tf) {
   int fd = (int)l_argi(tf, 0);
   int cmd = (int)l_argi(tf, 1);
   uint64_t arg = l_arg(tf, 2);
 
-  if (cmd == L_F_DUPFD) return l_ret(tf, -EINVAL);
+  if (cmd == L_F_DUPFD || cmd == L_F_DUPFD_CLOEXEC) {
+    int64_t minfd = (int64_t)arg;
+    if (minfd < 0 || minfd > (int64_t)MAX_OPEN_FDS) return l_ret(tf, -EINVAL);
+    int r = file_dup_min(p, fd, (int)minfd);
+    if (r >= 0 && cmd == L_F_DUPFD_CLOEXEC)
+      (void)file_fcntl(p, r, K_F_SETFD, K_FD_CLOEXEC);
+    return l_ret(tf, r);
+  }
   return l_ret(tf, file_fcntl(p, fd, cmd, arg));
 }
 
@@ -877,6 +1141,557 @@ static int l_fd_fchown(struct process *p, struct trap_frame *tf) {
   return l_ret(tf, rc);
 }
 
+/* ---- cp/sys: sendmmsg ---------------------------------------------------
+ *
+ * Not Wine's own call: glibc 2.31's resolver (res_send.c send_dg) sends the
+ * A and AAAA queries of one getaddrinfo() in a single sendmmsg on a
+ * CONNECTED UDP socket (Wine reaches it from wineboot.exe's host-name
+ * lookup, docs/cyberpunk-evidence.md §3.1 rank 6).  Each struct mmsghdr is a
+ * msghdr (56 bytes) followed by msg_len (u32) + 4 bytes of padding.
+ *   AF_UNIX  -> one file_sendmsg per entry (fds and all);
+ *   AF_INET  -> one datagram per entry through the connected-socket write
+ *               path (a single iovec, no msg_name: the resolver's shape).
+ * Linux semantics: the count of messages sent; an error only when the FIRST
+ * message fails; a would-block on the first parks the whole call. */
+#define L_SYS_sendmmsg 307
+#define L_MMSG_SIZE 64
+
+static int l_fd_sendmmsg(struct process *p, struct trap_frame *tf) {
+  int fd = (int)l_argi(tf, 0);
+  uint64_t uvec = l_arg(tf, 1);
+  int64_t vlen = l_argi(tf, 2);
+  int flags = (int)l_argi(tf, 3);
+  if (vlen < 0) return l_ret(tf, -EINVAL);
+  if (vlen > 1024) vlen = 1024; /* UIO_MAXIOV, as Linux clamps */
+  if (vlen == 0) return l_ret(tf, 0);
+  int issock = l_is_socket(p, fd);
+  if (issock < 0) return l_ret(tf, -EBADF);
+  if (issock == 0) return l_ret(tf, -ENOTSOCK);
+  if (!l_user_ok(p, uvec, (uint64_t)vlen * L_MMSG_SIZE, 1))
+    return l_ret(tf, -EFAULT);
+  int64_t sent = 0;
+  for (int64_t i = 0; i < vlen; i++) {
+    uint64_t um = uvec + (uint64_t)i * L_MMSG_SIZE;
+    int r = file_sendmsg(p, fd, um, flags);
+    if (r == -EOPNOTSUPP) {
+      /* INET: the connected-datagram write path. */
+      struct k_msghdr m;
+      if (l_copy_from_user(p, &m, um, sizeof m) != 0) {
+        r = -EFAULT;
+      } else if (m.name != 0 && m.namelen != 0) {
+        r = -EOPNOTSUPP; /* directed send: no sendto-with-address engine */
+      } else if (m.iovlen != 1) {
+        r = -EOPNOTSUPP;
+      } else {
+        uint64_t io[2];
+        if (l_copy_from_user(p, io, m.iov, sizeof io) != 0) r = -EFAULT;
+        else if (io[1] > 0x10000) r = -EMSGSIZE;
+        else if (io[1] > 0 && !l_user_ok(p, io[0], io[1], 0)) r = -EFAULT;
+        else {
+          int saved = -1;
+          if (flags & K_MSG_DONTWAIT) saved = l_nonblock_push(p, fd);
+          r = file_write(p, fd, (const void *)(uintptr_t)io[0], (int)io[1], tf);
+          l_nonblock_pop(p, fd, saved);
+          if (r == -1) r = -EIO;
+        }
+      }
+    }
+    if (r == -2) {
+      if (sent == 0) return l_park(p, tf);
+      break;
+    }
+    if (r < 0) {
+      if (sent == 0) return l_ret(tf, r);
+      break;
+    }
+    uint32_t mlen = (uint32_t)r;
+    if (l_copy_to_user(p, um + 56, &mlen, sizeof mlen) != 0) {
+      if (sent == 0) return l_ret(tf, -EFAULT);
+      break;
+    }
+    sent++;
+  }
+  return l_ret(tf, sent);
+}
+
+/* ---- cp/sys: extended attributes -----------------------------------------
+ *
+ * No volume here stores xattrs, so every one answers as a Linux filesystem
+ * without xattr support does: get/set/remove are -EOPNOTSUPP (== ENOTSUP,
+ * 95) and list is an empty list (0).  That is the errno Wine tolerates on
+ * EVERY path that uses them:
+ *   get  (DOS attributes, reparse tag): dlls/ntdll/unix/file.c:1704-1712
+ *        and :1820-1830 return quietly on ENOTSUP (also ENODATA/ENOATTR);
+ *   set/remove (fd_set_dos_attrib):     file.c:1764 ignores ENOTSUP;
+ *   the reparse-point READ (file.c:4060) fails the one operation that
+ *        needs a reparse point, which cannot exist on these volumes.
+ * The arguments are still validated the way Linux validates them before it
+ * reaches the filesystem: a path that does not exist is -ENOENT, a closed fd
+ * is -EBADF, a NULL name is -EFAULT. */
+#define L_SYS_setxattr 188
+#define L_SYS_lsetxattr 189
+#define L_SYS_fsetxattr 190
+#define L_SYS_getxattr 191
+#define L_SYS_lgetxattr 192
+#define L_SYS_fgetxattr 193
+#define L_SYS_listxattr 194
+#define L_SYS_llistxattr 195
+#define L_SYS_flistxattr 196
+#define L_SYS_removexattr 197
+#define L_SYS_lremovexattr 198
+#define L_SYS_fremovexattr 199
+
+/* 0 when the target exists, -errno otherwise.  by_fd: arg0 is an fd. */
+static int l_xattr_target(struct process *p, struct trap_frame *tf, int by_fd,
+                          int follow) {
+  if (by_fd) {
+    struct k_stat ks;
+    int err = 0;
+    return file_stat_fd(p, (int)l_argi(tf, 0), &ks, &err) == 0 ? 0 : -EBADF;
+  }
+  char path[VFS_PATH_MAX];
+  int r = l_copy_cstr(p, path, l_arg(tf, 0), sizeof path);
+  if (r) return r;
+  if (path[0] == '\0') return -ENOENT;
+  char abs[VFS_PATH_MAX];
+  if (vfs_abs_path(path, abs, sizeof abs) != 0) return -ENAMETOOLONG;
+  struct k_stat ks;
+  if (!follow && tmpfs_owns(abs)) {
+    int tr = tmpfs_stat(abs, 0, &ks);
+    if (tr != TMPFS_EXTERNAL) return tr;
+  }
+  int err = 0;
+  return file_stat_path(p, abs, &ks, &err) == 0 ? 0 : -(err ? err : ENOENT);
+}
+
+static int l_xattr_name(struct process *p, uint64_t uname) {
+  if (!uname) return -EFAULT;
+  char nm[256];
+  int r = l_copy_cstr(p, nm, uname, sizeof nm);
+  if (r == -ENAMETOOLONG) return -ERANGE; /* XATTR_NAME_MAX exceeded */
+  if (r) return r;
+  if (nm[0] == '\0') return -ERANGE;
+  return 0;
+}
+
+static int l_xattr_common(struct process *p, struct trap_frame *tf, int by_fd,
+                          int follow, int is_list) {
+  int r = l_xattr_target(p, tf, by_fd, follow);
+  if (r) return l_ret(tf, r);
+  if (is_list) return l_ret(tf, 0); /* an empty list */
+  r = l_xattr_name(p, l_arg(tf, 1));
+  if (r) return l_ret(tf, r);
+  return l_ret(tf, -EOPNOTSUPP);
+}
+
+static int l_fd_setxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 0, 1, 0); }
+static int l_fd_lsetxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 0, 0, 0); }
+static int l_fd_fsetxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 1, 1, 0); }
+static int l_fd_getxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 0, 1, 0); }
+static int l_fd_lgetxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 0, 0, 0); }
+static int l_fd_fgetxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 1, 1, 0); }
+static int l_fd_listxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 0, 1, 1); }
+static int l_fd_llistxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 0, 0, 1); }
+static int l_fd_flistxattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 1, 1, 1); }
+static int l_fd_removexattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 0, 1, 0); }
+static int l_fd_lremovexattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 0, 0, 0); }
+static int l_fd_fremovexattr(struct process *p, struct trap_frame *tf) { return l_xattr_common(p, tf, 1, 1, 0); }
+
+/* ---- cp/sys: eventfd ------------------------------------------------------
+ *
+ * A real counter (Linux eventfd(2)): write adds a u64, read returns and
+ * clears it (or returns 1 and decrements it with EFD_SEMAPHORE); readable
+ * while the counter is non-zero, writable while another 1 fits below
+ * 0xfffffffffffffffe.  A blocking read/write parks in 10 ms slices through
+ * the scheduler (the timerfd model: the condition is re-polled on the
+ * restarted syscall), never spins.  Upstream Wine 11.0 does not call it
+ * (no eventfd in server/ or dlls/ntdll/unix/); the host Proton run shows 4
+ * calls (docs/cp-p0-host.md §4), so it is implemented, not refused. */
+#define L_EFD_SEMAPHORE 0x1
+#define L_EFD_NONBLOCK 0x800
+#define L_EFD_CLOEXEC 0x80000
+/* C1-k5: 1024 system-wide (was 256).  A slot is ~150 B of BSS (two pid
+   masks), so 1024 cost ~110 KiB more; upstream Wine 11.0 uses none (no
+   esync), the host Proton trace 4.  Exhaustion is ENFILE, as Linux. */
+#define L_EVENTFD_SLOTS 1024
+#define L_EVENTFD_MAX 0xfffffffffffffffeULL
+
+static struct {
+  int used;
+  int sem;
+  uint64_t count;
+  /* C1-k4: parked readers / writers.  A blocking read used to re-poll in
+     10 ms slices with nobody waking it: an eventfd ping-pong ran at 50 round
+     trips a second (linux_probe_pipestorm R10). */
+  struct pid_mask rwait, wwait;
+} l_efd[L_EVENTFD_SLOTS];
+static spinlock_t l_efd_lock;
+
+static void l_efd_drain(struct pid_mask *m) {
+  for (int wi = 0; wi < PID_MASK_WORDS; wi++) {
+    uint64_t x = m->w[wi];
+    while (x) {
+      int pid = (wi << 6) + __builtin_ctzll(x);
+      x &= x - 1;
+      process_wakeup(pid);
+    }
+  }
+}
+
+int l_eventfd_new(unsigned int initval, int flags) {
+  uint64_t fl = spinlock_acquire_irqsave(&l_efd_lock);
+  int slot = -ENFILE;
+  for (int i = 0; i < L_EVENTFD_SLOTS; i++) {
+    if (!l_efd[i].used) {
+      l_efd[i].used = 1;
+      l_efd[i].sem = (flags & L_EFD_SEMAPHORE) != 0;
+      l_efd[i].count = initval;
+      pid_mask_zero(&l_efd[i].rwait);
+      pid_mask_zero(&l_efd[i].wwait);
+      slot = i;
+      break;
+    }
+  }
+  spinlock_release_irqrestore(&l_efd_lock, fl);
+  return slot;
+}
+
+/* C1-k6 round 2: an eventfd's poll notification key. */
+const void *l_eventfd_key(int slot) {
+  return (slot >= 0 && slot < L_EVENTFD_SLOTS) ? (const void *)&l_efd[slot] : 0;
+}
+
+void l_eventfd_release(int slot) {
+  if (slot < 0 || slot >= L_EVENTFD_SLOTS) return;
+  uint64_t fl = spinlock_acquire_irqsave(&l_efd_lock);
+  l_efd[slot].used = 0;
+  l_efd[slot].count = 0;
+  spinlock_release_irqrestore(&l_efd_lock, fl);
+}
+
+void l_eventfd_probe(int slot, int *r, int *w) {
+  if (slot < 0 || slot >= L_EVENTFD_SLOTS) return;
+  uint64_t fl = spinlock_acquire_irqsave(&l_efd_lock);
+  uint64_t c = l_efd[slot].count;
+  spinlock_release_irqrestore(&l_efd_lock, fl);
+  if (c > 0) *r = 1;
+  if (c < L_EVENTFD_MAX) *w = 1;
+}
+
+/* Park the calling THREAD until the counter changes; the syscall restarts.
+ * C1-k4: the condition is re-checked and the waiter registered under
+ * proc_lock -> l_efd_lock (the pipe.c order), so a write between the first
+ * check and the park cannot be lost.  Returns -2 (parked), 1 (the condition
+ * changed: try again) or -EINTR. */
+static int l_efd_park(int slot, int read_side) {
+  struct process *cur = current_process();
+  if (!cur) return -EAGAIN;
+  uint64_t pf = spinlock_acquire_irqsave(&proc_lock);
+  if (linux_compat_sig_deliverable(cur)) {
+    spinlock_release_irqrestore(&proc_lock, pf);
+    return -EINTR;
+  }
+  spinlock_acquire(&l_efd_lock);
+  uint64_t c = l_efd[slot].count;
+  int ready = read_side ? (c > 0) : (c < L_EVENTFD_MAX);
+  if (!ready && process_park_ok_locked(cur)) { /* C1-k4: not the dead */
+    pid_mask_set(read_side ? &l_efd[slot].rwait : &l_efd[slot].wwait, cur->pid);
+    cur->wake_ms = 0;
+    cur->state = PROC_STATE_BLOCKED;
+  }
+  spinlock_release(&l_efd_lock);
+  spinlock_release_irqrestore(&proc_lock, pf);
+  return ready ? 1 : -2;
+}
+
+int l_eventfd_read(struct file *f, void *buf, int size) {
+  if (size < 8) return -EINVAL;
+  int slot = f->eventfd.slot;
+  if (slot < 0 || slot >= L_EVENTFD_SLOTS) return -EBADF;
+  for (;;) {
+    struct pid_mask wake;
+    pid_mask_zero(&wake);
+    uint64_t fl = spinlock_acquire_irqsave(&l_efd_lock);
+    uint64_t c = l_efd[slot].count;
+    uint64_t v = 0;
+    if (c > 0) {
+      v = l_efd[slot].sem ? 1 : c;
+      l_efd[slot].count = c - v;
+      wake = l_efd[slot].wwait; /* room for a parked writer */
+      pid_mask_zero(&l_efd[slot].wwait);
+    }
+    spinlock_release_irqrestore(&l_efd_lock, fl);
+    if (c == 0) {
+      if (f->open_flags & L_EFD_NONBLOCK) return -EAGAIN;
+      int r = l_efd_park(slot, 1);
+      if (r == 1) continue;
+      return r;
+    }
+    l_efd_drain(&wake);
+    poll_notify_obj(&l_efd[slot]); /* C1-k6 round 2: keyed */
+    if (l_copy_to_user(current_process(), (uint64_t)(uintptr_t)buf, &v, 8) != 0) {
+      /* Put the value back: the read did not happen. */
+      fl = spinlock_acquire_irqsave(&l_efd_lock);
+      l_efd[slot].count += v;
+      spinlock_release_irqrestore(&l_efd_lock, fl);
+      return -EFAULT;
+    }
+    return 8;
+  }
+}
+
+int l_eventfd_write(struct file *f, const void *buf, int size) {
+  if (size < 8) return -EINVAL;
+  int slot = f->eventfd.slot;
+  if (slot < 0 || slot >= L_EVENTFD_SLOTS) return -EBADF;
+  uint64_t v = 0;
+  if (l_copy_from_user(current_process(), &v, (uint64_t)(uintptr_t)buf, 8) != 0)
+    return -EFAULT;
+  if (v == 0xffffffffffffffffULL) return -EINVAL;
+  for (;;) {
+    struct pid_mask wake;
+    pid_mask_zero(&wake);
+    uint64_t fl = spinlock_acquire_irqsave(&l_efd_lock);
+    uint64_t c = l_efd[slot].count;
+    int fits = v <= L_EVENTFD_MAX - c;
+    if (fits) {
+      l_efd[slot].count = c + v;
+      if (v) {
+        wake = l_efd[slot].rwait;
+        pid_mask_zero(&l_efd[slot].rwait);
+      }
+    }
+    spinlock_release_irqrestore(&l_efd_lock, fl);
+    if (!fits) {
+      if (f->open_flags & L_EFD_NONBLOCK) return -EAGAIN;
+      int r = l_efd_park(slot, 0);
+      if (r == 1) continue;
+      return r;
+    }
+    l_efd_drain(&wake);
+    if (v) poll_notify_obj(&l_efd[slot]); /* C1-k6 round 2: keyed */
+    return 8;
+  }
+}
+
+static int l_fd_eventfd_common(struct process *p, struct trap_frame *tf,
+                               unsigned int initval, int flags) {
+  if (flags & ~(L_EFD_SEMAPHORE | L_EFD_NONBLOCK | L_EFD_CLOEXEC))
+    return l_ret(tf, -EINVAL);
+  return l_ret(tf, file_eventfd_create(p, initval, flags));
+}
+
+static int l_fd_eventfd(struct process *p, struct trap_frame *tf) {
+  return l_fd_eventfd_common(p, tf, (unsigned int)l_arg(tf, 0), 0);
+}
+
+static int l_fd_eventfd2(struct process *p, struct trap_frame *tf) {
+  return l_fd_eventfd_common(p, tf, (unsigned int)l_arg(tf, 0),
+                             (int)l_argi(tf, 1));
+}
+
+/* ---- C1-k6: signalfd / signalfd4 (docs/cp-k6.md §4) ---------------------
+ *
+ * signalfd(fd, const sigset_t *mask, size_t sizemask) and signalfd4(..., flags).
+ * fd == -1 makes a new signalfd; otherwise fd must be a signalfd and its mask
+ * is replaced.  sizemask must be 8 (the kernel sigset); flags SFD_CLOEXEC |
+ * SFD_NONBLOCK (O_CLOEXEC/O_NONBLOCK values).  SIGKILL and SIGSTOP are
+ * silently dropped from the mask, as Linux does.
+ *
+ * A read dequeues the READER's pending signals that are in the mask -- its
+ * thread-directed set first, then its own process-directed bits, then the
+ * group's -- lowest number first, one 128-byte signalfd_siginfo each, up to
+ * count / 128.  Nothing pending: EAGAIN (O_NONBLOCK) or a park that the next
+ * signal sent to a Linux-ABI process ends (process_signal_directed ->
+ * l_signalfd_notify -> poll_notify, only while a signalfd exists), with a
+ * 250 ms re-check as the safety net.  Programs block the signals they read
+ * this way; a blocked SIG_DFL signal stays pending for it (process.c). */
+#define L_SFD_CLOEXEC 0x80000
+#define L_SFD_NONBLOCK 0x800
+#define L_SYS_signalfd4 289
+#define L_SSI_SIZE 128
+static int l_sfd_live; /* open signalfds; 0 = signal sends skip the notify */
+
+void l_signalfd_count(int delta) {
+  __atomic_fetch_add(&l_sfd_live, delta, __ATOMIC_SEQ_CST);
+}
+
+/* process.c, after a signal has been made pending (no lock held). */
+void l_signalfd_notify(void) {
+  if (__atomic_load_n(&l_sfd_live, __ATOMIC_SEQ_CST) > 0) poll_notify();
+}
+
+static uint64_t l_sfd_pending(struct process *cur, uint64_t mask) {
+  struct process *grp = process_group(cur);
+  uint64_t pend = cur->sig_pending_dir | cur->sig_pending;
+  if (grp && grp != cur) pend |= grp->sig_pending;
+  return pend & mask;
+}
+
+int l_signalfd_ready(struct file *f) {
+  struct process *cur = current_process();
+  if (!cur) return 0;
+  return l_sfd_pending(cur, __atomic_load_n(&f->sigfd.mask, __ATOMIC_SEQ_CST)) != 0;
+}
+
+struct l_ssi_rec {
+  int sig, code, pid, status;
+};
+
+int l_signalfd_read(struct file *f, void *buf, int size) {
+  struct process *cur = current_process();
+  if (!cur) return -EINVAL;
+  if (size < L_SSI_SIZE) return -EINVAL;
+  struct process *grp = process_group(cur);
+  int max = size / L_SSI_SIZE;
+  if (max > 16) max = 16;
+  struct l_ssi_rec rec[16];
+  int n = 0;
+  for (;;) {
+    uint64_t seen = poll_seq_snapshot();
+    uint64_t mask = __atomic_load_n(&f->sigfd.mask, __ATOMIC_SEQ_CST);
+    uint64_t pf = spinlock_acquire_irqsave(&proc_lock);
+    while (n < max) {
+      uint64_t dir = cur->sig_pending_dir & mask;
+      uint64_t own = cur->sig_pending & mask;
+      uint64_t sh = (grp && grp != cur) ? (grp->sig_pending & mask) : 0;
+      uint64_t any = dir | own | sh;
+      if (!any) break;
+      int sig = __builtin_ctzll(any) + 1;
+      uint64_t bit = 1ull << (sig - 1);
+      int directed = (dir & bit) != 0;
+      if (directed) cur->sig_pending_dir &= ~bit;
+      else if (own & bit) cur->sig_pending &= ~bit;
+      else grp->sig_pending &= ~bit;
+      rec[n].sig = sig;
+      rec[n].code = directed ? -6 /* SI_TKILL */ : 0 /* SI_USER */;
+      /* C1-k6 round 2: the sender's tgid (0 = the kernel) */
+      rec[n].pid = directed ? cur->sig_sender[sig]
+                            : ((own & bit) ? cur->sig_sender[sig] : grp->sig_sender[sig]);
+      rec[n].status = 0;
+      if (sig == 17 /* SIGCHLD */ && grp && grp->sig_child_pid > 0) {
+        int st = grp->sig_child_status;
+        rec[n].pid = grp->sig_child_pid;
+        if ((st & 0x7f) == 0) {
+          rec[n].code = 1; /* CLD_EXITED */
+          rec[n].status = (st >> 8) & 0xff;
+        } else {
+          rec[n].code = 2; /* CLD_KILLED */
+          rec[n].status = st & 0x7f;
+        }
+      }
+      n++;
+    }
+    if (n > 0 || (f->open_flags & L_SFD_NONBLOCK)) {
+      spinlock_release_irqrestore(&proc_lock, pf);
+      break;
+    }
+    if (linux_compat_sig_deliverable(cur)) {
+      spinlock_release_irqrestore(&proc_lock, pf);
+      return -EINTR;
+    }
+    if (!process_park_ok_locked(cur)) { /* killed inside the syscall */
+      spinlock_release_irqrestore(&proc_lock, pf);
+      return -EINTR;
+    }
+    if (poll_park_locked(cur, seen)) { /* a signal raced the scan */
+      spinlock_release_irqrestore(&proc_lock, pf);
+      continue;
+    }
+    proc_set_deadline_us(cur, timer_get_us() + 250000);
+    cur->state = PROC_STATE_BLOCKED;
+    spinlock_release_irqrestore(&proc_lock, pf);
+    return -2; /* parked: the read restarts */
+  }
+  if (n == 0) return -EAGAIN;
+  for (int i = 0; i < n; i++) {
+    uint8_t ssi[L_SSI_SIZE];
+    for (int k = 0; k < L_SSI_SIZE; k++) ssi[k] = 0;
+    uint32_t v[11] = {(uint32_t)rec[i].sig, 0, (uint32_t)rec[i].code,
+                      (uint32_t)rec[i].pid, 0, 0, 0, 0, 0, 0,
+                      (uint32_t)rec[i].status};
+    /* ssi_signo@0 errno@4 code@8 pid@12 uid@16 fd@20 tid@24 band@28
+       overrun@32 trapno@36 status@40 (byte-wise: no unaligned stores) */
+    for (int w = 0; w < 11; w++)
+      for (int b = 0; b < 4; b++) ssi[w * 4 + b] = (uint8_t)(v[w] >> (8 * b));
+    if (l_copy_to_user(cur, (uint64_t)(uintptr_t)buf + (uint64_t)i * L_SSI_SIZE,
+                       ssi, L_SSI_SIZE) != 0)
+      return i ? i * L_SSI_SIZE : -EFAULT;
+  }
+  return n * L_SSI_SIZE;
+}
+
+/* C1-k6 round 2: dequeue the lowest pending signal of `mask` for `cur`
+   (its directed set, its own, the group's), as a signalfd read does.
+   Returns the signal number or 0; *code / *pid as in signalfd_siginfo. */
+int l_sig_dequeue(struct process *cur, uint64_t mask, int *code, int *pid) {
+  struct process *grp = process_group(cur);
+  uint64_t pf = spinlock_acquire_irqsave(&proc_lock);
+  uint64_t dir = cur->sig_pending_dir & mask;
+  uint64_t own = cur->sig_pending & mask;
+  uint64_t sh = (grp && grp != cur) ? (grp->sig_pending & mask) : 0;
+  uint64_t any = dir | own | sh;
+  int sig = 0;
+  if (any) {
+    sig = __builtin_ctzll(any) + 1;
+    uint64_t bit = 1ull << (sig - 1);
+    int directed = (dir & bit) != 0;
+    if (directed) cur->sig_pending_dir &= ~bit;
+    else if (own & bit) cur->sig_pending &= ~bit;
+    else grp->sig_pending &= ~bit;
+    *code = directed ? -6 : 0;
+    *pid = (directed || (own & bit)) ? cur->sig_sender[sig] : grp->sig_sender[sig];
+  }
+  spinlock_release_irqrestore(&proc_lock, pf);
+  return sig;
+}
+
+static int l_fd_signalfd_common(struct process *p, struct trap_frame *tf,
+                                int fd, uint64_t umask, uint64_t sizemask,
+                                int flags) {
+  if (flags & ~(L_SFD_CLOEXEC | L_SFD_NONBLOCK)) return l_ret(tf, -EINVAL);
+  if (sizemask != 8) return l_ret(tf, -EINVAL);
+  uint64_t mask = 0;
+  if (l_copy_from_user(p, &mask, umask, 8) != 0) return l_ret(tf, -EFAULT);
+  mask &= ~((1ull << (9 - 1)) | (1ull << (19 - 1))); /* never SIGKILL/SIGSTOP */
+  if (fd == -1) return l_ret(tf, file_signalfd_create(p, mask, flags));
+  return l_ret(tf, file_signalfd_set_mask(p, fd, mask));
+}
+
+static int l_fd_signalfd(struct process *p, struct trap_frame *tf) {
+  return l_fd_signalfd_common(p, tf, (int)l_argi(tf, 0), l_arg(tf, 1),
+                              l_arg(tf, 2), 0);
+}
+
+static int l_fd_signalfd4(struct process *p, struct trap_frame *tf) {
+  return l_fd_signalfd_common(p, tf, (int)l_argi(tf, 0), l_arg(tf, 1),
+                              l_arg(tf, 2), (int)l_argi(tf, 3));
+}
+
+/* ---- cp/sys: inotify ------------------------------------------------------
+ *
+ * Refused as a kernel built without CONFIG_INOTIFY_USER refuses it: init and
+ * init1 are -ENOSYS, and since no inotify fd can therefore exist, add_watch /
+ * rm_watch answer -EBADF for a closed fd and -EINVAL ("not an inotify
+ * instance") for any other.  Every Wine caller treats a failed init as "no
+ * change notification" and carries on:
+ *   server/change.c:925-927   create_inotify_fd(): `if (unix_fd<0) return NULL`
+ *                             (and our build has no HAVE_SYS_INOTIFY_H at all);
+ *   dlls/winebus.sys/bus_udev.c:1492-1496  WARN and return the error, the
+ *                             udev bus then runs without hot-plug watches. */
+#define L_SYS_inotify_init 253
+#define L_SYS_inotify_add_watch 254
+#define L_SYS_inotify_rm_watch 255
+
+static int l_fd_inotify_init(struct process *p, struct trap_frame *tf) {
+  (void)p;
+  return l_ret(tf, -ENOSYS);
+}
+
+static int l_fd_inotify_watch(struct process *p, struct trap_frame *tf) {
+  return l_ret(tf, l_fd_valid(p, (int)l_argi(tf, 0)) ? -EBADF : -EINVAL);
+}
+
 /* ---- the table --------------------------------------------------------- */
 
 /* GB-308 fsync(2) / fdatasync(2).
@@ -896,7 +1711,19 @@ static int l_fd_fsync(struct process *p, struct trap_frame *tf) {
   uint16_t cl = 0;
   uint32_t sz = 0;
   int r = file_fat16_ident(p, fd, &cl, &sz);
-  if (r != 0) return l_ret(tf, r);
+  if (r == -EBADF) return l_ret(tf, -EBADF);
+  if (r != 0) {
+    /* cp-sync (merge of main): every other open fd keeps its earlier answer.
+       This row is consulted before l_tab_misc's l_misc_fsync, so without this
+       arm fsync() of a pipe, socket, memfd, NFS file or /dev/fb0 answered
+       -ENOTSUP (and /dev/fb0 lost its GB-032 present verb).  ext2 and tmpfs
+       fds never get here: their tables answer first. */
+    if (file_fd_is_devfb(p, fd)) {
+      extern void virtio_gpu_flush(void);
+      virtio_gpu_flush();
+    }
+    return l_ret(tf, 0);
+  }
   return l_ret(tf, l_mem_fsync_file(p, cl, sz, tf));
 }
 
@@ -933,7 +1760,31 @@ const struct l_sysent l_tab_fd[] = { {L_SYS_fsync, l_fd_fsync, "fsync"},
   {L_SYS_poll, l_fd_poll, "poll"},
   {L_SYS_select, l_fd_select, "select"},
   {L_SYS_pselect6, l_fd_pselect6, "pselect6"},
+  {L_SYS_ppoll, l_fd_ppoll, "ppoll"},
+  {L_SYS_fadvise64, l_fd_fadvise64, "fadvise64"},
   {L_SYS_ioctl, l_fd_ioctl, "ioctl"},
   {L_SYS_fcntl, l_fd_fcntl, "fcntl"},
+  /* cp/sys (docs/cp-sys.md): rows Wine reaches */
+  {L_SYS_sendmmsg, l_fd_sendmmsg, "sendmmsg"},
+  {L_SYS_setxattr, l_fd_setxattr, "setxattr"},
+  {L_SYS_lsetxattr, l_fd_lsetxattr, "lsetxattr"},
+  {L_SYS_fsetxattr, l_fd_fsetxattr, "fsetxattr"},
+  {L_SYS_getxattr, l_fd_getxattr, "getxattr"},
+  {L_SYS_lgetxattr, l_fd_lgetxattr, "lgetxattr"},
+  {L_SYS_fgetxattr, l_fd_fgetxattr, "fgetxattr"},
+  {L_SYS_listxattr, l_fd_listxattr, "listxattr"},
+  {L_SYS_llistxattr, l_fd_llistxattr, "llistxattr"},
+  {L_SYS_flistxattr, l_fd_flistxattr, "flistxattr"},
+  {L_SYS_removexattr, l_fd_removexattr, "removexattr"},
+  {L_SYS_lremovexattr, l_fd_lremovexattr, "lremovexattr"},
+  {L_SYS_fremovexattr, l_fd_fremovexattr, "fremovexattr"},
+  {L_SYS_eventfd, l_fd_eventfd, "eventfd"},
+  {L_SYS_eventfd2, l_fd_eventfd2, "eventfd2"},
+  {L_SYS_signalfd, l_fd_signalfd, "signalfd"},
+  {L_SYS_signalfd4, l_fd_signalfd4, "signalfd4"},
+  {L_SYS_inotify_init, l_fd_inotify_init, "inotify_init"},
+  {L_SYS_inotify_init1, l_fd_inotify_init, "inotify_init1"},
+  {L_SYS_inotify_add_watch, l_fd_inotify_watch, "inotify_add_watch"},
+  {L_SYS_inotify_rm_watch, l_fd_inotify_watch, "inotify_rm_watch"},
   L_SYSENT_END
 };

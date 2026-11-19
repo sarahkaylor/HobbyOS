@@ -1,0 +1,72 @@
+# C10-regress: exact commands (strix, 2026-11-17)
+#
+# Trees
+#   L = cp-regress (integ11 13dc693b + this lane's commits), Mac ~/hobbyos-cp-lanes/regress,
+#       strix ~/cp/lanes/regress
+#   R = main 3c1cb61f (git -C ~/Documents/GitHub/HobbyOS-cyberpunk fetch hobbyos-main main;
+#       git worktree add --detach ~/hobbyos-cp-lanes/regress-ref-main 3c1cb61f),
+#       strix ~/cp/lanes/regress-ref (third_party copied from the L strix tree).
+#       Scratch-only edit on the strix R copy: the unix_test.c window patch (main's
+#       identity-map idiom) so main's ARM unit image links at all (R/PATCHED.txt).
+# Sync (Mac -> strix), excluding strix build outputs and the git-ignored Freedoom IWAD:
+rsync -a --delete --exclude .git --exclude obj/ --exclude third_party/ --exclude /disk.img \
+  --exclude /hobbyos.elf --exclude '/*.img' --exclude /doom1.wad <tree>/ strix:<strix-tree>/
+git -C <tree> ls-files third_party | rsync -a --files-from=- <tree>/ strix:<strix-tree>/
+
+# Every boot: one QEMU slot, a private PID + mount namespace (the repo GUI harnesses run
+# `pkill -9 -f qemu-system-*`; in the namespace that only reaches their own QEMU), a private
+# /tmp, and a PATH shim that clamps -m to 12288M, turns -display gtk|sdl into none, and allows
+# egl-headless only with rendernode=/dev/dri/renderD129 under host-venus.sh's env:
+#   ~/cp/regress-work/run1.sh <tree> <tag> <name> <timeout> CMD...
+#     = bash tools/cp/qemu-slot.sh timeout -k 20 <timeout> bash ~/cp/regress-work/ns.sh CMD...
+#   ~/cp/regress-work/chain.sh <tree> <tag> <list>   (name|timeout|cmd|prebuild-outside-slot)
+# (scripts: docs/cp-regress-evidence/harness-scripts.txt)
+
+# Doom ELF (both trees)
+HOBBYOS_DOOM_BUILD=~/cp/regress-work/doom OUT=~/cp/regress-work/doom/out bash tools/linux-doom/build-doomgen.sh
+#   (third_party/doomgeneric + the cached musl X11 sysroot ~/.cache/hobbyos-doom; no download)
+cp doomgen.elf obj/doom-linux/; cp doom1.wad obj/doom-linux/DOOM1.WAD   # Freedoom IWAD already in the tree
+make ARCH=intel DESKTOP=icewm disk.img
+python3 tools/doom_elf/run_doom_elf_test.py --no-build --elf obj/doom-linux/doomgen.elf \
+  --wad obj/doom-linux/DOOM1.WAD --start-line "/DOOM.ELF -iwad /DOOM1.WAD" --out /tmp/doom
+DOOM_ELF_CPU=qemu64 python3 tools/doom_elf/run_doom_elf_test.py ... (same)       # FXSAVE fallback
+python3 ~/cp/regress-work/ppmstats.py /tmp/doom/shot-*.ppm                        # frames distinct/non-black
+
+# Unit tiers
+UNIT_TESTS_TIMEOUT=1200 bash ./run_unit_tests.sh            # ARM, TCG, -m clamped 16384M -> 12288M
+rm -f hobbyos.elf; UNIT_TESTS_TIMEOUT=900 bash ./run_unit_tests_intel.sh
+make ARCH=arm MODE=unit_tests hobbyos.elf                   # the link check (linker.ld ASSERT)
+
+# Host tier + guard
+make -k host_tests ; python3 tools/host/spawn_reap_test.py
+
+# Desktop / GUI (each: chain row, prebuild outside the slot)
+python3 run_icewm_test.py --arch intel --out /tmp/icewm
+ARCH=intel|arm DESKTOP_TEST_TIMEOUT=180|600 python3 run_desktop_test.py
+python3 run_xeyes_test.py | run_antfarm_test.py | run_desktop_apps_test.py | run_files_nav_test.py |
+        run_games_test.py | run_console_test.py                     (ARM, native desktop)
+ARCH=intel|arm python3 run_xcalc_test.py | run_nano_test.py | run_apps_test.py |
+        run_filedialog_test.py | run_pong_test.py
+
+# main's glibc-2.31 ABI probes (single-program t3 boots, NOT the full wave)
+bash ~/cp/regress-work/main-probes.sh <tree> <out>
+#   GLIBC231=~/cp/sysroot-glibc231 bash tools/jdk/build-probes.sh ...; per probe:
+#   T3_TIMEOUT=300 T3_STAGE="GLIBC231=... bash tools/jdk/stage.sh --probe obj/jdk/X.exe:X.EXE --wave X.EXE" \
+#   T3_MIN_LINES=1 bash tools/cp/qemu-slot.sh bash tools/t3_tier.sh intel
+
+# RimWorld (virgl, L86 front-end driver), lane-owned export, renderD129 only
+sudo -n mkdir -p /srv/nfs/cp-regress-rw; rsync -a /srv/nfs/rimworld/ /srv/nfs/cp-regress-rw/
+bash ~/cp/regress-work/rw-gl.sh <tree> <tag> rw_gl1
+#   = prebuild (make ARCH=intel MODE=desktop DESKTOP=icewm hobbyos.elf disk.img; xcompat_dsos; libc.a)
+#   + tools/cp/exports.sh add /srv/nfs/cp-regress-rw (removed on EXIT, outside the namespace)
+#   + rwmon.sh (every 5 s: /proc/<qemu>/fd may hold only /dev/dri/renderD129, else kill -9)
+#   + RW_EXPORT_OVERRIDE=/srv/nfs/cp-regress-rw RW_SKIP_EXPORT=1 GLIBC231=GLIBC231_DEV=~/cp/sysroot-glibc231
+#     RW_L86=1 RW_QEMU_GL=1 RW_GLMODE=virgl RW_SCREEN=1280x720 RW_WM_HONOUR=1
+#     RW_QEMU_DISPLAY=egl-headless,rendernode=/dev/dri/renderD129 RW_WAIT_SECS=2600
+#     bash tools/rw/run-rimworld-desktop.sh --timeout 600 --run-timeout 2400
+
+# Gates for this lane's commits (test-only + host-mock code)
+SCAN_JOBS=8 bash tools/cp/mmu/castscan_check.sh
+make ARCH=arm TOOLS_SKIP=1 hobbyos.elf ; make ARCH=intel MODE=test hobbyos.elf disk.img
+clang -E -P ... src/kernel/{unix_test,virtio_gpu_test,gpu_abi_m2_test}.c   # 0 tokens outside unit mode
+bash tools/cp/check-no-game-files.sh

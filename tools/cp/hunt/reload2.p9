@@ -1,0 +1,62 @@
+# tools/cp/hunt/reload2.p9 -- the P9 reload without the H1-12 trap (lane
+# H1-hunt round 2, docs/cp-hunt.md).  tools/cp/p9/reload.p9 first opens the
+# save list (evidence) and Esc's back; after that Esc the main menu shows no
+# focus frame for Up/Down (cp-hunt H1-12, 3/3 boots), so its CONTINUE seek
+# fails.  Here CONTINUE (= the newest save, boot A's quick save) is taken from
+# the FRESH main menu, where the focus behaves (every boot so far).  The save
+# list is not shown; the evidence that the save is boot A's is the world
+# itself: an immediate F5 without moving writes a new quick save whose
+# metadata playerPosition tools/cp/p9/saves.sh compares with boot A's.
+phase menu
+shot menu
+expect menu-continue 10 CONTINUE
+# No `seek` here: in h2-rl2 the reading after the 2nd Up was one 104 px
+# frame over CONTINUE + NEW GAME (the CONTINUE highlight drawn taller, or
+# caught moving), labelled NEW GAME by its centre, so seek tapped once more and
+# overshot onto the frameless button above CONTINUE.  Every fresh main menu so
+# far (h2-rl1, h2-rl2, round 1's reloads) answered the 1st Up with NEW GAME and
+# the 2nd with CONTINUE, so: two Ups with a settle gap, a shot for the record,
+# and the `expect loaded` below is the check (Enter on anything but CONTINUE
+# does not reach the loading screen's PRESS ... TO CONTINUE).
+key up
+wait 1.6
+shot menu-continue-a
+key up
+wait 1.6
+shot menu-continue-b
+phase loading
+key ret
+expect loaded 400 PRESS\b.{0,24}\bTO\s+CONTINUE
+key spc
+wait 6
+phase world
+expect inworld 60 RIPPERDOC|Jackie
+shot reloaded-place
+wait 10
+shot reloaded-place2
+# quick save WITHOUT moving: its playerPosition must equal boot A's last save
+phase save
+key f5
+wait 5
+shot resaved
+# ~2 minutes in the world (an fps sample on the reloaded save)
+phase world
+repeat 5
+hold w 4000
+look 400 0 20 16
+down shift
+hold w 4000
+up shift
+wait 3
+shot rl-loop
+end
+phase quit
+key esc
+wait 4
+seek pause-quit pause down 9 QUIT GAME
+exit_ok
+key ret
+wait 3
+expect quit-confirm 10 sure.{0,20}quit
+key ret
+wait_exit 180

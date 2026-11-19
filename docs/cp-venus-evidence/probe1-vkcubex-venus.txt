@@ -1,0 +1,96 @@
+# Gate P6 probe 1 -- Linux vkcube (C5-vk2's vkcubex) on Venus in the guest X session (IceWM, XHOBBY), strix 2026-11-17
+# command: CP_VK_WORK=~/cp/vk2-build CP_X11_WORK=~/cp/x11-build-x2 TOOLS_SKIP=1 MAKEFLAGS=-j16 python3 tools/cp/venus/run_vkcubex_venus.py --secs 65 --no-build
+# tree: cp-venus (default desktop/icewm build); screendumps: evidence/cp-venus/vkcubex-t20s.png, vkcubex-t50s.png (pmemsave of the 2D scanout)
+
+[P5X] staged: /LIB64 glibc 2.31, /CP/X11 (39 libs), /CP/VK (x11 variant), /VKCUBEX.ELF; XSTART: /VKCUBEX.ELF 65 640 480 fifo
+[P5X] venus: staged /CP/VK/lib/libvulkan_virtio.so + virtio_icd.x86_64.json; lvp ICD JSON removed
+[VENUS-P5] qemu: qemu-system-x86_64 -name hobbyos-venus,debug-threads=on -machine q35,accel=kvm,memory-backend=mem0 -cpu host -smp 8 -m 12288M -object memory-backend-memfd,id=mem0,size=12288M,share=on -drive if=pflash,format=raw,file=/home/sarah/cp/lanes/venus/obj/cp-venus/vkcubex/ovmf.fd -device virtio-gpu-gl-pci,blob=true,hostmem=8G,venus=true -vga none -display egl-headless,rendernode=/dev/dri/renderD129 -serial file:/home/sarah/cp/lanes/venus/obj/cp-venus/vkcubex/serial.log -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=/home/sarah/cp/lanes/venus/obj/cp-venus/vkcubex/disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -action shutdown=poweroff -qmp unix:/home/sarah/cp/lanes/venus/obj/cp-venus/vkcubex/qmp-sock,server,nowait -d guest_errors -D /home/sarah/cp/lanes/venus/obj/cp-venus/vkcubex/qemu-debug.log
+[P5X] waiting for a QEMU slot (tools/cp/qemu-slot.sh semantics)
+qemu-slot: slot 3 of 4 held by pid 2227589 00:53:10
+[P5X] slot 3 acquired 00:53:10; boot: -smp 8 -m 12288M -cpu host (KVM)
+[P5X] qemu pid 2237399
+[VENUS-P5] screendump via pmemsave of framebuffer pa=0x75c00000 -> /home/sarah/cp/lanes/venus/obj/cp-venus/vkcubex/vkcubex-t20s.ppm
+[P5X] t=20s: screendump taken; QEMU guests on the host now (incl. this one): 3
+[VENUS-P5] screendump via pmemsave of framebuffer pa=0x75c00000 -> /home/sarah/cp/lanes/venus/obj/cp-venus/vkcubex/vkcubex-t50s.ppm
+[P5X] t=50s: screendump taken; QEMU guests on the host now (incl. this one): 4
+[P5X] guests on the host at the end of the run: 3 (incl. none of ours)
+[P5X] boot finished after 77 s; lock released
+[P5X] screendump vkcubex-t20s.ppm: clear=241140 cube=66680 bbox=(332, 24, 970, 502) hash=af80609e779329e9
+[P5X] screendump vkcubex-t50s.ppm: clear=241920 cube=65920 bbox=(332, 24, 970, 502) hash=5fb7c3ef854e0047
+[P5X] --- [VK] rows (serial) ---
+[VK] vkcubex start (C5-vk2, VK_KHR_xcb_surface): 65 s, 640x480, present mode fifo, pid 14
+[VK] env VK_DRIVER_FILES=(unset)
+[VK] env VK_ICD_FILENAMES=(unset)
+[VK] env XDG_DATA_DIRS=(unset)
+[VK] env LP_NUM_THREADS=(unset)
+[VK] env DISPLAY=:0
+[VK] env LD_LIBRARY_PATH=/LIB64
+[VK] prefault (startup): touched 1119 pages in 8 objects in 1429 ms
+[VK] x11: xcb_connect ok in 1.0 ms DISPLAY=:0 screen 0 1920x1080 depth 24 vendor "The X.Org Foundation"
+[VK] x11: ext Present  present
+[VK] x11: ext DRI3     absent
+[VK] x11: ext MIT-SHM  absent
+[VK] x11: ext XFIXES   present
+[VK] x11: ext SYNC     present
+[VK] x11: ext RANDR    present
+[VK] x11: window 0x800000 640x480 mapped
+[VK] loader libvulkan.so.1 loaded in 125.0 ms
+[VK] instance surface extensions (24 total): VK_KHR_get_surface_capabilities2 VK_KHR_surface VK_KHR_surface_maintenance1 VK_KHR_surface_protected_capabilities VK_KHR_xcb_surface VK_KHR_xlib_surface VK_EXT_display_surface_counter VK_EXT_headless_surface VK_EXT_surface_maintenance1
+[VK] device: Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201)) (api 1.4.307) instance+enumerate 223.0 ms
+[VK] vkCreateDevice ok in 70.0 ms (queue family 0, VK_KHR_swapchain)
+[VK] surface: formats(format/colorspace): 50/0 44/0 -> 44; present modes: IMMEDIATE MAILBOX FIFO FIFO_RELAXED -> FIFO
+[VK] surface caps: images 3..0 current 640x480 min 640x480 max 640x480 usage 0x8009f -> 4 images 640x480
+[VK] swapchain: 4 images in 78.0 ms
+[VK] pipeline created in 18.0 ms
+[VK] render loop: 65 s
+[VK] frame 0: acquire 4.00 ms, render 17.00 ms, present 12.00 ms, total 33.00 ms (image 0)
+[VK] frame 1: acquire 3.00 ms, render 1.00 ms, present 0.00 ms, total 4.00 ms (image 1)
+[VK] frame 2: acquire 0.00 ms, render 1.00 ms, present 0.00 ms, total 1.00 ms (image 2)
+[VK] t=5s frames=1138 window fps=227.46 | median ms acquire 4.00 render 1.00 present 0.00 total 4.00
+[VK] t=10s frames=2270 window fps=226.26 | median ms acquire 4.00 render 1.00 present 0.00 total 4.00
+[VK] t=15s frames=3343 window fps=214.86 | median ms acquire 4.00 render 1.00 present 0.00 total 4.00
+[VK] t=20s frames=4477 window fps=226.80 | median ms acquire 4.00 render 1.00 present 0.00 total 4.00
+[VK] t=25s frames=5477 window fps=199.88 | median ms acquire 4.00 render 1.00 present 0.00 total 4.00
+[VK] t=30s frames=6675 window fps=239.74 | median ms acquire 3.00 render 1.00 present 0.00 total 4.00
+[VK] t=35s frames=7795 window fps=224.00 | median ms acquire 3.00 render 1.00 present 0.00 total 4.00
+[VK] t=40s frames=8976 window fps=236.06 | median ms acquire 4.00 render 0.00 present 0.00 total 4.00
+[VK] t=45s frames=10169 window fps=238.70 | median ms acquire 3.00 render 1.00 present 0.00 total 4.00
+[VK] t=50s frames=11364 window fps=238.90 | median ms acquire 4.00 render 0.00 present 0.00 total 4.00
+[VK] t=55s frames=12425 window fps=212.24 | median ms acquire 4.00 render 0.00 present 0.00 total 4.00
+[VK] t=60s frames=13621 window fps=239.15 | median ms acquire 3.00 render 1.00 present 0.00 total 4.00
+[VK] t=65s frames=14731 window fps=221.87 | median ms acquire 3.00 render 1.00 present 0.00 total 4.00
+[VK] RESULT frames=14731 wall=65007.0 ms fps=226.61 | per-frame total median 4.00 p90 6.00 worst(after frame 0) 566.00 ms | swapchain 640x480 4 images FIFO | recreated=0 suboptimal=0
+[VK] teardown: clean
+[VK] done rc=0
+[P5X] --- session / loader / fault lines ---
+  [XSESS] IceWM session launcher starting
+  [XSESS] WARN /dev/null did not land on fd 0 (got 3)
+  [XSESS] children's stdout/stderr relayed to the console (pipe fd 9)
+  [XSESS] dir ok: /tmp
+  [XSESS] dir created: /tmp/.X11-unix
+  [XSESS] spawned /XHOBBY.BIN pid=3
+  [XSESS] waiting for /tmp/.X11-unix/X0 (named AF_UNIX connect probe)
+  [XSESS] server ready after ~300 ms
+  [XSESS] spawned /ICEWMBG.BIN pid=6
+  [EXITPC] pid=6 last_user_pc=0x1000257627 code=0x0
+  [XSESS] spawned /ICEWM.BIN pid=9
+  [XSESS] spawned /XEYESR.BIN pid=12
+  [XSESS] XSTART: /VKCUBEX.ELF
+  [XSESS] spawned /VKCUBEX.ELF pid=14
+  [XSESS] XSTART: spawned 1 program(s)
+  [XSESS] session running
+  [PIN] off=[XSESS] background pid=6 exited status=0
+  [EXITPC] pid=14 last_user_pc=0x1080268146 code=0x0
+  [XSESS] child pid=14 exited status=0
+[P5X] PASS: Linux vkcube on Mesa's X11 WSI (lavapipe) in the X session for >= 60 s, two distinct screendumps
+[P5X] device row: [VK] device: Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201)) (api 1.4.307) instance+enumerate 223.0 ms
+[P5X] PASS: Linux vkcube on Venus (host RX 9070 XT) in the X session for >= 60 s, two distinct screendumps
+--- qemu stderr
+WARNING: radv is not a conformant Vulkan implementation, testing use only.
+qemu-system-x86_64: terminating on signal 15 from pid 2081352 (python3)
+WARNING: radv is not a conformant Vulkan implementation, testing use only.
+qemu-system-x86_64: terminating on signal 15 from pid 2179009 (python3)
+WARNING: radv is not a conformant Vulkan implementation, testing use only.
+qemu-system-x86_64: terminating on signal 15 from pid 2202524 (python3)
+WARNING: radv is not a conformant Vulkan implementation, testing use only.
+qemu-system-x86_64: terminating on signal 15 from pid 2227589 (python3)

@@ -1,0 +1,55 @@
+H2-early root cause: [GDT] rows (kernel getdents64 on NFS, one per listing start) after "[P8] begin game", strix serials
+format: <count> <path> total=<entries the listing returned>
+
+== ~/cp/integ15/p8-lvp.2.serial  -- EARLY EXIT
+      1 /CP/WINE/share/wine/fonts total=42
+     12 /CP/WINE/share/wine/fonts total=56
+      1 /CP/WINE/share/wine/fonts total=6
+      1 /CP/WINE/share/wine/fonts total=7
+      1 /GAME/engine/config/base total=56
+      1 /GAME/engine/config/platform/pc total=56
+      1 /GAME/engine/config total=4
+      1 /GAME/engine/config total=58
+      1 /GAME/r6/config total=42
+      1 /GAME/r6/config total=56
+      4 /GAME/r6/config total=6
+
+== ~/cp/integ13/p8-lvp.1.serial  -- EARLY EXIT
+      1 /CP/WINE/share/wine/fonts total=55
+      9 /CP/WINE/share/wine/fonts total=56
+      1 /CP/WINE/share/wine/fonts total=6
+      2 /CP/WINE/share/wine/fonts total=7
+      1 /GAME/engine/config/base total=7
+      1 /GAME/engine/config/platform/pc total=56
+      2 /GAME/engine/config total=4
+      1 /GAME/r6/config total=29
+      1 /GAME/r6/config total=49
+      1 /GAME/r6/config total=56
+      2 /GAME/r6/config total=6
+      1 /GAME/r6/config total=62
+
+== ~/cp/integ/obj/cp-p8/integ10-venus/serial.txt  -- EARLY EXIT
+      5 /CP/WINE/share/wine/fonts total=56
+      1 /GAME/engine/config/base total=58
+      1 /GAME/engine/config/platform/pc total=2
+      2 /GAME/engine/config total=4
+      1 /GAME/r6/config total=58
+      5 /GAME/r6/config total=6
+
+== ~/cp/integ15/p8-lvp.1.serial  -- GOOD (main menu)
+     15 /CP/WINE/share/wine/fonts total=56
+      1 /GAME/engine/config/base total=7
+      2 /GAME/engine/config/galaxy/pc total=1
+      1 /GAME/engine/config/platform/pc total=2
+      2 /GAME/engine/config total=4
+      6 /GAME/r6/config total=6
+
+right answers (every good boot lists these counts; READDIRPLUS ignores "."/".."): /GAME/engine/config/base 7, /GAME/engine/config/platform/pc 2, /GAME/engine/config 4, /GAME/r6/config 6, /CP/WINE/share/wine/fonts 56, /GAME/bin/x64 58
+
+integ15/p8-lvp.2.serial lines 1798-1878 (excerpt):
+[GDT] rel=/engine/config/base total=56 path=/GAME/engine/config/base
+[GDT] rel=/r6/config total=56 path=/GAME/r6/config
+[GDT] rel=/r6/config total=42 path=/GAME/r6/config
+[GDT] rel=/r6/config total=6 path=/GAME/r6/config
+[KERNEL] Process 126: Cyberpunk2077.e exited unexpectedly or gracefully.
+[P8] end game status=0 ms=2886

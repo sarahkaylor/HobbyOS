@@ -1,0 +1,278 @@
+=================== strix:~/cp/regress-work/run1.sh
+#!/bin/bash
+# run1.sh <tree> <tag> <name> <timeout_s> CMD... : one bounded QEMU test run.
+# Takes one strix QEMU slot (outside), runs CMD in a private PID+mount ns with
+# a private /tmp, the -m clamp shim first on PATH, from <tree>.
+T=$1; TAG=$2; N=$3; TO=$4; shift 4
+W=$HOME/cp/regress-work; E=$W/$TAG; mkdir -p $E
+PT=$E/tmp-$N; rm -rf "$PT"; mkdir -p "$PT"
+export PATH=$W/qshim:$HOME/.local/bin:/usr/sbin:/sbin:$PATH MAKEFLAGS=-j16 TOOLS_SKIP=1
+t0=$(date +%s)
+echo "== $N start $(date +%T) tree=$T cmd=$*" > $E/$N.log
+cd "$T" && NS_TMP="$PT" bash $HOME/cp/lanes/regress/tools/cp/qemu-slot.sh \
+  timeout -k 20 "$TO" bash $W/ns.sh env QSHIM_LOG=/tmp/qshim.log bash -c 'cd "$0" && exec "$@"' "$T" "$@" >> $E/$N.log 2>&1
+rc=$?
+echo "$N rc=$rc secs=$(( $(date +%s) - t0 )) end=$(date +%T)" >> $E/results.txt
+echo "== $N rc=$rc" >> $E/$N.log
+exit $rc
+=================== strix:~/cp/regress-work/ns.sh
+#!/bin/bash
+# ns.sh CMD... : run CMD (as the calling user) in a private PID + mount
+# namespace.  The repo GUI harnesses run `pkill -9 -f qemu-system-*`; inside
+# the namespace that can only reach this run's own QEMU.  With NS_TMP=<dir>,
+# /tmp is a private bind of <dir> (harnesses hard-code /tmp paths).  Take the
+# QEMU slot OUTSIDE: bash tools/cp/qemu-slot.sh ns.sh CMD...
+U=$(id -u); G=$(id -g)
+exec sudo -n env NS_TMP="$NS_TMP" NS_HOME="$HOME" NS_PATH="$PATH" NS_SLOT="${CP_QEMU_SLOT_HELD:-}" NS_MF="${MAKEFLAGS:-}" NS_TS="${TOOLS_SKIP:-}" unshare --kill-child --pid --fork --mount --propagation private --mount-proc bash -c '
+  if [ -n "$NS_TMP" ]; then mkdir -p "$NS_TMP" && chown '$U:$G' "$NS_TMP" && mount --bind "$NS_TMP" /tmp || exit 99; fi
+  exec setpriv --reuid='$U' --regid='$G' --init-groups -- env HOME="$NS_HOME" PATH="$NS_PATH" CP_QEMU_SLOT_HELD="$NS_SLOT" MAKEFLAGS="$NS_MF" TOOLS_SKIP="$NS_TS" "$@"' ns "$@"
+=================== strix:~/cp/regress-work/qshim/qemu-system-x86_64
+#!/bin/bash
+# C10-regress shim: clamp guest RAM to the strix slot cap (12 GiB), never let a
+# GTK/SDL window reach the user's desktop session (-display gtk|sdl -> none,
+# DISPLAY/WAYLAND_DISPLAY/XAUTHORITY unset), and log the exact command line.
+# A GL display (egl-headless) is allowed ONLY as
+# egl-headless,rendernode=/dev/dri/renderD129 and then runs with
+# tools/cp/host-venus.sh's environment (its `env` output: venus-host-shim
+# LD_PRELOAD + CP_SHIM_DENY of every other DRM node), integrator-approved.
+unset DISPLAY WAYLAND_DISPLAY XAUTHORITY
+LOG=${QSHIM_LOG:-/tmp/qshim.log}
+REAL=${QSHIM_REAL:-/usr/bin/qemu-system-x86_64}
+args=(); gl=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -m)
+      v=$2; n=${v%%[MmGg]*}; u=${v#$n}
+      case "$u" in G|g) mb=$((n*1024));; *) mb=$n;; esac
+      [ "$mb" -gt 12288 ] && v=12288M
+      args+=(-m "$v"); shift 2; continue ;;
+    -display)
+      v=$2
+      case "$v" in
+        gtk*|sdl*|cocoa*) v=none ;;
+        egl-headless*)
+          case ",$v," in
+            *,rendernode=/dev/dri/renderD129,*) gl=1 ;;
+            *) echo "[qshim] REFUSED: $v (GL only on rendernode=/dev/dri/renderD129)" >> "$LOG"; exit 3 ;;
+          esac ;;
+      esac
+      args+=(-display "$v"); shift 2; continue ;;
+  esac
+  args+=("$1"); shift
+done
+HV=$HOME/cp/lanes/regress/tools/cp/host-venus.sh
+if [ $gl = 1 ]; then
+  export VENUS_BUILD=$HOME/cp/regress-work/venus RENDER=/dev/dri/renderD129
+  bash "$HV" check >> "$LOG" 2>&1 || { echo "[qshim] REFUSED: host-venus.sh check failed" >> "$LOG"; exit 3; }
+  mapfile -t E < <(bash "$HV" env)
+  printf '[qshim] env %s\n' "${E[@]}" >> "$LOG"
+  grep -q '^CP_SHIM_DENY=/dev/dri/' <(printf '%s\n' "${E[@]}") || { echo "[qshim] REFUSED: no CP_SHIM_DENY" >> "$LOG"; exit 3; }
+  echo "[qshim] $(date +%T) GL qemu-system-x86_64 ${args[*]}" >> "$LOG"
+  exec env -u DISPLAY -u WAYLAND_DISPLAY -u XAUTHORITY "${E[@]}" "$REAL" "${args[@]}"
+fi
+echo "[qshim] $(date +%T) qemu-system-x86_64 ${args[*]}" >> "$LOG"
+exec "$REAL" "${args[@]}"
+=================== strix:~/cp/regress-work/qshim/qemu-system-aarch64
+#!/bin/bash
+# C10-regress shim: clamp guest RAM to the strix slot cap (12 GiB), never let a
+# GTK/SDL window reach the user's desktop session (-display gtk|sdl -> none,
+# DISPLAY/WAYLAND_DISPLAY unset), and log the exact command line.
+unset DISPLAY WAYLAND_DISPLAY XAUTHORITY
+args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -m)
+      v=$2; n=${v%%[MmGg]*}; u=${v#$n}
+      case "$u" in G|g) mb=$((n*1024));; *) mb=$n;; esac
+      [ "$mb" -gt 12288 ] && v=12288M
+      args+=(-m "$v"); shift 2; continue ;;
+    -display)
+      v=$2; case "$v" in gtk*|sdl*|cocoa*) v=none;; esac
+      args+=(-display "$v"); shift 2; continue ;;
+  esac
+  args+=("$1"); shift
+done
+echo "[qshim] $(date +%T) qemu-system-aarch64 ${args[*]}" >> "${QSHIM_LOG:-/tmp/qshim.log}"
+exec /usr/bin/qemu-system-aarch64 "${args[@]}"
+=================== strix:~/cp/regress-work/qshim-glfix/qemu-system-x86_64
+#!/bin/bash
+# glfix QEMU (Makefile QEMU_GLFIX_DIR) behind the C10-regress qshim
+export QSHIM_REAL=/home/sarah/.local/share/hobbyos-tools/qemu-glfix/prefix/bin/qemu-system-x86_64
+exec /home/sarah/cp/regress-work/qshim/qemu-system-x86_64 "$@"
+=================== strix:~/cp/regress-work/chain.sh
+#!/bin/bash
+# chain.sh <tree> <tag> <listfile> : run each "name|timeout|cmd[|prebuild]"
+# line of listfile through run1.sh, in order (one tree => one boot at a time).
+# prebuild (optional) runs first in <tree>, OUTSIDE the QEMU slot, so the
+# harness's own make is a no-op and its QMP/boot deadlines measure the guest.
+T=$1; TAG=$2; L=$3; W=$HOME/cp/regress-work
+while IFS='|' read -r n to cmd pre; do
+  case "$n" in ''|\#*) continue;; esac
+  [ -f $W/$TAG/STOP ] && break
+  if [ -n "$pre" ]; then
+    (cd "$T" && PATH=$HOME/.local/bin:/usr/sbin:/sbin:$PATH MAKEFLAGS=-j16 TOOLS_SKIP=1 bash -c "$pre") > $W/$TAG/$n.prebuild.log 2>&1 < /dev/null
+    echo "$n prebuild rc=$?" >> $W/$TAG/results.txt
+  fi
+  bash $W/run1.sh "$T" "$TAG" "$n" "$to" bash -c "$cmd" < /dev/null
+done < "$L"
+echo "CHAIN DONE $(date +%T)" >> $W/$TAG/results.txt
+=================== strix:~/cp/regress-work/rw-run.sh
+#!/bin/bash
+# rw-run.sh <tree> <tag> <name> [VAR=val...] : RimWorld to the main menu on
+# <tree>, using the lane-owned export /srv/nfs/cp-regress-rw (a copy of
+# /srv/nfs/rimworld; integrator-approved option B).  The export is added and
+# removed ONLY via tools/cp/exports.sh, OUTSIDE the private-/tmp namespace (its
+# /tmp/cp-exports.lock must be the shared one), removed on EXIT.  Never
+# tools/rw/nfs-export.sh (RW_SKIP_EXPORT=1).
+set -u
+T=$1; TAG=$2; N=$3; shift 3
+W=$HOME/cp/regress-work
+EXP=/srv/nfs/cp-regress-rw
+EX=$HOME/cp/lanes/regress/tools/cp/exports.sh
+exec 9>>$W/rw.lock; flock 9   # one RimWorld run at a time: shared export + launcher file
+bash "$EX" add "$EXP" > $W/$TAG/$N.export.log 2>&1 || { echo "$N export add failed" >> $W/$TAG/results.txt; exit 2; }
+trap 'bash "$EX" remove "$EXP" >> $W/$TAG/$N.export.log 2>&1' EXIT
+bash $W/run1.sh "$T" "$TAG" "$N" ${RW_TO:-3300} env RW_EXPORT_OVERRIDE=$EXP RW_SKIP_EXPORT=1 \
+    GLIBC231=$HOME/cp/sysroot-glibc231 GLIBC231_DEV=$HOME/cp/sysroot-glibc231 \
+    RW_WAIT_SECS=${RW_WAIT_SECS:-2400} "$@" \
+    bash tools/rw/run-rimworld-desktop.sh --timeout ${RW_BOOT_T:-600} --run-timeout ${RW_RUN_T:-2100}
+=================== strix:~/cp/regress-work/rw-gl.sh
+#!/bin/bash
+# rw-gl.sh <tree> <tag> <name> : one virgl RimWorld boot (L86 front-end driver)
+# on <tree>: prebuild outside the slot, then rw-run.sh with the GL display on
+# renderD129 only (qshim enforces + host-venus.sh env), rwmon watching fds.
+T=$1; TAG=$2; N=$3; W=$HOME/cp/regress-work
+( cd "$T" && export PATH=$HOME/.local/bin:/usr/sbin:/sbin:$PATH MAKEFLAGS=-j16 TOOLS_SKIP=1 && rm -f hobbyos.elf &&
+  make ARCH=intel MODE=desktop DESKTOP=icewm hobbyos.elf disk.img && make -s ARCH=intel xcompat_dsos && make -s ARCH=intel obj/intel/libc.a ) \
+  > $W/$TAG/$N.prebuild.log 2>&1
+echo "$N prebuild rc=$?" >> $W/$TAG/results.txt
+rm -f $W/$TAG/$N.rwmon.log.stop
+bash $W/rwmon2.sh "$T" $W/$TAG/$N.rwmon.log &
+MON=$!
+RW_TO=3600 RW_BOOT_T=600 RW_RUN_T=2400 RW_WAIT_SECS=2600 bash $W/rw-run.sh "$T" "$TAG" "$N" \
+  RW_L86=1 RW_QEMU_GL=1 RW_GLMODE=virgl RW_SCREEN=1280x720 RW_WM_HONOUR=1 \
+  RW_QEMU_DISPLAY=egl-headless,rendernode=/dev/dri/renderD129 QEMU_GLFIX_DIR=$W/qshim-glfix
+touch $W/$TAG/$N.rwmon.log.stop; wait $MON
+mkdir -p $W/$TAG/$N.out && cp -a "$T"/obj/rw-desktop/serial-desktop.log "$T"/obj/rw-desktop/Player.log $W/$TAG/$N.out/ 2>/dev/null
+cp -a "$T"/obj/rw-desktop/shots $W/$TAG/$N.out/ 2>/dev/null
+echo "$N done $(date +%T)" >> $W/$TAG/results.txt
+=================== strix:~/cp/regress-work/rwmon2.sh
+#!/bin/bash
+# rwmon.sh <tree> <logfile> : while a GL RimWorld boot of <tree> runs, check
+# every 5 s that its QEMU holds no DRM node except renderD129; on any other
+# (renderD128, any card*) kill that QEMU at once (integrator condition).
+T=$1; L=$2; seen=0
+echo "rwmon start $(date +%T) tree=$T" >> "$L"
+while :; do
+  pid=""; for c in $(pgrep -f "qemu-system-x86_64.*egl-headless"); do [ "$(readlink /proc/$c/cwd)" = "$T" ] && pid=$c; done
+  if [ -n "$pid" ]; then
+    seen=1
+    dri=$(ls -l /proc/$pid/fd 2>/dev/null | grep -o '/dev/dri/[a-zA-Z0-9]*' | sort | uniq -c | tr '\n' ' ')
+    bad=$(ls -l /proc/$pid/fd 2>/dev/null | grep -o '/dev/dri/[a-zA-Z0-9]*' | grep -v '^/dev/dri/renderD129$' | head -1)
+    echo "$(date +%T) pid=$pid dri: ${dri:-none}" >> "$L"
+    envok=$(tr "\\0" "\\n" < /proc/$pid/environ 2>/dev/null | grep -c "^LD_PRELOAD=.*venus-host-shim.so$\\|^CP_SHIM_DENY=/dev/dri/")
+    [ "$envok" = 2 ] || bad="no-shim-env($envok)"
+    if [ -n "$bad" ]; then echo "$(date +%T) VIOLATION $bad -> kill -9 $pid" >> "$L"; kill -9 $pid; fi
+  elif [ $seen = 1 ]; then echo "rwmon: qemu gone $(date +%T)" >> "$L"; exit 0; fi
+  [ -f "$L.stop" ] && exit 0
+  sleep 5
+done
+=================== strix:~/cp/regress-work/main-probes.sh
+#!/usr/bin/env bash
+# main-probes.sh <tree> <outdir> : main's glibc-2.31 x86_64 ABI probes
+# (tools/jdk/*.c + cp-sync's munmapwb.c), one single-program t3 boot each
+# (T3_STAGE + stage.sh --wave: NOT the full T3 wave), each under its own slot.
+# Adapted from strix:~/cp/lanes/sync/obj/main-gates.sh (C0-sync).
+set -uo pipefail
+T="${1:?tree}"; O="${2:?outdir}"; mkdir -p "$O"
+export TOOLS_SKIP=1 MAKEFLAGS=-j16 GLIBC231=$HOME/cp/sysroot-glibc231 PATH=$HOME/.local/bin:/usr/sbin:$PATH
+SLOT=$HOME/cp/lanes/regress/tools/cp/qemu-slot.sh
+cd "$T" || exit 2
+rm -f hobbyos.elf
+bash tools/jdk/build-probes.sh tools/jdk/hello-glibc.c tools/jdk/dirprobe.c tools/jdk/mapfsync.c \
+  tools/jdk/mmapro.c tools/jdk/lockhold.c $HOME/cp/lanes/regress/tools/cp/sync/munmapwb.c > "$O/build-probes.log" 2>&1
+echo "build-probes rc=$?" > "$O/summary.txt"
+run() {  # name stage-args...
+  local name=$1; shift
+  local st="GLIBC231=$GLIBC231 bash tools/jdk/stage.sh $*"
+  T3_TIMEOUT=300 T3_STAGE="$st" T3_MIN_LINES=1 \
+    bash $SLOT bash tools/t3_tier.sh intel > "$O/$name.out" 2>&1 < /dev/null
+  local rc=$? log; log="$(sed -n 's/^T3_LOG=//p' "$O/$name.out" | tail -1)"
+  [ -n "$log" ] && [ -r "$log" ] && cp "$log" "$O/$name.serial"
+  echo "$name tier_rc=$rc $(grep -aoE '(HELLO-GLIBC: (done|exit)[^\r]*|DIRPROBE [A-Z]+[^\r]{0,40}|[A-Z]+ VERDICT [A-Z]+|LOCKHOLD[^\r]{0,60}(got|acquired|EAGAIN|wait)[^\r]{0,30})' "$O/$name.serial" 2>/dev/null | tail -3 | tr '\n' ' ')" >> "$O/summary.txt"
+}
+J=obj/jdk
+run hello    "--probe $J/hello-glibc.exe:HELLO.EXE --wave HELLO.EXE"
+run dirprobe "--probe $J/dirprobe.exe:DIRPROBE.EXE --wave DIRPROBE.EXE"
+run mmapro   "--probe $J/mmapro.exe:MMAPRO.EXE --wave MMAPRO.EXE"
+run mapfsync "--probe $J/mapfsync.exe:MAPFSYNC.EXE --wave MAPFSYNC.EXE"
+run munmapwb "--probe $J/munmapwb.exe:MUNMAPWB.EXE --wave MUNMAPWB.EXE"
+run lockwait "--probe $J/lockhold.exe:LOCKHOLD.EXE --wave 'LOCKHOLD.EXE /LK.TXT 8' --wave 'LOCKHOLD.EXE /LK.TXT 1'"
+echo ALLDONE >> "$O/summary.txt"
+=================== strix:~/cp/regress-work/collect.sh
+#!/bin/bash
+# collect.sh : raw evidence tails -> ~/cp/regress-work/ev/*.txt (committed as
+# docs/cp-regress-evidence/*.txt).  L = integ11 lane tree (cp-regress),
+# R = main 3c1cb61f reference tree.  strix, Zen 5, KVM unless noted.
+W=$HOME/cp/regress-work; O=$W/ev; mkdir -p $O
+hdr() { echo "# $1"; echo "# L = cp-regress on integ11 13dc693b (strix:~/cp/lanes/regress); R = main 3c1cb61f (strix:~/cp/lanes/regress-ref)"; echo "# host: strix (Ryzen Zen 5, KVM for x86_64, TCG for aarch64), QEMU 10.2.1, guest <= 12 GiB"; echo; }
+sec() { echo; echo "=== $1"; }
+{ hdr "results.txt rows (rc / seconds) of every boot, both trees"
+  sec "L"; cat $W/L/results.txt; sec "R"; cat $W/R/results.txt; } > $O/runs-index.txt
+{ hdr "Doom ELF (doomgeneric from third_party/doomgeneric, Freedoom IWAD), tools/doom_elf/run_doom_elf_test.py"
+  for t in L R; do for n in doom_gen doom_gen2 doom_q64; do f=$W/$t/$n.log; [ -f $f ] || continue
+    sec "$t $n"; head -1 $f; grep -a "PASS\|FAIL" $f | tail -3
+    d=$W/$t/tmp-$n/doom; [ -f $d/REPORT.txt ] && head -6 $d/REPORT.txt
+    ls $d/shot-*.ppm >/dev/null 2>&1 && python3 $W/ppmstats.py $d/shot-*.ppm
+    grep -o -- "-cpu [a-z0-9,+-]*" $W/$t/tmp-$n/qshim.log 2>/dev/null | head -1
+  done; done; } > $O/doom-elf.txt
+{ hdr "Kernel unit tiers"
+  for t in L R; do for n in arm_unit arm_unit_fix arm_unit_win arm_unit_win2 unit_intel unit_intel_fix; do f=$W/$t/$n.log; [ -f $f ] || continue
+    sec "$t $n"; head -1 $f; grep -aE "Build failed|error:|EXPECT.*FAILED|FAIL:|Tests (run|failed)|UNIT TESTS (PASSED|FAILED)|timed out" $f | sort | uniq -c
+    grep -a "Running test" $f | tail -1; done; done
+  sec "ARM unit link, before (no-assert relink of 13dc693b MODE=unit_tests)"; cat $W/L/arm-unit-link-before.txt 2>/dev/null
+  sec "L arm-unit-build.log (13dc693b)"; grep -a "error" $W/L/arm-unit-build.log
+  sec "R arm-unit-build.log (3c1cb61f)"; grep -a "error" $W/R/arm-unit-build.log
+  sec "after (cp-regress)"; cat $W/L/arm-unit-link-after.txt 2>/dev/null; } > $O/unit-tiers.txt
+{ hdr "Host tier (make -k host_tests) + spawn_reap guard"
+  for t in L R; do for f in host.log host2.log; do [ -f $W/$t/$f ] || continue
+    sec "$t $f"; grep -a "host-tests\] done\|^  FAIL" $W/$t/$f; grep -a "spawn_reap_test" $W/$t/$f; done; done
+  sec "spawn_reap before/after"; cat $W/spawn-reap.txt 2>/dev/null; } > $O/host-tier.txt
+{ hdr "Native desktop / GUI harnesses (each in a private PID+mount namespace; QEMU -m clamped to 12 GiB, -display gtk -> none by the qshim)"
+  for t in L R; do for f in $W/$t/*.log; do n=$(basename $f .log)
+    case $n in icewm*|desktop_*|xcalc*|nano*|apps*|filedialog*|pong*|xeyes*|antfarm*|files_nav*|games*|console*) ;; *) continue;; esac
+    sec "$t $n"; head -1 $f; grep -a -E "^\[TEST\] (ok|RESULT)|RESULT|acceptance|PASS|FAIL|Timeout|never appeared|never started|rc=" $f | grep -av "Running test\|STAGE4K\|https://" | tail -n 25; done; done; } > $O/desktop-gui.txt
+{ hdr "main's glibc-2.31 x86_64 ABI probes (tools/jdk/*.c + tools/cp/sync/munmapwb.c), one single-program t3 boot each"
+  for t in L R; do sec "$t summary"; cat $W/$t/mainprobes/summary.txt 2>/dev/null
+    for s in $W/$t/mainprobes/*.serial; do [ -f $s ] || continue; sec "$t $(basename $s)"; grep -aE "HELLO-GLIBC|DIRPROBE|MMAPRO|FSYNC|MUNMAPWB|LOCKHOLD|memory fault|FATAL|System halt" $s | head -40; done; done; } > $O/main-abi-probes.txt
+echo done; ls -la $O
+=================== strix:~/cp/regress-work/ppmstats.py
+#!/usr/bin/env python3
+"""ppmstats.py FILE.ppm... : per-frame stats for screendump evidence.
+nonblack = fraction of pixels with any channel > 16; colours = distinct RGB
+values over every 4th pixel; md5 = of the pixel payload (frames that differ
+have different md5).  Prints one row per file and a summary."""
+import hashlib, sys
+def load(p):
+    b = open(p, 'rb').read()
+    # P6 header: magic, w, h, maxval separated by whitespace (no comments here)
+    parts, i = [], 0
+    while len(parts) < 4:
+        while b[i:i+1].isspace(): i += 1
+        j = i
+        while not b[j:j+1].isspace(): j += 1
+        parts.append(b[i:j]); i = j
+    i += 1
+    w, h = int(parts[1]), int(parts[2])
+    return w, h, b[i:i + w*h*3]
+rows = []
+for p in sys.argv[1:]:
+    w, h, px = load(p)
+    n = w*h
+    nb = sum(1 for k in range(0, len(px), 3) if px[k] > 16 or px[k+1] > 16 or px[k+2] > 16)
+    cols = len({px[k:k+3] for k in range(0, len(px), 12)})
+    md = hashlib.md5(px).hexdigest()[:12]
+    rows.append((p, w, h, nb/n, cols, md))
+    print(f"{p.split('/')[-1]:24s} {w}x{h} nonblack={nb/n:.3f} colours={cols} md5={md}")
+print(f"frames={len(rows)} distinct={len({r[5] for r in rows})} "
+      f"max_nonblack={max(r[3] for r in rows):.3f} max_colours={max(r[4] for r in rows)}")

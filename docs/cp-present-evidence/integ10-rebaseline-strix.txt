@@ -1,0 +1,62 @@
+# integ10 re-baseline (coordinator request): fpsprobe boots on strix, -smp 8 -m 32G Venus, X 1280x720 zero-copy scanout.  Kernel per run in the header; Mesa: play-venus (no [HBV]) for base runs, present-venus ([HBV]) for lane runs; ioeventfd: off on integ10 trees (their host-venus.sh), on in cp-present.
+
+#### pr10-base  kernel: integ10 49e83499  (QEMU guests on the host before ours: 2)
+phase           rows          game s   median     p10     min     max    mean
+menu              11         114-129    176.0   158.3   139.7   187.4   173.2
+world             62         221-312     22.5    18.5     9.6    29.7    23.0
+prof-fp-world     13         314-332     29.2    26.7    26.2    32.0    29.1
+   world              rows   46  scanout   2128  putimage      0  refused    0  flip    3142  sub    6062  wait       6
+   prof-fp-world      rows   11  scanout    646  putimage      0  refused    0  flip    3106  sub    4474  wait       5
+   host: gpu_busy_percent samples=120 mean=24.5 p50=26 p90=34 max=40;  759077 759079 vkr-ring-11 34.9 5.5 15659 110; 757550 757550 qemu-system-x86 5.0 3.8 7315 36;
+
+#### pr10-base2  kernel: integ10 49e83499  (QEMU guests on the host before ours: 1)
+phase           rows          game s   median     p10     min     max    mean
+menu              16         147-169    117.7    74.8    12.6   136.0   108.7
+world             61         280-371     32.6    17.3    13.9    39.1    30.2
+prof-fp-world     14         373-392     35.4    32.2    27.7    37.3    34.7
+   world              rows   46  scanout   2797  putimage      0  refused    0  flip    3091  sub    4167  wait       5
+   prof-fp-world      rows   11  scanout    770  putimage      0  refused    0  flip    2937  sub    3968  wait       5
+
+#### pr10-basek6  kernel: integ10 + 9d47b051 (scratch)  (QEMU guests on the host before ours: 3)
+phase           rows          game s   median     p10     min     max    mean
+menu              12         130-144    176.5   169.2   168.3   185.8   175.6
+world             60         238-327     29.5    19.1    14.4    33.7    27.8
+prof-fp-world     14         330-349     30.7    28.8    24.3    37.5    32.1
+   world              rows   45  scanout   2529  putimage      0  refused    0  flip    6018  sub   10485  wait       6
+   prof-fp-world      rows   11  scanout    713  putimage      0  refused    0  flip    4005  sub    5467  wait       5
+   host: gpu_busy_percent samples=120 mean=89.4 p50=96 p90=97 max=100; 1006761 1006763 vkr-ring-11 29.9 5.0 18128 50;1005164 1005164 qemu-system-x86 7.5 5.3 12020 20;
+
+#### pr10-lane-stalekernel  kernel: integ10 kernel objects (stale build: lane kernel NOT active), lane Mesa + ioeventfd=on  (QEMU guests on the host before ours: 1)
+phase           rows          game s   median     p10     min     max    mean
+menu              16         133-151    197.4   180.6   176.7   215.7   196.1
+world             59         234-322     21.3    14.4    10.2    27.4    20.6
+prof-fp-world     15         325-345     24.2    22.6    20.3    27.2    24.0
+   world              rows   46  scanout   1903  putimage      0  refused    0  flip    3014  sub    6262  wait       7
+   prof-fp-world      rows   10  scanout    481  putimage      0  refused    0  flip    2938  sub    6277  wait       6
+   host: gpu_busy_percent samples=120 mean=26.4 p50=26 p90=35 max=42;  811135 811139 vkr-ring-11 32.9 5.6 15576 40; 804717 804717 qemu-system-x86 6.1 4.2 5646 11;
+
+#### pr10-lane2  kernel: cp-present = integ10 + this lane  (QEMU guests on the host before ours: 3)
+phase           rows          game s   median     p10     min     max    mean
+menu              13         100-115    160.7   150.7   148.4   180.7   161.6
+world             61         223-313     30.3    17.5    13.2    39.9    29.0
+prof-fp-world     14         314-334     36.2    31.3    28.3    38.6    35.2
+   world              rows   46  scanout   2687  putimage      0  refused    0  flip    3390  sub    5062  wait       6
+   prof-fp-world      rows   10  scanout    708  putimage      0  refused    0  flip    4654  sub    6399  wait       6
+   host: gpu_busy_percent samples=120 mean=22.9 p50=24 p90=30 max=60;  936817 936819 vkr-ring-11 28.5 5.3 19286 39; 933222 933222 qemu-system-x86 5.4 3.6 4832 21;
+
+#### pr10-lane3  kernel: cp-present = integ10 + this lane  (QEMU guests on the host before ours: 1)
+phase           rows          game s   median     p10     min     max    mean
+menu              13         100-116    192.8   176.2   166.4   222.4   196.6
+world             60         214-303     25.1    16.7     7.5    30.1    23.7
+prof-fp-world     14         305-324     27.6    25.6    24.6    33.3    28.1
+   world              rows   45  scanout   2145  putimage      0  refused    0  flip    3076  sub    4128  wait       7
+   prof-fp-world      rows   10  scanout    564  putimage      0  refused    0  flip    3153  sub    4059  wait       6
+
+#### pr10-k6  kernel: cp-present + 9d47b051 (scratch)  (QEMU guests on the host before ours: 0)
+phase           rows          game s   median     p10     min     max    mean
+menu              13         116-133    182.3   135.8   127.9   204.3   172.4
+world             61         242-333     33.2    21.3    12.5    40.6    30.9
+prof-fp-world     15         335-355     32.6    28.5    25.2    34.5    32.0
+   world              rows   47  scanout   2910  putimage      0  refused    0  flip    2958  sub    4339  wait       5
+   prof-fp-world      rows   10  scanout    645  putimage      0  refused    0  flip    2975  sub    3777  wait       5
+   host: gpu_busy_percent samples=120 mean=31.5 p50=32 p90=39 max=100;  883404 883406 vkr-ring-11 32.4 6.2 18390 36; 877799 877799 qemu-system-x86 6.5 4.6 6836 17;

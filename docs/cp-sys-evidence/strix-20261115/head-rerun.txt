@@ -1,0 +1,7 @@
+HEAD tmpfs gate_rc=0 [LP] done rc=0
+HEAD wsys gate_rc=0 [LP] done rc=0
+HEAD fd gate_rc=0 [LP] done rc=0
+HEAD mem gate_rc=0 [LP] done rc=0
+HEAD proc gate_rc=0 [LP] done rc=0
+HEAD timers gate_rc=0 [LP] done rc=0
+HEADDONE

@@ -274,10 +274,13 @@ $(BROWSER_FONT): third_party/fonts/dejavu-fonts-ttf-2.37.zip third_party/fonts/d
 # here so arm, intel and host builds all see it.
 X11_INC = -Isrc/user/x11/include
 
-# Determine if the mode has changed and update the tracker file
+# Determine if the mode has changed and update the tracker file.  C1-thr: the
+# console trace knobs (FUTEX_TRACE / SIG_TRACE, below) ride the same stamp,
+# so toggling one rebuilds instead of linking objects of the other kind.
+MODE_STAMP := $(MODE)$(if $(FUTEX_TRACE),+futex-trace)$(if $(SIG_TRACE),+sig-trace)
 CURRENT_MODE := $(shell [ -f $(MODE_FILE) ] && cat $(MODE_FILE) || echo none)
-ifneq ($(CURRENT_MODE),$(MODE))
-$(shell mkdir -p $(OBJ_DIR) && echo $(MODE) > $(MODE_FILE))
+ifneq ($(CURRENT_MODE),$(MODE_STAMP))
+$(shell mkdir -p $(OBJ_DIR) && echo $(MODE_STAMP) > $(MODE_FILE))
 endif
 
 # Same tracker for the DESKTOP knob (icewm.md §4.5).
@@ -344,7 +347,7 @@ ifeq ($(ARCH),intel)
   # nothing" on the icewm desktop, while the keyboard path worked fine because
   # keys are not routed through a pointer device).  tools/rw/rw_desktop_drive.py
   # and the GUI gates all drive the desktop through absolute events.
-  QEMU_CMD = $(QEMU) -M q35,vmport=on -smp $(QEMU_SMP) -m 12288M -pflash $(EDK2_X86_64) -display $(GX_GPU_DISPLAY) -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -device virtio-tablet-pci $(GX_X64_GPU_DEV) -action shutdown=poweroff $(QEMU_ARGS)
+  QEMU_CMD = $(QEMU) -M q35,vmport=on $(X64_CPU_ARGS) -smp $(QEMU_SMP) -m 12288M -pflash $(EDK2_X86_64) -display $(GX_GPU_DISPLAY) -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -device virtio-tablet-pci $(GX_X64_GPU_DEV) -action shutdown=poweroff $(CP_DIAG_FWCFG) $(QEMU_ARGS)
 else
   # Default to ARM
   QEMU = qemu-system-aarch64
@@ -363,6 +366,30 @@ else
   # block below — gl -> virtio-gpu-gl-device + `gtk,gl=on`, soft (default
   # for every headless tier) -> virtio-gpu-device + the plain display.
   QEMU_CMD = $(QEMU) -M virt -cpu cortex-a53 -smp $(QEMU_SMP) -m 16384M -accel tcg,thread=multi -bios $(EDK2_AARCH64) -display $(GX_GPU_DISPLAY) -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device $(GX_GPU_DEV) -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff $(QEMU_ARGS)
+endif
+
+# cp/ext2 (docs/cp-ext2.md): the optional writable ext2 data disk, x86_64
+# only, attached as NVMe namespace 2 of the boot controller when the file
+# $(CPDATA) exists (make one with tools/cp/mkcpdata.sh).  No file -> the
+# QEMU line is byte-for-byte unchanged.  CPDATA= (empty) never attaches.
+CPDATA ?= cpdata.img
+ifeq ($(ARCH),intel)
+ifneq ($(strip $(CPDATA)),)
+ifneq ($(wildcard $(CPDATA)),)
+QEMU_CMD += -drive file=$(CPDATA),format=raw,id=cpdata,if=none -device nvme-ns,drive=cpdata,nsid=2
+endif
+endif
+endif
+
+# C4-audio (docs/cp-audio.md): an opt-in virtio-sound device whose output goes
+# to a WAV file on the host (never a host audio backend: strix's PipeWire is the
+# user's desktop).  Unset -> the QEMU line is byte-for-byte unchanged.
+#   CP_AUDIO_WAV=/abs/path/out.wav make ARCH=intel run ...
+CP_AUDIO_WAV ?=
+ifeq ($(ARCH),intel)
+ifneq ($(strip $(CP_AUDIO_WAV)),)
+QEMU_CMD += -audiodev wav,id=cpsnd0,path=$(CP_AUDIO_WAV),out.frequency=48000,out.channels=2,out.format=s16 -device virtio-sound-pci,audiodev=cpsnd0,streams=1
+endif
 endif
 
 # --- F2.4 (browser.md §6): userland C++ build policy ---------------------
@@ -551,6 +578,22 @@ ifeq ($(ARCH),intel)
   endif
 endif
 
+# cp P1 (docs/cyberpunk.md AD-4): the guest CPU model under KVM.  With no
+# -cpu, QEMU gives a KVM guest its `qemu64` model, which has no XSAVE and no
+# AVX, so the kernel's XSAVE path (src/kernel/arch/x64/fpu.c) could never run
+# and AVX code would #UD.  So whenever the final QEMU_ARGS asks for KVM and
+# names no -cpu of its own, the x64 QEMU_CMD adds $(X64_KVM_CPU) (default
+# `-cpu host`).  Recursive (=) on purpose: it is evaluated when QEMU_CMD is
+# expanded, so it sees QEMU_ARGS whether it came from this file or from a
+# wrapper's command line (t3_tier.sh, run_unit_tests_intel.sh).  An explicit
+# -cpu always wins -- `-cpu qemu64` is how the FXSAVE fallback is tested --
+# and TCG runs are untouched.  AVX-512 needs no masking here: the kernel's
+# XCR0 never enables its state, so user code that checks XGETBV (glibc, Wine,
+# MSVC's runtime) never selects it; pass X64_KVM_CPU='-cpu host,-avx512f' to
+# hide it from CPUID as well.
+X64_KVM_CPU ?= -cpu host
+X64_CPU_ARGS = $(if $(findstring -cpu ,$(QEMU_ARGS) ),,$(if $(findstring -enable-kvm,$(QEMU_ARGS)),$(X64_KVM_CPU)))
+
 # --- GX (docs/graphics-accel.md §3-D5): resolve QEMU_GPU to the concrete
 # display/device pair referenced by the per-arch QEMU_CMD lines above.
 # This block must run AFTER the `-display none` append: non-desktop modes
@@ -621,6 +664,18 @@ endif
 ifneq ($(RW_WATCH_FIXUP),)
   CFLAGS += -DRW_WATCH_FIXUP=1
 endif
+# Diagnostics (C6-venus, P8 stop 11), both off by default:
+#   CP_FAULT_PTRS=1  fatal user-fault dump also prints [SPTR]/[SCODE]/[SFLD]/
+#                    [SOBJ]/[SMAP]: what each register points at, code bytes
+#                    at the PC and before the return address, live blob maps;
+#   CP_XCMP=1        every read of an NFS /r6/config/*.xml is compared with a
+#                    fresh uncached read of the same range ([XCMP] rows).
+ifneq ($(CP_FAULT_PTRS),)
+  CFLAGS += -DCP_FAULT_PTRS=1
+endif
+ifneq ($(CP_XCMP),)
+  CFLAGS += -DCP_XCMP=1
+endif
 # Diagnostic: one compact serial row per memory syscall (mmap/munmap/mremap/
 # mprotect/madvise/brk/msync/mincore/memfd), with the caller's six arguments and
 # the return value.  Empty = no row, no code growth.  Used to name the strategy
@@ -659,12 +714,41 @@ endif
 ifneq ($(RW_WAKEALL),)
   CFLAGS += -DRW_WAKEALL=1
 endif
+# Diagnostic: print the first 48 futex operations ([FUTEX] ##n rows) and the
+# first 8 idle-CPU kicks ([IPI] rows) on the console.  Off by default: they are
+# emitted from inside the futex/wake syscalls of the program under test, so
+# they interleave with its own console output (docs/cp-thr.md §5).  The
+# futex flight-recorder ring and the hang dump are unaffected.
+#     make FUTEX_TRACE=1 ... disk.img
+ifneq ($(FUTEX_TRACE),)
+  CFLAGS += -DFUTEX_TRACE_CONSOLE=1
+endif
+# Diagnostic: the per-signal rows on the send / park-interrupt / frame-plant /
+# sigreturn path ([SIGIN], [SIG] send, [TGTK], [FWK], [SFP], [SIGD], [RT],
+# [TEXIT], ...).  Off by default: each is a synchronous UART record, and the
+# ~2 KB one signal printed WAS its delivery latency (src/include/sig_trace.h).
+#     make SIG_TRACE=1 ... disk.img
+ifneq ($(SIG_TRACE),)
+  CFLAGS += -DSIG_TRACE_CONSOLE=1
+endif
 
 # Target and objects
 TARGET = hobbyos.elf
 SRC_DIR = src/kernel
 
 # Find all .c and .s files in both src/kernel and the architecture directory
+# C0-console (docs/cp-console.md §3): the diagnostic rows the console holds
+# back by default ([PUB], [MR] s=, [FUTEX], [ALIVE-SET] slot=, [RESUME-*],
+# [BLKD] cc=, [PECOW], [ANONF]).  Boot knob, no rebuild:  CP_DIAG=all (or a
+# list: CP_DIAG=pub,futex) on any `make ... run` adds the QEMU fw_cfg file
+# opt/hobbyos/diag; the cp harnesses pass CP_DIAG through the same way.
+# Build knob: CP_DIAG_DEFAULT=all bakes the default into the kernel.
+cp_diag_comma := ,
+CP_DIAG_FWCFG = $(if $(CP_DIAG),-fw_cfg name=opt/hobbyos/diag$(cp_diag_comma)string=$(CP_DIAG))
+ifneq ($(CP_DIAG_DEFAULT),)
+  CFLAGS += -DCP_DIAG_DEFAULT='"$(CP_DIAG_DEFAULT)"'
+endif
+
 C_SRCS = $(wildcard $(SRC_DIR)/*.c) $(wildcard $(ARCH_DIR)/*.c)
 ASM_SRCS = $(wildcard $(SRC_DIR)/*.s) $(wildcard $(ARCH_DIR)/*.s)
 
@@ -2702,6 +2786,17 @@ icewm-stubs: $(X11STUB_BINS)
 # source with third_party/x11/build.sh (default build dir only — an explicit
 # X11_BUILD_DIR that lacks them is an error, never a silent rebuild).
 X11_REQUIRED_BINS = XHOBBY.BIN ICEWM.BIN
+# cp/x3: a build dir that already HAS XHOBBY.BIN/ICEWM.BIN used to be taken
+# as-is, so a tree whose server or window-manager sources changed (C4-x2's
+# one-screen DDX, MIT-SHM, IceWM patches) kept booting whatever the dir was
+# first built with.  When any input of a stage is newer than the dir's last
+# check of that stage, the stage is re-run; build.sh's content keys make that
+# a no-op (a few seconds) when nothing really changed.
+X11_COMMON_INPUTS = third_party/x11/build.sh third_party/x11/cross $(OBJ_DIR)/libc.a
+X11_server_INPUTS = third_party/x11/ddx third_party/x11/patches/xserver \
+  third_party/x11/build-server.sh third_party/x11/pins/server.txt
+X11_icewm_INPUTS = third_party/x11/icewm third_party/x11/patches/icewm \
+  third_party/x11/build-icewm.sh third_party/x11/pins/icewm.txt
 # The runtime prerequisites build.sh links every flat .BIN against: listing
 # them here makes the outer make build them first, so build.sh's own
 # `make obj/<arch>/libc.a` is a no-op instead of rewriting libc.a while a
@@ -2709,6 +2804,16 @@ X11_REQUIRED_BINS = XHOBBY.BIN ICEWM.BIN
 .PHONY: x11-staged
 x11-staged: $(OBJ_DIR)/libc.a $(OBJ_DIR)/crt0.o $(OBJ_DIR)/libcxx.a
 	@missing=""; for b in $(X11_REQUIRED_BINS); do [ -f "$(X11_BUILD_DIR)/bin/$$b" ] || missing="$$missing $$b"; done; \
+	if [ -z "$$missing" ] && [ "$(X11_BUILD_DIR)" = "third_party/x11/build/$(ARCH)" ] && [ -f third_party/x11/build.sh ]; then \
+	  for st in server icewm; do \
+	    case $$st in server) ins="$(X11_server_INPUTS)";; *) ins="$(X11_icewm_INPUTS)";; esac; \
+	    chk="$(X11_BUILD_DIR)/.$$st-inputs-checked"; \
+	    new=""; [ -f "$$chk" ] && new="$$(find $$ins $(X11_COMMON_INPUTS) -newer "$$chk" 2>/dev/null | head -1)"; \
+	    if [ ! -f "$$chk" ] || [ -n "$$new" ]; then \
+	      echo "[x11] $$st inputs changed$${new:+ ($$new)}: re-running build.sh --stage $$st (cached when the key matches)"; \
+	      bash third_party/x11/build.sh --arch $(ARCH) --stage $$st -j $(or $(X11_JOBS),8) || exit 1; \
+	      touch "$$chk"; fi; \
+	  done; fi; \
 	if [ -z "$$missing" ]; then echo "[x11] using $(X11_BUILD_DIR)"; exit 0; fi; \
 	if [ "$(X11_BUILD_DIR)" != "third_party/x11/build/$(ARCH)" ]; then \
 	  echo "[x11] ERROR: X11_BUILD_DIR=$(X11_BUILD_DIR) lacks:$$missing (expected in $(X11_BUILD_DIR)/bin/)"; exit 1; fi; \
@@ -2773,7 +2878,13 @@ disk.img: certs/cacert.pem
 
 # LibreOffice suite (`make run` completeness): build and stage all 7 apps into
 # every disk.img (skipped only when X11_BUILD_DIR is the synthetic x11stub dir).
-ifeq ($(filter %/x11stub,$(X11_BUILD_DIR)),)
+# cp-sync (merge of main): ...and when the X client prefix the suite links
+# against has not been built.  Without that, lo-x11-libs would run
+# third_party/x11/build.sh --stage all (a from-source X stack build) inside
+# every `make disk.img`, which the cyberpunk gate trees do not carry.
+# LO_ON_DISK=1 forces the suite in, LO_ON_DISK= keeps it out.
+LO_ON_DISK ?= $(if $(filter %/x11stub,$(X11_BUILD_DIR)),,$(if $(wildcard $(LO_X11_DIR)/prefix/lib/libX11.a),1,))
+ifneq ($(LO_ON_DISK),)
 disk.img: $(LIBREOFFICE_BINS)
 endif
 ifeq ($(MODE),lo_test)
@@ -2932,7 +3043,7 @@ endif
 ifeq ($(MODE),lo_test)
 	$(MCOPY) -i disk.img $(LO_TEST_BIN) ::/LO_TEST.BIN
 endif
-ifeq ($(filter %/x11stub,$(X11_BUILD_DIR)),)
+ifneq ($(LO_ON_DISK),)
 	$(MCOPY) -i disk.img $(SOFFICE_BIN) ::/SOFFICE.BIN
 	$(MCOPY) -i disk.img $(SWRITER_BIN) ::/SWRITER.BIN
 	$(MCOPY) -i disk.img $(SCALC_BIN) ::/SCALC.BIN
@@ -3646,6 +3757,17 @@ $(MEMFD_TEST): src/host/memfd_test.c
 # boundaries (so ManagedX is not captured), idempotence (paths cross vfs_abs_path
 # more than once), longest-prefix, the chain refusal that keeps idempotence
 # true, and no-truncation.
+# cp/ext2 (docs/cp-ext2.md): the ext2 core against mke2fs/e2fsck/debugfs.
+# Host-bound (needs e2fsprogs; SKIPs cleanly without them).
+EXT2_TEST = ext2_test_host
+$(EXT2_TEST): src/host/ext2_test.c src/kernel/ext2.c src/include/ext2.h
+	$(HOST_CC) -Isrc/include -Wall -Wextra -g -O1 src/kernel/ext2.c src/host/ext2_test.c -o $@
+ext2_test_run: $(EXT2_TEST)
+	$(HOST_RUN_EXT2) ./$(EXT2_TEST)
+host_tests: ext2_test_run
+.PHONY: ext2_test_run
+HOST_RUN_EXT2 = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 300 "$$@"; else exec "$$@"; fi' sh
+
 VFS_BIND_TEST = vfs_bind_test_host
 $(VFS_BIND_TEST): src/host/vfs_bind_test.c src/kernel/vfs_bind.c src/include/vfs_bind.h
 	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/kernel/vfs_bind.c src/host/vfs_bind_test.c -o $@
@@ -3670,6 +3792,31 @@ $(INPUT_NODE_TEST): src/host/input_node_test.c src/kernel/input_node.c src/inclu
 # /dev/dsp (OSS) open -> ENODEV + SDL dummy silent-safe path. Single-TU host
 # golden (src/kernel/audio_stub.c), T1 differential vs <errno.h>; runs in
 # host_tests (the in-OS T5 playthrough leg is the separately wall-gated gate).
+# C0-console: the line-atomic kernel console (src/kernel/kconsole.c) with stub
+# arch hooks -- multi-call rows, IRQ rows on the same CPU, preempted threads,
+# the diagnostic filter, user lines in pieces, the bounded lock (docs/cp-console.md).
+KCONSOLE_TEST = kconsole_test_host
+$(KCONSOLE_TEST): src/host/kconsole_test.c src/host/cons_host_shim.h src/kernel/kconsole.c src/include/console.h
+	$(HOST_CC) -Isrc/include -Isrc/host $(HOST_CFLAGS) -DCONS_HOST_TEST src/kernel/kconsole.c src/host/kconsole_test.c -o $@
+# H4-kglitch (cp-hunt H1-14): the x64 stall watchdog's "console silent" test
+# (src/include/wd_silence.h) -- a console stamped after `now` is not silence.
+WD_SILENCE_TEST = wd_silence_test_host
+$(WD_SILENCE_TEST): src/host/wd_silence_test.c src/include/wd_silence.h
+	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/host/wd_silence_test.c -o $@
+
+# H4-kglitch (docs/cp-kglitch.md §1): the wire lock with real threads, one per
+# CPU, and a holder stalled mid-row (a whole-guest host stall, a short and a
+# long single-vCPU stall).  The bound is shortened to 300 ms for the test.
+KCONSOLE_MT_TEST = kconsole_mt_test_host
+$(KCONSOLE_MT_TEST): src/host/kconsole_mt_test.c src/host/cons_host_shim.h src/kernel/kconsole.c src/include/console.h
+	$(HOST_CC) -Isrc/include -Isrc/host $(HOST_CFLAGS) -pthread -DCONS_HOST_TEST -DCONS_WAIT_US=300000ULL src/kernel/kconsole.c src/host/kconsole_mt_test.c -o $@
+
+# C4-audio (docs/cp-audio.md): the ALSA hw_params refine/choose engine
+# (src/kernel/linux_snd_params.c), the same TU the kernel's /dev/snd PCM uses.
+LINUX_SND_PARAMS_TEST = linux_snd_params_test_host
+$(LINUX_SND_PARAMS_TEST): src/host/linux_snd_params_test.c src/kernel/linux_snd_params.c src/include/linux_snd_params.h
+	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/kernel/linux_snd_params.c src/host/linux_snd_params_test.c -o $@
+
 AUDIO_STUB_TEST = audio_stub_test_host
 $(AUDIO_STUB_TEST): src/host/audio_stub_test.c src/kernel/audio_stub.c src/include/audio_stub.h
 	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) src/kernel/audio_stub.c src/host/audio_stub_test.c -o $@
@@ -3811,6 +3958,17 @@ LINUX_LAYOUT_TEST = linux_layout_test_host
 $(LINUX_LAYOUT_TEST): obj/host_linux_layout_test.o
 	$(HOST_CC) -o $@ $^
 obj/host_linux_layout_test.o: src/host/linux_layout_test.c src/include/linux_layout.h
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -Isrc/include -c $< -o $@
+
+# cp P1 / F2 (docs/cyberpunk.md 7.3): the x86_64 signal frame's FP/XSAVE shape
+# (src/include/linux_sigframe.h) against tests/fixtures/abi/linux_sigframe.golden,
+# measured from the Linux UAPI headers by tools/linux-abi/gen_sigframe_golden.py,
+# plus a sweep of the kernel's frame-placement arithmetic.
+LINUX_SIGFRAME_TEST = linux_sigframe_test_host
+$(LINUX_SIGFRAME_TEST): obj/host_linux_sigframe_test.o
+	$(HOST_CC) -o $@ $^
+obj/host_linux_sigframe_test.o: src/host/linux_sigframe_test.c src/include/linux_sigframe.h
 	@mkdir -p obj
 	$(HOST_CC) $(HOST_CFLAGS) -Isrc/include -c $< -o $@
 
@@ -4384,6 +4542,16 @@ OPEN_MODE_SCAN = open_mode_scan
 $(OPEN_MODE_SCAN): tools/gate/open_mode_scan.py
 	@python3 tools/gate/open_mode_scan.py
 
+# cp/nfsguard: the 32 KiB NFS READ size has been lost to merges more than once.
+# The scan FAILs if any known regression (1344-byte clamp, single-frame
+# readahead, no FSINFO, 2 KiB reply buffers, no IPv4 reassembly) is back; its
+# selftest re-applies each one and must see it FAIL.  The boot-level guard is
+# tools/cp/nfs/rsize_guard.sh (docs/cp-nfs.md).
+NFS_RSIZE_SCAN = nfs_rsize_scan
+$(NFS_RSIZE_SCAN): tools/cp/nfs/rsize_scan.py
+	@python3 tools/cp/nfs/rsize_scan.py --selftest
+	@python3 tools/cp/nfs/rsize_scan.py
+
 # GB-066: T4 device-leg instrument.  src/user/t4_probe.c is the W0 row-set probe
 # (standard C + write(), so the SAME musl-built static ELF is leg A on Linux and
 # leg B inside HobbyOS-intel via the real ELF loader + linux dispatch — never a
@@ -4608,99 +4776,112 @@ test_pr_sync:
 
 # The suite as one list, so a host-portable subset can be derived from it
 # without maintaining a second copy (see host_tests_portable).
-HOST_TESTS_TARGETS = $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness test_pr_sync $(GAMES_SCAN_TEST) $(GFX_STATS_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(VFS_BIND_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) $(T4_COMPAT_SELFTEST) $(OPEN_MODE_SCAN) $(VECTOR_SHAPE_SCAN) $(SDL_TEST_APP_HOST) $(UNAME_PARITY) $(AUDIO_STUB_TEST) $(SSP_REPORT_TEST)
+HOST_TESTS_TARGETS = $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness test_pr_sync $(GAMES_SCAN_TEST) $(GFX_STATS_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_SIGFRAME_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(VFS_BIND_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) $(T4_COMPAT_SELFTEST) $(OPEN_MODE_SCAN) $(NFS_RSIZE_SCAN) $(VECTOR_SHAPE_SCAN) $(SDL_TEST_APP_HOST) $(UNAME_PARITY) $(AUDIO_STUB_TEST) $(LINUX_SND_PARAMS_TEST) $(SSP_REPORT_TEST) $(KCONSOLE_TEST) $(KCONSOLE_MT_TEST) $(WD_SILENCE_TEST)
+# H4-kglitch: every step of the recipe runs and a red one is recorded, not
+# fatal (tools/host/host_try.sh); the last line lists every failure and exits 1.
+# Before, the first red line (the known-red python suite) ended the recipe and
+# every test binary after it was built but never run.
+HOST_TESTS_FAILS = obj/host_tests.fails.$$PPID
+HOST_TRY = @sh tools/host/host_try.sh $(HOST_TESTS_FAILS)
 host_tests: $(HOST_TESTS_TARGETS)
-	$(HOST_RUN) ./$(EDITOR_TEST_BIN)
-	$(HOST_RUN) ./$(GAMES_SCAN_TEST)
-	$(HOST_RUN) ./$(GFX_STATS_TEST)
-	$(HOST_RUN) ./$(DESKTOP_MENU_TEST)
-	$(HOST_RUN) ./$(DESKTOP_DRAG_TEST)
-	$(HOST_RUN) ./$(DESKTOP_DAMAGE_TEST)
-	$(HOST_RUN) ./$(DESKTOP_INPUT_TEST)
-	$(HOST_RUN) ./$(DESKTOP_TERM_TEST)
-	$(HOST_RUN) ./$(DESKTOP_PIXEL_TEST)
-	$(HOST_RUN) ./$(X11_LIB_TEST)
-	$(HOST_RUN) ./$(XCALC_TEST)
-	$(HOST_RUN) ./$(ANTFARM_TEST)
-	$(HOST_RUN) ./$(XEYES_TEST)
-	$(HOST_RUN) ./$(XNIBBLER_TEST)
-	$(HOST_RUN) ./$(NANO_TERM_TEST)
-	$(HOST_RUN) ./$(XCRYPT_TEST)
-	$(HOST_RUN) ./$(NFS_PROTO_TEST)
-	$(HOST_RUN) ./$(RESOLV_TEST)
-	$(HOST_RUN) ./$(TIME_MATH_TEST)
-	$(HOST_RUN) ./$(CONSOLE_APP_TEST)
-	$(HOST_RUN) ./$(DIALOG_ARROW_TEST)
-	$(HOST_RUN) ./$(PONG_TEST_BIN)
-	$(HOST_RUN) ./$(STARDUST_TEST)
+	@rm -f $(HOST_TESTS_FAILS)
+	$(HOST_TRY) ./$(EDITOR_TEST_BIN)
+	$(HOST_TRY) ./$(GAMES_SCAN_TEST)
+	$(HOST_TRY) ./$(GFX_STATS_TEST)
+	$(HOST_TRY) ./$(DESKTOP_MENU_TEST)
+	$(HOST_TRY) ./$(DESKTOP_DRAG_TEST)
+	$(HOST_TRY) ./$(DESKTOP_DAMAGE_TEST)
+	$(HOST_TRY) ./$(DESKTOP_INPUT_TEST)
+	$(HOST_TRY) ./$(DESKTOP_TERM_TEST)
+	$(HOST_TRY) ./$(DESKTOP_PIXEL_TEST)
+	$(HOST_TRY) ./$(X11_LIB_TEST)
+	$(HOST_TRY) ./$(XCALC_TEST)
+	$(HOST_TRY) ./$(ANTFARM_TEST)
+	$(HOST_TRY) ./$(XEYES_TEST)
+	$(HOST_TRY) ./$(XNIBBLER_TEST)
+	$(HOST_TRY) ./$(NANO_TERM_TEST)
+	$(HOST_TRY) ./$(XCRYPT_TEST)
+	$(HOST_TRY) ./$(NFS_PROTO_TEST)
+	$(HOST_TRY) ./$(RESOLV_TEST)
+	$(HOST_TRY) ./$(TIME_MATH_TEST)
+	$(HOST_TRY) ./$(CONSOLE_APP_TEST)
+	$(HOST_TRY) ./$(DIALOG_ARROW_TEST)
+	$(HOST_TRY) ./$(PONG_TEST_BIN)
+	$(HOST_TRY) ./$(STARDUST_TEST)
+	$(HOST_TRY) ./$(KCONSOLE_TEST)
+	$(HOST_TRY) ./$(KCONSOLE_MT_TEST)
+	$(HOST_TRY) ./$(WD_SILENCE_TEST)
 	@echo "[host] self-registering python host tests (GB-064)"
-	python3 tools/t5/run_t5_tests.py
-	$(HOST_RUN) ./$(NES_TEST)
-	$(HOST_RUN) ./$(GUI_TEST)
-	$(HOST_RUN) ./$(ERRNO_TEST)
-	$(HOST_RUN) ./$(ELF_IMAGE_TEST)
-	$(HOST_RUN) ./$(LINUX_ABI_TEST)
-	$(HOST_RUN) ./$(UNAME_PARITY)
-	$(HOST_RUN) ./$(LINUX_LAYOUT_TEST)
-	$(HOST_RUN) ./$(LINUX_ABI_CONSTANTS_TEST)
-	$(HOST_RUN) ./$(THRD_TEST_HOST)
-	$(HOST_RUN) ./$(TLS_TEST_HOST)
-	$(HOST_RUN) ./$(WK1C_TEST_HOST)
-	$(HOST_RUN) ./$(IPC_PROTO_TEST)
-	$(HOST_RUN) ./$(IPC_TEST_HOST)
-	$(HOST_RUN) ./$(TORTURE_TEST_HOST)
-	$(HOST_RUN) ./$(GRAPHICS_LIB_TEST)
-	$(HOST_RUN) ./$(WSURF_TEST_HOST)
-	$(HOST_RUN) ./$(FB_IOCTL_TEST)
-	$(HOST_RUN) ./$(FB_PIXEL_TEST)
-	$(HOST_RUN) ./$(M2_CONTRACT_TEST)
-	$(HOST_RUN) ./$(EVDEV_TEST)
-	$(HOST_RUN) ./$(JOYPAD_TEST)
-	$(HOST_RUN) ./$(CLOCKABI_TEST)
-	$(HOST_RUN) ./$(LOCKSTEAL_TEST)
-	$(HOST_RUN) ./$(MEMFD_TEST)
-	$(HOST_RUN) ./$(VFS_BIND_TEST)
-	$(HOST_RUN) ./$(LINUX_INPUT_TEST)
-	$(HOST_RUN) ./$(INPUT_NODE_TEST)
-	$(HOST_RUN) ./$(AUDIO_STUB_TEST)
-	$(HOST_RUN) ./$(FB_MMAP_TEST)
-	$(HOST_RUN) ./$(SDL_TEST_APP_HOST)
-	$(HOST_RUN) ./$(WINDOW_DAMAGE_TEST)
-	$(HOST_RUN) ./$(WINDOW_TEXT_TEST)
-	$(HOST_RUN) ./$(STRING_TEST)
-	$(HOST_RUN) ./$(CTYPE_TEST)
-	$(HOST_RUN) ./$(STDLIB_TEST)
-	$(HOST_RUN) ./$(SETJMP_TEST)
-	$(HOST_RUN) ./$(REALLOC_TEST)
-	$(HOST_RUN) ./$(PRINTF_TEST)
-	$(HOST_RUN) ./$(HEADERS_TEST)
-	$(HOST_RUN) ./$(CXXRT_TEST)
-	$(HOST_RUN) ./$(CXX_HEADERS_TEST)
-	$(HOST_RUN) ./$(RTTI_TEST)
-	$(HOST_RUN) ./$(GETOPT_TEST)
+	$(HOST_TRY) -t 1200 python3 tools/t5/run_t5_tests.py
+	$(HOST_TRY) ./$(NES_TEST)
+	$(HOST_TRY) ./$(GUI_TEST)
+	$(HOST_TRY) ./$(ERRNO_TEST)
+	$(HOST_TRY) ./$(ELF_IMAGE_TEST)
+	$(HOST_TRY) ./$(LINUX_ABI_TEST)
+	$(HOST_TRY) ./$(UNAME_PARITY)
+	$(HOST_TRY) ./$(LINUX_LAYOUT_TEST)
+	$(HOST_TRY) ./$(LINUX_SIGFRAME_TEST)
+	$(HOST_TRY) ./$(LINUX_ABI_CONSTANTS_TEST)
+	$(HOST_TRY) ./$(THRD_TEST_HOST)
+	$(HOST_TRY) ./$(TLS_TEST_HOST)
+	$(HOST_TRY) ./$(WK1C_TEST_HOST)
+	$(HOST_TRY) ./$(IPC_PROTO_TEST)
+	$(HOST_TRY) ./$(IPC_TEST_HOST)
+	$(HOST_TRY) ./$(TORTURE_TEST_HOST)
+	$(HOST_TRY) ./$(GRAPHICS_LIB_TEST)
+	$(HOST_TRY) ./$(WSURF_TEST_HOST)
+	$(HOST_TRY) ./$(FB_IOCTL_TEST)
+	$(HOST_TRY) ./$(FB_PIXEL_TEST)
+	$(HOST_TRY) ./$(M2_CONTRACT_TEST)
+	$(HOST_TRY) ./$(EVDEV_TEST)
+	$(HOST_TRY) ./$(JOYPAD_TEST)
+	$(HOST_TRY) ./$(CLOCKABI_TEST)
+	$(HOST_TRY) ./$(LOCKSTEAL_TEST)
+	$(HOST_TRY) ./$(MEMFD_TEST)
+	$(HOST_TRY) ./$(VFS_BIND_TEST)
+	$(HOST_TRY) ./$(LINUX_INPUT_TEST)
+	$(HOST_TRY) ./$(INPUT_NODE_TEST)
+	$(HOST_TRY) ./$(AUDIO_STUB_TEST)
+	$(HOST_TRY) ./$(LINUX_SND_PARAMS_TEST)
+	$(HOST_TRY) ./$(FB_MMAP_TEST)
+	$(HOST_TRY) ./$(SDL_TEST_APP_HOST)
+	$(HOST_TRY) ./$(WINDOW_DAMAGE_TEST)
+	$(HOST_TRY) ./$(WINDOW_TEXT_TEST)
+	$(HOST_TRY) ./$(STRING_TEST)
+	$(HOST_TRY) ./$(CTYPE_TEST)
+	$(HOST_TRY) ./$(STDLIB_TEST)
+	$(HOST_TRY) ./$(SETJMP_TEST)
+	$(HOST_TRY) ./$(REALLOC_TEST)
+	$(HOST_TRY) ./$(PRINTF_TEST)
+	$(HOST_TRY) ./$(HEADERS_TEST)
+	$(HOST_TRY) ./$(CXXRT_TEST)
+	$(HOST_TRY) ./$(CXX_HEADERS_TEST)
+	$(HOST_TRY) ./$(RTTI_TEST)
+	$(HOST_TRY) ./$(GETOPT_TEST)
 ifneq ($(REGEX_TEST),)
-	$(HOST_RUN) ./$(REGEX_TEST)
+	$(HOST_TRY) ./$(REGEX_TEST)
 else
 	@echo "  SKIP: regex layout (glibc-ABI only; this host has no struct re_registers)"
 endif
-	$(HOST_RUN) ./$(LANGINFO_TEST)
-	$(HOST_RUN) ./$(SCANFW_PARITY)
-	$(HOST_RUN) ./$(NUM_PARITY)
-	$(HOST_RUN) ./$(MATH_TX)
-	$(HOST_RUN) ./$(WIDE_PARITY)
-	$(HOST_RUN) ./files_test_host
-	$(HOST_RUN) ./calc_test_host
-	$(HOST_RUN) ./clock_test_host
-	$(HOST_RUN) ./sysmon_test_host
-	$(HOST_RUN) ./hex_test_host
-	$(HOST_RUN) ./tasks_test_host
-	$(HOST_RUN) ./find_test_host
-	$(HOST_RUN) ./$(SSP_REPORT_TEST)
-	$(HOST_RUN) ./diff_test_host
-	$(HOST_RUN) ./notes_test_host
-	$(HOST_RUN) ./unit_test_host
+	$(HOST_TRY) ./$(LANGINFO_TEST)
+	$(HOST_TRY) ./$(SCANFW_PARITY)
+	$(HOST_TRY) ./$(NUM_PARITY)
+	$(HOST_TRY) ./$(MATH_TX)
+	$(HOST_TRY) ./$(WIDE_PARITY)
+	$(HOST_TRY) ./files_test_host
+	$(HOST_TRY) ./calc_test_host
+	$(HOST_TRY) ./clock_test_host
+	$(HOST_TRY) ./sysmon_test_host
+	$(HOST_TRY) ./hex_test_host
+	$(HOST_TRY) ./tasks_test_host
+	$(HOST_TRY) ./find_test_host
+	$(HOST_TRY) ./$(SSP_REPORT_TEST)
+	$(HOST_TRY) ./diff_test_host
+	$(HOST_TRY) ./notes_test_host
+	$(HOST_TRY) ./unit_test_host
 	@mkdir -p obj/host_scratch
-	@cd obj/host_scratch && sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 120 "../../$(APPS_SUITE_TEST)"; else exec "../../$(APPS_SUITE_TEST)"; fi'
+	$(HOST_TRY) -t 120 -C obj/host_scratch ../../$(APPS_SUITE_TEST)
+	@sh tools/host/host_try.sh $(HOST_TESTS_FAILS) --report
 
 # GB-085 concurrency gate: two `make host_tests` at once must both pass
 # (per-process scratch dirs), and a shared-path override must FAIL it.
@@ -4810,7 +4991,7 @@ test_parity_ci:
 	bash tools/gate/parity_ci_test.sh
 
 .PHONY: icewm_test
-.PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test desktop_test_build host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test merge_gate merge_gate_ci test_merge_gate parity_ci test_parity_ci cache_setup cold_vs_cached test_cache test_diff_harness test_pr_sync bigload_intel t4_compat_parity t4_device_gate t4_device_selftest t4_device_check t4_w0_gate t4_w0_selftest t4_wave_gate t4_wave_selftest t4_glued_selftest t4_compat_selftest open_mode_scan uname_parity_host t3_pollbrk t3_nullentry t3_resume_page_selftest
+.PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test desktop_test_build host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test merge_gate merge_gate_ci test_merge_gate parity_ci test_parity_ci cache_setup cold_vs_cached test_cache test_diff_harness test_pr_sync bigload_intel t4_compat_parity t4_device_gate t4_device_selftest t4_device_check t4_w0_gate t4_w0_selftest t4_wave_gate t4_wave_selftest t4_glued_selftest t4_compat_selftest open_mode_scan nfs_rsize_scan uname_parity_host t3_pollbrk t3_nullentry t3_resume_page_selftest
 
 # icewm.md §9 (lane apps): virtual-display core host golden test
 # (src/kernel/vdisplay.c with the kernel glue compiled out).
@@ -4938,3 +5119,22 @@ host_tests_portable: $(filter-out $(HOST_TESTS_HOSTBOUND),$(HOST_TESTS_TARGETS))
 	[ "$$fail" -eq 0 ]
 
 .PHONY: host_tests_portable
+
+# ==== cp/x2 (lane C4-x2, docs/cyberpunk.md §6 P4) -- integrator review ====
+# Stage the X client libraries a Wine session needs onto the disk:
+#   make ARCH=intel cp-x11-disk [CP_X11_STAGE=<dir>/stage/CP/X11]
+# copies tools/cp/x11/build.sh's runtime tree (the C4-x libraries under their
+# sonames, libXcomposite and FreeType 2.14.3 included, + share/X11) to
+# ::/CP/X11 on disk.img -- the F4 layout of docs/cp-x11.md §2.3.  It is NOT a
+# disk.img prerequisite: the default disk is unchanged.  A Wine session puts
+# /CP/X11/lib FIRST on LD_LIBRARY_PATH (winex11 dlopens by bare soname, and
+# /LIB64 may hold the RimWorld libX11 shim).  A session that mounts NFS at /CP
+# (tools/cp/p4/run-p4.sh) sees the export's copy instead of this one.
+CP_X11_STAGE ?= $(HOME)/cp/x11-build/stage/CP/X11
+.PHONY: cp-x11-disk
+cp-x11-disk: disk.img
+	@[ -f "$(CP_X11_STAGE)/lib/libX11.so.6" ] || { echo "[cp-x11] no stage at $(CP_X11_STAGE) (bash tools/cp/x11/build.sh all)"; exit 1; }
+	-$(MMD) -i disk.img ::/CP >/dev/null 2>&1
+	$(MCOPY) -s -o -i disk.img "$(CP_X11_STAGE)" ::/CP/
+	@echo "[cp-x11] staged $$(ls "$(CP_X11_STAGE)/lib" | wc -l) libraries at ::/CP/X11/lib"
+# ==== end cp/x2 ====

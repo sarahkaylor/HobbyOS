@@ -1,0 +1,119 @@
+# tools/cp/hunt/soak.p9 -- the H1-hunt long soak (docs/cp-hunt.md): fpsprobe.p9's
+# load sequence (main menu -> LOAD GAME -> ManualSave-86), then ~28 minutes in
+# the world: six ~4.5-minute phases (soak1..soak6, 17 x ~16 s each of sprint /
+# walk / turn / strafe / look up-down), so summarize.py gives a median per
+# phase (fps decay) and [THRS] rows show memory growth.  No save, then stop.
+phase menu
+shot menu
+# ---- LOAD GAME -> ManualSave-86 ---------------------------------------------
+seek menu-load main down 6 LOAD GAME
+key ret
+expect loadlist 30 LOAD\s*GAME|Expand\s*groups|Coll\w*\s*groups|Progression
+key 0
+wait 2
+# the list with both groups expanded (ctl1): Streetkid/AutoSave-16 group at
+# the top, then the second Streetkid group whose one entry, "The Ripperdoc"
+# (ManualSave-86), has its frame centred at screen row 509
+expect loadlist-ripperdoc 10 Ripperdoc
+listseek loadlist-focus down 8 509
+phase loading
+key ret
+expect loaded 400 PRESS\b.{0,24}\bTO\s+CONTINUE
+key spc
+wait 6
+phase world
+expect inworld 60 RIPPERDOC|Jackie
+shot world-start
+
+phase soak1
+repeat 17
+down shift
+hold w 6000
+up shift
+look 350 0 15 16
+hold w 4000
+look -300 0 10 16
+hold a 1500
+hold d 1500
+look 0 -30 5 16
+look 0 30 5 16
+wait 2
+end
+shot soak1-end
+phase soak2
+repeat 17
+down shift
+hold w 6000
+up shift
+look 350 0 15 16
+hold w 4000
+look -300 0 10 16
+hold a 1500
+hold d 1500
+look 0 -30 5 16
+look 0 30 5 16
+wait 2
+end
+shot soak2-end
+phase soak3
+repeat 17
+down shift
+hold w 6000
+up shift
+look 350 0 15 16
+hold w 4000
+look -300 0 10 16
+hold a 1500
+hold d 1500
+look 0 -30 5 16
+look 0 30 5 16
+wait 2
+end
+shot soak3-end
+phase soak4
+repeat 17
+down shift
+hold w 6000
+up shift
+look 350 0 15 16
+hold w 4000
+look -300 0 10 16
+hold a 1500
+hold d 1500
+look 0 -30 5 16
+look 0 30 5 16
+wait 2
+end
+shot soak4-end
+phase soak5
+repeat 17
+down shift
+hold w 6000
+up shift
+look 350 0 15 16
+hold w 4000
+look -300 0 10 16
+hold a 1500
+hold d 1500
+look 0 -30 5 16
+look 0 30 5 16
+wait 2
+end
+shot soak5-end
+phase soak6
+repeat 17
+down shift
+hold w 6000
+up shift
+look 350 0 15 16
+hold w 4000
+look -300 0 10 16
+hold a 1500
+hold d 1500
+look 0 -30 5 16
+look 0 30 5 16
+wait 2
+end
+shot soak6-end
+prof 20 10 soak-end
+stop

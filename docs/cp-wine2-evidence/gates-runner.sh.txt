@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# w2-gates.sh TREE OUTDIR [probe...] -- the wave-3 common gates for one tree
+# (lane C2-wine2).  Every build MAKEFLAGS=-j16, every boot under the shared
+# lock, one lock hold per boot so other lanes interleave.
+set -u
+T="$1"; O="$2"; shift 2
+export MAKEFLAGS=-j16 TOOLS_SKIP=1
+L=/tmp/cp-qemu.lock
+mkdir -p "$O"; S="$O/summary.txt"; : > "$S"
+cd "$T" || exit 2
+echo "tree=$T rev=$(cat .gate-rev 2>/dev/null) start=$(date -Is)" >> "$S"
+make ARCH=intel MODE=test hobbyos.elf disk.img > "$O/build.log" 2>&1; echo "build rc=$?" >> "$S"
+PROBES="$*"
+[ -n "$PROBES" ] || PROBES=$(ls src/user/linux_probe_*.c | sed 's#.*/linux_probe_##; s#\.c$##' | grep -vx x11)
+for p in $PROBES; do
+  x=""; [ "$p" = fpu_sig ] && x="PROBE.ELF nest"
+  flock "$L" env LP_TIMEOUT=300 LP_WAVE_EXTRA="$x" LP_OUT="$O/$p.tier" \
+    bash tools/gate/t3_linux_probe.sh "$p" > "$O/$p.gate" 2>&1
+  rc=$?
+  c=$(sed -n 's/^T3_LOG=//p' "$O/$p.tier" 2>/dev/null | tail -1)
+  [ -n "$c" ] && [ -f "$c" ] && cp -f "$c" "$O/$p.console"
+  echo "probe $p rc=$rc $(grep -a '\[LP\] done' "$O/$p.gate" | tail -1) fails=$(grep -ac '\[LP\] FAIL' "$O/$p.gate")" >> "$S"
+done
+[ "${SKIP_REST:-0}" = 1 ] && { echo "ALLDONE $(date -Is)" >> "$S"; exit 0; }
+GATE_DIR="$O/ext2-gate" GLIBC_SYSROOT=$HOME/cp/sysroot-glibc231 bash tools/cp/ext2_gate.sh > "$O/ext2_gate.log" 2>&1
+echo "ext2_gate rc=$? $(grep -aE 'ext2_gate: (PASS|FAIL)|boot [123].*(PASS|FAIL)' "$O/ext2_gate.log" | tr '\n' ' ' | cut -c1-300)" >> "$S"
+flock "$L" env UNIT_TESTS_TIMEOUT=900 bash ./run_unit_tests_intel.sh > "$O/unit.log" 2>&1
+echo "unit rc=$? $(grep -aE 'Tests run|tests run|passed|failed' "$O/unit.log" | tail -3 | tr '\n' ' ') $(grep -a 'EXPECT_EQ FAILED' "$O/unit.log" | sed 's/.* at //' | tr '\n' ' ')" >> "$S"
+make -k host_tests > "$O/host.log" 2>&1
+echo "host_tests rc=$? $(grep -acE '^(PASS|ok)' "$O/host.log") pass-lines; errors: $(grep -aE '\*\*\* \[|Error [0-9]' "$O/host.log" | head -5 | tr '\n' ' ')" >> "$S"
+bash tools/cp/mmu/castscan_check.sh > "$O/castscan.log" 2>&1; echo "castscan rc=$? $(tail -2 "$O/castscan.log" | tr '\n' ' ')" >> "$S"
+make ARCH=arm hobbyos.elf > "$O/arm.log" 2>&1; echo "arm_build rc=$?" >> "$S"
+echo "ALLDONE $(date -Is)" >> "$S"

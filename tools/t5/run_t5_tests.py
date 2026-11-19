@@ -34,10 +34,21 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 PASS_MARKERS = ("ALL PASSED", ": PASS", "PASSED")
 
 
-def discover():
+# Scripts that match the *_test.py glob but are QEMU harnesses with their own
+# make targets, not host unit tests (see discover()).
+EXCLUDED = {
+    "tools/doom_elf/run_doom_elf_test.py",
+    # GB-176 again (H4-kglitch): the RimWorld in-colony gameplay battery boots a
+    # guest and drives the game over QMP; it needs the staged game and a slot.
+    "tools/rw/rw_gameplay_test.py",
+}
+
+
+def discover(root=None):
     """Ordered, deduped set of python test scripts to execute."""
-    scripts = [os.path.relpath(p, ROOT)
-               for p in glob.glob(os.path.join(ROOT, "tools", "*", "*_test.py"))]
+    root = root or ROOT
+    scripts = [os.path.relpath(p, root)
+               for p in glob.glob(os.path.join(root, "tools", "*", "*_test.py"))]
     # tools-root T5 tests (stable, low churn); NOT run_selfhost_build_test.py
     # (a heavy standalone selfhost run, deliberately outside host_tests).
     scripts += ["tools/evidence_rig_test.py", "tools/perf_game_cycle_test.py"]
@@ -48,8 +59,7 @@ def discover():
     # every clean machine; discovered on a box that has the artifact it boots a
     # VM inside `make host_tests`. Both are wrong: the harness has its own
     # target (`make doom_elf_test`). Same reasoning as run_selfhost_build_test.py.
-    excluded = {"tools/doom_elf/run_doom_elf_test.py"}
-    scripts = [s for s in scripts if s not in excluded]
+    scripts = [s for s in scripts if s not in EXCLUDED]
     seen, out = set(), []
     for s in scripts:
         if s not in seen:
@@ -98,6 +108,16 @@ def self_test():
         good = (ok == want)
         print(f"  {'PASS' if good else 'FAIL'}: {name} ({why}) -> grader said {'PASS' if ok else 'FAIL'}, wanted {'PASS' if want else 'FAIL'}")
         fails += 0 if good else 1
+    # The QEMU harnesses that match the glob are never discovered (GB-176).
+    t = tempfile.mkdtemp()
+    harnesses = ["tools/doom_elf/run_doom_elf_test.py", "tools/rw/rw_gameplay_test.py"]
+    for rel in harnesses + ["tools/x/plain_test.py"]:
+        os.makedirs(os.path.join(t, os.path.dirname(rel)), exist_ok=True)
+        write(os.path.join(t, rel), "print('ALL PASSED')\n")
+    found = [s for s in discover(t) if s.startswith("tools/") and s.count("/") == 2]
+    good = found == ["tools/x/plain_test.py"]
+    print(f"  {'PASS' if good else 'FAIL'}: QEMU harnesses excluded from discovery -> {found}")
+    fails += 0 if good else 1
     print("RUN_T5_TESTS_SELF_TEST:", "ALL PASSED" if fails == 0 else f"{fails} FAILED")
     return fails
 
@@ -110,7 +130,7 @@ def main():
     print(f"[host-tests] self-registering suite: {len(scripts)} python tests")
     grader_fails = self_test()          # the grader proves it can fail, every run
     fails = grader_fails
-    total = len(scripts) + 5            # 5 = the grader's own self-test cases
+    total = len(scripts) + 6            # 6 = the grader's own self-test cases
     for s in scripts:
         ok, last = run_one(s, cwd)
         print(f"  {'PASS' if ok else 'FAIL'}  {s}" + (f"  ({last})" if not ok else ""))

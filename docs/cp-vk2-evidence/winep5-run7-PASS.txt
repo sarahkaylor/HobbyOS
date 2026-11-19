@@ -1,0 +1,146 @@
+# Gate P5 rows 2-4 -- Wine P5 run 7: PASS (strix guest -cpu host -smp 8 -m 12288M KVM, slot 1, 0 other guests at start)
+# kernel/tree: cyberpunk 9991149a + cp-vk2 301bfba3 (WINEDLLOVERRIDES += mscoree,mshtml=); Wine: C4-x2 ~/cp/wine-build-x; X stage ~/cp/x11-build-x2;
+# X server: C4-x2 one-screen XHOBBY.BIN sha256 935c760fd450eb9a3326e75691a9b8feaacf155f19033e807f98a4bf78424c97 (scratch override), HB_SECOND_SCREEN=0
+# graded with: python3 tools/cp/p5/boot_wine_p5.py --out obj/cp-p5/wine --grade-only (grader fix: strip XSESSION's [X] relay prefix; the in-run grade predates it)
+# screendumps: evidence/cp-vk2/wine-{vkcube,d3d11,d3d12}-t{20,50}s.png
+
+## export manifest
+beffdd081dce91c2     122894 P5/D3D11/d3d10core.dll
+0a203b6255c89343    7483406 P5/D3D11/d3d11.dll
+e0111cb5dfe96a49      90112 P5/D3D11/d3d11tri.exe
+e3c1178eb7f0dd59    5414926 P5/D3D11/dxgi.dll
+0dfd690a39ef8361    6651918 P5/D3D12/d3d12core.dll
+502694a5fd5e0638     147470 P5/D3D12/d3d12.dll
+64fadc24e224800c      90112 P5/D3D12/d3d12tri.exe
+e3c1178eb7f0dd59    5414926 P5/D3D12/dxgi.dll
+4bc1ada166d02813     102400 P5/VK/vkcube.exe
+60c66bbc48660f4b   60741320 VK/lib/libvulkan_lvp.so
+31d3d579faa86629     615576 VK/lib/libvulkan.so
+31d3d579faa86629     615576 VK/lib/libvulkan.so.1
+31d3d579faa86629     615576 VK/lib/libvulkan.so.1.4.363
+e9a0f596ef04fed7        176 VK/share/vulkan/icd.d/lvp_icd.x86_64.json
+
+[P5W] --- [P5] rows and probe rows (serial) ---
+[P5] winep5 launcher (C5-vk2)
+[P5] begin wineboot : wineboot -i
+[P5] end wineboot status=0 ms=38480
+[P5] quiesce after wineboot: extra=0
+[P5] begin keepalive (background) : wine Z:\CP\P5\VK\vkcube.exe --idle 7200
+[P5] keepalive pid=117
+[P5] begin winprobe01 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+[VK] idle: keepalive pid 32, desktop 0000000000010020, 7200 s
+[VK] winprobe: CreateWindowEx -> 0000000000010056 in 107 ms (display driver loaded)
+[P5] end winprobe01 status=0 ms=16955
+[P5] warm-up: display driver loaded
+[P5] begin vkcube : wine Z:\CP\P5\VK\vkcube.exe 65 640 480
+[VK] vkcubex start (C5-vk2, VK_KHR_win32_surface): 65 s, 640x480, present mode fifo, pid 316
+[VK] prefault (startup): n/a for a PE image
+[VK] win32: window 000000000003002A 640x480 client, created+shown in 256.0 ms
+[VK] loader vulkan-1.dll (C:\windows\system32\vulkan-1.dll) loaded in 13.0 ms
+[VK] instance surface extensions (14 total): VK_KHR_get_surface_capabilities2 VK_KHR_surface VK_KHR_surface_maintenance1 VK_EXT_surface_maintenance1 VK_KHR_win32_surface
+[VK] device: llvmpipe (LLVM 21.1.8, 256 bits) (api 1.4.354) instance+enumerate 141.0 ms
+[VK] vkCreateDevice ok in 2598.0 ms (queue family 0, VK_KHR_swapchain)
+[VK] surface: formats(format/colorspace): 50/0 44/0 -> 44; present modes: IMMEDIATE MAILBOX FIFO FIFO_RELAXED -> FIFO
+[VK] surface caps: images 3..16 current 640x480 min 640x480 max 640x480 usage 0x8009f -> 4 images 640x480
+[VK] swapchain: 4 images in 18.0 ms
+[VK] pipeline created in 234.0 ms
+[VK] render loop: 65 s
+[VK] frame 0: acquire 0.00 ms, render 1289.00 ms, present 4.00 ms, total 1293.00 ms (image 0)
+[VK] frame 1: acquire 0.00 ms, render 12.00 ms, present 0.00 ms, total 12.00 ms (image 1)
+[VK] frame 2: acquire 0.00 ms, render 5.00 ms, present 0.00 ms, total 5.00 ms (image 2)
+[VK] t=5s frames=4028 window fps=805.60 | median ms acquire 0.00 render 0.00 present 0.00 total 1.00
+[VK] t=10s frames=9291 window fps=819.20 | median ms acquire 0.00 render 0.00 present 0.00 total 1.00
+[VK] t=15s frames=14835 window fps=819.20 | median ms acquire 0.00 render 0.00 present 0.00 total 1.00
+[VK] t=20s frames=20231 window fps=819.20 | median ms acquire 0.00 render 1.00 present 0.00 total 1.00
+[VK] t=25s frames=24330 window fps=819.20 | median ms acquire 0.00 render 0.00 present 0.00 total 1.00
+[VK] t=30s frames=29618 window fps=819.20 | median ms acquire 0.00 render 1.00 present 0.00 total 1.00
+[VK] t=35s frames=35289 window fps=819.20 | median ms acquire 0.00 render 0.00 present 0.00 total 1.00
+[VK] t=40s frames=40745 window fps=819.20 | median ms acquire 0.00 render 1.00 present 0.00 total 1.00
+[VK] t=45s frames=46339 window fps=819.20 | median ms acquire 0.00 render 0.00 present 0.00 total 1.00
+[VK] t=50s frames=51811 window fps=819.20 | median ms acquire 0.00 render 0.00 present 0.00 total 1.00
+[VK] t=55s frames=55674 window fps=772.60 | median ms acquire 0.00 render 0.00 present 0.00 total 1.00
+[VK] t=60s frames=61162 window fps=819.20 | median ms acquire 0.00 render 1.00 present 0.00 total 1.00
+[VK] t=65s frames=66803 window fps=819.20 | median ms acquire 0.00 render 0.00 present 0.00 total 1.00
+[VK] RESULT frames=66803 wall=65000.0 ms fps=1027.74 | per-frame total median 1.00 p90 1.00 worst(after frame 0) 1469.00 ms | swapchain 640x480 4 images FIFO | recreated=0 suboptimal=0
+[VK] teardown: clean
+[VK] done rc=0
+[P5] end vkcube status=0 ms=70467
+[P5] begin d3d11 : wine Z:\CP\P5\D3D11\d3d11tri.exe 65 640 480
+[D3D11] d3d11tri start (C5-vk2): 65 s, 640x480, pid 324
+[D3D11] module d3d11.dll          Z:\CP\P5\D3D11\d3d11.dll
+[D3D11] module dxgi.dll           Z:\CP\P5\D3D11\dxgi.dll
+[D3D11] module d3dcompiler_47.dll C:\windows\system32\d3dcompiler_47.dll
+[D3D11] D3D11CreateDeviceAndSwapChain ok in 3953.0 ms, feature level 0xb100
+[D3D11] adapter: "llvmpipe (LLVM 21.1.8, 256 bits)" vendor 0x10005 device 0x0000 dedicated video memory 11520 MiB
+[D3D11] D3DCompile vs/vs_5_0: 1372 bytes DXBC in 3.0 ms
+[D3D11] D3DCompile ps/ps_5_0: 580 bytes DXBC in 0.0 ms
+[D3D11] render loop: 65 s
+[D3D11] frame 0: 31.00 ms
+[D3D11] frame 1: 1654.00 ms
+[D3D11] frame 2: 17.00 ms
+[D3D11] t=5s frames=1757 window fps=351.40
+[D3D11] t=10s frames=4431 window fps=534.69
+[D3D11] t=15s frames=6256 window fps=365.00
+[D3D11] t=20s frames=8866 window fps=522.00
+[D3D11] t=25s frames=11589 window fps=544.71
+[D3D11] t=30s frames=14227 window fps=527.60
+[D3D11] t=35s frames=16911 window fps=536.69
+[D3D11] t=40s frames=19556 window fps=529.11
+[D3D11] t=45s frames=21245 window fps=337.73
+[D3D11] t=50s frames=23844 window fps=519.90
+[D3D11] t=55s frames=26534 window fps=538.00
+[D3D11] t=60s frames=29189 window fps=530.89
+[D3D11] t=65s frames=31846 window fps=531.51
+[D3D11] RESULT frames=31846 wall=65000.0 ms fps=489.94 | per-frame median 2.00 p90 2.00 worst(after frame 0) 1804.00 ms
+[D3D11] teardown: clean
+[D3D11] done rc=0
+[P5] end d3d11 status=0 ms=70638
+[P5] begin d3d12 : wine Z:\CP\P5\D3D12\d3d12tri.exe 65 640 480
+[D3D12] d3d12tri start (C5-vk2): 65 s, 640x480, pid 360
+[D3D12] module d3d12.dll          Z:\CP\P5\D3D12\d3d12.dll
+[D3D12] module d3d12core.dll      Z:\CP\P5\D3D12\d3d12core.dll
+[D3D12] module dxgi.dll           Z:\CP\P5\D3D12\dxgi.dll
+[D3D12] module d3dcompiler_47.dll C:\windows\system32\d3dcompiler_47.dll
+[D3D12] D3D12CreateDevice ok in 3147.0 ms
+[D3D12] adapter: "llvmpipe (LLVM 21.1.8, 256 bits)" vendor 0x10005 device 0x0000 dedicated video memory 11520 MiB
+[D3D12] highest shader model (asked 6.0): 0x60
+[D3D12] CreateSwapChainForHwnd ok in 39.0 ms (2 buffers, FLIP_DISCARD)
+[D3D12] D3DCompile vs/vs_5_0: 1340 bytes DXBC in 2.0 ms
+[D3D12] D3DCompile ps/ps_5_0: 580 bytes DXBC in 1.0 ms
+[D3D12] CreateGraphicsPipelineState ok in 7.0 ms
+[D3D12] render loop: 65 s
+[D3D12] frame 0: 3535.00 ms (back buffer 0)
+[D3D12] frame 1: 8.00 ms (back buffer 1)
+[D3D12] frame 2: 7.00 ms (back buffer 0)
+[D3D12] t=5s frames=745 window fps=149.00
+[D3D12] t=10s frames=3461 window fps=543.20
+[D3D12] t=15s frames=6072 window fps=522.10
+[D3D12] t=20s frames=8796 window fps=544.91
+[D3D12] t=25s frames=11489 window fps=538.60
+[D3D12] t=30s frames=14248 window fps=551.80
+[D3D12] t=35s frames=15905 window fps=331.40
+[D3D12] t=40s frames=18492 window fps=517.30
+[D3D12] t=45s frames=21194 window fps=540.40
+[D3D12] t=50s frames=23921 window fps=545.40
+[D3D12] t=55s frames=26538 window fps=523.50
+[D3D12] t=60s frames=29222 window fps=536.80
+[D3D12] t=65s frames=30951 window fps=345.73
+[D3D12] RESULT frames=30951 wall=65001.0 ms fps=476.16 | per-frame median 2.00 p90 2.00 worst(after frame 0) 1943.00 ms
+[D3D12] teardown: clean
+[D3D12] done rc=0
+[P5] end d3d12 status=0 ms=71113
+[P5] begin kill : wineserver -k
+[P5] end kill status=0 ms=380
+[P5] quiesce after kill: extra=1
+[P5] done
+[P5W] vkcube vkcube-t20s.ppm: clear=245020 saturated=62704 bbox=(44, 70, 682, 548) hash=4804ca2b3c0192f1
+[P5W] vkcube vkcube-t50s.ppm: clear=238620 saturated=69132 bbox=(44, 70, 682, 548) hash=529152b4c9a3c252
+[P5W] vkcube: PASS
+[P5W] d3d11 d3d11-t20s.ppm: clear=237232 saturated=48308 bbox=(724, 70, 1362, 548) hash=d55ad6c9a1763a7b
+[P5W] d3d11 d3d11-t50s.ppm: clear=237260 saturated=48292 bbox=(724, 70, 1362, 548) hash=ce39dd760b65f659
+[P5W] d3d11: PASS
+[P5W] d3d12 d3d12-t20s.ppm: clear=237316 saturated=46496 bbox=(724, 574, 1362, 1052) hash=e36999dc066c1f45
+[P5W] d3d12 d3d12-t50s.ppm: clear=237312 saturated=46484 bbox=(724, 574, 1362, 1052) hash=732f207da05322d1
+[P5W] d3d12: PASS
+[P5W] NFS: no-reply rows=0 [NFSHARD] retry rows=0 longest waited_ms=0 GIVE UP=0 NFLK rc=-1=0
+[P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps

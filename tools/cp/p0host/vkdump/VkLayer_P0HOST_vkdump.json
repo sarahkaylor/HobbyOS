@@ -1,0 +1,11 @@
+{
+  "file_format_version": "1.2.0",
+  "layer": {
+    "name": "VK_LAYER_P0HOST_vkdump",
+    "type": "GLOBAL",
+    "library_path": "./libVkLayer_P0HOST_vkdump.so",
+    "api_version": "1.4.341",
+    "implementation_version": "1",
+    "description": "C7-p0host: log enabled instance/device extensions and features"
+  }
+}

@@ -1,0 +1,30 @@
+[P4H] wineboot -i: rc=0 8.6s
+[P4H] screenshot /home/sarah/cp/wine-build-x/p4-host/rawinput.png
+[P4H] winecfg window: 10485763
+[P4H] screenshot /home/sarah/cp/wine-build-x/p4-host/winecfg-0.png
+[P4H] winecfg geometry: Window 10485763 Position: 3,29 (screen: 0) Geometry: 410x446
+[P4H] screenshot /home/sarah/cp/wine-build-x/p4-host/winecfg-1.png
+[P4H] screenshot /home/sarah/cp/wine-build-x/p4-host/winecfg-2.png
+[P4H] screenshot /home/sarah/cp/wine-build-x/p4-host/winecfg-3.png
+[P4H] notepad window: 10485763
+[P4H] screenshot /home/sarah/cp/wine-build-x/p4-host/notepad.png
+[P4H] wineboot: rc=0 8.6s
+[P4H] rawinput:
+   [RI] rawinput probe (C4-x2) mode=mouselook
+   [RI] PASS RegisterRawInputDevices
+   [RI] window hwnd=0x1005a rect=200,150,840,630 fg=1 screen=1920x1080
+   [RI] phase free ready cursor=520,403
+   [RI] phase free total n=10 rel=10 abs=0 dx=70 dy=30 lastabs=0,0 cursor=590,433
+   [RI] PASS ClipCursor got=204,180,836,626
+   [RI] phase clip ready cursor=520,403 clip=204,180,836,626
+   [RI] phase clip total n=21 rel=21 abs=0 dx=290 dy=-3 lastabs=0,0 cursor=1370,428 inside=0
+   [RI] done rc=1
+[P4H] modes:
+   [RI] rawinput probe (C4-x2) mode=modes
+   [RI] mode 0 1920x1080x32 @0
+   [RI] mode 1 1920x1080x16 @0
+   [RI] mode 2 1920x1080x8 @0
+   [RI] modes count=3 current=1920x1080 has1280x720=0
+   [RI] ChangeDisplaySettingsEx 1280x720 rc=-2 metrics=1920x1080 current=1920x1080
+   [RI] restore rc=0 current=1920x1080
+   [RI] done rc=0

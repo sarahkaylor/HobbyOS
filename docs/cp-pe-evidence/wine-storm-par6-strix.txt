@@ -1,0 +1,26 @@
+# Wine start-up storm, PE_PAR=6 x PE_ROUNDS=10 (tools/cp/pe/wine-ab.sh, PE_AB_MODE=storm), strix KVM, 2026-11-17; stopped after 1 session per tree
+# base = 15ad4a35 (pe-base; session 1 partial: stopped at round 6 after the wineserver died), lane = 35f97d73+ (pe-ab)
+# Both trees: the 512-entry system file table runs out ("Too many open files" / c000011f), Wine's NLS init fails, and the
+# next RtlUpcaseUnicodeString reads a NULL case table: ntdll casemap (locale.c:51).  Same thread id on the locale_init row and the fault.
+# This is the C1-k5 fd ceiling (docs/cp-p8.md stop 2), not a page-cache fault; PAR=6 is therefore not usable for this A/B.
+# storm-lane: 6 Gate P5 sessions in /home/sarah/cp/lanes/pe-ab (2026-11-17T08:36:02Z, host strix)
+run 1 rc=1 fault_procs=1 sigdump_procs=1 unhandled=1 emptyname_imports=0 pecow_rows=1 last_pecow(peers=1 cows=389) storm(starts=60 nonzero=28) p5=""
+    [KERNEL] pid=282 (start.exe) memory fault VA=0x0000000000000000 PC=0x00006FFFFFF79148 rw=r  in=HOLE region=NONE rsp=0x00007FFFFE1F6370 live=1 inH=0 cr3frame=0x00000002D0760000 asroot=0x00000  casemap /home/sarah/cp/wine-build-x/src/wine-11.0/dlls/ntdll/locale.c:51:29 
+    wine: [SIGDUMP] pid=282 tgid=282 nm=start.exe rip=0x00006FFFFFF79148 rsp=0x00007FFFFE1F6370 cs=0x000000000000001B vec=14 err=0x0000000000000004 cr2=0x0000000000000000
+    wine: [X] wine: Unhandled page fault on read access to 0000000000000000 at address 00006FFFFFF79148 (thread 02c4), starting debugger...
+    wine: [SIGDUMP] pid=282 tgid=282 nm=start.exe rip=0x00006FFFFFF79148 rsp=0x00007FFFFE1F3DF0 cs=0x000000000000001B vec=14 err=0x0000000000000004 cr2=0x0000000000000000
+== storm-base-run1-partial.serial: "Too many open files"/c000011f rows: 40
+[X] 01d0:err:nls:locale_init locale init failed c000011f
+[KERNEL] pid=219 (vkcube.exe) memory fault VA=0x0000000000000000 PC=0x00006FFFFFF78E66 rw=r  in=HOLE region=NONE rsp=0x00007FFFFE1FE6E0 live=1 inH=0 cr3frame=0x0000000299
+[KERNEL] pid=219 (vkcube.exe) memory fault VA=0x0000000000000000 PC=0x00006FFFFFF78E66 rw=r  in=HOLE region=NONE rsp=0x00007FFFFE1FEA40 live=1 inH=0 cr3frame=0x0000000299
+[KERNEL] pid=116 (wineserver) memory fault VA=0x0000000000000000 PC=0x0000001000043D20 rw=r  in=HOLE region=NONE rsp=0x00000017FFFFF2D8 live=1 inH=0 cr3frame=0x000000025E
+[KERNEL] pid=374 (wine) memory fault VA=0x0000000000000000 PC=0x000000108026C37B rw=r  in=HOLE region=NONE near=0x0000000000010000+0x0000000000100000 below=0x000000000001
+== storm-lane-run1.serial: "Too many open files"/c000011f rows: 43
+[X] 02c4:err:nls:locale_init locale init failed c000011f
+[KERNEL] pid=282 (start.exe) memory fault VA=0x0000000000000000 PC=0x00006FFFFFF79148 rw=r  in=HOLE region=NONE rsp=0x00007FFFFE1F6370 live=1 inH=0 cr3frame=0x00000002D07
+[KERNEL] pid=282 (start.exe) memory fault VA=0x0000000000000000 PC=0x00006FFFFFF79148 rw=r  in=HOLE region=NONE rsp=0x00007FFFFE1F3DF0 live=1 inH=0 cr3frame=0x00000002D07
+[X] wine: Unhandled page fault on read access to 0000000000000000 at address 00006FFFFFF79148 (thread 02c4), starting debugger...
+[X] 032c:err:nls:locale_init locale init failed c000011f
+[X] 0324:err:nls:locale_init locale init failed c000011f
+[PS] storm done starts=60 nonzero=28
+ntdll 0x6FFFFFF78E66 / 0x6FFFFFF79148 -> casemap /home/sarah/cp/wine-build-x/src/wine-11.0/dlls/ntdll/locale.c:51:29 

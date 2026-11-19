@@ -1,0 +1,14 @@
+# guest vkcube 2026-11-14T21:41:16-06:00 host=sarahpc cpu=avx-on cpu=host shim=1 vkfilter=order
+# waiting for ~/cp/measure.lock
+# lock acquired 2026-11-14T21:41:16-06:00
+kms-dmabuf :0 pm=0 1280x720 n1=100 t1=1.260 n2=1100 t2=11.807 fps=94.8
+kms-dmabuf :0 pm=1 1280x720 n1=100 t1=0.864 n2=1100 t2=7.689 fps=146.5
+kms-dmabuf :0 pm=2 1280x720 n1=100 t1=3.420 n2=1100 t2=36.823 fps=29.9
+kms-swcopy :0 pm=0 1280x720 n1=100 t1=1.840 n2=1100 t2=18.565 fps=59.8
+xvfb-swcopy :1 pm=0 1280x720 n1=100 t1=0.324 n2=1100 t2=1.743 fps=705.1
+kms-dmabuf :0 pm=0 1920x1080 n1=100 t1=1.068 n2=1100 t2=9.938 fps=112.7
+kms-dmabuf :0 pm=1 1920x1080 n1=100 t1=0.892 n2=1100 t2=8.224 fps=136.4
+kms-dmabuf :0 pm=2 1920x1080 n1=100 t1=2.736 n2=1100 t2=29.410 fps=37.5
+kms-swcopy :0 pm=0 1920x1080 n1=100 t1=2.476 n2=1100 t2=29.477 fps=37.0
+xvfb-swcopy :1 pm=0 1920x1080 n1=100 t1=0.515 n2=1100 t2=3.370 fps=350.3
+# done 2026-11-14T21:44:13-06:00

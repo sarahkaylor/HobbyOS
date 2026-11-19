@@ -1,0 +1,35 @@
+HobbyOS icewm patch (lane C4-x3, docs/cp-x3.md 4).
+wmmgr: re-read the screens on RRNotify CrtcChange, and refit fullscreen
+frames after a screen change, so a fullscreen Wine window follows a mode
+switch (1920x1080 -> 1280x720) instead of keeping the old size.
+
+--- a/src/wmmgr.cc
++++ b/src/wmmgr.cc
+@@ -3908,6 +3908,12 @@
+ 
+ void YWindowManager::handleRRNotify(const XRRNotifyEvent &notify) {
+     // logRandrNotify((const union _XEvent&) notify);
++    // HobbyOS (C4-x3): a mode switch is "CRTC off, screen size, CRTC on"
++    // (Wine's XRandR 1.4 handler, xrandr).  The screen-change event of the
++    // size request can be handled while the CRTC is still off, so the screen
++    // list is only right once the CRTC is back: re-read it then too.
++    if (notify.subtype == RRNotify_CrtcChange)
++        updateScreenSize((XEvent *) &notify);
+ }
+ 
+ void YWindowManager::updateScreenSize(XEvent *event) {
+@@ -3946,6 +3952,14 @@
+                 }
+             }
+         }
++        // HobbyOS (C4-x3): refit fullscreen frames to their (new) monitor.
++        // Without this a frame made fullscreen at 1920x1080 kept that size
++        // after a switch to 1280x720 and answered the client's own resize
++        // with it (a fullscreen frame's configure re-applies updateLayout).
++        for (YFrameIter frame = fCreationOrder.iterator(); ++frame; ) {
++            if (frame->isFullscreen())
++                frame->updateLayout();
++        }
+         if (resize) {
+             arrangeIcons();
+             smActionListener->handleSMAction(ICEWM_ACTION_ICEWMBG);

@@ -1,0 +1,77 @@
+# cp-nfs2b: the 180 s LOOKUP give-up (strix, 2026-11-16)
+
+## C5-vk2 run 5 (cyberpunk with cp-nfs2): the give-up and what flowed meanwhile
+[NFSHARD] retry op=LOOKUP off=0 want=0 try=1 waited_ms=0 total=1
+[NFSHARD] retry op=LOOKUP off=0 want=0 try=32 waited_ms=102384 total=32
+[NFSHARD] GIVE UP op=RPC off=0 want=3 tries=55 after_ms=180000 -> EIO
+[NFLK] retry comp=WINE tries=1 rc=0 total=1
+[NFSHARD] retry op=LOOKUP off=0 want=0 try=1 waited_ms=0 total=64
+[NFSNET] frags=12298 done=544 drop_timeout=0 drop_evict=0 drop_full=0 drop_bad=0 nosock=0 dgfull=0 stalls=0 inj_dropped=0
+[NFSNET] frags=18253 done=869 drop_timeout=0 drop_evict=0 drop_full=0 drop_bad=0 nosock=0 dgfull=0 stalls=0 inj_dropped=0
+(frags grow from 12298 to 18253 across the give-up: READs on the long-lived socket kept being answered)
+
+## host: nfsd UDP socket (no drops), ephemeral range
+State  Recv-Q Send-Q Local Address:Port Peer Address:Port                                                         
+UNCONN 0      0            0.0.0.0:2049      0.0.0.0:*   
+	 skmem:(r0,rb40001536,t0,tb40001536,f4096,w0,o0,bl0,d0)
+32768	60999
+
+## guard on 12e14203 (G10 added, no pool) and on 6e586000 (pool), run side by side in two slots
+rsize_scan: PASS (32 KiB NFS READ paths intact)
+rsize_guard: G9 5/5 injected-loss rows right (inject.blackout.read pages=1024 bad=0 short=0 eio=0 ms=8923)
+rsize_guard: FAIL G10 the LOOKUP storm created 18000 sockets (want <= 32): one per RPC ([NB] lookstorm stats=6000 failed_procs=0 ms=27240 ok)
+rsize_guard: FAIL (/home/sarah/cp/lanes/nfs2b-pre; console /home/sarah/cp/lanes/nfs2b-pre/obj/nfs-bench/console.log)
+rsize_scan: PASS (32 KiB NFS READ paths intact)
+rsize_guard: G9 5/5 injected-loss rows right (inject.blackout.read pages=1024 bad=0 short=0 eio=0 ms=8979)
+rsize_guard: G10 lookstorm stats=6000 failed_procs=0 ms=682 ok with 1 new sockets
+rsize_guard: PASS (/home/sarah/cp/lanes/nfs2b)
+
+## host samples during those two runs: UDP sockets held by each QEMU (ss -uanp), Udp RcvbufErrors, nfsd pool_stats
+# time  rcvbuf_errors  nfsd(pkts_arrived sockets_enqueued threads_woken timedout)  qemu:<tree>=<udp sockets>
+15:45:20 42331 [13692484 25108549 24881418 0]
+15:45:25 42331 [13692484 25108549 24881418 0]
+15:45:30 42331 [13692484 25108549 24881418 0]
+15:45:35 42331 [13692484 25108549 24881418 0]
+15:45:40 42331 [13692484 25108549 24881418 0]
+15:45:45 42331 [13692484 25108549 24881418 0]
+15:45:50 42331 [13692484 25108549 24881418 0]
+15:45:55 42331 [13692484 25108549 24881418 0]
+15:46:00 42331 [13708892 25140308 24913048 0] nfs2b=5 nfs2b-pre=75
+15:46:05 42331 [13709422 25141252 24914003 0] nfs2b=5 nfs2b-pre=77
+15:46:10 42331 [13709564 25141500 24914255 0] nfs2b=8 nfs2b-pre=83
+15:46:15 42331 [13709834 25142006 24914761 0] nfs2b=8 nfs2b-pre=87
+15:46:20 42331 [13709854 25142043 24914800 0] nfs2b=11 nfs2b-pre=93
+15:46:26 42331 [13710120 25142554 24915310 0] nfs2b=11 nfs2b-pre=98
+15:46:31 42331 [13710136 25142586 24915344 0] nfs2b=11 nfs2b-pre=106
+15:46:36 42331 [13737434 25195804 24968235 0] nfs2b-pre=9183
+15:46:41 42331 [13741706 25204348 24976779 0] nfs2b-pre=13443
+15:46:46 42331 [13743843 25208622 24981053 0] nfs2b-pre=15567
+15:46:51 42331 [13745100 25211136 24983567 0] nfs2b-pre=16384
+15:46:56 42331 [13745974 25212884 24985315 0] nfs2b-pre=16384
+15:47:01 42331 [13746400 25213736 24986167 0]
+15:47:06 42331 [13746400 25213736 24986167 0]
+
+## Gate P2 run 4 on cp-nfs2b 6e586000 (cyberpunk b8d73938 + the pool), cyberpunk run-wine-p2.sh
+G1 wine cmd /c echo hello prints hello : PASS   ([P2] end echo status=0 ms=8093)
+G2 winprobe.exe every marker + exit 0  : PASS   ([P2] end winprobe status=0 ms=7894; 41 markers, 0 missing/failed)
+G3 wineserver -k leaves no processes   : PASS   ([P2] end kill status=0 ms=313; [P2] ps-extra count=0)
+extra: winprobe from C:\ (the prefix) : [WP] done rc=0 ([P2] end winprobe-c status=0 ms=893)
+rc=0 wall=73s
+[P2] end nfscount status=0 ms=205
+[P2] end nfshash status=0 ms=97
+[P2] end wineboot status=0 ms=25309
+[P2] end echo status=0 ms=8093
+[P2] end winprobe status=0 ms=7894
+[P2] end copy status=0 ms=4666
+[P2] end winprobe-c status=0 ms=893
+[P2] end kill status=0 ms=313
+[NFSRTT] periodic want=32768 n=6860 sock_us=0 send_us=0 wait_us=105 wait_max_us=3538 wait_min_us=18 bytes=206970628
+[NFSNET] frags=145310 done=6649 drop_timeout=0 drop_evict=0 drop_full=0 drop_bad=0 nosock=0 dgfull=0 stalls=0 inj_dropped=0 socks=8 pool_temp=0
+[NFSRA] hits=18899 fills=3580 saved_kib=549017 misses=1455 seqfills=565 fill_kib=201991 direct=0 hit_pct=92 stalls=0 big_kib=0 tail_kib=0 wins=4096 shrunk=0 alloc_us=1450 fill_us=564875
+total READ bytes (NFSIO): 207907930; [NFSHARD] rows: 0
+
+## host samples during P2 run 4
+# time  rcvbuf_errors  nfsd(pkts_arrived sockets_enqueued threads_woken timedout)  qemu:<tree>=<udp sockets>
+15:48:08 42331 [13843571 25407136 25180158 0] nfs2-p2=6
+15:48:38 42331 [13860339 25440663 25213679 0] nfs2-p2=6 nfs2=0
+15:49:08 42331 [13861149 25442283 25215299 0] nfs2=0

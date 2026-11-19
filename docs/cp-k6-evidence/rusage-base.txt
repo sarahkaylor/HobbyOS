@@ -1,0 +1,19 @@
+== strix guest (KVM -cpu host, 8 vCPU, 12 GiB), tools/gate/t3_linux_probe.sh rusage, tree base (cyberpunk 058fd3d5 + the probe source), 2026-11-17T10:21:01-06:00
+qemu-slot: slot 3 of 4 held by pid 1711552 16:20:53
+t3_linux_probe: building /home/sarah/cp/lanes/k6-base/obj/intel/probe_rusage.elf
+make: Entering directory '/home/sarah/cp/lanes/k6-base'
+musl-gcc -static-pie -fPIE -O1 -g -Wall -Wextra -o obj/intel/probe_rusage.elf src/user/linux_probe_rusage.c
+make: Leaving directory '/home/sarah/cp/lanes/k6-base'
+=== t3_linux_probe: rusage (deadline 300s, log /home/sarah/cp/lanes/k6-base/obj/linux_probe_rusage.log) ===
+--- probe rows ---
+[LP] R1 user-mode spin (RUSAGE_SELF)       wall=300007us utime+=289998us stime+=0us -> PASS
+[LP] R2 getppid() loop (RUSAGE_SELF)       wall=300039us utime+=300004us stime+=0us -> FAIL
+[LP] R3 getppid() loop (RUSAGE_THREAD)     wall=300083us utime+=300049us stime+=0us -> FAIL
+[LP] R4 a child's getppid() loop (CHILDREN) wall=370211us utime+=292848us stime+=0us -> FAIL[AS-TD] tgid=4 nr=6 res=28
+[LP] done rc=3
+--- unhandled Linux syscalls (name the next handler) ---
+[LCOMPAT] argv argc=1 a0=PROBE.ELF execfn=PROBE.ELF
+--- faults / exits ---
+[EXITPC] pid=4 last_user_pc=0x1000003E5E code=0x0
+[EXITPC] pid=2 last_user_pc=0x1000003E5E code=0x3
+t3_linux_probe: FAIL — rusage never printed '[LP] done rc=0' (tier rc=1)

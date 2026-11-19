@@ -1,0 +1,712 @@
+# P8 run2 -- game boot + fd headroom census (stop 2, stop 5)
+# host strix (Ryzen AI MAX+ 395, Zen 5, KVM), guest -cpu host -smp 8 -m 12288M; tree cyberpunk 949ba008 + cp-game harness (tools/cp/p8)
+# generated 2026-11-17T00:24:37-06:00 from obj/cp-p8/run2 (serial.log, run-p8.log, timeline.txt); no game content beyond file names
+
+## harness log (run-p8.log, the == rows and the boot watcher)
+== run-p8 phase=game run=run2 2026-11-17T00:01:11-06:00 host=sarahpc tree=/home/sarah/cp/lanes/game
+== build: kernel + disk (intel, desktop/icewm), P8.BIN, PFXSYNC.ELF, PE warm-up client
+== staging export: /srv/nfs/cp-game-p8 (WINE, X11, VK, P5/VK)
+== exports.sh: add /srv/nfs/cp-game-p8 ok (non-cp lines unchanged)
+== game copy before: 156 files, 66820176214 bytes, newest mtime 1794714264
+== game copy before: modes of the top dir and bin/x64: dr-xr-xr-x dr-xr-xr-x
+== exports.sh: add /srv/nfs/cp-game ok (non-cp lines unchanged)
+== stage (a copy of disk.img): glibc 2.31, /P8.BIN, /PFXSYNC.ELF, XHOBBY.BIN, XSESSION.ENV, /XSTART.TXT
+== X server: /home/sarah/cp/vk2-scratch/x2-xserver/XHOBBY.BIN (sha256 935c760fd450eb9a3326e75691a9b8feaacf155f19033e807f98a4bf78424c97) staged as ::/XHOBBY.BIN (scratch override, not committed)
+== data disk: a copy of /home/sarah/cp/lanes/game/obj/cp-p8/pfx-seeded.img
+== boot (deadline 1500s; one QEMU slot for the boot only)
+[P8W] waiting for a QEMU slot (tools/cp/qemu-slot.sh semantics)
+[P8W] +     0.0 s  00:01:16  slot 4 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 3
+[P8W] qemu pid 1492181
+[P8W] +     6.3 s  00:01:23  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
+[P8W] +    30.3 s  00:01:47  warm-up result: [P8] warm-up: display driver loaded
+[P8W] +    30.3 s  00:01:47  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8W] +    30.4 s  00:01:47  baseline screendump 1920x1080 (desktop before the game's window)
+[P8W] +    75.8 s  00:02:32  game process ended: [P8] end game status=5 ms=45594
+[P8W] +   107.0 s  00:03:03  sync done: [P8] sync done
+[P8W] +   107.0 s  00:03:03  launcher done: [P8] done
+[P8W] +   111.4 s  00:03:08  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 1
+== e2fsck -fn after the boot: rc=0 (cpdata: 1046/1048576 files (0.6% non-contiguous), 135276/4194304 blocks)
+== game copy after: 156 files, 66820176214 bytes, newest mtime 1794714264
+== game copy after: modes of the top dir and bin/x64: dr-xr-xr-x dr-xr-xr-x
+== game copy unchanged (count, bytes, newest mtime)
+== caches on ext2 after the boot (debugfs, sizes only)
+   /pfx/drive_c/vc              0 entries, 0 bytes
+   /mc                          0 entries, 0 bytes
+== verdict: launcher-done
+== timeline:
+== exports.sh: remove /srv/nfs/cp-game ok (non-cp lines unchanged)
+== exports.sh: remove /srv/nfs/cp-game-p8 ok (non-cp lines unchanged)
+== removed /srv/nfs/cp-game-p8
+
+## timeline (host wall clock)
++     0.0 s  00:01:16  slot 4 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 3
++     6.3 s  00:01:23  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
++    30.3 s  00:01:47  warm-up result: [P8] warm-up: display driver loaded
++    30.3 s  00:01:47  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
++    30.4 s  00:01:47  baseline screendump 1920x1080 (desktop before the game's window)
++    75.8 s  00:02:32  game process ended: [P8] end game status=5 ms=45594
++   107.0 s  00:03:03  sync done: [P8] sync done
++   107.0 s  00:03:03  launcher done: [P8] done
++   111.4 s  00:03:08  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 1
+
+## NFS: no-reply rows=0 [NFSHARD] retry=0 GIVE UP=0 NFLK rc=-1=0
+
+## rows that matter (tools/cp/p8/rows.sh: launcher rows, Wine output except loaddll, kernel faults, ENOSYS)
+[P8] p8launch (C8-game) phase 2
+[P8] mount 10.0.2.2:/srv/nfs/cp-game-p8 -> /CP ok
+[P8] mount 10.0.2.2:/srv/nfs/cp-game -> /GAME ok
+[P8] begin keepalive (background) : wine Z:\CP\P5\VK\vkcube.exe --idle 86400
+[P8] keepalive pid=16
+[P8] begin winprobe01 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+[X] 0034:err:winediag:getaddrinfo Failed to resolve your host name IP
+[X] 0034:err:wineboot:process_run_key Error running cmd L"C:\\windows\\system32\\winemenubuilder.exe -a -r" (126).
+[X] 00ac:err:ntoskrnl:ZwLoadDriver failed to create driver L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\winebth": c00000e5
+[X] 0024:err:module:import_dll Loading library gdi32.dll (which is needed by L"C:\\windows\\system32\\user32.dll") failed (error c0000130).
+[X] 0024:err:module:import_dll Library  (which is needed by L"C:\\windows\\system32\\msvcrt.dll") not found
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffff990c0
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=[0PxU0B0]0 0w0h0o0=0f0a0u0l0t0_0o0b0j  rvsap==0x01x00800020A75F0F0F0F Eo1fFfE=30Ax850
+[X] 0024:err:seh:NtRaiseException Unhandled exception code c0000005 flags 0 addr 0x6ffffff990c0
+[P8] end winprobe01 status=5 ms=14471
+[KERNEL] pid=16 (vkcube.exe) memory fault VA=0x000000018007DE97 PC=0x00007FFFFFA0CE90 rw=r  in=HOLE region=NONE rsp=0x00007FFFFE1FEF18 live=1 inH=0 cr3frame=0x00000002038CC000 asroot=0x00000002038CC000 sys=228 ret=0x0000000000000000 rbx=0x00007FFFFFA42DF8 rdi=0x00007FFFFFA1E2F0 rsi=0x00007FFFFE1FF0B
+[SIGDUMP] pid=16 tgid=16 nm=vkcube.exe rip=0x00007FFFFFA0CE90 rsp=0x00007FFFFE1FEF18 cs=0x000000000000001B vec=14 err=0x0000000000000004 cr2=0x000000018007DE97
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1FDE00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1FCD00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1FBC00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1FAB00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1F9A00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1F8900
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1F7800
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1F6700
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1F5600
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1F4500
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1F3400
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1F2300
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1F1200
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1F0100
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1EF000
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1EDF00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1ECE00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1EBD00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1EAC00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1E9B00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1E8A00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1E7900
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1E6800
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1E5700
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1E4600
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1E3500
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1E2400
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1E1300
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1E0200
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1DF100
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1DE000
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1DCF00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1DBE00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1DAD00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1D9C00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1D8B00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1D7A00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1D6900
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1D5800
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1D4700
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1D3600
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1D2500
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1D1400
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1D0300
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1CF200
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1CE100
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1CD000
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1CBF00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1CAE00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1C9D00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1C8C00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1C7B00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1C6A00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1C5900
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1C4800
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1C3700
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1C2600
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1C1500
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1C0400
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1BF300
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1BE200
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1BD100
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1BC000
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1BAF00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1B9E00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1B8D00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1B7C00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1B6B00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1B5A00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1B4900
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1B3800
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1B2700
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1B1600
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1B0500
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1AF400
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1AE300
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1AD200
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1AC100
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1AB000
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1A9F00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1A8E00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1A7D00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1A6C00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1A5B00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1A4A00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1A3900
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1A2800
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1A1700
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE1A0600
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE19F500
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE19E400
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE19D300
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE19C200
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE19B100
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE19A000
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE198F00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE197E00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE196D00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE195C00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE194B00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE192900
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE191800
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE190700
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE18F600
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE18E500
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE18D400
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE18C300
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE18B200
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE18A100
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE189000
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE187F00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE186E00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE185D00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE184C00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE183B00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE182A00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE181900
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE180800
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE17F700
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE17E600
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE17D500
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE17C400
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE17B300
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE17A200
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE179100
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE178000
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE176F00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE175E00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE174D00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE173C00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE172B00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE171A00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE170900
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE16F800
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE16E700
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE16D600
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE16C500
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE16B400
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE16A300
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE169200
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE168100
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE167000
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE165F00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE164E00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE163D00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE162C00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE161B00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE160A00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE15F900
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE15E800
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE15D700
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE15C600
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE15B500
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE15A400
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE159300
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE158200
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE157100
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE156000
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE154F00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE153E00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE152D00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE151C00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE150B00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE14FA00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE14E900
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE14D800
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE14C700
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE14B600
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE14A500
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE149400
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE148300
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE147200
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE146100
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE145000
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE143F00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE142E00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE141D00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE140C00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE13FB00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE13EA00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE13D900
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE13C800
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE13B700
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE13A600
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE139500
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE138400
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE137300
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE136200
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE135100
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE134000
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE132F00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE131E00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE130D00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE12FC00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE12EB00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE12DA00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE12C900
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE12B800
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE12A700
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE129600
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE128500
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE127400
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE126300
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE125200
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE124100
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE123000
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE121F00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE120E00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE11FD00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE11EC00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE11DB00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE11CA00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE11B900
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE11A800
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE119700
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE118600
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE117500
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE116400
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE115300
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE114200
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE113100
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE112000
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE110F00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE10FE00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE10ED00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE10DC00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE10CB00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE10BA00
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE10A900
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE109800
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE108700
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE107600
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE106500
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE105400
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE104300
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE103200
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE102100
+[KERNEL] User process fault! Vector: 13 RIP: 0x6ffffffa665a
+[KERNEL] fault-pc region=0x00006FFFFFF41000+0x0000000000070000 prot=5 kind=3 jit=0 live=1 err=0x0000000000000000 rsp=0x00007FFFFE101000
+[X] 002c:trace:o-	:DllMain stack overflow 1792 bytes addr 0x6ffffffa665a stack 0x7ffffe100900 (0x7ffffe100000-0x7ffffe101000-0x7ffffe200000)
+[P8] begin winprobe02 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+[X] [VK] winprobe: CreateWindowEx -> 0000000000010052 in 202 ms (display driver loaded)
+[P8] end winprobe02 status=0 ms=7622
+[P8] warm-up: display driver loaded
+[P8] chdir /GAME/bin/x64 rc=0
+[P8] fd headroom before the game (cap 600):
+[P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8] game pid=88
+[P8] census game t=5s procs: vkcube.exe/16:s4 wineserver/21:s3 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 rpcss.exe/76:s5 Cyberpunk2077.e/88:s5 (n=9)
+[P8] census game t=24s procs: vkcube.exe/16:s4 wineserver/21:s3 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 rpcss.exe/76:s5 Cyberpunk2077.e/88:s3 Cyberpunk2077.e/91:s3 (n=10)
+[P8] census game t=34s procs: vkcube.exe/16:s4 wineserver/21:s5 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 rpcss.exe/76:s5 Cyberpunk2077.e/88:s7 Cyberpunk2077.e/91:s3 /94 (n=11)
+[LCOMPAT] ENOSYS nr=221 name=wineserver pid=21 rip=0x108011AD0E rdi=0x8D
+[X] 0154:err:secur32:SECUR32_initSchannelSP no schannel support, expect problems
+[X] 0154:err:kerberos:kerberos_LsaApInitializePackage no Kerberos support, expect problems
+[X] 012c:err:winediag:NtCreateFile Too many open files, ulimit -n probably needs to be increased
+[X] 0144:err:win:get_desktop_window failed to start explorer c000011f
+[X] info:  Game: Cyberpunk2077.exe
+[X] info:  DXVK: v3.1.1
+[X] info:  Build: x86_64 gcc 16.2.0
+[X] 0144:err:winediag:NtCreateFile Too many open files, ulimit -n probably needs to be increased
+[KERNEL] pid=88 (Cyberpunk2077.e) memory fault VA=0x0000000000000000 PC=0x0000000000000000 rw=rx in=HOLE region=NONE rsp=0x00007FFFFE2FE838 live=15 inH=0 cr3frame=0x0000000226582000 asroot=0x0000000226582000 sys=1 ret=0x000000000000002F rbx=0x0000001083E10750 rdi=0x00007FFFFEAA1638 rsi=0x00000010844
+[X] err:   Vulkan: vkGetInstanceProcAddr not found
+[SIGDUMP] pid=88 tgid=88 nm=Cyberpunk2077.e rip=0x0000000000000000 rsp=0x00007FFFFE2FE838 cs=0x000000000000001B vec=14 err=0x0000000000000014 cr2=0x0000000000000000
+[X] 0134:err:winediag:NtCreateFile Too many open files, ulimit -n probably needs to be increased
+[X] 0144:err:winediag:nodrv_CreateWindow Application tried to create a window, but no driver could be loaded.
+[X] 0144:err:winediag:nodrv_CreateWindow L"The explorer process failed to start."
+[P8] census game t=45s procs: vkcube.exe/16:s4 wineserver/21:s3 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 rpcss.exe/76:s5 Cyberpunk2077.e/88:s3 (n=9)
+[P8] end game status=5 ms=45594
+[P8] census after-game t=45s procs: vkcube.exe/16:s4 wineserver/21:s3 services.exe/28:s5 winedevice.exe/31:s5 plugplay.exe/40:s5 svchost.exe/46:s5 winedevice.exe/52:s5 rpcss.exe/76:s5 (n=8)
+[P8] begin kill : wineserver -k
+[P8] end kill status=0 ms=539
+[P8] quiesce after kill: extra=1 left: vkcube.exe/16:s4
+[P8] begin sync : pfxsync
+[X] [PFX] sync rc=0 errno=0
+[P8] end sync status=0 ms=15
+[P8] sync done
+[P8] done
+
+## fd headroom rows (src/user/cp/p8fdcount.c), in order with the census rows
+[P8] fd headroom before the game (cap 600):
+[X] [P8FD] cap=600 opened=143 first_errno=24 (EMFILE)
+[P8] census game t=5s (n=9)
+[X] [P8FD] cap=24 opened=24 first_errno=0
+[P8] census game t=24s (n=10)
+[X] [P8FD] cap=24 opened=24 first_errno=0
+[P8] census game t=34s (n=11)
+[X] [P8FD] cap=24 opened=24 first_errno=0
+[P8] census game t=45s (n=9)
+[X] [P8FD] cap=24 opened=24 first_errno=0
+[P8] census after-game t=45s (n=8)
+[X] [P8FD] cap=24 opened=24 first_errno=0
+
+## modules the game process tree loaded after launch (WINEDEBUG +loaddll; names only)
+1: 012c native Z:\GAME\bin\x64\Cyberpunk2077.exe
+2: 012c builtin C:\windows\system32\kernelbase.dll
+3: 012c builtin C:\windows\system32\kernel32.dll
+4: 012c builtin C:\windows\system32\ucrtbase.dll
+5: 012c builtin C:\windows\system32\sechost.dll
+6: 012c builtin C:\windows\system32\msvcrt.dll
+7: 012c builtin C:\windows\system32\advapi32.dll
+8: 012c builtin C:\windows\system32\win32u.dll
+9: 012c builtin C:\windows\system32\gdi32.dll
+10: 012c builtin C:\windows\system32\USER32.dll
+11: 012c builtin C:\windows\system32\shcore.dll
+12: 012c builtin C:\windows\system32\shlwapi.dll
+13: 012c builtin C:\windows\system32\SHELL32.dll
+14: 012c builtin Z:\GAME\bin\x64\dbghelp.dll
+15: 012c builtin C:\windows\system32\IMM32.dll
+16: 012c builtin C:\windows\system32\cryptbase.dll
+17: 012c builtin C:\windows\system32\rpcrt4.dll
+18: 012c builtin C:\windows\system32\combase.dll
+19: 012c builtin C:\windows\system32\coml2.dll
+20: 012c builtin C:\windows\system32\ole32.dll
+21: 012c builtin C:\windows\system32\vcruntime140.dll
+22: 012c builtin C:\windows\system32\MSVCP140.dll
+23: 012c builtin C:\windows\system32\VCRUNTIME140_1.dll
+24: 012c native Z:\GAME\bin\x64\sl.interposer.dll
+25: 012c builtin C:\windows\system32\SETUPAPI.dll
+26: 012c builtin C:\windows\system32\VERSION.dll
+27: 012c native C:\windows\system32\dxgi.dll
+28: 012c builtin C:\windows\system32\CFGMGR32.dll
+29: 012c native Z:\GAME\bin\x64\libxell.dll
+30: 012c native Z:\GAME\bin\x64\libxess_fg.dll
+31: 012c builtin C:\windows\system32\HID.DLL
+32: 012c builtin C:\windows\system32\msacm32.dll
+33: 012c builtin C:\windows\system32\WINMM.dll
+34: 012c builtin C:\windows\system32\WS2_32.dll
+35: 012c builtin C:\windows\system32\bcrypt.dll
+36: 012c builtin C:\windows\system32\CRYPT32.dll
+37: 012c builtin C:\windows\system32\mpr.dll
+38: 012c builtin C:\windows\system32\WININET.dll
+39: 012c native Z:\GAME\bin\x64\REDGalaxy64.dll
+40: 012c native Z:\GAME\bin\x64\libxess.dll
+41: 012c builtin C:\windows\system32\WLDAP32.dll
+42: 012c builtin C:\windows\system32\Normaliz.dll
+43: 012c native Z:\GAME\bin\x64\libcurl.dll
+44: 012c native Z:\GAME\bin\x64\redlexer_native.dll
+45: 012c builtin C:\windows\system32\XINPUT9_1_0.dll
+46: 012c native Z:\GAME\bin\x64\bink2w64.dll
+47: 012c native Z:\GAME\bin\x64\icudt.dll
+48: 012c native Z:\GAME\bin\x64\icuuc.dll
+49: 012c native Z:\GAME\bin\x64\icuin.dll
+50: 012c native Z:\GAME\bin\x64\PhysX3Common_x64.dll
+51: 012c native Z:\GAME\bin\x64\PxFoundation_x64.dll
+52: 012c native Z:\GAME\bin\x64\PhysX3CharacterKinematic_x64.dll
+53: 012c native Z:\GAME\bin\x64\PhysX3Cooking_x64.dll
+54: 012c native Z:\GAME\bin\x64\PhysX3_x64.dll
+55: 012c native Z:\GAME\bin\x64\amd_fidelityfx_loader_dx12.dll
+56: 012c builtin C:\windows\system32\POWRPROF.dll
+57: 012c native Z:\GAME\bin\x64\oo2ext_7_win64.dll
+58: 012c native Z:\GAME\bin\x64\amd_ags_x64.dll
+59: 012c builtin C:\windows\system32\OLEAUT32.dll
+60: 012c builtin C:\windows\system32\jsproxy.dll
+61: 012c builtin C:\windows\system32\WINHTTP.dll
+62: 012c builtin C:\windows\system32\concrt140.dll
+63: 0134 native Z:\GAME\bin\x64\REDEngineErrorReporter.exe
+64: 0134 builtin C:\windows\system32\kernelbase.dll
+65: 0134 builtin C:\windows\system32\kernel32.dll
+66: 0134 builtin C:\windows\system32\ucrtbase.dll
+67: 0134 builtin C:\windows\system32\sechost.dll
+68: 0134 builtin C:\windows\system32\msvcrt.dll
+69: 0134 builtin C:\windows\system32\advapi32.dll
+70: 0134 builtin C:\windows\system32\win32u.dll
+71: 0134 builtin C:\windows\system32\gdi32.dll
+72: 0134 builtin C:\windows\system32\USER32.dll
+73: 0134 builtin Z:\GAME\bin\x64\dbghelp.dll
+74: 0134 builtin C:\windows\system32\VERSION.dll
+75: 0134 builtin C:\windows\system32\shcore.dll
+76: 0134 builtin C:\windows\system32\shlwapi.dll
+77: 0134 builtin C:\windows\system32\SHELL32.dll
+78: 0134 builtin C:\windows\system32\cryptbase.dll
+79: 0134 builtin C:\windows\system32\rpcrt4.dll
+80: 0134 builtin C:\windows\system32\combase.dll
+81: 0134 builtin C:\windows\system32\coml2.dll
+82: 0134 builtin C:\windows\system32\ole32.dll
+83: 012c native Z:\GAME\bin\x64\steam_api64.dll
+84: 012c native Z:\GAME\bin\x64\GameServicesSteam.dll
+85: 012c builtin C:\windows\system32\dnsapi.dll
+86: 012c builtin C:\windows\system32\nsi.dll
+87: 012c builtin C:\windows\system32\iphlpapi.dll
+88: 012c builtin C:\windows\system32\netprofm.dll
+89: 0154 builtin C:\windows\system32\secur32.dll
+90: 0154 builtin C:\windows\system32\Kerberos.dll
+91: 0154 builtin C:\windows\system32\netutils.dll
+92: 0154 builtin C:\windows\system32\netapi32.dll
+93: 0154 builtin C:\windows\system32\MSV1_0.dll
+94: 012c builtin C:\windows\system32\cryptnet.dll
+95: 012c builtin C:\windows\system32\WINTRUST.DLL
+96: 012c builtin C:\windows\system32\imagehlp.dll
+97: 012c builtin C:\windows\system32\rsaenh.dll
+98: 012c builtin C:\windows\system32\gdiplus.dll
+99: 012c native Z:\GAME\bin\x64\GfnRuntimeSdk.dll
+100: 0144 builtin C:\windows\system32\conhost.exe
+101: 0144 builtin C:\windows\system32\kernelbase.dll
+102: 0144 builtin C:\windows\system32\kernel32.dll
+103: 0144 builtin C:\windows\system32\ucrtbase.dll
+104: 21[X] 0144:trace:loaddll:build_module Loaded L"C:\windows\system32\sechost.dll" at 00007FFFFFA00000: builtin
+105: 0144 builtin C:\windows\system32\msvcrt.dll
+106: 0144 builtin C:\windows\system32\advapi32.dll
+107: 0144 builtin C:\windows\system32\win32u.dll
+108: 0144 builtin C:\windows\system32\gdi32.dll
+109: 0144 builtin C:\windows\system32\user32.dll
+110: 0134 builtin C:\windows\system32\imm32.dll

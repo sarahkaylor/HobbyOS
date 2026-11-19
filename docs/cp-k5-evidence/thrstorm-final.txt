@@ -1,0 +1,50 @@
+# C1-k5: thrstorm.exe under console Wine on the FINAL lane tree (cp-k5 f98ffad7 = cp-k5 + cyberpunk 15ad4a35 + the fd-install race fix)
+# host strix (Zen 5), guest intel MODE=test KVM 8 vCPU 12 GiB, one QEMU slot
+# cmd: LO_ON_DISK= K5_OUT=obj/cp-k5/ts-final TIMEOUT_S=2400 bash tools/cp/k5/run-thrstorm.sh
+
+[K5] k5wine launcher (C1-k5)
+[K5] ps-before count=1
+[K5] mount 10.0.2.2:/srv/nfs/cp-k5-ts -> /CP ok
+[K5] begin wineboot : wineboot -i
+[K5] end wineboot status=0 ms=26441
+[K5] quiesce after wineboot: extra=0
+[K5] begin thrstorm : wine Z:\CP\K5\thrstorm.exe 60
+[TS] thrstorm (C1-k5): threads=256 secs=60 pid=32
+[TS] PASS T1 create (threads=256 why=0)
+[TS] PASS T1 start (started=256 toolhelp=257)
+[TS] info startup ms=2669
+[K5] census t=10s processes=9
+[K5] census t=20s processes=9
+[TS] t=10s rounds=47 trips=12032 worst_round_ms=625 threads=257
+[TS] t=20s rounds=82 trips=20992 worst_round_ms=1350 threads=257
+[K5] census t=30s processes=9
+[TS] t=30s rounds=128 trips=32768 worst_round_ms=1350 threads=257
+[K5] census t=40s processes=9
+[TS] t=40s rounds=174 trips=44544 worst_round_ms=1350 threads=257
+[K5] census t=50s processes=9
+[TS] t=50s rounds=213 trips=54528 worst_round_ms=1632 threads=257
+[K5] census t=60s processes=9
+[TS] t=60s rounds=258 trips=66048 worst_round_ms=1632 threads=257
+[TS] PASS T2 storm (rounds=258 ms=60223)
+[TS] PASS T3 stop (bad=0 first=0)
+[TS] done rc=0
+[K5] end thrstorm status=0 ms=69991 peak_processes=9
+[K5] begin kill : wineserver -k
+[K5] end kill status=0 ms=284
+[K5] ps-extra count=0
+[K5] done
+--- fault lines: 0; client errors: 0
+--- [EPOLLHW] rows:
+[EPOLLHW] pid=6 n=16
+[EPOLLHW] pid=6 n=32
+[EPOLLHW] pid=104 n=16
+[EPOLLHW] pid=104 n=32
+[EPOLLHW] pid=104 n=64
+[EPOLLHW] pid=104 n=128
+[EPOLLHW] pid=104 n=256
+--- grader
+build-thrstorm: /home/sarah/cp/lanes/k5/obj/cp-k5/ts-final/thrstorm.exe 65536 B sha256 e081b14c93d7e62f
+S1 thrstorm done rc=0, exit 0        : PASS   ([K5] end thrstorm status=0 ms=69991 peak_processes=9)
+S2 storm >= 60s, rounds > 0          : PASS   (rounds/ms: 258 60223)
+S3 wineserver -k, nothing left        : PASS   ([K5] end kill status=0 ms=284; [K5] ps-extra count=0)
+S4 no fault line                      : PASS   (0 lines)

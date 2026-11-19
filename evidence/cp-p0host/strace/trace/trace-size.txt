@@ -1,0 +1,1 @@
+-rw-r--r-- 1 sarah sarah 1995834501 Nov 14 23:16 /home/sarah/cp/p0host/runs/trace/trace.txt

@@ -211,7 +211,7 @@ static int va_read(struct addr_space *as, uint64_t va, uint8_t *out, uint32_t n)
     if (vm_arch_walk(as, a & ~0xFFFULL, &leaf) != 0) return -1;
     uint64_t phys = vm_arch_leaf_phys(leaf);
     if (phys == 0) return -1;
-    out[i] = *(uint8_t *)(phys + (a & 0xFFF));
+    out[i] = *(uint8_t *)phys_to_virt(phys + (a & 0xFFF));
   }
   return 0;
 }

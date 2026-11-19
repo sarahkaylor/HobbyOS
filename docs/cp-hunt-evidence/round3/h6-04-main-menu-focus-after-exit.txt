@@ -1,0 +1,15 @@
+# cp-hunt H6-04: the main menu after EXIT TO MAIN MENU, the seek to QUIT GAME (boot_p9 seek, Down taps 0.8 s apart)
+# strix, integ21, the cold-*-mq.p9 boots (P9 12 GiB Venus).  h3-c02 / h3-c03 ran the scripts WITH a relative-mouse
+# wiggle (look 60 0 / look -60 0, H1-12's workaround) right before the seek (c02 1 s after the menu, c03 after
+# a 10 s settle); from h3-c06 on the wiggle is gone (10 s settle only; h3-c06 crashed before its exit, H6-07).
+h3-c02 cold-a16-mq: SEEK FAILED menu-quit: main menu row 'QUIT GAME' not focused after 8 x down
+h3-c03 cold-m86-mq: SEEK FAILED menu-quit: main menu row 'QUIT GAME' not focused after 8 x down
+h3-c07 cold-m86-mq: seek menu-quit: main menu focus on QUIT GAME after 4 taps
+h3-c10 cold-a16-mq: seek menu-quit: main menu focus on QUIT GAME after 4 taps
+h3-c11 cold-m86-mq: seek menu-quit: main menu focus on QUIT GAME after 4 taps
+h3-c14 cold-a16-mq: seek menu-quit: main menu focus on QUIT GAME after 4 taps
+h3-c15 cold-m86-mq: seek menu-quit: main menu focus on QUIT GAME after 4 taps
+h3-c18 cold-a16-mq: SEEK FAILED menu-quit: main menu row 'QUIT GAME' not focused after 8 x down
+h3-c19 cold-m86-mq: seek menu-quit: main menu focus on QUIT GAME after 4 taps
+# h3-churn4 (drive.py, no pointer move): 'seek LOAD GAME: tap 1 focus SETTINGS' after each of its 5 exits (5/5).
+# With the wiggle 0/2 found the focus, without it 6/7 (h3-c18 the one miss: 9 x 'no highlighted row').

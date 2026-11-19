@@ -1,0 +1,93 @@
+# loop f run 5 (strix ~/cp/lanes/ext2w3b, cp-ext2w3 c4d06c59): ext2_lock wedge in boot 2; the wedge dump (serial silent 300 s) named every vCPU
+[HOST] ok   reg add exit 0
+[HOST] ok   wineserver -k exit 0 in 69 ms (Wine SIGKILLs the server at 10.5 s)
+[HOST] ok   boot 1 halted
+[HOST] ok   e2fsck -fn after b1 rc=0 (cpdata: 1023/524288 files (0.2% non-contiguous), 91198/2097152 blocks)
+[HOST] ok   pfx/user.reg on the disk holds [Software\\CpTest] "X"="Y" (23191 bytes)
+[HOST] ok   pfx/system.reg on the disk holds the HKLM key (1811981 bytes)
+[HOST] ok   HKLM reg add exit 0
+[HOST] ok   no reg*.tmp left in pfx/
+[HOST] ok   boot 2: reg query prints X REG_SZ Y
+[HOST] ok   reg query exit 0
+[HOST] ok   boot 2: HKLM reg query prints X REG_SZ Y
+[HOST] FAIL boot 2: race rounds finished: 0 of 4
+[HOST] info serial-b2: [YLOCK-STALL] contention rows on: 0x7028E9EC g_lock+0x0;
+[HOST] FAIL serial-b2: [YLOCK-WEDGE]: [YLOCK-WEDGE] site=ext2_lock lock=ext2_lock addr=0x7028E9EC pc=0x3 extra=0x6 cpu=6 [YLOCK-OWNER] ext2_lock pid=7 cpu=3 pcb_live=1 ost=3 osys=257 
+[HOST] FAIL serial-b2: [E2W] ext2_lock wait 2000 ms: holder pid=7 site=0x7001479A held_ms=2003 waiter site=0x70014B17
+[HOST] FAIL wedge-regs-serial-b2: serial silent 300 s, vCPU registers dumped
+[HOST] info wedge-regs-serial-b2: CPU#0 rip=0x000000007007c23b ylock_tryacquire
+[HOST] info wedge-regs-serial-b2: CPU#0 rip=0x000000007007c243 spin_pause
+[HOST] info wedge-regs-serial-b2: CPU#1 rip=0x000000007007c23b ylock_tryacquire
+[HOST] info wedge-regs-serial-b2: CPU#2 rip=0x000000007007c23b ylock_tryacquire
+[HOST] info wedge-regs-serial-b2: CPU#3 rip=0x00000000700f4106 safe_wfi
+[HOST] info wedge-regs-serial-b2: CPU#4 rip=0x00000000700f4106 safe_wfi
+[HOST] info wedge-regs-serial-b2: CPU#5 rip=0x000000007007c23b ylock_tryacquire
+[HOST] info wedge-regs-serial-b2: CPU#5 rip=0x000000007007c2b0 ls_memo_new
+[HOST] info wedge-regs-serial-b2: CPU#6 rip=0x000000007007c23b ylock_tryacquire
+[HOST] info wedge-regs-serial-b2: CPU#7 rip=0x000000007007c23b ylock_tryacquire
+[HOST] ok   e2fsck -fn after b2 rc=0 (cpdata: 1023/524288 files (0.2% non-contiguous), 91198/2097152 blocks)
+--- holder/waiter sites
+0x7001479A ext2v_open src/kernel/ext2_vfs.c:494
+0x70014B17 ext2v_close src/kernel/ext2_vfs.c:562
+--- serial-b2 last 20 lines
+[SIGR] pid=42 sig=3 ipc=0x108005065A mask=0x10012A07
+[SIGR] pid=48 sig=3 ipc=0x108017895B mask=0x10012A07
+[SIGR] pid=60 sig=3 ipc=0x108017895D mask=0x10012A07
+[KERNEL] Process 62: rpcss.exe exited unexpectedly or gracefully.
+[EXITPC] pid=30 last_user_pc=0x1080143146 code=0x1
+[KERNEL] Process 42: winedevice.exe exited unexpectedly or gracefully.
+[KERNEL] Process 48: winedevice.exe exited unexpectedly or gracefully.
+[KERNEL] Process 60: plugplay.exe exited unexpectedly or gracefully.
+[EXITPC] pid=62 last_user_pc=0x1080143146 code=0x0
+[EXITPC] pid=42 last_user_pc=0x1080143146 code=0x0
+[EXITPC] pid=48 last_user_pc=0x1080143146 code=0x0
+[EXITPC] pid=60 last_user_pc=0x1080143146 code=0x0
+[E2W] ext2_lock wait 2000 ms: holder pid=7 site=0x7001479A held_ms=2003 waiter site=0x70014B17
+[YLOCK-STALL] site=ext2_lock lock=ext2_lock addr=0x7028E9EC pc=0x3 extra=0x100000 cpu=0
+[YLOCK-WEDGE] site=ext2_lock lock=ext2_lock addr=0x7028E9EC pc=0x3 extra=0x6 cpu=6
+[YLOCK-OWNER] ext2_lock pid=7 cpu=3 pcb_live=1 ost=3 osys=257
+  [YLOCK] f->lock held=1 owner_cpu=6 nwait=0 waiters=-
+  [YLOCK] f->lock held=1 owner_cpu=2 nwait=0 waiters=-
+  [YLOCK] f->lock held=1 owner_cpu=1 nwait=0 waiters=-
+qemu-system-x86_64: terminating on signal 15 from pid 4089754 (bash)
+--- vCPU registers, sample 1 (RIP/RSP/CR3 lines)
+CPU#0
+RAX=0000000000000001 RBX=000000007028e9ec RCX=0000000000000001 RDX=0000000000000003
+RSI=0000000070117108 RDI=0000000000000007 RBP=0000000076925a40 RSP=00000000769258d0
+RIP=000000007007c23b RFL=00000097 [--S-APC] CPL=0 II=0 A20=1 SMM=0 HLT=0
+CR0=80000033 CR2=0000001080143110 CR3=0000000219d02000 CR4=00040620
+CPU#1
+RAX=0000000000000001 RBX=000000007028e9ec RCX=0000000000000001 RDX=0000000000000003
+RSI=0000000070117108 RDI=0000000000000007 RBP=0000000076915a40 RSP=00000000769158d0
+RIP=000000007007c23b RFL=00000097 [--S-APC] CPL=0 II=0 A20=1 SMM=0 HLT=0
+CR0=80000033 CR2=0000001080143110 CR3=00000002135ca000 CR4=00040620
+CPU#2
+RAX=0000000000000001 RBX=000000007028e9ec RCX=0000000000000001 RDX=0000000000000003
+RSI=0000000070117108 RDI=0000000000000007 RBP=0000000076905a40 RSP=00000000769058d0
+RIP=000000007007c23b RFL=00000097 [--S-APC] CPL=0 II=0 A20=1 SMM=0 HLT=0
+CR0=80000033 CR2=0000001080143110 CR3=0000000210627000 CR4=00040620
+CPU#3
+RAX=0000000000000003 RBX=00000000702320b0 RCX=0000000000000100 RDX=00000000000000ff
+RSI=00000000000000c8 RDI=00000000757380a4 RBP=00000000768f4130 RSP=00000000768f4130
+RIP=00000000700f4106 RFL=00000246 [---Z-P-] CPL=0 II=0 A20=1 SMM=0 HLT=1
+CR0=80000033 CR2=00000010801a1440 CR3=0000000201b72000 CR4=00040620
+CPU#4
+RAX=0000000000000026 RBX=00000000000018a3 RCX=00000000002db219 RDX=000000000024ab5d
+RSI=0000000000000188 RDI=0000000074d57988 RBP=ffff800023ffeeb8 RSP=ffff800023ffeeb8
+RIP=00000000700f4106 RFL=00000283 [--S---C] CPL=0 II=0 A20=1 SMM=0 HLT=1
+CR0=80000033 CR2=000000108021fe78 CR3=000000007678d000 CR4=00040620
+CPU#5
+RAX=0000000000000001 RBX=000000007028e9ec RCX=0000000000000001 RDX=0000000000000003
+RSI=0000000070117108 RDI=0000000000000007 RBP=00000000768d5a40 RSP=00000000768d58d0
+RIP=000000007007c23b RFL=00000097 [--S-APC] CPL=0 II=0 A20=1 SMM=0 HLT=0
+CR0=80000033 CR2=0000001080143110 CR3=0000000217202000 CR4=00040620
+CPU#6
+RAX=0000000000000001 RBX=000000007028e9ec RCX=0000000000000001 RDX=0000000000000003
+RSI=0000000070117108 RDI=0000000000000007 RBP=00000000768c5a40 RSP=00000000768c58d0
+RIP=000000007007c23b RFL=00000097 [--S-APC] CPL=0 II=0 A20=1 SMM=0 HLT=0
+CR0=80000033 CR2=0000001080143110 CR3=000000020f2d8000 CR4=00040620
+CPU#7
+RAX=0000000000000001 RBX=000000007028e9ec RCX=0000000000000001 RDX=0000000000000003
+RSI=0000000070117108 RDI=0000000000000007 RBP=00000000768b5a40 RSP=00000000768b58d0
+RIP=000000007007c23b RFL=00000097 [--S-APC] CPL=0 II=0 A20=1 SMM=0 HLT=0
+CR0=80000033 CR2=0000001080143110 CR3=000000021f2c2000 CR4=00040620

@@ -1,0 +1,345 @@
+=== lanes/sys tmpfs
+[LP] PASS T1 mkdir 0700 (0)
+[LP] PASS T1 is dir (7)
+[LP] PASS T1 mode 0700 (448)
+[LP] PASS T1 owner caller (0)
+[LP] PASS T1 EEXIST (0)
+[LP] PASS T1 ENOENT parent (17)
+[LP] PASS T2 open create (3)
+[LP] PASS T2 write/seek/read (5)
+[LP] PASS T2 fstat size 11 (4096)
+[LP] PASS T2 ftruncate 4 (11)
+[LP] PASS T3 unlink-while-open keeps data (7)
+[LP] PASS T4 rename (2)
+[LP] PASS T4 old gone new there (4)
+[LP] PASS T4 rename replaces (2)
+[LP] PASS T4 renameat2 (2)
+[LP] PASS T4 renameat2 NOREPLACE EEXIST (2)
+[LP] PASS T5 symlink (17)
+[LP] PASS T5 readlink (1)
+[LP] PASS T5 lstat is link (33188)
+[LP] PASS T5 stat follows to file (41471)
+[LP] PASS T5 symlink to / (17)
+[LP] PASS T5 link off /tmp follows (33188)
+[LP] PASS T6 getdents lists entries (7)
+[LP] PASS T6 rmdir a file ENOTDIR (22)
+[LP] PASS T6 unlink a dir EISDIR (20)
+[LP] PASS T6 rmdir non-empty ENOTEMPTY (21)
+[LP] PASS T7 O_EXCL EEXIST (17)
+[LP] PASS T7 ENOENT (17)
+[LP] PASS T7 ENOTDIR (2)
+[LP] PASS T7 dir O_WRONLY EISDIR (20)
+[LP] PASS T8 mmap 66MiB MAP_SHARED (0)
+[LP] PASS T8 mmap store visible to read() (90)
+[LP] PASS T8 write() visible in the mapping (81)
+[LP] PASS T9 memfd ftruncate 66MiB (21)
+[LP] PASS T9 memfd pread/pwrite (3)
+[LP] PASS T9 memfd mmap sees write (102)
+[LP] PASS T9 memfd fstat size (0)
+[LP] PASS T10 bind makes a socket inode (49645)
+[LP] PASS T10 second bind EADDRINUSE (21)
+[LP] PASS T11 F_SETLK write lock (98)
+[LP] PASS T11 child sees the lock across fork (89)
+[LP] PASS T12 pass the page fd over SCM_RIGHTS (98)
+[LP] PASS T12 child observes the counter change (89)
+[LP] PASS T13 two records each carry their fd (1)
+[LP] PASS T14 statfs /tmp is tmpfs (16914836)
+[LP] done rc=0
+[EXITPC] pid=1 last_user_pc=0x100000742E code=0x0
+[EXITPC] pid=1 last_user_pc=0x100000742E code=0x0
+[EXITPC] pid=2 last_user_pc=0x100000742E code=0x0
+t3_linux_probe: PASS — tmpfs reached its done marker
+=== lanes/sys wsys
+[LP] PASS fchdir open two dirs (0)
+[LP] PASS fchdir to d1 and getcwd (0)
+[LP] PASS fchdir to d2 and getcwd (0)
+[LP] PASS fchdir EBADF on a closed fd (0)
+[LP] PASS fchdir ENOTDIR on a file (9)
+[LP] PASS getxattr absent attr -> ENOTSUP/ENODATA (95)
+[LP] PASS setxattr -> ok or ENOTSUP (95)
+[LP] PASS fgetxattr -> value or ENOTSUP/ENODATA (95)
+[LP] PASS listxattr -> a (possibly empty) list (0)
+[LP] PASS fgetxattr EBADF on a closed fd (9)
+[LP] PASS getxattr ENOENT on a missing path (2)
+[LP] PASS eventfd create (0)
+[LP] PASS eventfd accumulates then read clears (10)
+[LP] PASS eventfd empty nonblock EAGAIN (11)
+[LP] PASS eventfd semaphore read returns 1 (1)
+[LP] PASS eventfd semaphore decrements (1)
+[LP] PASS inotify_init1 -> fd or ENOSYS (38)
+[LP] PASS inotify_add_watch on a non-inotify fd fails (9)
+[LP] PASS process_vm_readv reads own memory (29)
+[LP] PASS process_vm_readv EFAULT on a bad remote range (14)
+[LP] PASS process_vm_readv ESRCH for no such pid (3)
+[LP] PASS prctl(SUD) returns (ok or EINVAL) (22)
+[LP] PASS getrusage(RUSAGE_THREAD) succeeds (0)
+[LP] PASS getrusage times are non-negative (0)
+[LP] done rc=0
+[EXITPC] pid=2 last_user_pc=0x100000325E code=0x0
+t3_linux_probe: PASS — wsys reached its done marker
+=== lanes/sys join
+[LP] join probe start
+[LP] B wake-before-look wait=0 flag=1
+[LP] C join-park-first rc=0 us=138000 ran=1
+[LP] D join-after-exit rc=0 us=0
+[LP] E clone failed errno=22
+[LP] done rc=2
+[EXITPC] pid=2 last_user_pc=0x1000005F2E code=0x1
+t3_linux_probe: FAIL — join never printed '[LP] done rc=0' (tier rc=1)
+=== lanes/sys fd
+[LP] socketpair rc=0 fds=3,4 errno=0 ok
+[LP] pair_rw a->b=4/4 b->a=5/5 ok
+[LP] fionread rc=0 n=3 errno=0 ok
+[LP] poll_ready rc=1 revents=0x1 errno=0 ok
+[LP] poll_timeout rc=0 elapsed_ms=131 errno=0 ok
+[LP] select_ready rc=1 errno=0 ok
+[LP] select_timeout rc=0 elapsed_ms=68 errno=0 ok
+[LP] fcntl_nonblock getfl=0x0 setfl=0 fl_nb=0x800 clr=0 fl_blk=0x0 ok
+[LP] nonblock_eagain rc=-1 errno=11 ok
+[LP] ioctl_fionbio set=0 fl_nb=0x800 clr=0 fl_blk=0x0 errno=0 ok
+[LP] dup fd=5 wr=1 rd=1 errno=0 ok
+[LP] dup2 rc=20 want=20 errno=0 ok
+[LP] dup3 rc=21 fdflags=0x1 same=-1 errno=22 ok
+[LP] pipe2 rc=0 getfl=0x800 getfd=0x1 wr=4 rd=4 errno=0 ok
+[LP] close_range rc=0 c1=40 c2=41 f40=-1/e9 f41=-1/e9 errno=0 ok
+[LP] connect_missing rc=-1 errno=2 ok
+[LP] bind_listen bind=0 listen=0 errno=0 ok
+[LP] getsockname rc=0 len=23 fam=1 path=/tmp/lpfd-probe.sock errno=0 ok
+[LP] connect_named rc=0 errno=0 ok
+[LP] listen_pollin rc=1 revents=0x1 ok
+[LP] accept fd=7 len=2 fam=1 errno=0 ok
+[LP] peer_names peer(rc=0 len=23 path=/tmp/lpfd-probe.sock) self(rc=0 len=23 path=/tmp/lpfd-probe.sock) ok
+[LP] sockopts so_error=0 type=1 sndbuf=524288 rcvbuf=524288 set=0/0 errno=0 ok
+[LP] sendto_recvfrom send=3 recv=3 data=x11 srclen=2 errno=0 ok
+[LP] poll_accepted rc=1 revents=0x1 ok
+[LP] sendmsg_recvmsg send=4 recv=4 data=msg! flags=0x0 errno=0 ok
+[LP] accept4 connect=0 fd=9 getfl=0x800 getfd=0x1 errno=0 ok
+[LP] shutdown_eof shutdown=0 read=0 errno=0 ok
+[LP] poll_hup rc=1 revents=0x19 ok
+[LP] done rc=0
+[EXITPC] pid=2 last_user_pc=0x1000004DEE code=0x0
+t3_linux_probe: PASS — fd reached its done marker
+=== lanes/sys mem
+[LP] mem probe build=mem-3 pid=2 pagesz=4096
+[LP] mmap 4KiB                    ok detail=7
+[LP] mmap 1MiB                    ok detail=7
+[LP] mmap 16MiB                   ok detail=7
+[LP] mmap anon ignores fd         ok detail=1
+[LP] map_fixed replace            ok detail=3
+[LP] map_fixed interior split     ok detail=1
+[LP] mprotect RO enforced=unmeasurable kept=1 (no fault-signal delivery in compat; raise() path only)
+[LP] mprotect NONE enforced=unmeasurable preserved=0 (x64: 0 expected)
+[LP] mprotect hole ENOMEM         ok detail=12
+[LP] mremap grow(maymove)         ok detail=7
+[LP] mremap shrink in place       ok detail=3
+[LP] mremap grow in place      same_addr=1
+[LP] mremap read-only move       ok
+[LP] munmap interior range        ok detail=13
+[LP] munmap interior gone=unmeasurable (no fault-signal delivery in compat)
+[LP] munmap unmapped succeeds     ok detail=0
+[LP] munmap across leading hole   ok detail=3
+[LP] brk start=0x1040000000
+[LP] brk grow returns new break   ok detail=69793284096
+[LP] brk span writable            ok detail=1
+[LP] brk shrink returns new break ok detail=69793218560
+[LP] brk refusal returns old break ok detail=69793218560
+[LP] madvise normal/willneed      ok detail=3
+[LP] mincore resident             ok detail=3
+[LP] madvise DONTNEED rc=0 refill_zero=1 resident_after=1/32
+[LP] msync async/sync             ok detail=3
+[LP] memfd_create fd=3
+[LP] memfd shared write-through   ok detail=1
+[LP] 64 live 4KiB mappings        ok detail=64
+[LP] 200 mmap/munmap cycles       ok detail=200
+[LP] malloc 8MiB write+free       ok detail=3
+[LP] done rc=0
+[EXITPC] pid=2 last_user_pc=0x1000005B7E code=0x0
+t3_linux_probe: PASS — mem reached its done marker
+=== lanes/sys proc
+[LP] proc probe start pid=2 uid=0
+[LP] readlink exe=/PROBE.ELF len=10
+[LP] stat exe size=70880 mode=100644 isreg=1 nlink=1 ino=8898 ok
+[LP] stat blksize=512 blocks=139 ok
+[LP] read bytes=70880 st_size=70880 fstat_size=70880 ino_eq=1 ok
+[LP] stat(missing) errno=2 ok
+[LP] fstat(badfd) errno=9 ok
+[LP] lstat root isdir=1 mode=40755 ok
+[LP] fstatat size=70880 same_as_stat=1 ok
+[LP] readlink(file) errno=22 ok
+[LP] rlimit nofile cur=256 max=256 ok
+[LP] rlimit stack cur=8388608 ok
+[LP] prlimit64 rc=0 cur=256 ok
+[LP] sysinfo uptime=1 totalram=5637144576 freeram=5536481280 procs=1 unit=1 ok
+[LP] times t0=112 t1=118 ticks_delta=6 ok
+[LP] getrusage utime=0.000000 maxrss=0 ok
+[LP] umask old=0022 roundtrip=0027 ok
+[LP] sigprocmask block_seen=1 unblock_seen=1 ok
+[LP] sigaction installed=1 queried=1 same=1 ok
+[LP] kill pid0=0 group0=0 ok
+[LP] raise signal=2 before got=0
+[LP] raise handler_ran=1 got=2 waited_ms=0 ok
+[LP] raise2 handler_ran=1 waited_ms=0 ok
+[LP] access read=1 missing_enoent=1 ok
+[LP] done rc=0
+[EXITPC] pid=2 last_user_pc=0x1000003C3E code=0x0
+t3_linux_probe: PASS — proc reached its done marker
+=== lanes/sys timers
+[LP] timers probe start
+[LP] timerfd_create              fd=3 OK
+[LP] timerfd_settime             rc=0 errno=0
+[LP] timerfd_gettime             left=50ms
+[LP] timerfd read (50ms)          rc=0 elapsed=51ms want=50..300 OK
+[LP] timerfd read count          n=8 expirations=1
+[LP] poll(timerfd) 20ms           rc=0 elapsed=28ms want=20..270 OK
+[LP] timerfd poll revents=0x1 exp=1
+[LP] setitimer                   rc=0 left=50ms
+[LP] setitimer SIGALRM (50ms)     rc=0 elapsed=74ms want=50..300 OK
+[LP] setitimer handler hits      1
+[LP] alarm(1)                    prev=0
+[LP] alarm(1) SIGALRM (1000ms)    rc=0 elapsed=1018ms want=1000..1400 OK
+[LP] timer_create                OK
+[LP] timer_settime               rc=0 errno=0
+[LP] timer_gettime               left=59ms
+[LP] timer_create SIGALRM (60ms)  rc=0 elapsed=82ms want=60..310 OK
+[LP] timer overrun               0
+[LP] timer_delete                rc=0 errno=0
+[LP] epoll_wait empty (60ms)      rc=0 elapsed=67ms want=60..310 OK
+[LP] poll(NULL,0,60)              rc=0 elapsed=69ms want=60..310 OK
+[LP] select(0,...,60ms)           rc=0 elapsed=69ms want=60..310 OK
+[LP] nanosleep(60ms)              rc=0 elapsed=69ms want=60..310 OK
+[LP] done rc=0
+[EXITPC] pid=2 last_user_pc=0x1000003E3E code=0x0
+t3_linux_probe: PASS — timers reached its done marker
+=== base join
+[LP] join probe start
+[LP] B wake-before-look wait=0 flag=1
+[LP] C join-park-first rc=0 us=134000 ran=1
+[LP] D join-after-exit rc=0 us=0
+[LP] E clone failed errno=22
+[LP] done rc=1
+[EXITPC] pid=2 last_user_pc=0x1000005F2E code=0x1
+t3_linux_probe: FAIL — join never printed '[LP] done rc=0' (tier rc=1)
+=== base fd
+[LP] socketpair rc=0 fds=3,4 errno=0 ok
+[LP] pair_rw a->b=4/4 b->a=5/5 ok
+[LP] fionread rc=0 n=3 errno=0 ok
+[LP] poll_ready rc=1 revents=0x1 errno=0 ok
+[LP] poll_timeout rc=0 elapsed_ms=127 errno=0 ok
+[LP] select_ready rc=1 errno=0 ok
+[LP] select_timeout rc=0 elapsed_ms=68 errno=0 ok
+[LP] fcntl_nonblock getfl=0x0 setfl=0 fl_nb=0x800 clr=0 fl_blk=0x0 ok
+[LP] nonblock_eagain rc=-1 errno=11 ok
+[LP] ioctl_fionbio set=0 fl_nb=0x800 clr=0 fl_blk=0x0 errno=0 ok
+[LP] dup fd=5 wr=1 rd=1 errno=0 ok
+[LP] dup2 rc=20 want=20 errno=0 ok
+[LP] dup3 rc=21 fdflags=0x1 same=-1 errno=22 ok
+[LP] pipe2 rc=0 getfl=0x800 getfd=0x1 wr=4 rd=4 errno=0 ok
+[LP] close_range rc=0 c1=40 c2=41 f40=-1/e9 f41=-1/e9 errno=0 ok
+[LP] connect_missing rc=-1 errno=2 ok
+[LP] bind_listen bind=0 listen=0 errno=0 ok
+[LP] getsockname rc=0 len=23 fam=1 path=/tmp/lpfd-probe.sock errno=0 ok
+[LP] connect_named rc=0 errno=0 ok
+[LP] listen_pollin rc=1 revents=0x1 ok
+[LP] accept fd=7 len=2 fam=1 errno=0 ok
+[LP] peer_names peer(rc=0 len=23 path=/tmp/lpfd-probe.sock) self(rc=0 len=23 path=/tmp/lpfd-probe.sock) ok
+[LP] sockopts so_error=0 type=1 sndbuf=524288 rcvbuf=524288 set=0/0 errno=0 ok
+[LP] sendto_recvfrom send=3 recv=3 data=x11 srclen=2 errno=0 ok
+[LP] poll_accepted rc=1 revents=0x1 ok
+[LP] sendmsg_recvmsg send=4 recv=4 data=msg! flags=0x0 errno=0 ok
+[LP] accept4 connect=0 fd=9 getfl=0x800 getfd=0x1 errno=0 ok
+[LP] shutdown_eof shutdown=0 read=0 errno=0 ok
+[LP] poll_hup rc=1 revents=0x19 ok
+[LP] done rc=0
+[EXITPC] pid=2 last_user_pc=0x1000004DEE code=0x0
+t3_linux_probe: PASS — fd reached its done marker
+=== base mem
+[LP] mem probe build=mem-3 pid=2 pagesz=4096
+[LP] mmap 4KiB                    ok detail=7
+[LP] mmap 1MiB                    ok detail=7
+[LP] mmap 16MiB                   ok detail=7
+[LP] mmap anon ignores fd         ok detail=1
+[LP] map_fixed replace            ok detail=3
+[LP] map_fixed interior split     ok detail=1
+[LP] mprotect RO enforced=unmeasurable kept=1 (no fault-signal delivery in compat; raise() path only)
+[LP] mprotect NONE enforced=unmeasurable preserved=0 (x64: 0 expected)
+[LP] mprotect hole ENOMEM         ok detail=12
+[LP] mremap grow(maymove)         ok detail=7
+[LP] mremap shrink in place       ok detail=3
+[LP] mremap grow in place      same_addr=1
+[LP] mremap read-only move       ok
+[LP] munmap interior range        ok detail=13
+[LP] munmap interior gone=unmeasurable (no fault-signal delivery in compat)
+[LP] munmap unmapped succeeds     ok detail=0
+[LP] munmap across leading hole   ok detail=3
+[LP] brk start=0x1040000000
+[LP] brk grow returns new break   ok detail=69793284096
+[LP] brk span writable            ok detail=1
+[LP] brk shrink returns new break ok detail=69793218560
+[LP] brk refusal returns old break ok detail=69793218560
+[LP] madvise normal/willneed      ok detail=3
+[LP] mincore resident             ok detail=3
+[LP] madvise DONTNEED rc=0 refill_zero=1 resident_after=1/32
+[LP] msync async/sync             ok detail=3
+[LP] memfd_create fd=3
+[LP] memfd shared write-through   ok detail=1
+[LP] 64 live 4KiB mappings        ok detail=64
+[LP] 200 mmap/munmap cycles       ok detail=200
+[LP] malloc 8MiB write+free       ok detail=3
+[LP] done rc=0
+[EXITPC] pid=2 last_user_pc=0x1000005B7E code=0x0
+t3_linux_probe: PASS — mem reached its done marker
+=== base proc
+[LP] proc probe start pid=2 uid=0
+[LP] readlink exe=/PROBE.ELF len=10
+[LP] stat exe size=70880 mode=100644 isreg=1 nlink=1 ino=8898 ok
+[LP] stat blksize=512 blocks=139 ok
+[LP] read bytes=70880 st_size=70880 fstat_size=70880 ino_eq=1 ok
+[LP] stat(missing) errno=2 ok
+[LP] fstat(badfd) errno=9 ok
+[LP] lstat root isdir=1 mode=40755 ok
+[LP] fstatat size=70880 same_as_stat=1 ok
+[LP] readlink(file) errno=22 ok
+[LP] rlimit nofile cur=256 max=256 ok
+[LP] rlimit stack cur=8388608 ok
+[LP] prlimit64 rc=0 cur=256 ok
+[LP] sysinfo uptime=1 totalram=5637144576 freeram=5536481280 procs=1 unit=1 ok
+[LP] times t0=109 t1=116 ticks_delta=7 ok
+[LP] getrusage utime=0.000000 maxrss=0 ok
+[LP] umask old=0022 roundtrip=0027 ok
+[LP] sigprocmask block_seen=1 unblock_seen=1 ok
+[LP] sigaction installed=1 queried=1 same=1 ok
+[LP] kill pid0=0 group0=0 ok
+[LP] raise signal=2 before got=0
+[LP] raise handler_ran=1 got=2 waited_ms=0 ok
+[LP] raise2 handler_ran=1 waited_ms=0 ok
+[LP] access read=1 missing_enoent=1 ok
+[LP] done rc=0
+[EXITPC] pid=2 last_user_pc=0x1000003C3E code=0x0
+t3_linux_probe: PASS — proc reached its done marker
+=== base timers
+[LP] timers probe start
+[LP] timerfd_create              fd=3 OK
+[LP] timerfd_settime             rc=0 errno=0
+[LP] timerfd_gettime             left=50ms
+[LP] timerfd read (50ms)          rc=0 elapsed=52ms want=50..300 OK
+[LP] timerfd read count          n=8 expirations=1
+[LP] poll(timerfd) 20ms           rc=0 elapsed=32ms want=20..270 OK
+[LP] timerfd poll revents=0x1 exp=1
+[LP] setitimer                   rc=0 left=50ms
+[LP] setitimer SIGALRM (50ms)     rc=0 elapsed=67ms want=50..300 OK
+[LP] setitimer handler hits      1
+[LP] alarm(1)                    prev=0
+[LP] alarm(1) SIGALRM (1000ms)    rc=0 elapsed=1019ms want=1000..1400 OK
+[LP] timer_create                OK
+[LP] timer_settime               rc=0 errno=0
+[LP] timer_gettime               left=59ms
+[LP] timer_create SIGALRM (60ms)  rc=0 elapsed=78ms want=60..310 OK
+[LP] timer overrun               0
+[LP] timer_delete                rc=0 errno=0
+[LP] epoll_wait empty (60ms)      rc=0 elapsed=65ms want=60..310 OK
+[LP] poll(NULL,0,60)              rc=0 elapsed=69ms want=60..310 OK
+[LP] select(0,...,60ms)           rc=0 elapsed=69ms want=60..310 OK
+[LP] nanosleep(60ms)              rc=0 elapsed=69ms want=60..310 OK
+[LP] done rc=0
+[EXITPC] pid=2 last_user_pc=0x1000003E3E code=0x0
+t3_linux_probe: PASS — timers reached its done marker

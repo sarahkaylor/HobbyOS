@@ -1,0 +1,24 @@
+# linux_probe_ipclat (C1-k6's wineserver round trip), strix guest, both under one 32 GiB P9 guest + other lanes' guests
+## ipclat-pn1 (lane 5173062a)
+[LP] I0 syscall floor: getppid 176 ns, pipe write+read (same thread) 693 ns
+[LP] I1 epoll server, 1 fd                 n=2000 rt_us p50=5 p90=14 p99=22 max=338  126071 round trips/s PASS
+[LP] I2 epoll server, 64 fds               n=2000 rt_us p50=8 p90=17 p99=40 max=1602  80372 round trips/s PASS
+[LP] I3 epoll server, 256 fds              n=2000 rt_us p50=7 p90=15 p99=43 max=109  99945 round trips/s PASS
+[LP] I4 poll server, 256 fds               n=2000 rt_us p50=20 p90=39 p99=68 max=464  42166 round trips/s PASS
+[LP] I5 epoll 256 fds, 4 clients           n=8000 rt_us p50=63 p90=120 p99=219 max=497  49709 round trips/s PASS
+[LP] done rc=0
+## ipclat-base2 (integ11 13dc693b)
+[LP] I0 syscall floor: getppid 164 ns, pipe write+read (same thread) 571 ns
+[LP] I1 epoll server, 1 fd                 n=2000 rt_us p50=5 p90=15 p99=21 max=48  121565 round trips/s PASS
+[LP] I2 epoll server, 64 fds               n=2000 rt_us p50=8 p90=17 p99=34 max=68  91920 round trips/s PASS
+[LP] I3 epoll server, 256 fds              n=2000 rt_us p50=7 p90=17 p99=36 max=114  92584 round trips/s PASS
+[LP] I4 poll server, 256 fds               n=2000 rt_us p50=20 p90=41 p99=61 max=119  40736 round trips/s PASS
+[LP] I5 epoll 256 fds, 4 clients           n=8000 rt_us p50=65 p90=122 p99=196 max=459  47873 round trips/s PASS
+[LP] done rc=0
+## integ14 batch (integ11, quieter host): ~/cp/integ14/ipclat.gate
+[LP] I0 syscall floor: getppid 157 ns, pipe write+read (same thread) 505 ns
+[LP] I1 epoll server, 1 fd                 n=2000 rt_us p50=4 p90=12 p99=18 max=87  163719 round trips/s PASS
+[LP] I2 epoll server, 64 fds               n=2000 rt_us p50=4 p90=12 p99=22 max=129  140984 round trips/s PASS
+[LP] I3 epoll server, 256 fds              n=2000 rt_us p50=6 p90=14 p99=35 max=122  111495 round trips/s PASS
+[LP] I4 poll server, 256 fds               n=2000 rt_us p50=17 p90=31 p99=59 max=130  53032 round trips/s PASS
+[LP] I5 epoll 256 fds, 4 clients           n=8000 rt_us p50=56 p90=106 p99=144 max=231  55568 round trips/s PASS

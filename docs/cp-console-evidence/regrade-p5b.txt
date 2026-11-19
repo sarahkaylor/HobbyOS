@@ -1,0 +1,55 @@
+# integ7's P5 log (strix:~/cp/integ10/p5b.serial.log) regraded, --grade-only, rows only (no screendumps were kept as .ppm,
+# so every screendump check fails in both; those lines are filtered out here).
+# old grader = tools/cp/p5/boot_wine_p5.py at 058fd3d5; new = this branch.
+
+== grader from console-base
+[P5W] vkcube: FAIL
+[P5W] d3d11: FAIL
+[P5W] d3d12: FAIL
+[P5W] fullscr: FAIL
+[P5W] FAIL: d3d11: no RESULT row
+[P5W] FAIL: d3d11: no '[D3D11] done rc=0'
+[P5W] FAIL: d3d11: launcher end row (none)
+[P5W] FAIL: d3d11: no module row for d3d11.dll
+[P5W] FAIL: d3d11: no module row for dxgi.dll
+[P5W] FAIL: d3d11: adapter row (none)
+[P5W] FAIL: d3d12: no RESULT row
+[P5W] FAIL: d3d12: no '[D3D12] done rc=0'
+[P5W] FAIL: d3d12: launcher end row (none)
+[P5W] FAIL: d3d12: no module row for d3d12.dll
+[P5W] FAIL: d3d12: no module row for d3d12core.dll
+[P5W] FAIL: d3d12: no module row for dxgi.dll
+[P5W] FAIL: d3d12: adapter row (none)
+[P5W] FAIL: fullscr: launcher end row for fscheck: (none)
+
+== grader from console
+[P5W] vkcube: FAIL
+[P5W] d3d11: FAIL
+[P5W] d3d12: FAIL
+[P5W] fullscr: FAIL
+[P5W] FAIL: d3d11: launcher end row (none)
+[P5W] FAIL: d3d12: no RESULT row
+[P5W] FAIL: d3d12: no '[D3D12] done rc=0'
+[P5W] FAIL: d3d12: launcher end row (none)
+[P5W] FAIL: d3d12: no module row for d3d12.dll
+[P5W] FAIL: d3d12: no module row for d3d12core.dll
+[P5W] FAIL: d3d12: no module row for dxgi.dll
+[P5W] FAIL: d3d12: adapter row (none)
+
+# the destroyed rows, as the console wrote them:
+[X] [D3D11] done rc=0
+[PUB] who=fault_obj va=0x1083E26000 off=0x1BF9000 prot=RX priv=1 src=file zero=532 ver=1
+[PUB] who=fault_obj va=0x1084025000 off=0x1DF8000 prot=RX priv=1 src=file zero=464 ver=1
+[PUB] who=fault_obj va=0x1083E3C000 off=0x1C0F000 prot=RX priv=1 src=file zero=422 ver=1
+[PUB] who=fault_obj va=0x1083D92000 off=0x1B65000 prot=RX priv=1 src=file zero=498  v eCrS=T1K 
+cpu1:[ P0UxB0]0 0w0h0o0=0f0a7u0l0t7_5o2bbj2  v0ax=000x0100080503037F0000705 2obf2f =00xx030101020000000 7p0r0o6t5=2RdX6  p0rxi0v0=010 0s0r0c0=7f0i0l4e4 2z5efr o
+0752b[2P U0Bx]0 0w0h0o0=0f0a0u7l0t0_70o8bcjd  v0ax=000x0100080502027D00007053 5oef f0=x00x03000000000000 7p0r0o3t0=1R4X7  p0rxi0v0=010 0s0r0c0=7f0i0l7e5 2zbe2r 
+07535e [0PxU0B0]0 00w0h0o0=7f0a0u7l5t0_7oeb j0 xv00a0=000x01008057A0703705020b 2o f0fx=000x030804060000700 0p7r5o2tb=2R X0 xp0r0i0v0=010 0s0r7c0=0f7i5l2eb zer2o
+007535e 0x000[0P0U0B]0 0wh7o=0f0a7u5l2tb_2ob
+ j  CvDaA=T0Ax 1c0p8u513 8c6u0r0~0= 0oxf0f0=000x030105097060901 5p9rbo8t:= R0Xx 0p0r0i0v0=0100 7s00r7c5=2fbi2l e0 xz0e0r0o0=0404040 7v4edr4=e194
+8 0x[0P0U0B0]0 0w0h0o7=00ffa1ufl3t4_ o0bxj0 0v0a=00x01000087069B165Ca06000  0oxf0f0=000x080E0000700 0prf1o9t0=cR X0 xpr0i0v0=017 fsfrfcf=ef0iflfe7 dz0 e0rxo0=02
+1681: mapped=[P5] mount 10.0.2.2:/srv/nfs/cp-integ-p5 -> /CP ok
+6920:[BLKD] cc=[MR] s=1211 pid=29 g=29 as=0x767070C8 len=0x2000 base=0x1084935000 w=F
+16202:[BLKD] cc=[MR] s=3636 pid=80 g=76 as=0x7670C190 len=0x1000 base=0x7FFFFF230000 w=F
+22810:[BLKD] cc=[MR] s=5330 pid=151 g=146 as=0x767139E0 len=0x110000 base=0x1080DE0000 w=1
+25826:[BLKD] cc=[PUB] who=fault_obj va=0x108396A000 off=0x2AF3000 prot=RX priv=1 src=file zero=634 ver=1

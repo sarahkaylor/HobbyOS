@@ -1,0 +1,12 @@
+# H4-kglitch: tools/cp/kglitch/xrun-host-test.sh on strix, integ15 linux_snd.c (kglitch-s3) then the lane (kglitch-s5)
+== base
+[XRUN] starving the PCM for 400 ms
+[XRUN] recovers before=0 after=1 (want after >= 1)
+[SND] pcm closed: chunks=24 frames=28800 xruns=1 sync_ptr=72 writei=450 status=0 refine=8 parks=476 irqs=0 tx=24 ctl=5 ctl_timeouts=0
+[XRUN] done rc=0
+== lane
+[XRUN] starving the PCM for 400 ms
+[SND] xrun n=1 frames_done=14400 chunks=12
+[XRUN] recovers before=0 after=1 (want after >= 1)
+[SND] pcm closed: chunks=24 frames=28800 xruns=1 sync_ptr=72 writei=449 status=0 refine=8 parks=475 irqs=0 tx=24 ctl=5 ctl_timeouts=0
+[XRUN] done rc=0

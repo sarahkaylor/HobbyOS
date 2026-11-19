@@ -1,0 +1,68 @@
+# linux_probe_forkva (C9-play's p9forkprobe cases as a t3 probe), strix KVM, 8 vCPUs, -m 12G; fork+exec -> child running, median of 5
+# host_compact_stall = strix /proc/vmstat compact_stall delta across the boot (QEMU guest RAM is THP-madvised, defrag=madvise)
+## BASE cyberpunk 058fd3d5 (strix:~/cp/lanes/fork-base)
+forkva rc=1 buildfail=0 host_compact_stall+17813 t3_linux_probe: FAIL — forkva never printed '[LP] done rc=0' (tier rc=1)
+    [LP] P9FORK F1 small parent: fork+exec -> child running min 71.8 med 73.3 max 84.2 ms; reaped med 74.9 ms (n=5) -> INFO
+    [LP] P9FORK F2a 64 GiB PROT_NONE only: fork+exec -> child running min 3902.8 med 3919.6 max 4009.8 ms; reaped med 3924.1 ms (n=5) -> INFO
+    [LP] P9FORK F2b 1300 mappings only: fork+exec -> child running min 746.8 med 1466.1 max 1659.0 ms; reaped med 1473.6 ms (n=5) -> INFO
+    [LP] P9FORK F2 big VA: fork+exec -> child running min 4193.1 med 5317.7 max 5671.9 ms; reaped med 5319.5 ms (n=5) -> FAIL
+    [LP] P9FORK F3 big VA + 40 threads: fork+exec -> child running min 4621.8 med 6232.7 max 8021.8 ms; reaped med 6262.1 ms (n=5) -> FAIL
+    [LP] P9FORK F4 big VA + 40 threads: vfork+exec -> child running min 13.8 med 18.3 max 51.8 ms; reaped med 20.5 ms (n=5) -> INFO
+forkcow rc=0 buildfail=0 host_compact_stall+25260 [LP] done rc=0
+
+## step 1 only (aea9eb44: walk what is mapped, eager copy), lane, 2 boots
+[LP] P9FORK F1 small parent: fork+exec -> child running min 12.7 med 14.3 max 24.2 ms; reaped med 15.9 ms (n=5) -> INFO
+[LP] P9FORK F2a 64 GiB PROT_NONE only: fork+exec -> child running min 11.6 med 11.6 max 14.4 ms; reaped med 13.2 ms (n=5) -> INFO
+[LP] P9FORK F2b 1300 mappings only: fork+exec -> child running min 119.2 med 374.4 max 1822.8 ms; reaped med 376.1 ms (n=5) -> INFO
+[LP] P9FORK F2 big VA: fork+exec -> child running min 99.1 med 174.8 max 2224.3 ms; reaped med 176.5 ms (n=5) -> PASS
+[LP] P9FORK F3 big VA + 40 threads: fork+exec -> child running min 488.6 med 1462.9 max 2278.1 ms; reaped med 1465.0 ms (n=5) -> FAIL
+[LP] P9FORK F4 big VA + 40 threads: vfork+exec -> child running min 10.6 med 10.8 max 12.0 ms; reaped med 12.4 ms (n=5) -> INFO
+[FORKT] pid=2 clone_us=1003 regions=6 resident=30 batches=7 max_hold_us=102
+[FORKT] pid=2 clone_us=35 regions=6 resident=30 batches=7 max_hold_us=14
+[FORKT] pid=2 clone_us=1372626 regions=9 resident=83230 batches=2609 max_hold_us=139990
+[FORKT] pid=2 clone_us=1786380 regions=9 resident=83230 batches=2609 max_hold_us=128543
+[FORKT] pid=2 clone_us=339618 regions=9 resident=83230 batches=2609 max_hold_us=72086
+[FORKT] pid=2 clone_us=133581 regions=9 resident=83230 batches=2609 max_hold_us=10735
+host (strix) during this boot: compact_stall +9900 thp_fault_alloc +1460
+
+## step 2 (1013849c: COW sharing)
+forkva rc=0 buildfail=0 host_compact_stall+1618 [LP] done rc=0
+    [LP] P9FORK F1 small parent: fork+exec -> child running min 13.1 med 13.6 max 29.9 ms; reaped med 15.2 ms (n=5) -> INFO
+    [LP] P9FORK F2a 64 GiB PROT_NONE only: fork+exec -> child running min 11.9 med 12.0 max 20.8 ms; reaped med 13.6 ms (n=5) -> INFO
+    [LP] P9FORK F2b 1300 mappings only: fork+exec -> child running min 83.4 med 90.1 max 94.3 ms; reaped med 91.7 ms (n=5) -> INFO
+    [LP] P9FORK F2 big VA: fork+exec -> child running min 83.7 med 84.8 max 88.6 ms; reaped med 86.7 ms (n=5) -> PASS
+    [LP] P9FORK F3 big VA + 40 threads: fork+exec -> child running min 79.7 med 81.3 max 86.1 ms; reaped med 82.9 ms (n=5) -> PASS
+    [LP] P9FORK F4 big VA + 40 threads: vfork+exec -> child running min 10.6 med 10.8 max 11.3 ms; reaped med 12.4 ms (n=5) -> INFO
+    [FORKT] pid=2 clone_us=42067 regions=10 resident=83230 batches=2610 max_hold_us=63
+    [FORKT] pid=2 clone_us=41761 regions=90 resident=83304 batches=2690 max_hold_us=151
+    [FORKT] pid=2 clone_us=38859 regions=90 resident=83304 batches=2690 max_hold_us=41
+    [FORKT] pid=2 clone_us=42469 regions=90 resident=83304 batches=2690 max_hold_us=55
+    [FORKT] pid=2 clone_us=41349 regions=90 resident=83304 batches=2690 max_hold_us=260
+    [FORKT] pid=2 clone_us=39406 regions=90 resident=83304 batches=2690 max_hold_us=92
+
+## step 3 (9a51c83c: final), lane
+forkva rc=0 buildfail=0 host_compact_stall+3293 [LP] done rc=0
+    [LP] P9FORK F1 small parent: fork+exec -> child running min 11.8 med 13.0 max 29.0 ms; reaped med 14.5 ms (n=5) -> INFO
+    [LP] P9FORK F2a 64 GiB PROT_NONE only: fork+exec -> child running min 11.0 med 11.4 max 12.0 ms; reaped med 13.1 ms (n=5) -> INFO
+    [LP] P9FORK F2b 1300 mappings only: fork+exec -> child running min 44.3 med 50.7 max 204.4 ms; reaped med 52.5 ms (n=5) -> INFO
+    [LP] P9FORK F2 big VA: fork+exec -> child running min 41.5 med 44.3 max 48.8 ms; reaped med 45.9 ms (n=5) -> PASS
+    [LP] P9FORK F3 big VA + 40 threads: fork+exec -> child running min 43.9 med 48.3 max 54.0 ms; reaped med 49.8 ms (n=5) -> PASS
+    [LP] P9FORK F4 big VA + 40 threads: vfork+exec -> child running min 10.6 med 10.7 max 10.7 ms; reaped med 12.2 ms (n=5) -> INFO
+    [FORKT] pid=2 clone_us=33711 regions=10 resident=83230 batches=2610 max_hold_us=268
+    [FORKT] pid=2 clone_us=39635 regions=90 resident=83306 batches=2690 max_hold_us=2336
+    [FORKT] pid=2 clone_us=31306 regions=90 resident=83306 batches=2690 max_hold_us=342
+    [FORKT] pid=2 clone_us=30330 regions=90 resident=83306 batches=2690 max_hold_us=26
+    [FORKT] pid=2 clone_us=31671 regions=90 resident=83306 batches=2690 max_hold_us=818
+    [FORKT] pid=2 clone_us=34500 regions=90 resident=83306 batches=2690 max_hold_us=3675
+forkcow rc=0 buildfail=0 host_compact_stall+3573 [LP] done rc=0
+forkcow rc=0 buildfail=0 host_compact_stall+3573 [LP] done rc=0
+
+## Linux host (strix, kernel 7.0.0-43-generic), same source, gcc
+[LP] P9FORK F1 small parent: fork+exec -> child running min 0.2 med 0.4 max 0.5 ms; reaped med 0.4 ms (n=5) -> INFO
+[LP] P9FORK F2a 64 GiB PROT_NONE only: fork+exec -> child running min 0.2 med 0.2 max 0.3 ms; reaped med 0.2 ms (n=5) -> INFO
+[LP] P9FORK F2b 1300 mappings only: fork+exec -> child running min 11.3 med 13.1 max 15.4 ms; reaped med 13.2 ms (n=5) -> INFO
+[LP] P9FORK F2 big VA: fork+exec -> child running min 6.4 med 10.5 max 19.0 ms; reaped med 10.5 ms (n=5) -> PASS
+[LP] P9FORK F3 big VA + 40 threads: fork+exec -> child running min 5.4 med 11.5 max 17.2 ms; reaped med 11.6 ms (n=5) -> PASS
+[LP] P9FORK F4 big VA + 40 threads: vfork+exec -> child running min 0.2 med 0.2 max 0.4 ms; reaped med 0.2 ms (n=5) -> INFO
+[LP] P9FORK done: PASS
+[LP] done rc=0

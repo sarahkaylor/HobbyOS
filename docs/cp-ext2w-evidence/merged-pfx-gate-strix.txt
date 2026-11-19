@@ -1,0 +1,17 @@
+[LP] info X9 f_type=0xef53 (ext2 0xef53)
+[LP] info X9 fgetxattr user.DOSATTRIB -> -1 errno=95
+[LP] done rc=0
+pfx_gate: pfx probe rc=0 PASS rows=72 skips=0; e2fsck -fn rc=0 (cpdata: 25/131072 files (0.0% non-contiguous), 9529/524288 blocks)
+[LP] info M memfd 200 MiB: freeram before=11698176 KiB after-touch=11501568 KiB delta=196608 KiB, data=204800 KiB, overhead=-8192 KiB (frame array + page tables)
+[LP] info M memfd 200 MiB released: freeram=11534336 KiB (before=11698176)
+[LP] done rc=0
+pfx_gate: bigobj probe rc=0 PASS rows=30 skips=0; e2fsck -fn rc=0 (cpdata: 11/131072 files (0.0% non-contiguous), 9004/524288 blocks)
+[LP] done rc=0
+pfx_gate: fatcoh probe rc=0 PASS rows=17 skips=0; e2fsck -fn rc=0 (cpdata: 11/131072 files (0.0% non-contiguous), 9004/524288 blocks)
+[LP] info ext2w mode=bench vol=/EXT
+[LP] done rc=0
+pfx_gate: ext2w probe rc=0 PASS rows=25 skips=0; e2fsck -fn rc=0 (cpdata: 31/131072 files (0.0% non-contiguous), 11654/524288 blocks)
+[LP] info e2stress: 6 workers x 3 threads + 2 x 4 racing servers, 20 s, dir /EXT/st
+[LP] done rc=0
+pfx_gate: e2stress probe rc=0 PASS rows=5 skips=0; e2fsck -fn rc=0 (cpdata: 44/131072 files (0.0% non-contiguous), 9597/524288 blocks)
+pfx_gate: PASS

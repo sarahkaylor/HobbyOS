@@ -1,0 +1,19 @@
+== strix guest (KVM -cpu host, 8 vCPU, 12 GiB), tools/gate/t3_linux_probe.sh rusage, tree lane (cp-k6 working tree), 2026-11-17T10:27:06-06:00
+qemu-slot: slot 3 of 4 held by pid 1757222 16:26:58
+t3_linux_probe: building /home/sarah/cp/lanes/k6/obj/intel/probe_rusage.elf
+make: Entering directory '/home/sarah/cp/lanes/k6'
+make: 'obj/intel/probe_rusage.elf' is up to date.
+make: Leaving directory '/home/sarah/cp/lanes/k6'
+=== t3_linux_probe: rusage (deadline 300s, log /home/sarah/cp/lanes/k6/obj/linux_probe_rusage.log) ===
+--- probe rows ---
+[LP] R1 user-mode spin (RUSAGE_SELF)       wall=300002us utime+=289292us stime+=10677us -> PASS
+[LP] R2 getppid() loop (RUSAGE_SELF)       wall=300019us utime+=126940us stime+=173034us -> PASS
+[LP] R3 getppid() loop (RUSAGE_THREAD)     wall=300003us utime+=109016us stime+=190948us -> PASS
+[LP] R4 a child's getppid() loop (CHILDREN) wall=367517us utime+=81933us stime+=209121us -> PASS
+[LP] done rc=0
+--- unhandled Linux syscalls (name the next handler) ---
+[LCOMPAT] argv argc=1 a0=PROBE.ELF execfn=PROBE.ELF
+--- faults / exits ---
+[EXITPC] pid=4 last_user_pc=0x1000003E5E code=0x0
+[EXITPC] pid=2 last_user_pc=0x1000003E5E code=0x0
+t3_linux_probe: PASS — rusage reached its done marker

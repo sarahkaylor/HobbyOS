@@ -1,0 +1,180 @@
+=================== Wine run vkfs1
+== merged Vulkan tree /home/sarah/cp/p7work/venus-build/vkmerge: virtio_icd.x86_64.json
+== build: kernel + disk (intel, default desktop/icewm), WINEP5.BIN, PE probes
+== stage (a copy of disk.img): glibc 2.31 /LIB64 + /lib64/ld, /WINEP5.BIN, /XSTART.TXT
+== X server: the tree's ::/XHOBBY.BIN, sha256 7bceb8d9cee9cee17de436b486a162fe7d09e6c5931a5d80cfd17efed5d257d3
+== XSESSION.ENV: HB_SECOND_SCREEN=0 
+== boot + grade (deadline 7200s; one QEMU slot for the boot only)
+[VENUS-P5] screendump via VNC (1920x1080, the glass) -> /home/sarah/cp/lanes/p7/obj/cp-p5/wine/vkcube-t20s.ppm
+[P5W] screendump vkcube-t20s.ppm at +92 s; QEMU guests on the host now (incl. this one): 2
+[VENUS-P5] screendump via VNC (1920x1080, the glass) -> /home/sarah/cp/lanes/p7/obj/cp-p5/wine/vkcube-t50s.ppm
+[P5W] screendump vkcube-t50s.ppm at +121 s; QEMU guests on the host now (incl. this one): 2
+[VK] done rc=0
+[P5W] vkcube: PASS
+[P5W] NFS: no-reply rows=0 [NFSHARD] retry rows=0 longest waited_ms=0 GIVE UP=0 NFLK rc=-1=0
+[P5W] PASS: vkcube each ran >= 60 s under Wine with two distinct, recognisable screendumps
+== removed /srv/nfs/cp-p7-p5
+rc=0
+--- serial: probe rows, [P7] kernel rows, X fullscreen reports, [HBP] (every 5th)
+ done: pages=904 mapped=473 skipped=21 batches=4 stop=[X] hobbyos: fullscreen window 0x0 0x0
+[X] hobbyos: fullscreen window 0x6000af 1920x1080
+[P7] scanout X fullscreen window/size 0 0 seq=0
+[X] hobbyos: fullscreen window 0x0 0x0
+[P5] begin vkcube : wine Z:\CP\P5\VK\vkcube.exe 65 fs 480
+[P7] scanout X fullscreen window/size 12582915 125830200 seq=0
+[X] hobbyos: fullscreen window 0xc00003 1920x1080
+[P7] scanout X fullscreen window/size 0 0 seq=0
+[X] hobbyos: fullscreen window 0x0 0x0
+[X] hobbyos: fullscreen window 0xc00003 1920x1080
+[X] [VK] win32: window 0000000000030028 1920x1080 client (fullscreen popup), created+shown in 249.3 ms
+[X] [VK] device: Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201)) (api 1.4.307) instance+enumerate 269.1 ms
+[P7] scanout X fullscreen window/size 10485806 125830200 seq=0
+[X] hobbyos: fullscreen window 0xa0002e 1920x1080
+[X] [VK] surface: formats(format/colorspace): 50/0 44/0 -> 44; present modes: IMMEDIATE MAILBOX FIFO FIFO_RELAXED -> FIFO
+[X] [VK] surface caps: images 3..16 current 1920x1080 min 1920x1080 max 1920x1080 usage 0x8009f -> 4 images 1920x1080
+[X] [VK] swapchain: 4 images in 105.0 ms
+[P7] scanout taken res/window 4107 10485806 seq=1
+[X] [VK] t=5s frames=474 window fps=94.67 | median ms acquire 0.00 render 5.70 present 3.07 total 8.78
+[X] [VK] t=10s frames=1010 window fps=107.21 | median ms acquire 0.00 render 5.69 present 3.04 total 8.75
+[X] [VK] t=15s frames=1557 window fps=109.27 | median ms acquire 0.00 render 5.66 present 3.03 total 8.71
+[X] [VK] t=20s frames=2097 window fps=108.16 | median ms acquire 0.00 render 5.68 present 3.04 total 8.72
+[X] [VK] t=25s frames=2644 window fps=109.26 | median ms acquire 0.00 render 5.71 present 3.01 total 8.73
+[X] [VK] t=30s frames=3173 window fps=106.01 | median ms acquire 0.00 render 5.77 present 3.01 total 8.82
+[X] [VK] t=35s frames=3654 window fps=96.16 | median ms acquire 0.00 render 5.80 present 3.01 total 8.82
+[X] [VK] t=40s frames=4188 window fps=106.82 | median ms acquire 0.00 render 5.80 present 3.06 total 8.87
+[X] [VK] t=45s frames=4629 window fps=88.20 | median ms acquire 0.01 render 5.94 present 3.06 total 9.04
+[X] [VK] t=50s frames=4965 window fps=66.89 | median ms acquire 0.01 render 9.81 present 3.15 total 13.44
+[X] [VK] t=55s frames=5362 window fps=79.59 | median ms acquire 0.01 render 6.65 present 3.26 total 10.23
+[X] [VK] t=60s frames=5740 window fps=75.54 | median ms acquire 0.01 render 8.81 present 3.10 total 12.28
+[X] [VK] t=65s frames=6064 window fps=64.79 | median ms acquire 0.01 render 9.00 present 3.09 total 12.32
+[X] [VK] RESULT frames=6064 wall=65017.3 ms fps=93.27 | per-frame total median 8.86 p90 14.32 worst(after frame 0) 579.36 ms | swapchain 1920x1080 4 images FIFO | recreated=0 suboptimal=0
+[P7] scanout back (blob freed) 4111 0 seq=6064
+[P7] scanout X fullscreen window/size 6292022 125830200 seq=6064
+[X] hobbyos: fullscreen window 0x600236 1920x1080
+[P7] scanout X fullscreen window/size 0 0 seq=6064
+[X] hobbyos: fullscreen window 0x0 0x0
+[X] [VK] done rc=0
+[P5] end vkcube status=0 ms=67515
+[X] [HBP] pid=187 n=210 fps=104.8 path=scanout acq=0/8 sub=168/17858 wait=2623/3236 flip=5680/8873 geom=0/0 set=66 flush=5411 us scanout=210 putimage=0 refused=0 total=210
+[X] [HBP] pid=187 n=217 fps=108.4 path=scanout acq=0/2 sub=75/148 wait=2613/3102 flip=5625/7825 geom=0/0 set=62 flush=5499 us scanout=217 putimage=0 refused=0 total=1263
+[X] [HBP] pid=187 n=216 fps=107.9 path=scanout acq=63/13495 sub=114/8078 wait=2628/4743 flip=5672/8213 geom=0/0 set=74 flush=5529 us scanout=216 putimage=0 refused=0 total=2352
+[X] [HBP] pid=187 n=214 fps=106.7 path=scanout acq=0/6 sub=74/144 wait=2985/81832 flip=5758/8475 geom=0/0 set=83 flush=5605 us scanout=214 putimage=0 refused=0 total=3428
+[X] [HBP] pid=187 n=209 fps=104.3 path=scanout acq=0/2 sub=80/148 wait=2614/3017 flip=5845/8972 geom=0/0 set=80 flush=5709 us scanout=209 putimage=0 refused=0 total=4432
+[X] [HBP] pid=187 n=146 fps=72.6 path=scanout acq=1/6 sub=764/83233 wait=3220/24665 flip=7454/12381 geom=0/0 set=259 flush=7059 us scanout=146 putimage=0 refused=0 total=5135
+[X] [HBP] pid=187 n=147 fps=73.2 path=scanout acq=1/11 sub=128/3138 wait=3153/15098 flip=6876/12465 geom=0/0 set=126 flush=6683 us scanout=147 putimage=0 refused=0 total=5914
+=================== Wine run win1
+== merged Vulkan tree /home/sarah/cp/p7work/venus-build/vkmerge: virtio_icd.x86_64.json
+== build: kernel + disk (intel, default desktop/icewm), WINEP5.BIN, PE probes
+== stage (a copy of disk.img): glibc 2.31 /LIB64 + /lib64/ld, /WINEP5.BIN, /XSTART.TXT
+== X server: the tree's ::/XHOBBY.BIN, sha256 7bceb8d9cee9cee17de436b486a162fe7d09e6c5931a5d80cfd17efed5d257d3
+== XSESSION.ENV: HB_SECOND_SCREEN=0 
+== boot + grade (deadline 7200s; one QEMU slot for the boot only)
+[VENUS-P5] screendump via VNC (1920x1080, the glass) -> /home/sarah/cp/lanes/p7/obj/cp-p5/wine/vkcube-t20s.ppm
+[P5W] screendump vkcube-t20s.ppm at +97 s; QEMU guests on the host now (incl. this one): 2
+[VENUS-P5] screendump via VNC (1920x1080, the glass) -> /home/sarah/cp/lanes/p7/obj/cp-p5/wine/vkcube-t50s.ppm
+[P5W] screendump vkcube-t50s.ppm at +127 s; QEMU guests on the host now (incl. this one): 1
+[VENUS-P5] screendump via VNC (1920x1080, the glass) -> /home/sarah/cp/lanes/p7/obj/cp-p5/wine/d3d11-t20s.ppm
+[P5W] screendump d3d11-t20s.ppm at +164 s; QEMU guests on the host now (incl. this one): 1
+[VENUS-P5] screendump via VNC (1920x1080, the glass) -> /home/sarah/cp/lanes/p7/obj/cp-p5/wine/d3d11-t50s.ppm
+[P5W] screendump d3d11-t50s.ppm at +195 s; QEMU guests on the host now (incl. this one): 1
+[VENUS-P5] screendump via VNC (1920x1080, the glass) -> /home/sarah/cp/lanes/p7/obj/cp-p5/wine/d3d12-t20s.ppm
+[P5W] screendump d3d12-t20s.ppm at +233 s; QEMU guests on the host now (incl. this one): 1
+[VENUS-P5] screendump via VNC (1920x1080, the glass) -> /home/sarah/cp/lanes/p7/obj/cp-p5/wine/d3d12-t50s.ppm
+[P5W] screendump d3d12-t50s.ppm at +262 s; QEMU guests on the host now (incl. this one): 3
+[VK] done rc=0
+[D3D11] done rc=0
+[D3D12] done rc=0
+[P5W] vkcube: PASS
+[P5W] d3d11: PASS
+[P5W] d3d12: PASS
+[P5W] NFS: no-reply rows=0 [NFSHARD] retry rows=0 longest waited_ms=0 GIVE UP=0 NFLK rc=-1=0
+[P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps
+== removed /srv/nfs/cp-p7-p5
+rc=0
+--- serial: probe rows, [P7] kernel rows, X fullscreen reports, [HBP] (every 5th)
+[X] hobbyos: fullscreen window 0x0 0x0
+[X] hobbyos: fullscreen window 0x6000af 1920x1080
+[X] hobbyos: fullscreen window 0x0 0x0
+[P5] begin vkcube : wine Z:\CP\P5\VK\vkcube.exe 65 640 480
+[X] [VK] win32: window 0000000000030026 640x480 client, created+shown in 207.1 ms
+[X] [VK] device: Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201)) (api 1.4.307) instance+enumerate 174.1 ms
+[X] [VK] surface: formats(format/colorspace): 50/0 44/0 -> 44; present modes: IMMEDIATE MAILBOX FIFO FIFO_RELAXED -> FIFO
+[X] [VK] surface caps: images 3..16 current 640x480 min 640x480 max 640x480 usage 0x8009f -> 4 images 640x480
+[X] [VK] swapchain: 4 images in 69.9 ms
+[X] [VK] t=5s frames=1046 window fps=209.20 | median ms acquire 0.01 render 0.36 present 3.98 total 4.39
+[X] [VK] t=10s frames=2100 window fps=210.67 | median ms acquire 0.01 render 0.35 present 4.02 total 4.41
+[X] [VK] t=15s frames=3026 window fps=185.28 | median ms acquire 0.01 render 0.34 present 4.01 total 4.38
+[X] [VK] t=20s frames=4082 window fps=211.01 | median ms acquire 0.01 render 0.35 present 4.01 total 4.38
+[X] [VK] t=25s frames=5171 window fps=217.94 | median ms acquire 0.00 render 0.32 present 4.00 total 4.33
+[X] [VK] t=30s frames=6251 window fps=216.05 | median ms acquire 0.00 render 0.31 present 3.96 total 4.30
+[X] [VK] t=35s frames=7350 window fps=219.78 | median ms acquire 0.00 render 0.31 present 4.00 total 4.31
+[X] [VK] t=40s frames=8424 window fps=214.78 | median ms acquire 0.00 render 0.31 present 4.00 total 4.34
+[X] [VK] t=45s frames=9373 window fps=189.72 | median ms acquire 0.00 render 0.32 present 4.01 total 4.36
+[X] [VK] t=50s frames=10427 window fps=210.82 | median ms acquire 0.00 render 0.33 present 4.02 total 4.39
+[X] [VK] t=55s frames=11512 window fps=216.92 | median ms acquire 0.00 render 0.31 present 4.01 total 4.36
+[X] [VK] t=60s frames=12534 window fps=204.59 | median ms acquire 0.01 render 0.35 present 4.03 total 4.43
+[X] [VK] t=65s frames=13514 window fps=195.89 | median ms acquire 0.01 render 0.46 present 4.06 total 4.74
+[X] [VK] RESULT frames=13514 wall=65003.9 ms fps=207.90 | per-frame total median 4.37 p90 7.51 worst(after frame 0) 524.79 ms | swapchain 640x480 4 images FIFO | recreated=0 suboptimal=0
+[X] [VK] done rc=0
+[P5] end vkcube status=0 ms=67307
+[P5] begin d3d11 : wine Z:\CP\P5\D3D11\d3d11tri.exe 65 640 480
+[X] info:    VK_KHR_present_wait
+[X] info:  VK_KHR_present_wait:
+[X] info:    presentWait                    : 1
+[X] info:  VK_KHR_present_wait2:
+[X] [D3D11] adapter: "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" vendor 0x1002 device 0x7550 dedicated video memory 16304 MiB
+[X] [D3D11] t=5s frames=600 window fps=119.90
+[X] [D3D11] t=10s frames=1088 window fps=97.41
+[X] [D3D11] t=15s frames=1723 window fps=127.28
+[X] [D3D11] t=20s frames=2348 window fps=125.06
+[X] [D3D11] t=25s frames=2977 window fps=125.68
+[X] [D3D11] t=30s frames=3597 window fps=124.04
+[X] [D3D11] t=35s frames=4239 window fps=128.39
+[X] [D3D11] t=40s frames=4706 window fps=93.42
+[X] [D3D11] t=45s frames=5347 window fps=128.26
+[X] [D3D11] t=50s frames=5974 window fps=125.23
+[X] [D3D11] t=55s frames=6613 window fps=127.89
+[X] [D3D11] t=60s frames=7243 window fps=125.99
+[X] [D3D11] t=65s frames=7889 window fps=129.16
+[X] [D3D11] RESULT frames=7889 wall=65005.1 ms fps=121.36 | per-frame median 7.44 p90 14.23 worst(after frame 0) 1237.66 ms
+[X] [D3D11] done rc=0
+[P5] end d3d11 status=0 ms=67713
+[P5] begin d3d12 : wine Z:\CP\P5\D3D12\d3d12tri.exe 65 640 480
+[X] [D3D12] adapter: "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" vendor 0x1002 device 0x7550 dedicated video memory 16304 MiB
+[X] 211.719:0164:0168:info:vkd3d-proton:dxgi_vk_swap_chain_init_sync_objects: Ensure maximum latency of 3 frames with KHR_present_wait.
+[X] [D3D12] t=5s frames=986 window fps=197.17
+[X] [D3D12] t=10s frames=1978 window fps=198.30
+[X] [D3D12] t=15s frames=3003 window fps=205.04
+[X] [D3D12] t=20s frames=3997 window fps=198.73
+[X] [D3D12] t=25s frames=5025 window fps=205.76
+[X] [D3D12] t=30s frames=5701 window fps=135.13
+[X] [D3D12] t=35s frames=6700 window fps=199.78
+[X] [D3D12] t=40s frames=7536 window fps=165.53
+[X] [D3D12] t=45s frames=8500 window fps=194.73
+[X] [D3D12] t=50s frames=9470 window fps=192.06
+[X] [D3D12] t=55s frames=10433 window fps=194.61
+[X] [D3D12] t=60s frames=11258 window fps=162.81
+[X] [D3D12] t=65s frames=12249 window fps=200.94
+[X] [D3D12] RESULT frames=12249 wall=65002.0 ms fps=188.44 | per-frame median 4.73 p90 5.41 worst(after frame 0) 944.26 ms
+[X] [D3D12] done rc=0
+[P5] end d3d12 status=0 ms=68211
+[X] [HBP] pid=187 n=418 fps=208.8 path=putimage acq=7/987 sub=606/4105 wait=2142/6526 flip=3476/91470 geom=0/10 set=0 flush=0 us scanout=0 putimage=418 refused=418 total=418
+[X] [HBP] pid=187 n=422 fps=210.9 path=putimage acq=59/20466 sub=703/6551 wait=2100/6977 flip=3725/85364 geom=0/1 set=0 flush=0 us scanout=0 putimage=422 refused=422 total=2540
+[X] [HBP] pid=187 n=430 fps=214.9 path=putimage acq=5/513 sub=817/4345 wait=2045/5857 flip=3918/80949 geom=0/3 set=0 flush=0 us scanout=0 putimage=430 refused=430 total=4530
+[X] [HBP] pid=187 n=437 fps=218.0 path=putimage acq=1/224 sub=725/4406 wait=2394/4208 flip=2900/86904 geom=0/2 set=0 flush=0 us scanout=0 putimage=437 refused=437 total=6712
+[X] [HBP] pid=187 n=426 fps=212.9 path=putimage acq=3/326 sub=543/5060 wait=2561/7404 flip=2790/85225 geom=0/6 set=0 flush=0 us scanout=0 putimage=426 refused=426 total=8878
+[X] [HBP] pid=187 n=432 fps=215.5 path=putimage acq=0/3 sub=686/3849 wait=2348/7801 flip=2597/7837 geom=0/2 set=0 flush=0 us scanout=0 putimage=432 refused=432 total=10889
+[X] [HBP] pid=187 n=357 fps=177.9 path=putimage acq=1/3 sub=430/4512 wait=2440/100685 flip=3496/10565 geom=1/2 set=0 flush=0 us scanout=0 putimage=357 refused=357 total=12920
+[X] [HBP] pid=191 n=118 fps=58.9 path=putimage acq=0/1 sub=10895/1119492 wait=3126/7120 flip=7333/15800 geom=1/1 set=0 flush=0 us scanout=0 putimage=118 refused=118 total=860
+[X] [HBP] pid=191 n=253 fps=126.1 path=putimage acq=0/1 sub=2537/14763 wait=2451/7553 flip=7856/93077 geom=1/8 set=0 flush=0 us scanout=0 putimage=253 refused=253 total=2119
+[X] [HBP] pid=191 n=253 fps=126.2 path=putimage acq=0/1 sub=2095/9633 wait=2616/7344 flip=7819/96189 geom=0/7 set=0 flush=0 us scanout=0 putimage=253 refused=253 total=3379
+[X] [HBP] pid=191 n=101 fps=50.5 path=putimage acq=0/1 sub=2389/7460 wait=2545/7622 flip=19766/1237618 geom=0/1 set=0 flush=0 us scanout=0 putimage=101 refused=101 total=4489
+[X] [HBP] pid=191 n=254 fps=126.9 path=putimage acq=0/1 sub=2023/13911 wait=2680/9985 flip=7746/94425 geom=1/14 set=0 flush=0 us scanout=0 putimage=254 refused=254 total=5755
+[X] [HBP] pid=191 n=256 fps=128.0 path=putimage acq=0/1 sub=2045/7784 wait=2867/6983 flip=7743/96944 geom=0/2 set=0 flush=0 us scanout=0 putimage=256 refused=256 total=7029
+[X] [HBP] pid=202 n=411 fps=205.4 path=putimage acq=23/9281 sub=842/3985 wait=2532/4019 flip=1324/88918 geom=0/2 set=0 flush=0 us scanout=0 putimage=411 refused=411 total=798
+[X] [HBP] pid=202 n=409 fps=204.1 path=putimage acq=0/1 sub=911/3914 wait=2591/6826 flip=1167/91907 geom=0/1 set=0 flush=0 us scanout=0 putimage=409 refused=409 total=2816
+[X] [HBP] pid=202 n=409 fps=204.3 path=putimage acq=0/1 sub=881/84555 wait=2667/4872 flip=1071/8775 geom=0/7 set=0 flush=0 us scanout=0 putimage=409 refused=409 total=4844
+[X] [HBP] pid=202 n=409 fps=204.4 path=putimage acq=0/5 sub=923/85420 wait=2788/4786 flip=1011/8959 geom=0/1 set=0 flush=0 us scanout=0 putimage=409 refused=409 total=6528
+[X] [HBP] pid=202 n=392 fps=195.6 path=putimage acq=0/8 sub=629/4507 wait=2371/6077 flip=1899/89870 geom=0/1 set=0 flush=0 us scanout=0 putimage=392 refused=392 total=8327
+[X] [HBP] pid=202 n=390 fps=194.7 path=putimage acq=0/6 sub=451/3865 wait=2570/5132 flip=1909/82704 geom=0/1 set=0 flush=0 us scanout=0 putimage=390 refused=390 total=10271
+[X] [HBP] pid=202 n=396 fps=197.9 path=putimage acq=0/1 sub=837/6665 wait=2422/4946 flip=1277/5171 geom=0/53 set=0 flush=0 us scanout=0 putimage=396 refused=396 total=12078

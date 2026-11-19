@@ -1,0 +1,82 @@
+# pr10-play: tools/cp/p9/play.p9 (Gate boot A) on cp-present f131f594 = integ10 49e83499 + this lane, [HBV] Mesa, ioeventfd=on; strix -smp 8 -m 32G Venus, X 1280x720
+QEMU guests on the host before ours: 2
+== fps (winevulkan trace:fps 'approx' rows) in /home/sarah/cp/lanes/venus/obj/cp-p9/pr10-play
+phase           rows          game s   median     p10     min     max    mean
+launch            62          18-112    162.5    84.6     0.0   218.1   143.5
+menu              13         116-132    165.1   147.9   141.0   181.1   164.3
+loading           73         133-242    166.2    27.1    13.4   215.6   141.8
+prof-world-start    14         244-264     16.5    11.0    10.3    19.6    15.7
+world            372         265-906     23.3    14.6    12.4    36.3    22.7
+map               21         283-636     50.4    24.2    17.9    78.3    52.1
+prof-world-mid    14         586-605     17.9    16.6    15.5    18.5    17.7
+prof-world-end    14         876-895     25.4    19.6    17.9    29.7    25.1
+save              19         909-935     27.2    25.0    23.6   140.4    70.5
+quit               5         936-942    130.2    71.9    33.4   131.8   111.3
+== frame pool free MiB ([P8MEM]) by phase: first / min / last
+   boot             31652   31652   31652  (1 rows)
+   launch           30937   29309   29335  (4 rows)
+   menu             29317   29317   29317  (1 rows)
+   loading          28636   28063   28063  (3 rows)
+   prof-world-start   27792   27792   27792  (1 rows)
+   world            27720   27582   27582  (19 rows)
+   prof-world-mid   27634   27634   27634  (1 rows)
+   map              27607   27607   27607  (1 rows)
+   prof-world-end   27572   27572   27572  (1 rows)
+   quit             27572   27572   31448  (2 rows)
+== game process ([THRS]): max threads 47, max anon 141110 MiB, max res 4499 MiB (188 rows)
+== phases (host s since boot, game s since launch, name)
+   45.5 0.0 launch
+   159.4 113.9 menu
+   159.4 113.9 menu
+   178.9 133.4 loading
+   287.8 242.3 world
+   289.8 244.3 prof-world-start
+   309.9 264.4 world
+   328.2 282.7 map
+   344.6 299.1 world
+   631.6 586.1 prof-world-mid
+   651.7 606.2 world
+   666.2 620.7 map
+   683.5 638.0 world
+   922.0 876.5 prof-world-end
+   942.0 896.5 world
+   954.2 908.7 save
+   980.4 934.9 quit
+== present path ([HBP] rows, C6-p7's instrument; per phase: rows, frames by path, avg flip/sub/wait us)
+== present path ([HBP] rows, C6-p7's instrument; per phase: rows, frames by path, avg flip/sub/wait us)
+   launch             rows   47  scanout  13416  putimage      0  refused    0  flip    3209  sub    2959  wait       6
+   menu               rows   10  scanout   3274  putimage      0  refused    0  flip    2970  sub    2072  wait       5
+   loading            rows   55  scanout  15693  putimage      0  refused    0  flip    3137  sub    3413  wait       6
+   prof-world-start   rows   11  scanout    352  putimage      0  refused    0  flip    3119  sub    7968  wait       8
+   world              rows  280  scanout  12838  putimage      0  refused    0  flip    3004  sub    5297  wait       6
+   map                rows   16  scanout   1663  putimage      0  refused    0  flip    2925  sub    2056  wait       6
+   prof-world-mid     rows   10  scanout    358  putimage      0  refused    0  flip    3074  sub    8716  wait       7
+   prof-world-end     rows   11  scanout    561  putimage      0  refused    0  flip    3030  sub    5422  wait       6
+   save               rows   13  scanout   1736  putimage      0  refused    0  flip    4162  sub    7227  wait       5
+   quit               rows    4  scanout   1064  putimage      0  refused    0  flip    4127  sub    7422  wait       4
+   +  1026.4 s  18:18:57  verdict: script-done; QEMU stopped, slot released; guests on the host now: 2
+== e2fsck -fn after the boot: rc=0 (cpdata: 1069/1048576 files (0.8% non-contiguous), 145058/4194304 blocks)
+== game copy unchanged (count, bytes, newest mtime)
+== verdict: script-done
+[P9W] +  1026.4 s  18:18:57  verdict: script-done; QEMU stopped, slot released; guests on the host now: 2
+== saves after
+AutoSave-0       name=AutoSave-0 time=00:11:53, 18.11.2026 playTime=4345.2 pos=(-1418.95, 1243.35, 23.07)
+AutoSave-1       name=AutoSave-1 time=00:15:00, 18.11.2026 playTime=4523.8 pos=(-1477.90, 1188.55, 19.05)
+AutoSave-16      name=AutoSave-16 time=21:52:29, 1.08.2025 playTime=97.8 pos=(-1262.37, -1001.16, 12.04)
+ManualSave-86    name=ManualSave-86 time=13:24:42, 8.08.2025 playTime=4031.0 pos=(-1429.96, 1255.29, 23.09)
+QuickSave-0      name=QuickSave-0 time=00:17:43, 18.11.2026 playTime=4684.3 pos=(-1478.30, 1189.77, 19.03)
+== world          frames  12838  fps 22.6  [HBP] sub 5.30 ms flip 3.00 ms (avg/frame)
+   ring 0.16/0.05ms  tls 0.00/0.00ms  space 1.13/0.62ms  slpR 0.21/0.04ms  slpO 1.40/0.62ms  yield 26.68/0.00ms  ntf 3.42/0.04ms  subF 25.05/0.38ms  subU 28.46/0.30ms  wait 59.12/20.00ms  fwait 19.27/19.29ms  qsub 24.86/6.20ms  pwait 0.00/0.00ms
+   threads (per frame: wait n/ms, submit n/ms, present-wait n/ms): t165 w4.0/5.2 q4.0/5.3 p0.00/0.0  t121 w40.0/8.8 q0.0/0.0 p0.00/0.0  t162 w1.0/5.0 q0.0/0.0 p0.00/0.0  t122 w2.3/0.0 q13.1/0.6 p0.00/0.0  t123 w5.6/0.3 q0.0/0.0 p0.00/0.0  t125 w1.0/0.3 q0.0/0.0 p0.00/0.0
+   replies: vkGetDeviceImageMemoryRequirements 0.06/0.03ms  vkCreateImage 0.03/0.01ms  vkCreateBuffer 0.01/0.01ms  vkGetBufferDeviceAddress 0.01/0.00ms  vkGetImageMemoryRequirements2 0.03/0.00ms  vkGetBufferMemoryRequirements2 0.01/0.00ms
+== map            frames   1663  fps 51.6  [HBP] sub 2.06 ms flip 2.93 ms (avg/frame)
+--
+== world          pid19:wineserver                   rows 113  run 0.31 ready 0.09 futex 0.00 kern 0.28 trap 0.10
+   blk 232:0.59
+   ksys 232:0.09 1:0.07 96:0.00 228:0.00 20:0.00 46:0.00 233:0.00 257:0.00
+   top (run/ready/kern/trap %) t19 30/8/27/9%(232=9,1=6,96=0,228=0,20=0,46=0,233=0,257=0)
+== world          pid92:services.exe                 rows 113  run 2.24 ready 0.24 futex 27.41 kern 0.89 trap 0.19
+   blk 0:12.04 23:4.93 16:0.09 7:0.01 230:0.01 1:0.00
+   ksys 16:0.36 202:0.16 14:0.05 1:0.03 228:0.03 0:0.02 20:0.01 23:0.00
+   top (run/ready/kern/trap %) t96 64/3/12/2%(202=2,14=1,228=0,1=0,0=0,9=0,230=0,20=0,16=0,186=0,98=0) t92 25/1/6/2%(202=1,1=0,14=0,228=0,47=0,0=0,98=0,20=0,16=0,230=0,7=0,9=0,186=0)
+== map            pid19:wineserver                   rows   7  run 0.20 ready 0.06 futex 0.00 kern 0.18 trap 0.07

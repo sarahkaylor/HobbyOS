@@ -1,0 +1,71 @@
+From 9c3a9ccf032447be03466e284eb09ca4ac7bbea6 Mon Sep 17 00:00:00 2001
+From: Sarah Kaylor <sarah.kaylor@outlook.com>
+Date: Tue, 17 Nov 2026 13:49:04 -0600
+Subject: [PATCH] PROBE (for C1-k6, not for merge): count kernel tasks made
+ READY while this CPU is still on their stack
+
+---
+ src/kernel/process.c | 40 ++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 40 insertions(+)
+
+diff --git a/src/kernel/process.c b/src/kernel/process.c
+index 68bc34a2..b1bce3e0 100755
+--- a/src/kernel/process.c
++++ b/src/kernel/process.c
+@@ -1971,6 +1971,45 @@ static void ru_count_switch_locked(int pid, int vol) {
+   }
+ }
+ 
++/* PROBE (cp-ext2w3-kprobe, for C1-k6): a kernel task preempted on its OWN
++ * stack is made READY here while this CPU is still executing on that stack;
++ * once proc_lock drops, another CPU can resume the task at its saved RSP and
++ * descend into the frames this CPU is still using (restore_context's
++ * local_tf, enter_user_space, resume_preflight_c).  Count every release
++ * whose live RSP is inside the task's own block, with a bounded row. */
++static volatile uint64_t kstack_release_n;
++static void kstack_release_probe(struct process *cur, uint32_t cpu) {
++#ifdef __x86_64__
++  if (!cur->is_kernel_process || !cur->user_phys_base)
++    return;
++  uint64_t rsp;
++  __asm__ volatile("mov %%rsp, %0" : "=r"(rsp));
++  uint64_t lo = phys_to_kva(cur->user_phys_base), hi = lo + USER_REGION_SIZE;
++  if (rsp < lo || rsp >= hi)
++    return;
++  uint64_t n = __atomic_add_fetch(&kstack_release_n, 1, __ATOMIC_RELAXED);
++  if (n <= 4 || (n & 1023) == 0) {
++    struct kline kl;
++    kl_init(&kl);
++    kl_s(&kl, "[KSTACK-RELEASE] n=");
++    kl_i(&kl, (long)n);
++    kl_s(&kl, " cpu=");
++    kl_i(&kl, (long)cpu);
++    kl_s(&kl, " pid=");
++    kl_i(&kl, (long)cur->pid);
++    kl_s(&kl, " rsp=");
++    kl_hex(&kl, rsp);
++    kl_s(&kl, " resume_sp=");
++    kl_hex(&kl, cur->context[33]);
++    kl_s(&kl, " (READY while this CPU is on its stack)\n");
++    kl_emit(&kl);
++  }
++#else
++  (void)cur;
++  (void)cpu;
++#endif
++}
++
+ void schedule(struct trap_frame *tf, int is_yield) {
+   if (!scheduler_started) return;
+ 
+@@ -2026,6 +2065,7 @@ void schedule(struct trap_frame *tf, int is_yield) {
+       if (cur->state == PROC_STATE_RUNNING) {
+         save_context(cur, tf);
+         cur->state = PROC_STATE_READY;
++        kstack_release_probe(cur, cpu);
+       } else if (cur->state == PROC_STATE_READY) {
+         /* A wake raced the caller's block-to-schedule gap (the -2/EAGAIN
+            retry path sets BLOCKED, returns to the trap, which then calls
+-- 
+2.50.1 (Apple Git-155)
+

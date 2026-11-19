@@ -1,0 +1,49 @@
+# C1-k6 §14 wfibound (host: strix, 2026-11-17; t3 probe boots under tools/cp/qemu-slot.sh, tree k6-dev2)
+
+## bound OFF (local experiment: the sched_wfi_bound() call removed from safe_wfi; not committed)
+### run 1
+[LP] FAIL W1 longest of 200 kernel halts: 10647 us (bound 1000 us, limit 2500)
+[LP] FAIL W2 round 1: waiter on cpu 2 saw the flag 500107 us after CPU 0 set it with IF=0 (spinner spun 500000 us)
+[LP] FAIL W2 round 2: waiter on cpu 7 saw the flag 500099 us after CPU 0 set it with IF=0 (spinner spun 500000 us)
+[LP] FAIL W2 round 3: waiter on cpu 1 saw the flag 500100 us after CPU 0 set it with IF=0 (spinner spun 500000 us)
+[LP] info bounded-halt arms during the probe: 0
+[LP] done rc=2
+### run 2
+[LP] FAIL W1 longest of 200 kernel halts: 10095 us (bound 1000 us, limit 2500)
+[LP] FAIL W2 round 1: waiter on cpu 3 saw the flag 500099 us after CPU 0 set it with IF=0 (spinner spun 500000 us)
+[LP] FAIL W2 round 2: waiter on cpu 1 saw the flag 500107 us after CPU 0 set it with IF=0 (spinner spun 500000 us)
+[LP] PASS W2 round 3: waiter on cpu 6 saw the flag 20 us after CPU 0 set it with IF=0 (spinner spun 20 us)
+[LP] info bounded-halt arms during the probe: 0
+[LP] done rc=2
+
+## bound ON (cp-k6 9d47b051 source)
+### run 1
+[LP] PASS W1 longest of 200 kernel halts: 1038 us (bound 1000 us, limit 2500)
+[LP] PASS W2 round 1: waiter on cpu 2 saw the flag 979 us after CPU 0 set it with IF=0 (spinner spun 980 us)
+[LP] PASS W2 round 2: waiter on cpu 7 saw the flag 1032 us after CPU 0 set it with IF=0 (spinner spun 1032 us)
+[LP] PASS W2 round 3: waiter on cpu 7 saw the flag 1005 us after CPU 0 set it with IF=0 (spinner spun 1005 us)
+[LP] info bounded-halt arms during the probe: 1160
+[LP] done rc=0
+### run 2
+[LP] PASS W1 longest of 200 kernel halts: 1052 us (bound 1000 us, limit 2500)
+[LP] PASS W2 round 1: waiter on cpu 5 saw the flag 990 us after CPU 0 set it with IF=0 (spinner spun 990 us)
+[LP] PASS W2 round 2: waiter on cpu 5 saw the flag 1006 us after CPU 0 set it with IF=0 (spinner spun 1006 us)
+[LP] PASS W2 round 3: waiter on cpu 1 saw the flag 1000 us after CPU 0 set it with IF=0 (spinner spun 1000 us)
+[LP] info bounded-halt arms during the probe: 2130
+[LP] done rc=0
+
+## same boot set, other probes on this tree (k6-probes2.sh)
+wfibound rc=0 [LP] done rc=0
+wfibound rc=0 [LP] done rc=0
+kstack rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+pipestorm rc=0 [LP] done rc=0
+ipclat rc=0 [LP] done rc=0
+hrtimer rc=0 [LP] done rc=0
+exitgroup rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+e2stress rc=0 [LP] done rc=0
+ext2w rc=0 [LP] done rc=0
+ALLDONE

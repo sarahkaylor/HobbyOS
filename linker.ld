@@ -47,9 +47,11 @@ SECTIONS
     {
         . = ALIGN(8);
         __bss_start = .;
-        *(.bss)
-        *(.bss.*)
-        *(COMMON)
+        /* Most-aligned input sections first: the 2 MiB-aligned objects
+           (framebuffer, the blk area) otherwise sit wherever the link order
+           puts them and waste up to 2 MiB of padding each whenever anything
+           before them grows (cp-x3's 22 KB shm table cost exactly 2 MiB). */
+        *(SORT_BY_ALIGNMENT(.bss) SORT_BY_ALIGNMENT(.bss.*) SORT_BY_ALIGNMENT(COMMON))
         __bss_end = .;
     }
 

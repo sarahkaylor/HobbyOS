@@ -1,0 +1,9 @@
+# H1-hunt: the seeded prefix was made by another Wine stage, so every game boot re-runs wineboot's prefix update (strix)
+# obj/cp-p8/pfx-seeded.img (copy of integ15's, sha256 b56d5231...): /pfx/.update-timestamp = 1794844150
+# stat -c %Y wine.inf: wine-build-x / ntsync-wine 1794844150 (= integ15's CP_WINE_STAGE wine-ntsync); wine-cp (the wave-8 default) 1794987459
+# h-fp1 serial.txt (guest seconds, WINEDEBUG +timestamp,+process):
+[X]  40.153:002c:trace:process:CreateProcessInternalW app L"C:\\windows\\system32\\rundll32.exe" cmdline L"C:\\windows\\system32\\rundll32.exe setupap
+[X]  41.646:002c:trace:process:CreateProcessInternalW app L"C:\\windows\\system32\\rundll32.exe" cmdline L"C:\\windows\\system32\\rundll32.exe setupap
+[X]  48.569:002c:trace:process:CreateProcessInternalW app L"C:\\windows\\syswow64\\rundll32.exe" cmdline L"C:\\windows\\syswow64\\rundll32.exe setupap
+[X] wine: failed to start L"C:\\windows\\syswow64\\rundll32.exe": c0000135
+# -> ~9.5 s (40.1 -> 48.6 s) of wine.inf reinstall in every boot, plus its ext2 writes; the last step (syswow64 rundll32, no 32-bit Wine) is the second 0xC0000135 [EXITPC] row of every boot

@@ -1,0 +1,113 @@
+# cp-int-mmu merged-tree gates; host strix (Zen 5, AVX-512), KVM, QEMU 10.2.1; MAKEFLAGS=-j16; every boot under flock /tmp/cp-qemu.lock
+## status
+PROBES=1
+lowva16G=0
+tmpfs16G=0
+EXT2=0
+UNIT=1
+Sun Nov 15 02:00:06 PM CST 2026
+DONE
+## probes (gates.sh probes, one boot each)
+GATE hello PASS
+    hello: [LP] done rc=0
+GATE timers PASS
+    timers: [LP] done rc=0
+GATE futex_sig PASS
+    futex_sig: [LP] done rc=0
+GATE fpu_sig PASS
+    fpu_sig: [LP] done rc=0
+GATE tramp_sig PASS
+    tramp_sig: [LP] done rc=0
+GATE avx PASS
+    avx: [LP] done rc=0
+GATE gs PASS
+    gs: [LP] done rc=0
+GATE tmpfs PASS
+    tmpfs: [LP] done rc=0
+GATE wsys PASS
+    wsys: [LP] done rc=0
+GATE fd PASS
+    fd: [LP] done rc=0
+GATE mem PASS
+    mem: [LP] done rc=0
+GATE mmap_race PASS
+    mmap_race: [LP] done rc=0
+GATE vmcommit PASS
+    vmcommit: [LP] done rc=0
+GATE redzone PASS
+    redzone: [LP] done rc=0
+GATE proc PASS
+    proc: [LP] done rc=0
+GATE clock PASS
+    clock: [LP] done rc=0
+GATE lowva PASS
+    lowva: [LP] done rc=0
+GATE join FAIL rc=1
+    join: [LP] done rc=2
+## join rows (merged) vs integration base int-ext2b (51f4c276) row A
+A park-first wait=0 wake=-1 flag=1[FUTEX] exit pid=1 st=3 key=0x0 PROBE.ELF
+[LP] B wake-before-look wait=0 flag=1
+[LP] C join-park-first rc=0 us=143000 ran=1
+[LP] D join-after-exit rc=0 us=0
+[LP] E clone failed errno=22
+[LP] done rc=2
+A park-first wait=0 wake=-1 flag=1[FUTEX] exit pid=1 st=3 ke
+## 16G boots
+[MEMMAP] src=multiboot multiboot_rc=0 entries=21 e820_rc=0 e820_entries=3 e820_ram_in_map=0
+[DMAP] ram above 8 GiB mapped_mib=10240 ranges=1
+[FRAME] frames=3997696 total_mib=15616 ext0=0x0x0000000020000000-0x0x0000000070000000 ext1=0x0x0000000100000000-0x0x0000000200000000 extents=3 hi_mib=10240 reserved=0
+[LP] done rc=0
+t3_linux_probe: PASS — lowva reached its done marker
+[MEMMAP] src=multiboot multiboot_rc=0 entries=21 e820_rc=0 e820_entries=3 e820_ram_in_map=0
+[DMAP] ram above 8 GiB mapped_mib=10240 ranges=1
+[FRAME] frames=3997696 total_mib=15616 ext0=0x0x0000000020000000-0x0x0000000070000000 ext1=0x0x0000000100000000-0x0x0000000200000000 extents=3 hi_mib=10240 reserved=0
+[LP] done rc=0
+t3_linux_probe: PASS — tmpfs reached its done marker
+## ext2_gate
+=== ext2_gate: boot 1 (CPDATA=/home/sarah/cp/lanes/int-mmu/obj/ext2-gate/cpdata.img) ===
+boot 1: 75 ok rows; t3_linux_probe: PASS — ext2 reached its done marker
+=== ext2_gate: boot 2 (CPDATA=/home/sarah/cp/lanes/int-mmu/obj/ext2-gate/cpdata.img) ===
+boot 2: 14 ok rows; t3_linux_probe: PASS — ext2 reached its done marker
+=== ext2_gate: boot 3 (linux_probe_ext2b + helper + glibc hs/hd from /EXT) ===
+boot 3: 124 main ok rows, 9 helper ok rows; t3_linux_probe: PASS — ext2b reached its done marker
+[HOST] ok   static-pie /EXT/lpx/bin/hs: all 914592 bytes read from ext2 and parsed; refused by the loader (open item: IRELATIVE)
+ext2_gate: PASS
+## tripwire per console
+obj/cpmmu/avx.console.log idmap_trip+badva=0 fatal=0 boots=1
+obj/cpmmu/clock.console.log idmap_trip+badva=0 fatal=0 boots=1
+obj/cpmmu/fd.console.log idmap_trip+badva=0 fatal=0 boots=1
+obj/cpmmu/fpu_sig.console.log idmap_trip+badva=0 fatal=0 boots=1
+obj/cpmmu/futex_sig.console.log idmap_trip+badva=0 fatal=0 boots=1
+obj/cpmmu/gs.console.log idmap_trip+badva=0 fatal=0 boots=1
+obj/cpmmu/hello.console.log idmap_trip+badva=0 fatal=0 boots=1
+obj/cpmmu/join.console.log idmap_trip+badva=0 fatal=0 boots=1
+obj/cpmmu/lowva16g.console.log idmap_trip+badva=0 fatal=0 boots=1
+obj/cpmmu/lowva.console.log idmap_trip+badva=0 fatal=0 boots=1
+obj/cpmmu/mem.console.log idmap_trip+badva=0 fatal=0 boots=1
+obj/cpmmu/mmap_race.console.log idmap_trip+badva=0 fatal=0 boots=1
+obj/cpmmu/proc.console.log idmap_trip+badva=0 fatal=0 boots=1
+obj/cpmmu/redzone.console.log idmap_trip+badva=0 fatal=0 boots=1
+obj/cpmmu/timers.console.log idmap_trip+badva=0 fatal=0 boots=1
+obj/cpmmu/tmpfs16g.console.log idmap_trip+badva=0 fatal=0 boots=1
+obj/cpmmu/tmpfs.console.log idmap_trip+badva=0 fatal=0 boots=1
+obj/cpmmu/tramp_sig.console.log idmap_trip+badva=0 fatal=0 boots=1
+obj/cpmmu/vmcommit.console.log idmap_trip+badva=0 fatal=0 boots=1
+obj/cpmmu/wsys.console.log idmap_trip+badva=0 fatal=0 boots=1
+obj/ext2-gate/boot1.console.log idmap_trip+badva=0 fatal=0 boots=1
+obj/ext2-gate/boot2.console.log idmap_trip+badva=0 fatal=0 boots=1
+obj/ext2-gate/boot3.console.log idmap_trip+badva=0 fatal=0 boots=1
+unit idmap_trip+badva=0
+## unit tier
+EXPECT_EQ FAILED: gpu_abi_pages_for(64ull * 1024 * 1024 + 1) == 0 at src/kernel/virtio_gpu_test.c:214
+EXPECT_EQ FAILED: gpu_abi_res_ok(&r) == 0 at src/kernel/virtio_gpu_test.c:244
+Tests run:    450
+Tests failed: 2
+## host_tests (int-mmu-arm copy)
+  FAIL  tools/board/sync_gaming_md_test.py  (FileNotFoundError: [Errno 2] No such file or directory: 'gaming.md')
+  FAIL  tools/t5/roadmap_doc_test.py  (FileNotFoundError: [Errno 2] No such file or directory: 'gaming.md')
+[host-tests] done: 38/40 passed
+## ARM build
+ld.lld -T linker.ld -o hobbyos.elf obj/arm/boot.o obj/arm/fpu.o obj/arm/setjmp.o
+ ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, with debug_info, not stripped
+## castscan_check.sh
+castscan: 359 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present

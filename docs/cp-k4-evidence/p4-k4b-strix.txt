@@ -1,0 +1,27 @@
+# Gate P4 (tools/cp/p4/run-p4.sh, WINEDEBUG=err+all,fixme-all,+loaddll), strix KVM, X session + IceWM
+## k4run1 = cp-k4b 2aa73fef+e17a9ec8 (before exit_owner)
+[P4] end wineboot status=0 ms=56254
+[P4] end rawinput status=0 ms=15404
+[P4] end modes status=0 ms=8099
+[P4] end winecfg status=0 ms=22942
+[P4] end notepad status=0 ms=17579
+[P4] end kill status=0 ms=414
+faults=0 drain_timeouts=2 unhandled=0 netlink_err=0
+## k4run2 = cp-k4b 075e9237
+[P4] end wineboot status=0 ms=33531
+[P4] end rawinput status=0 ms=14713
+[P4] end modes status=0 ms=7910
+[P4] end winecfg status=0 ms=22919
+[P4] end notepad status=0 ms=17568
+[P4] end kill status=0 ms=282
+faults=0 drain_timeouts=0 unhandled=0 netlink_err=0
+## basecp1 = cyberpunk 3cbf04a6 (no C1-k4 follow-ups)
+[P4] end wineboot status=0 ms=33115
+[P4] end rawinput status=0 ms=14995
+[P4] end modes status=0 ms=8112
+[P4] end winecfg status=0 ms=23470
+[P4] end notepad status=0 ms=17322
+[P4] end kill status=0 ms=312
+faults=1 drain_timeouts=2 unhandled=0 netlink_err=2
+[KERNEL] pid=126 (winedevice.exe) memory fault VA=0x0000000000000000 PC=0x000000108074F736 rw=r  in=HOLE region=NONE rsp=0x00007FFFFEB0E920 live=5 inH=0 cr3frame=0x000000
+## G1-G3: PASS in all three runs (run logs ~/cp/lanes/k4-p4run1.log, k4-p4run2.log, k4-p4base1.log)

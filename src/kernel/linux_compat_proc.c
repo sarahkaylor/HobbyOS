@@ -84,6 +84,7 @@
  *                      (see the handler for exactly how much each one does).
  */
 #include "linux_compat.h"
+#include "sig_trace.h"
 
 #include <stdint.h>
 
@@ -98,6 +99,8 @@
 #include "process.h"
 #include "timer.h"
 #include "vm.h"
+#include "vfs.h" /* cp/exec: VFS_PATH_MAX */
+#include "linux_exec.h"
 
 /* The layouts this file writes into guest memory.  A drift here corrupts a
    struct the guest then trusts, so lock them at compile time (docs §6, and the
@@ -143,6 +146,14 @@ static uint64_t l_sigmask[MAX_PROCESSES];
    SA_SIGINFO to build a correct frame.  Keyed like everything else here. */
 static uint32_t l_sigflags[MAX_PROCESSES][HO_SIG_MAX];
 
+/* C1-thr: sa_mask per (group anchor, signal).  The native PCB never stored
+   it (process_sigaction reports 0 for it), so a handler ran with only the
+   interrupted mask: Wine's SIGUSR1 handler (sa_mask = the server block set)
+   was protected only by the engine's old no-nesting rule, and a handler
+   could not see its own signal blocked.  linux_compat_signal_deliver() ORs
+   it (and the signal itself, unless SA_NODEFER) into the thread's mask. */
+static uint64_t l_samask[MAX_PROCESSES][HO_SIG_MAX];
+
 struct l_altstack_state {
   uint64_t ss_sp;
   uint64_t ss_size;
@@ -175,6 +186,58 @@ int linux_compat_altstack_get(struct process *p, uint64_t *sp, uint64_t *size,
   return 0;
 }
 
+uint64_t linux_compat_samask_get(struct process *p, int sig) {
+  int slot = l_slot(process_group(p));
+  if (slot < 0 || sig <= 0 || sig >= HO_SIG_MAX) return 0;
+  return l_samask[slot][sig];
+}
+
+/* H4-kglitch round 2 (H2-F2): a process the kernel creates from scratch
+   (spawn_ex, the wave/XSTART loaders) starts with an empty signal mask, no
+   sigaltstack and no SA_* flag words, as a Linux process started by a parent
+   that blocks nothing does.  These arrays are indexed by pid slot and were
+   never reset there, so the new process inherited the slot's last occupant:
+   a Wine client that died with ntdll's server_block_set (SIGINT included)
+   blocked.  p8launch spawn_ex()es `wine` onto such a slot from a session's
+   5th relaunch on; wine forks the wineserver (fork copies the mask), and
+   that server ignored `wineserver -k`'s SIGINT for 10.5 s until SIGKILL
+   (linux_probe_sigmask via tools/cp/kglitch/sigmask-gate.sh).  fork and
+   clone overwrite all of it afterwards (linux_compat_sig_fork/_clone).
+   Called from process.c's fresh-PCB init for every new slot. */
+void linux_compat_sig_slot_reset(struct process *p);
+void linux_compat_sig_slot_reset(struct process *p) {
+  int cs = l_slot(p);
+  if (cs < 0) return;
+  l_sigmask[cs] = 0;
+  for (int i = 0; i < HO_SIG_MAX; i++) {
+    l_sigflags[cs][i] = 0;
+    l_samask[cs][i] = 0;
+  }
+  l_altstack[cs].ss_sp = 0;
+  l_altstack[cs].ss_size = 0;
+  l_altstack[cs].ss_flags = 0;
+  l_altstack[cs].in_use = 0;
+}
+
+/* C1-thr: a new THREAD (clone CLONE_THREAD) starts with its creator's signal
+   mask -- Linux copies `blocked` in copy_process, and glibc 2.31's
+   pthread_create relies on it (start_thread sets no mask).  It used to start
+   with whatever the pid slot's previous occupant left: musl's pthread_exit
+   blocks every signal before it exits, so a raw clone landing on that slot
+   began with 0xFFFFFFFC7FFBFEFF and never took a tgkill (linux_probe_thr S5).
+   Its sigaltstack is cleared (CLONE_VM without CLONE_VFORK, as Linux does).
+   Called before the thread is READY. */
+void linux_compat_sig_clone(struct process *creator, struct process *thr);
+void linux_compat_sig_clone(struct process *creator, struct process *thr) {
+  int ps = l_slot(creator), cs = l_slot(thr);
+  if (ps < 0 || cs < 0) return;
+  l_sigmask[cs] = l_sigmask[ps];
+  l_altstack[cs].ss_sp = 0;
+  l_altstack[cs].ss_size = 0;
+  l_altstack[cs].ss_flags = 0;
+  l_altstack[cs].in_use = 0;
+}
+
 int linux_compat_sigflags_get(struct process *p, int sig) {
   /* Dispositions (and therefore their flags) are group state: a handler
      installed by one thread is entered by any thread, with that thread's
@@ -188,6 +251,41 @@ int linux_compat_sigflags_get(struct process *p, int sig) {
  * every compat process is uid 0 and FAT16 carries no permission bits, so a
  * shared value changes no observable answer — it only has to round-trip. */
 static uint32_t l_umask = 022;
+
+/* cp/sys: fork() inherits the signal mask and alternate stack of the
+   calling thread and the dispositions' flag words of its process (Linux
+   copy_process; the handlers themselves are native PCB state, copied by
+   linux_compat_fork_child).  Called before the child is READY. */
+void linux_compat_sig_fork(struct process *parent, struct process *child);
+void linux_compat_sig_fork(struct process *parent, struct process *child) {
+  int ps = l_slot(parent), cs = l_slot(child);
+  int gs = l_slot(process_group(parent));
+  if (ps < 0 || cs < 0 || gs < 0) return;
+  l_sigmask[cs] = l_sigmask[ps];
+  for (int i = 0; i < HO_SIG_MAX; i++) l_sigflags[cs][i] = l_sigflags[gs][i];
+  for (int i = 0; i < HO_SIG_MAX; i++) l_samask[cs][i] = l_samask[gs][i];
+  l_altstack[cs] = l_altstack[ps];
+}
+
+/* cp/exec: the signal state execve(2) resets (Linux flush_signal_handlers +
+   the altstack clear in exec): every disposition's flag word goes to 0 for
+   the group (the handlers themselves are reset by process_exec_apply), and the
+   exec'ing thread's alternate stack is disabled.  The mask is kept. */
+void linux_compat_sig_exec(struct process *p);
+void linux_compat_sig_exec(struct process *p) {
+  int s = l_slot(p), gs = l_slot(process_group(p));
+  if (gs >= 0)
+    for (int i = 0; i < HO_SIG_MAX; i++) l_sigflags[gs][i] = 0;
+  if (s >= 0) {
+    l_altstack[s].ss_sp = 0;
+    l_altstack[s].ss_size = 0;
+    l_altstack[s].ss_flags = 0;
+    l_altstack[s].in_use = 0;
+  }
+}
+
+/* cp/sys: the creation mask the compat /tmp applies (tmpfs.c). */
+uint32_t linux_compat_umask(void) { return l_umask; }
 
 /* Console budget for the "refused a handler install" diagnostic (below): one
    line per distinct refusal is evidence, an unbounded stream is a flood.  The
@@ -359,7 +457,7 @@ static int l_readlink_target(struct process *p, const char *path, char *out,
   if (path[0] != '/') return -ENOENT;
   struct process *g = p ? process_group(p) : 0;
   const char *src = 0;
-  char buf[160];
+  char buf[VFS_PATH_MAX]; /* cp/exec: an fd's path is a whole VFS path */
   int fd = -1;
 
   if (l_streq(path, "/proc/self")) {
@@ -542,19 +640,29 @@ static int l_proc_rt_sigaction(struct process *p, struct trap_frame *tf) {
   }
   /* Record the flag word: the native PCB keeps handler/mask/restorer but not
      flags, and the compat frame engine needs SA_ONSTACK/SA_SIGINFO. */
-  if (have_act) {
+  uint64_t old_samask = 0;
+  uint32_t old_flags = 0;
+  {
     int slot = l_slot(process_group(p));
-    if (slot >= 0 && sig > 0 && sig < HO_SIG_MAX)
-      l_sigflags[slot][sig] = (uint32_t)ka.sa_flags;
+    if (slot >= 0 && sig > 0 && sig < HO_SIG_MAX) {
+      old_samask = l_samask[slot][sig];
+      old_flags = l_sigflags[slot][sig];
+      if (have_act) {
+        l_sigflags[slot][sig] = (uint32_t)ka.sa_flags;
+        /* SIGKILL/SIGSTOP can never be blocked (Linux sigdelsetmask). */
+        l_samask[slot][sig] = ka.sa_mask & ~((1ull << (L_SIGKILL - 1)) |
+                                             (1ull << (L_SIGSTOP - 1)));
+      }
+    }
   }
   if (uold) {
     /* Exactly the 32 bytes the ABI defines — see the layout note above. */
     struct l_kernel_sigaction ko;
     l_zero(&ko, sizeof ko);
     ko.sa_handler = ho.sa_handler;
-    ko.sa_flags = (uint64_t)(uint32_t)ho.sa_flags;
+    ko.sa_flags = (uint64_t)old_flags; /* C1-thr: as sa_mask below */
     ko.sa_restorer = ho.sa_restorer;
-    ko.sa_mask = ho.sa_mask[0];
+    ko.sa_mask = old_samask; /* C1-thr: the native mirror never kept it */
     if (l_copy_to_user(p, uold, &ko, sizeof ko) != 0) return l_ret(tf, -EFAULT);
   }
   return l_ret(tf, 0);
@@ -654,6 +762,11 @@ static int l_proc_sigaltstack(struct process *p, struct trap_frame *tf) {
     if ((uint32_t)st.ss_flags & ~(uint32_t)(1 | 2 | 0x80000000u))
       return l_ret(tf, -EINVAL);
     if (st.ss_flags & 1) return l_ret(tf, -EINVAL); /* SS_ONSTACK on input */
+    /* cp P1 / F2: Linux refuses an enabled altstack below MINSIGSTKSZ (2048,
+       the UAPI constant) with ENOMEM.  The real frame (AT_MINSIGSTKSZ,
+       lsf_min_sigstksz: 1536 with XSAVE/AVX, 1216 without) is smaller, so
+       every stack Linux accepts can carry this kernel's frame. */
+    if (!(st.ss_flags & 2) && st.ss_size < 2048) return l_ret(tf, -ENOMEM);
     l_altstack[slot].ss_flags = (st.ss_flags & 2) ? 2 : 0;
     if (l_altstack[slot].ss_flags == 2) {
       l_altstack[slot].ss_sp = 0;
@@ -691,7 +804,7 @@ static int l_proc_sigaltstack(struct process *p, struct trap_frame *tf) {
 static void l_sig_row(const char *op, int tgid, int pid, int sig,
                       struct trap_frame *tf, int rc) {
   static int rows;
-  if (rows >= 60)
+  if (rows >= SIGTR(60))
     return;
   rows++;
   struct process *t = process_get_pcb(pid);
@@ -739,9 +852,9 @@ static int l_signal_one(struct trap_frame *tf, const char *op, int tgid,
     int probe = pid;
     if (probe == 0) return l_ret(tf, current_process() ? 0 : -ESRCH);
     if (probe < 0) probe = -probe;
-    struct process *t = process_get_pcb(probe);
-    if (t && t->state != PROC_STATE_FREE && t->state != PROC_STATE_EXITED &&
-        t->state != PROC_STATE_THREAD_DONE)
+    /* C1-k6: a group whose leader thread has exited still exists. */
+    extern int process_pid_alive(int pid);
+    if (process_pid_alive(probe))
       return l_ret(tf, 0);
     return l_ret(tf, -ESRCH);
   }
@@ -794,17 +907,21 @@ static int l_proc_tgkill(struct process *p, struct trap_frame *tf) {
 #define L_RLIMIT_DATA 2
 #define L_RLIMIT_CORE 4
 
-/* Every limit this kernel can state truthfully.  RLIMIT_NOFILE is the fd
-   table (64, MAX_OPEN_FDS); RLIMIT_STACK is the 8 MiB demand-paged main stack
-   (vm.h USER_MAIN_STK_SIZE).  The two are hard limits, so cur == max.  A
-   resource the kernel does not model reads back as RLIM_INFINITY except
-   RLIMIT_CORE, which is genuinely 0 (no core dumps) — the alternative was
-   inventing numbers, and a program that sizes a buffer from a made-up
-   RLIMIT_NOFILE would fail somewhere unrelated. */
-static int l_rlimit_get(int resource, linux_rlimit_t *rl) {
+/* Every limit this kernel can state truthfully.  RLIMIT_NOFILE is real
+   (C1-k5, docs/cp-k5.md §2): a per-group soft/hard pair, hard <= the table
+   (MAX_OPEN_FDS), soft honoured by every fd-allocating path in fs.c.
+   RLIMIT_STACK is the 8 MiB demand-paged main stack (vm.h
+   USER_MAIN_STK_SIZE), a hard limit, so cur == max.  A resource the kernel
+   does not model reads back as RLIM_INFINITY except RLIMIT_CORE, which is
+   genuinely 0 (no core dumps) -- the alternative was inventing numbers. */
+static int l_rlimit_get(struct process *g, int resource, linux_rlimit_t *rl) {
   switch (resource) {
   case L_RLIMIT_NOFILE:
-    rl->rlim_cur = rl->rlim_max = (uint64_t)MAX_OPEN_FDS;
+    rl->rlim_cur = (uint64_t)process_fd_limit(g);
+    rl->rlim_max = (g && g->rlim_nofile_max) ? (uint64_t)g->rlim_nofile_max
+                                             : (uint64_t)MAX_OPEN_FDS;
+    if (rl->rlim_max > (uint64_t)MAX_OPEN_FDS) rl->rlim_max = (uint64_t)MAX_OPEN_FDS;
+    if (rl->rlim_cur > rl->rlim_max) rl->rlim_cur = rl->rlim_max;
     return 0;
   case L_RLIMIT_STACK:
     rl->rlim_cur = rl->rlim_max = (uint64_t)USER_MAIN_STK_SIZE;
@@ -826,21 +943,32 @@ static int l_rlimit_get(int resource, linux_rlimit_t *rl) {
   }
 }
 
-/* setrlimit is ACCEPTED and not enforced (nothing in the kernel enforces a
-   limit today; the fd table and stack are fixed).  Returning 0 keeps a program
-   that lowers its own soft limit working; returning EPERM would break a
-   perfectly reasonable caller for a limit it cannot observe. */
+/* setrlimit semantics (Linux do_prlimit): cur > max is -EINVAL.  Every compat
+   process is uid 0 (CAP_SYS_RESOURCE), so the hard limit may also be raised,
+   up to the table (Linux: sysctl nr_open; beyond it -EPERM).  RLIMIT_NOFILE
+   is stored on the group anchor; the other resources are validated and
+   accepted, not enforced (nothing in the kernel enforces them; refusing would
+   break a program that lowers its own soft limit). */
+static int l_rlimit_set(struct process *g, int resource, const linux_rlimit_t *nr) {
+  linux_rlimit_t cur;
+  int rc = l_rlimit_get(g, resource, &cur);
+  if (rc != 0) return rc;
+  if (nr->rlim_cur > nr->rlim_max) return -EINVAL;
+  if (resource != L_RLIMIT_NOFILE) return 0;
+  if (nr->rlim_max > (uint64_t)MAX_OPEN_FDS) return -EPERM;
+  if (!g) return -ESRCH;
+  g->rlim_nofile_max = (uint32_t)nr->rlim_max;
+  g->rlim_nofile_cur = (uint32_t)nr->rlim_cur;
+  return 0;
+}
+
 static int l_proc_setrlimit(struct process *p, struct trap_frame *tf) {
-  (void)p;
   int resource = (int)l_argi(tf, 0);
   uint64_t url = l_arg(tf, 1);
   if (!url) return l_ret(tf, -EFAULT);
   linux_rlimit_t rl;
   if (l_copy_from_user(p, &rl, url, sizeof rl) != 0) return l_ret(tf, -EFAULT);
-  linux_rlimit_t cur;
-  int rc = l_rlimit_get(resource, &cur);
-  if (rc != 0) return l_ret(tf, rc);
-  return l_ret(tf, 0);
+  return l_ret(tf, l_rlimit_set(process_group(p), resource, &rl));
 }
 
 static int l_proc_getrlimit(struct process *p, struct trap_frame *tf) {
@@ -848,37 +976,38 @@ static int l_proc_getrlimit(struct process *p, struct trap_frame *tf) {
   uint64_t url = l_arg(tf, 1);
   if (!url) return l_ret(tf, -EFAULT);
   linux_rlimit_t rl;
-  int rc = l_rlimit_get(resource, &rl);
+  int rc = l_rlimit_get(process_group(p), resource, &rl);
   if (rc != 0) return l_ret(tf, rc);
   if (l_copy_to_user(p, url, &rl, sizeof rl) != 0) return l_ret(tf, -EFAULT);
   return l_ret(tf, 0);
 }
 
-/* prlimit64(pid, resource, new, old).  pid 0 or self only: cross-process limit
-   manipulation would need a permission model this kernel does not have, and
-   -EPERM is the honest answer for another live pid. */
+/* prlimit64(pid, resource, new, old).  pid 0, the caller, or any live process
+   (every compat process is uid 0: Linux's permission check passes).  old is
+   read before new is applied, as Linux does. */
 static int l_proc_prlimit64(struct process *p, struct trap_frame *tf) {
   int pid = (int)l_argi(tf, 0);
   int resource = (int)l_argi(tf, 1);
   uint64_t unew = l_arg(tf, 2);
   uint64_t uold = l_arg(tf, 3);
-  int self = p ? p->pid : -1;
-  if (pid != 0 && pid != self) {
-    struct process *t = process_get_pcb(pid);
+  struct process *t = p;
+  if (pid != 0 && !(p && (pid == p->pid || pid == process_group(p)->pid))) {
+    t = process_get_pcb(pid);
     if (!t || t->state == PROC_STATE_FREE || t->state == PROC_STATE_EXITED)
       return l_ret(tf, -ESRCH);
-    return l_ret(tf, -EPERM);
   }
+  struct process *g = process_group(t);
+  linux_rlimit_t nr;
+  if (unew && l_copy_from_user(p, &nr, unew, sizeof nr) != 0) return l_ret(tf, -EFAULT);
   linux_rlimit_t rl;
-  int rc = l_rlimit_get(resource, &rl);
+  int rc = l_rlimit_get(g, resource, &rl);
   if (rc != 0) return l_ret(tf, rc);
+  if (unew) {
+    rc = l_rlimit_set(g, resource, &nr);
+    if (rc != 0) return l_ret(tf, rc);
+  }
   if (uold) {
     if (l_copy_to_user(p, uold, &rl, sizeof rl) != 0) return l_ret(tf, -EFAULT);
-  }
-  if (unew) {
-    linux_rlimit_t nr;
-    if (l_copy_from_user(p, &nr, unew, sizeof nr) != 0) return l_ret(tf, -EFAULT);
-    /* accepted, not enforced — see l_proc_setrlimit */
   }
   return l_ret(tf, 0);
 }
@@ -956,9 +1085,11 @@ static int l_proc_times(struct process *p, struct trap_frame *tf) {
   return 1;
 }
 
-/* getrusage(who, struct rusage *) — 144 bytes, all-zero except the two
-   timevals, which are 0 for the same reason times()' counters are.  who must
-   be one of SELF / CHILDREN / THREAD. */
+/* getrusage(who, struct rusage *) -- 144 bytes (C1-k5, docs/cp-k5.md §4).
+   RUSAGE_THREAD is the calling thread, RUSAGE_SELF the whole group (exited
+   threads included), RUSAGE_CHILDREN every reaped descendant; CPU time comes
+   from schedule()'s accounting (all of it in ru_utime), nvcsw/nivcsw are real
+   switch counts.  O(1): no slot walk, no lock. */
 static int l_proc_getrusage(struct process *p, struct trap_frame *tf) {
   int who = (int)l_argi(tf, 0);
   uint64_t uru = l_arg(tf, 1);
@@ -966,9 +1097,11 @@ static int l_proc_getrusage(struct process *p, struct trap_frame *tf) {
     return l_ret(tf, -EINVAL);
   if (!uru) return l_ret(tf, -EFAULT);
   if (!l_user_ok(p, uru, sizeof(linux_rusage_t), 1)) return l_ret(tf, -EFAULT);
-  uint8_t blob[144];
-  l_zero(blob, sizeof blob);
-  if (l_copy_to_user(p, uru, blob, sizeof blob) != 0) return l_ret(tf, -EFAULT);
+  struct ho_rusage ru;
+  process_rusage(p, who, &ru);
+  typedef char ru_size_assert[sizeof ru == 144 ? 1 : -1];
+  (void)sizeof(ru_size_assert);
+  if (l_copy_to_user(p, uru, &ru, sizeof ru) != 0) return l_ret(tf, -EFAULT);
   return l_ret(tf, 0);
 }
 
@@ -1013,6 +1146,99 @@ static int l_proc_faccessat(struct process *p, struct trap_frame *tf) {
   if (r != 0) return l_ret(tf, r);
   if (path[0] != '/' && dirfd != L_AT_FDCWD) return l_ret(tf, -ENOTSUP);
   return l_ret(tf, l_access_check(p, upath, mode));
+}
+
+/* ---- process_vm_readv / process_vm_writev (cp/sys) ---------------------
+ *
+ * wineserver reads (and writes) client memory with these
+ * (server/ptrace.c:345-404, HAVE_PROCESS_VM_READV/WRITEV = 1 in our build's
+ * config.h).  Its fallback on ENOSYS/EPERM is ptrace + /proc/<pid>/mem
+ * (ptrace.c:406-), neither of which exists here, so the calls are
+ * implemented: every byte moves through a kernel bounce buffer between the
+ * target's address space (vm_user_read / vm_kwrite on the TARGET process,
+ * which validate and demand-fault its pages) and the caller's.  Linux
+ * semantics: the byte count transferred; a failure before the first byte is
+ * the error (-EFAULT for a bad remote range, -ESRCH for no such process);
+ * a later failure ends the transfer short.  flags must be 0. */
+#define L_SYS_process_vm_readv 310
+#define L_SYS_process_vm_writev 311
+#define L_PVM_IOV_MAX 1024
+#define L_PVM_CHUNK 512
+
+static int l_pvm_iov(struct process *p, uint64_t vec, uint64_t i,
+                     uint64_t *base, uint64_t *len) {
+  uint64_t io[2];
+  if (l_copy_from_user(p, io, vec + i * 16, sizeof io) != 0) return -EFAULT;
+  *base = io[0];
+  *len = io[1];
+  return 0;
+}
+
+static int l_proc_vm_rw(struct process *p, struct trap_frame *tf, int write) {
+  int pid = (int)l_argi(tf, 0);
+  uint64_t lvec = l_arg(tf, 1), lcnt = l_arg(tf, 2);
+  uint64_t rvec = l_arg(tf, 3), rcnt = l_arg(tf, 4);
+  uint64_t flags = l_arg(tf, 5);
+  if (flags != 0) return l_ret(tf, -EINVAL);
+  if (lcnt > L_PVM_IOV_MAX || rcnt > L_PVM_IOV_MAX) return l_ret(tf, -EINVAL);
+  struct process *t = pid > 0 ? process_get_pcb(pid) : 0;
+  if (!t || t->state == PROC_STATE_FREE || t->state == PROC_STATE_EXITED)
+    return l_ret(tf, -ESRCH);
+  t = process_group(t);
+  if (!t || !t->as) return l_ret(tf, -ESRCH);
+  uint64_t li = 0, loff = 0, lbase = 0, llen = 0;
+  uint64_t ri = 0, roff = 0, rbase = 0, rlen = 0;
+  if (lcnt && l_pvm_iov(p, lvec, 0, &lbase, &llen)) return l_ret(tf, -EFAULT);
+  if (rcnt && l_pvm_iov(p, rvec, 0, &rbase, &rlen)) return l_ret(tf, -EFAULT);
+  int64_t total = 0;
+  uint8_t bounce[L_PVM_CHUNK];
+  while (li < lcnt && ri < rcnt) {
+    if (loff >= llen) {
+      if (++li >= lcnt) break;
+      if (l_pvm_iov(p, lvec, li, &lbase, &llen)) return l_ret(tf, total ? total : -EFAULT);
+      loff = 0;
+      continue;
+    }
+    if (roff >= rlen) {
+      if (++ri >= rcnt) break;
+      if (l_pvm_iov(p, rvec, ri, &rbase, &rlen)) return l_ret(tf, total ? total : -EFAULT);
+      roff = 0;
+      continue;
+    }
+    uint64_t n = llen - loff;
+    if (rlen - roff < n) n = rlen - roff;
+    if (n > L_PVM_CHUNK) n = L_PVM_CHUNK;
+    int bad;
+    if (!write) {
+      bad = vm_user_read(t, rbase + roff, bounce, (int)n) != 0;
+      if (!bad && l_copy_to_user(p, lbase + loff, bounce, n) != 0) {
+        if (!total) return l_ret(tf, -EFAULT);
+        break;
+      }
+    } else {
+      if (l_copy_from_user(p, bounce, lbase + loff, n) != 0) {
+        if (!total) return l_ret(tf, -EFAULT);
+        break;
+      }
+      bad = vm_kwrite(t, rbase + roff, bounce, (int)n) != 0;
+    }
+    if (bad) {
+      if (!total) return l_ret(tf, -EFAULT);
+      break;
+    }
+    total += (int64_t)n;
+    loff += n;
+    roff += n;
+  }
+  return l_ret(tf, total);
+}
+
+static int l_proc_process_vm_readv(struct process *p, struct trap_frame *tf) {
+  return l_proc_vm_rw(p, tf, 0);
+}
+
+static int l_proc_process_vm_writev(struct process *p, struct trap_frame *tf) {
+  return l_proc_vm_rw(p, tf, 1);
 }
 
 /* ---- identity: prctl, nice, job control, affinity ----------------------- */
@@ -1100,6 +1326,17 @@ static int l_proc_prctl(struct process *p, struct trap_frame *tf) {
         return l_ret(tf, -EFAULT);
       return l_ret(tf, 0);
     }
+  case 59: /* PR_SET_SYSCALL_USER_DISPATCH (cp/sys) */
+    /* -EINVAL, i.e. what a Linux < 5.11 kernel answers: Syscall User
+       Dispatch is not implemented.  Upstream Wine 11.0 never asks for it
+       (no PR_SET_SYSCALL_USER_DISPATCH anywhere in the pinned tree; its
+       prctl calls are PR_SET_NAME, dlls/ntdll/unix/env.c:501, and
+       PR_SET_PTRACER, dlls/ntdll/unix/server.c:1656, whose result is
+       ignored).  The per-thread arming seen on the host
+       (docs/cp-p0-host.md §4) is Proton's Wine, which only uses it to catch
+       Windows code issuing raw `syscall`; refusing it costs that catch, not
+       a crash.  Named here so the row is explicit, not a default. */
+    return l_ret(tf, -EINVAL);
   default:
     return l_ret(tf, -EINVAL);
   }
@@ -1292,15 +1529,18 @@ static int l_proc_statx(struct process *p, struct trap_frame *tf) {
 
 /* ---- timer resolution + scheduler queries + rt_sigtimedwait (Mono) ------- */
 
-/* clock_getres(229).  The kernel's tick is 100 Hz, so 10 ms is the honest
- * answer for every clock; a NULL resolver only validates the clock id.
- * Mono sizes its timer wheels from this. */
+/* clock_getres(229); a NULL resolver only validates the clock id.  Mono
+ * sizes its timer wheels from this.  C1-k6: the clocks read the TSC in
+ * microseconds and timeouts are met by a one-shot timer, so 1 us is the
+ * honest answer; the COARSE clocks keep the 100 Hz tick's 10 ms (Linux
+ * answers a jiffy for them). */
 static int l_proc_clock_getres(struct process *p, struct trap_frame *tf) {
   int clockid = (int)l_argi(tf, 0);
   uint64_t ures = l_arg(tf, 1);
   if (clockid < 0 || clockid > 11) return l_ret(tf, -EINVAL);
   if (!ures) return l_ret(tf, 0);
-  struct { int64_t sec; int64_t nsec; } ts = {0, 10000000};
+  struct { int64_t sec; int64_t nsec; } ts = {0, 1000};
+  if (clockid == 5 || clockid == 6) ts.nsec = 10000000;
   if (l_copy_to_user(p, ures, &ts, sizeof ts) != 0) return l_ret(tf, -EFAULT);
   return l_ret(tf, 0);
 }
@@ -1326,10 +1566,30 @@ static int l_proc_sched_getscheduler(struct process *p, struct trap_frame *tf) {
  * it: report "nothing pending" with -EAGAIN and let the caller retry.  glibc's
  * sigwait loops tolerate it; Mono reaches thread creation and the managed
  * runtime with this answer (measured). */
+/* C1-k6 round 2: a signal of the set that IS pending is taken now (blocked
+ * SIG_DFL signals are queued since round 1, docs/cp-k6.md §4): its number
+ * is returned and siginfo filled (si_signo, si_code, si_pid).  Nothing
+ * pending is still -EAGAIN at once, whatever the timeout (no blocking wait:
+ * the Mono note above). */
 static int l_proc_rt_sigtimedwait(struct process *p, struct trap_frame *tf) {
-  (void)p;
-  (void)tf;
-  return l_ret(tf, -EAGAIN);
+  extern int l_sig_dequeue(struct process *cur, uint64_t mask, int *code, int *pid);
+  uint64_t uset = l_arg(tf, 0), uinfo = l_arg(tf, 1);
+  if (l_arg(tf, 3) != 8) return l_ret(tf, -EINVAL);
+  uint64_t set = 0;
+  if (!uset || l_copy_from_user(p, &set, uset, 8) != 0) return l_ret(tf, -EFAULT);
+  set &= ~((1ull << (9 - 1)) | (1ull << (19 - 1)));
+  int code = 0, pid = 0;
+  int sig = l_sig_dequeue(p, set, &code, &pid);
+  if (!sig) return l_ret(tf, -EAGAIN);
+  if (uinfo) {
+    uint8_t si[128];
+    for (int i = 0; i < 128; i++) si[i] = 0;
+    uint32_t v[6] = {(uint32_t)sig, 0, (uint32_t)code, 0, (uint32_t)pid, 0};
+    for (int w = 0; w < 6; w++)
+      for (int b = 0; b < 4; b++) si[w * 4 + b] = (uint8_t)(v[w] >> (8 * b));
+    if (l_copy_to_user(p, uinfo, si, sizeof si) != 0) return l_ret(tf, -EFAULT);
+  }
+  return l_ret(tf, sig);
 }
 
 
@@ -1447,7 +1707,8 @@ static int l_proc_rt_sigsuspend(struct process *p, struct trap_frame *tf) {
        the suspended worker keeps every lock it held, and Mono's ThreadPool can
        never grow again.  Re-check under the same lock that the sender takes. */
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-    int late = l_pending_under(p, nm);
+    /* C1-thr: a task killed while inside the syscall is never re-parked. */
+    int late = l_pending_under(p, nm) || (p->state == PROC_STATE_EXITED || p->state == PROC_STATE_THREAD_DONE);
     if (late) {
       /* The signal won the race: do not park.  Linux restores the
          pre-suspend mask and returns -EINTR; the handler runs at this
@@ -1492,7 +1753,31 @@ static int l_proc_rt_sigsuspend(struct process *p, struct trap_frame *tf) {
   return 1;
 }
 
-const struct l_sysent l_tab_proc[] = { {L_SYS_rt_sigaction, l_proc_rt_sigaction, "rt_sigaction"}, {L_SYS_rt_sigprocmask, l_proc_rt_sigprocmask, "rt_sigprocmask"}, {L_SYS_rt_sigreturn, l_proc_rt_sigreturn, "rt_sigreturn"}, {L_SYS_sigaltstack, l_proc_sigaltstack, "sigaltstack"}, {L_SYS_kill, l_proc_kill, "kill"}, {L_SYS_tkill, l_proc_tkill, "tkill"}, {L_SYS_tgkill, l_proc_tgkill, "tgkill"}, {L_SYS_stat, l_proc_stat, "stat"}, {L_SYS_fstat, l_proc_fstat, "fstat"}, {L_SYS_lstat, l_proc_lstat, "lstat"}, {L_SYS_newfstatat, l_proc_newfstatat, "newfstatat"}, {L_SYS_statx, l_proc_statx, "statx"}, {L_SYS_readlink, l_proc_readlink, "readlink"}, {L_SYS_readlinkat, l_proc_readlinkat, "readlinkat"}, {L_SYS_getrlimit, l_proc_getrlimit, "getrlimit"}, {L_SYS_setrlimit, l_proc_setrlimit, "setrlimit"}, {L_SYS_prlimit64, l_proc_prlimit64, "prlimit64"}, {L_SYS_sysinfo, l_proc_sysinfo, "sysinfo"}, {L_SYS_times, l_proc_times, "times"}, {L_SYS_getrusage, l_proc_getrusage, "getrusage"}, {L_SYS_umask, l_proc_umask, "umask"}, {L_SYS_access, l_proc_access, "access"}, {L_SYS_faccessat, l_proc_faccessat, "faccessat"}, {L_SYS_prctl, l_proc_prctl, "prctl"}, {L_SYS_getpriority, l_proc_getpriority, "getpriority"}, {L_SYS_setpriority, l_proc_setpriority, "setpriority"}, {L_SYS_setpgid, l_proc_setpgid, "setpgid"}, {L_SYS_getpgid, l_proc_getpgid, "getpgid"}, {L_SYS_setsid, l_proc_setsid, "setsid"}, {L_SYS_getsid, l_proc_getsid, "getsid"}, {L_SYS_sched_getaffinity, l_proc_sched_getaffinity, "sched_getaffinity"}, {L_SYS_sched_setaffinity, l_proc_sched_setaffinity, "sched_setaffinity"},
+/* ---- execve / execveat (cp/exec) -----------------------------------------
+ * linux_execve() (src/kernel/linux_exec.c) either installs the new image and
+ * leaves the trap frame entering it (every GPR, rax included, already 0), or
+ * returns -errno with the caller untouched, or -- past the point of no
+ * return -- has killed the process and rescheduled, in which case `tf` now
+ * belongs to another context and must not be written. */
+static int l_proc_execve_common(struct process *p, struct trap_frame *tf,
+                                int dirfd, uint64_t path, uint64_t argv,
+                                uint64_t envp, int flags) {
+  int rc = linux_execve(p, tf, dirfd, path, argv, envp, flags);
+  if (rc == LX_EXEC_DONE || rc == LX_EXEC_GONE) return 1;
+  return l_ret(tf, rc);
+}
+
+static int l_proc_execve(struct process *p, struct trap_frame *tf) {
+  return l_proc_execve_common(p, tf, L_AT_FDCWD, l_arg(tf, 0), l_arg(tf, 1),
+                              l_arg(tf, 2), 0);
+}
+
+static int l_proc_execveat(struct process *p, struct trap_frame *tf) {
+  return l_proc_execve_common(p, tf, (int)l_argi(tf, 0), l_arg(tf, 1),
+                              l_arg(tf, 2), l_arg(tf, 3), (int)l_argi(tf, 4));
+}
+
+const struct l_sysent l_tab_proc[] = { {L_SYS_rt_sigaction, l_proc_rt_sigaction, "rt_sigaction"}, {L_SYS_rt_sigprocmask, l_proc_rt_sigprocmask, "rt_sigprocmask"}, {L_SYS_rt_sigreturn, l_proc_rt_sigreturn, "rt_sigreturn"}, {L_SYS_sigaltstack, l_proc_sigaltstack, "sigaltstack"}, {L_SYS_kill, l_proc_kill, "kill"}, {L_SYS_tkill, l_proc_tkill, "tkill"}, {L_SYS_tgkill, l_proc_tgkill, "tgkill"}, {L_SYS_stat, l_proc_stat, "stat"}, {L_SYS_fstat, l_proc_fstat, "fstat"}, {L_SYS_lstat, l_proc_lstat, "lstat"}, {L_SYS_newfstatat, l_proc_newfstatat, "newfstatat"}, {L_SYS_statx, l_proc_statx, "statx"}, {L_SYS_readlink, l_proc_readlink, "readlink"}, {L_SYS_readlinkat, l_proc_readlinkat, "readlinkat"}, {L_SYS_getrlimit, l_proc_getrlimit, "getrlimit"}, {L_SYS_setrlimit, l_proc_setrlimit, "setrlimit"}, {L_SYS_prlimit64, l_proc_prlimit64, "prlimit64"}, {L_SYS_sysinfo, l_proc_sysinfo, "sysinfo"}, {L_SYS_times, l_proc_times, "times"}, {L_SYS_getrusage, l_proc_getrusage, "getrusage"}, {L_SYS_umask, l_proc_umask, "umask"}, {L_SYS_access, l_proc_access, "access"}, {L_SYS_faccessat, l_proc_faccessat, "faccessat"}, {L_SYS_prctl, l_proc_prctl, "prctl"}, {L_SYS_getpriority, l_proc_getpriority, "getpriority"}, {L_SYS_setpriority, l_proc_setpriority, "setpriority"}, {L_SYS_setpgid, l_proc_setpgid, "setpgid"}, {L_SYS_getpgid, l_proc_getpgid, "getpgid"}, {L_SYS_setsid, l_proc_setsid, "setsid"}, {L_SYS_getsid, l_proc_getsid, "getsid"}, {L_SYS_sched_getaffinity, l_proc_sched_getaffinity, "sched_getaffinity"}, {L_SYS_sched_setaffinity, l_proc_sched_setaffinity, "sched_setaffinity"}, {L_SYS_execve, l_proc_execve, "execve"}, {L_SYS_execveat, l_proc_execveat, "execveat"},
   {L_SYS_clock_getres, l_proc_clock_getres, "clock_getres"},
   {L_SYS_sched_getparam, l_proc_sched_getparam, "sched_getparam"},
   {L_SYS_sched_getscheduler, l_proc_sched_getscheduler, "sched_getscheduler"},
@@ -1504,5 +1789,8 @@ const struct l_sysent l_tab_proc[] = { {L_SYS_rt_sigaction, l_proc_rt_sigaction,
   {L_SYS_sched_get_priority_min, l_proc_sched_prio_min, "sched_get_priority_min"},
   {L_SYS_sched_rr_get_interval, l_proc_sched_rr_interval, "sched_rr_get_interval"},
   {L_SYS_sched_setscheduler, l_proc_sched_setscheduler, "sched_setscheduler"},
+  /* cp/sys */
+  {L_SYS_process_vm_readv, l_proc_process_vm_readv, "process_vm_readv"},
+  {L_SYS_process_vm_writev, l_proc_process_vm_writev, "process_vm_writev"},
   L_SYSENT_END
 };

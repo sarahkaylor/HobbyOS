@@ -1,0 +1,71 @@
+# tools/cp/audio/run-wine-audio.sh on strix, cp-audio 2b81ad0b (kernel = cbefd9b5 + diag row), Wine = tools/cp/audio/build-wine-alsa.sh stage, P5 harness tag audio
+# QEMU line:
+# serial rows ([P5] begin/end, [ALSA], [AUD], [SND]; identical [SND] pcm-closed rows of Wine's endpoint probing counted):
+[SND] virtio-sound 1af4:1059 bar=0x0000380800008000 jacks=0 streams=1 chmaps=0 ctlq=64 txq=64
+[SND] stream 0 out formats=0x00000000000E0078 rates=0x0000000000003FFF ch=1..2
+[SND] irq line=10 vector=42 (TX completions by INTx)
+[SND] ALSA nodes: /dev/snd/controlC0 /dev/snd/pcmC0D0p
+[P5] begin wineboot : wineboot -i
+[P5] end wineboot status=0 ms=16183
+[P5] begin keepalive (background) : wine Z:\CP\P5\VK\vkcube.exe --idle 7200
+[P5] begin winprobe01 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+[P5] end winprobe01 status=0 ms=2343
+[P5] begin alsatone : alsatone default 660 1500
+[ALSA] alsa-lib 1.2.14, device 'default', 660 Hz, 1500 ms
+[SND] hw_params rate=48000 ch=2 period=1200 periods=4 buffer=4800
+[ALSA] card 0: VirtIO SoundCard
+[SND] pcm closed: chunks=60 frames=72000 xruns=0 sync_ptr=364 writei=234 status=0 refine=42 parks=60 irqs=60 tx=60 ctl=6 ctl_timeouts=0
+[P5] end alsatone status=0 ms=1552
+[ALSA] buffer 4800 frames, period 1200 frames
+[ALSA] wrote 72000 frames in 1.404 s, delay 4800, drain ok in 0.102 s, recovers 0
+[ALSA] done rc=0
+[P5] begin alsafloat : alsatone default 770 1000 float
+[ALSA] alsa-lib 1.2.14, device 'default', 770 Hz, 1000 ms
+[SND] hw_params rate=48000 ch=2 period=1200 periods=4 buffer=4800
+[ALSA] card 0: VirtIO SoundCard
+[SND] pcm closed: chunks=40 frames=48000 xruns=0 sync_ptr=685 writei=100 status=0 refine=48 parks=4 irqs=99 tx=100 ctl=11 ctl_timeouts=0
+[P5] end alsafloat status=0 ms=1152
+[ALSA] buffer 4800 frames, period 1200 frames
+[ALSA] wrote 48000 frames in 1.066 s, delay 4800, drain ok in 0.052 s, recovers 0
+[ALSA] done rc=0
+[P5] begin wasapi : wine Z:\CP\P5\AUD\audiotone.exe wasapi 2000
+      2 [SND] pcm closed: chunks=0 frames=0 xruns=0 sync_ptr=1 writei=0 status=0 refine=0 parks=0 irqs=99 tx=100 ctl=11 ctl_timeouts=0
+      2 [SND] pcm closed: chunks=0 frames=0 xruns=0 sync_ptr=1 writei=0 status=0 refine=3 parks=0 irqs=99 tx=100 ctl=11 ctl_timeouts=0
+[SND] pcm closed: chunks=0 frames=0 xruns=0 sync_ptr=1 writei=0 status=0 refine=1 parks=0 irqs=99 tx=100 ctl=11 ctl_timeouts=0
+[SND] pcm closed: chunks=0 frames=0 xruns=0 sync_ptr=1 writei=0 status=0 refine=3 parks=0 irqs=99 tx=100 ctl=11 ctl_timeouts=0
+[AUD] wasapi: CoCreateInstance(MMDeviceEnumerator) hr=0
+[SND] pcm closed: chunks=0 frames=0 xruns=0 sync_ptr=1 writei=0 status=0 refine=3 parks=0 irqs=99 tx=100 ctl=11 ctl_timeouts=0
+[AUD] wasapi: 2 active render endpoint(s)
+[AUD] wasapi: GetDefaultAudioEndpoint hr=0
+[AUD] wasapi: endpoint id {0.0.0.00000000}.{59374F8A-EC93-4323-AA35-70B27770E5EC}
+[AUD] wasapi: Activate(IAudioClient) hr=0
+[SND] hw_params rate=48000 ch=2 period=480 periods=4 buffer=1920
+[AUD] wasapi: mix format tag=0xfffe ch=2 rate=48000 bits=32 float=1
+[AUD] wasapi: Initialize(shared, 200 ms) hr=0
+[AUD] wasapi: buffer 9600 frames, latency 24000000 ns, period 10000000 ns
+[AUD] wasapi: Start hr=0
+[AUD] wasapi: wrote 96000 frames (2.00 s) in 2000 ms; clock 768000/384000
+[SND] pcm closed: chunks=200 frames=96000 xruns=2 sync_ptr=1233 writei=169 status=0 refine=45 parks=0 irqs=266 tx=300 ctl=16 ctl_timeouts=0
+[AUD] wasapi done rc=0
+[P5] end wasapi status=0 ms=2233
+[P5] begin waveout : wine Z:\CP\P5\AUD\audiotone.exe waveout 1500
+      2 [SND] pcm closed: chunks=0 frames=0 xruns=0 sync_ptr=1 writei=0 status=0 refine=0 parks=0 irqs=266 tx=300 ctl=16 ctl_timeouts=0
+     42 [SND] pcm closed: chunks=0 frames=0 xruns=0 sync_ptr=1 writei=0 status=0 refine=3 parks=0 irqs=266 tx=300 ctl=16 ctl_timeouts=0
+[AUD] waveout: 2 device(s)
+[SND] hw_params rate=48000 ch=2 period=480 periods=4 buffer=1920
+[AUD] waveout: waveOutOpen(WAVE_MAPPER, 48000/16/2) = 0
+[SND] pcm closed: chunks=150 frames=71520 xruns=0 sync_ptr=881 writei=430 status=0 refine=39 parks=0 irqs=412 tx=450 ctl=21 ctl_timeouts=0
+[AUD] waveout: queued 72000 frames (1.50 s) in 1473 ms
+[AUD] waveout done rc=0
+[P5] end waveout status=0 ms=1784
+[P5] begin kill : wineserver -k
+[P5] end kill status=0 ms=73
+# grader + host WAV
+[P5W] audio: PASS (rows only; the tones are graded in the host WAV: tools/cp/audio/run-wine-audio.sh)
+[P5W] PASS: audio each ran >= 60 s under Wine with two distinct, recognisable screendumps
+run-wine-audio: p5 rc=0
+run-wine-audio: alsatone (660 Hz, >= 1.2 s): wavcheck: file=/home/sarah/cp/lanes/audio/obj/cp-audio/wine/wine-audio.wav rate=48000 channels=2 duration_s=5.982 rms_dbfs=-9.1 active_rms_dbfs=-9.1 active_s=5.9 first_active_s=0.0 peak_hz_median=770.0 tone_hz=660.0 tone_s=1.5 active_peak_dbfs=-6.0 verdict=PASS
+run-wine-audio: alsafloat (770 Hz, >= 0.8 s): wavcheck: file=/home/sarah/cp/lanes/audio/obj/cp-audio/wine/wine-audio.wav rate=48000 channels=2 duration_s=5.982 rms_dbfs=-9.1 active_rms_dbfs=-9.1 active_s=5.9 first_active_s=0.0 peak_hz_median=770.0 tone_hz=770.0 tone_s=1.0 active_peak_dbfs=-6.0 verdict=PASS
+run-wine-audio: wasapi (880 Hz, >= 1.6 s): wavcheck: file=/home/sarah/cp/lanes/audio/obj/cp-audio/wine/wine-audio.wav rate=48000 channels=2 duration_s=5.982 rms_dbfs=-9.1 active_rms_dbfs=-9.1 active_s=5.9 first_active_s=0.0 peak_hz_median=770.0 tone_hz=880.0 tone_s=2.0 active_peak_dbfs=-6.0 verdict=PASS
+run-wine-audio: waveout (550 Hz, >= 1.2 s): wavcheck: file=/home/sarah/cp/lanes/audio/obj/cp-audio/wine/wine-audio.wav rate=48000 channels=2 duration_s=5.982 rms_dbfs=-9.1 active_rms_dbfs=-9.1 active_s=5.9 first_active_s=0.0 peak_hz_median=770.0 tone_hz=550.0 tone_s=1.4 active_peak_dbfs=-6.0 verdict=PASS
+run-wine-audio: PASS

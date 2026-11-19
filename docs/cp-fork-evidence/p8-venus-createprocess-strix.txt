@@ -1,0 +1,22 @@
+# One Cyberpunk 2077 boot on Venus (P8_GPU=venus, tools/cp/p8/run-p8.sh, run fork-venus1), lane cp-fork @ 9a51c83c, strix KVM, -m 12G
+# WINEDEBUG=+loaddll,fixme-all,+fps,+timestamp,+process (Wine timestamps = s since Wine start); P8_EXPORT=/srv/nfs/cp-fork-p8
+# before (C9-play gateA4, cyberpunk 058fd3d5): NtCreateUserProcess 37.358 -> 54.052 s = 16.7 s; gateB5 16.5 s; gateA5 17.6 s
+
+## the error reporter
+[X]  38.043:0140:trace:process:CreateProcessInternalW app L"Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe" cmdline L"REDEngineErrorReporter.exe 316"
+[X]  38.043:0140:warn:process:CreateProcessInternalW (L"Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe",...): ignoring some flags in 5000210
+[X]  38.051:0140:trace:process:NtCreateUserProcess L"\\??\\Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe" image L"Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe" cmdline L"REDEngineErrorReporter.exe 
+[X]  38.486:0140:trace:process:NtCreateUserProcess L"\\??\\Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe" pid 0144 tid 0148 handles 0xbc/0xc0
+[X]  38.535:0148:trace:loaddll:build_module Loaded L"Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe" at 0000000140000000: native
+
+## the kernel side of those forks ([FORKT]: one row per clone > 20 ms, plus the first two)
+[FORKT] pid=18 clone_us=1069 regions=24 resident=387 batches=35 max_hold_us=29
+[FORKT] pid=17 clone_us=330 regions=57 resident=334 batches=65 max_hold_us=33
+[FORKT] pid=92 clone_us=59171 regions=495 resident=96200 batches=3705 max_hold_us=175
+[FORKT] pid=93 clone_us=47470 regions=495 resident=96201 batches=3705 max_hold_us=47
+
+## verdict
+main-menu
+   +   213.2 s  12:27:55  main menu OCR at s012-t000178: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+   +   219.0 s  12:28:01  main menu OCR at s013-t000184: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+   +   221.5 s  12:28:03  verdict: main-menu; QEMU stopped, slot released; guests on the host now: 1

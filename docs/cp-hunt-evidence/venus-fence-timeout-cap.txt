@@ -1,0 +1,8 @@
+# H1-hunt: [VENUS] fence_wait2 timeout rows are short-timeout waits at the game's first frames; the lifetime cap (16, src/kernel/gpu_abi.c:1409 'to_rows++ < 16') is spent there (strix, h-fp1 serial.txt; second column = the nearest Wine +timestamp, guest s)
+4092 65.398 [VENUS] fence_wait2 timeout pid=109 ctx=12 ring=1 seqno=0x0000000100000011 issued=0x0000000100000011 done=0x0000000000000000 ctx_inflight=2
+4096 65.398 [VENUS] fence_wait2 timeout pid=109 ctx=12 ring=1 seqno=0x0000000100000011 issued=0x0000000100000011 done=0x0000000100000011 ctx_inflight=0
+4381 71.027 [VENUS] fence_wait2 timeout pid=109 ctx=12 ring=4 seqno=0x0000000100000021 issued=0x0000000100000021 done=0x0000000000000000 ctx_inflight=3
+4421 71.459 [VENUS] fence_wait2 timeout pid=109 ctx=12 ring=1 seqno=0x0000000100000087 issued=0x0000000100000087 done=0x0000000100000083 ctx_inflight=4
+4399:[X]  71.343:01f4:trace:fps:win32u_vkQueuePresentKHR 0x104009d510 @ approx 0.01fps, total 0.01fps
+4471:[X]  72.847:01f4:trace:fps:win32u_vkQueuePresentKHR 0x104009d510 @ approx 220.08fps, total 220.74fps
+# all 16 rows within 65.4-71.5 s; the first fps row is at 71.3 s; the game then runs ~280 s more with no row possible. Same shape in 95/128 old game boots (mine_report.py).

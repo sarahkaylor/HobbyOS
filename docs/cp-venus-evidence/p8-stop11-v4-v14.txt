@@ -1,0 +1,233 @@
+# P8 stop 11, boots v4..v14 (C6-venus), strix 2026-11-17: one variable per boot; Venus, -m 12288M
+
+## v4 v4-nouphvv-caps2
+== run-p8 gpu=venus phase=game run=v4-nouphvv-caps2 2026-11-17T04:05:19-06:00 host=sarahpc tree=/home/sarah/cp/lanes/ven
+[P8W] +     0.0 s  04:05:27  slot 3 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 1
+[P8W] +    29.4 s  04:05:57  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8W] +   162.4 s  04:08:10  game process ended: [P8] end game status=11 ms=133009
+[P8W] +   198.6 s  04:08:46  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 3
+== verdict: launcher-done
+[VIRGL3D] shm id=1 bar=4 base=0x0000380800000000 len=0x0000000200000000
+[X]  27.554:011c:0120:info:vkd3d-proton:vkd3d_config_flags_init_once: VKD3D_CONFIG='no_upload_hvv'.
+[X]  27.955:011c:0120:info:vkd3d-proton:d3d12_device_init_workarounds: Detected Linux kernel version 6.1.0
+[KERNEL] pid=96 (Cyberpunk2077.e) memory fault VA=0x0000000143059FC0 PC=0x0000000143059FC0 rw=rx in=PROT region=0x0000000142FF3000+0x0000000000910000 prot=1 kind=3 rsp=0x00000014F355FC58 live=45 inH=0
+[X] [P8CAPS] adapter[0] "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" luid 00000000:000003f5 flags 0x0
+[X] [P8CAPS] adapter[0] budget local hr=0x00000000 budget 16304 MiB usage 0 MiB reservation 8152 MiB
+[X] [P8CAPS] adapter[0] budget non-local hr=0x00000000 budget 48093 MiB usage 0 MiB reservation 24046 MiB
+[X] [P8CAPS] adapter[0] output[0] "\\.\DISPLAY1" attached 1 rect 0,0-1920,1080 rot 0
+[X] [P8CAPS]   fmt 28: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS]   fmt 87: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS]   fmt 24: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS] adapter[0] outputs: 1 (hr=0x887a0002)
+
+## v5 v5-hostmem16
+== run-p8 gpu=venus phase=game run=v5-hostmem16 2026-11-17T04:06:27-06:00 host=sarahpc tree=/home/sarah/cp/lanes/venus-p
+[P8W] +     0.0 s  04:07:39  slot 1 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 3
+[P8W] +    29.4 s  04:08:09  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8W] +   155.4 s  04:10:15  game process ended: [P8] end game status=11 ms=125884
+[P8W] +   191.8 s  04:10:51  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 3
+== verdict: launcher-done
+[VIRGL3D] shm id=1 bar=4 base=0x0000380800000000 len=0x0000000400000000
+[X]  27.363:011c:0120:info:vkd3d-proton:vkd3d_config_flags_init_once: VKD3D_CONFIG=''.
+[X]  27.778:011c:0120:info:vkd3d-proton:d3d12_device_init_workarounds: Detected Linux kernel version 6.1.0
+[KERNEL] pid=96 (Cyberpunk2077.e) memory fault VA=0x0000000143059FC0 PC=0x0000000143059FC0 rw=rx in=PROT region=0x0000000142FF3000+0x0000000000910000 prot=1 kind=3 rsp=0x00000014F355FC58 live=45 inH=0
+
+## v6 v6-xcmp
+== run-p8 gpu=venus phase=game run=v6-xcmp 2026-11-17T04:10:02-06:00 host=sarahpc tree=/home/sarah/cp/lanes/venus-p8b
+[P8W] +     0.0 s  04:10:20  slot 3 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 2
+[P8W] +    28.4 s  04:10:49  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+== verdict: 
+   +     0.0 s  04:10:20  slot 3 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 2
+   +    28.4 s  04:10:49  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[VIRGL3D] shm id=1 bar=4 base=0x0000380800000000 len=0x0000000200000000
+[X]  27.130:011c:0120:info:vkd3d-proton:vkd3d_config_flags_init_once: VKD3D_CONFIG=''.
+[X]  27.498:011c:0120:info:vkd3d-proton:d3d12_device_init_workarounds: Detected Linux kernel version 6.1.0
+[X] [P8CAPS] adapter[0] "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" luid 00000000:000003f5 flags 0x0
+[X] [P8CAPS] adapter[0] budget local hr=0x00000000 budget 16304 MiB usage 0 MiB reservation 8152 MiB
+[X] [P8CAPS] adapter[0] budget non-local hr=0x00000000 budget 48093 MiB usage 0 MiB reservation 24046 MiB
+[X] [P8CAPS] adapter[0] output[0] "\\.\DISPLAY1" attached 1 rect 0,0-1920,1080 rot 0
+[X] [P8CAPS]   fmt 28: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS]   fmt 87: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS]   fmt 24: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS] adapter[0] outputs: 1 (hr=0x887a0002)
+
+## v7 v7-xcmp
+== run-p8 gpu=venus phase=game run=v7-xcmp 2026-11-17T04:21:13-06:00 host=sarahpc tree=/home/sarah/cp/lanes/venus-p8b
+[P8W] +     0.0 s  04:21:18  slot 3 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 1
+[P8W] +    29.4 s  04:21:48  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8W] +   217.7 s  04:24:56  main menu OCR at s011-t000188: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   254.5 s  04:25:33  main menu OCR at s012-t000225: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   260.2 s  04:25:38  main menu OCR at s013-t000230: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[VIRGL3D] shm id=1 bar=4 base=0x0000380800000000 len=0x0000000200000000
+[X]  27.522:011c:0120:info:vkd3d-proton:vkd3d_config_flags_init_once: VKD3D_CONFIG=''.
+[X]  27.946:011c:0120:info:vkd3d-proton:d3d12_device_init_workarounds: Detected Linux kernel version 6.1.0
+[X] [P8CAPS] adapter[0] "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" luid 00000000:000003f5 flags 0x0
+[X] [P8CAPS] adapter[0] budget local hr=0x00000000 budget 16304 MiB usage 0 MiB reservation 8152 MiB
+[X] [P8CAPS] adapter[0] budget non-local hr=0x00000000 budget 48093 MiB usage 0 MiB reservation 24046 MiB
+[X] [P8CAPS] adapter[0] output[0] "\\.\DISPLAY1" attached 1 rect 0,0-1920,1080 rot 0
+[X] [P8CAPS]   fmt 28: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS]   fmt 87: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS]   fmt 24: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS] adapter[0] outputs: 1 (hr=0x887a0002)
+[XCMP] off=0 want=963 got=963 size=963 direct=963 fnv=0x0xB72705945A3F846D dfnv=0x0xB72705945A3F846D first_diff=-1 tid=89 /GAME/r6/config/uiInputActions.xml
+
+## v8 v8-lvp-xcmp
+== run-p8 gpu=lavapipe phase=game run=v8-lvp-xcmp 2026-11-17T04:21:13-06:00 host=sarahpc tree=/home/sarah/cp/lanes/venus
+[P8W] +     0.0 s  04:21:37  slot 1 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 3
+[P8W] +    43.5 s  04:22:20  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8W] +   371.1 s  04:27:48  main menu OCR at s017-t000327: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   376.8 s  04:27:54  main menu OCR at s018-t000333: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P8W] +   382.5 s  04:27:59  main menu OCR at s019-t000339: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[X]  36.045:013c:0140:info:vkd3d-proton:vkd3d_config_flags_init_once: VKD3D_CONFIG=''.
+[X]  77.418:0154:0158:info:vkd3d-proton:vkd3d_config_flags_init_once: VKD3D_CONFIG=''.
+[X] [P8CAPS] adapter[0] "llvmpipe (LLVM 21.1.8, 256 bits)" luid 00000000:000003f4 flags 0x0
+[X] [P8CAPS] adapter[0] budget local hr=0x00000000 budget 11520 MiB usage 0 MiB reservation 5760 MiB
+[X] [P8CAPS] adapter[0] budget non-local hr=0x00000000 budget 0 MiB usage 0 MiB reservation 0 MiB
+[X] [P8CAPS] adapter[0] output[0] "\\.\DISPLAY1" attached 1 rect 0,0-1920,1080 rot 0
+[X] [P8CAPS]   fmt 28: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS]   fmt 87: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS]   fmt 24: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS] adapter[0] outputs: 1 (hr=0x887a0002)
+[XCMP] off=0 want=963 got=963 size=963 direct=963 fnv=0x0xB72705945A3F846D dfnv=0x0xB72705945A3F846D first_diff=-1 tid=132 /GAME/r6/config/uiInputActions.xml
+
+## v9 v9-xcmp2
+== run-p8 gpu=venus phase=game run=v9-xcmp2 2026-11-17T04:26:08-06:00 host=sarahpc tree=/home/sarah/cp/lanes/venus-p8b
+[P8W] +     0.0 s  04:28:04  slot 1 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 3
+[P8W] +    27.4 s  04:28:31  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8W] +   106.7 s  04:29:51  game process ended: [P8] end game status=5 ms=79057
+[P8W] +   142.1 s  04:30:26  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 2
+== verdict: launcher-done
+[VIRGL3D] shm id=1 bar=4 base=0x0000380800000000 len=0x0000000200000000
+[X]  25.522:011c:0120:info:vkd3d-proton:vkd3d_config_flags_init_once: VKD3D_CONFIG=''.
+[X]  25.930:011c:0120:info:vkd3d-proton:d3d12_device_init_workarounds: Detected Linux kernel version 6.1.0
+[KERNEL] pid=89 (Cyberpunk2077.e) memory fault VA=0x00000000000000F8 PC=0x00000001422CA324 rw=r  in=HOLE region=NONE rsp=0x00007FFFFE2FF780 live=45 inH=0 cr3frame=0x0000000229C82000 asroot=0x000000022
+[X] [P8CAPS] adapter[0] "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" luid 00000000:000003f5 flags 0x0
+[X] [P8CAPS] adapter[0] budget local hr=0x00000000 budget 16304 MiB usage 0 MiB reservation 8152 MiB
+[X] [P8CAPS] adapter[0] budget non-local hr=0x00000000 budget 48093 MiB usage 0 MiB reservation 24046 MiB
+[X] [P8CAPS] adapter[0] output[0] "\\.\DISPLAY1" attached 1 rect 0,0-1920,1080 rot 0
+[X] [P8CAPS]   fmt 28: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS]   fmt 87: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS]   fmt 24: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS] adapter[0] outputs: 1 (hr=0x887a0002)
+[XCMP] off=0 want=963 got=963 size=963 direct=963 fnv=0x0xB72705945A3F846D dfnv=0x0xB72705945A3F846D first_diff=-1 tid=89 /GAME/r6/config/uiInputActions.xml
+
+## v10 v10-delay
+== run-p8 gpu=venus phase=game run=v10-delay 2026-11-17T04:26:08-06:00 host=sarahpc tree=/home/sarah/cp/lanes/venus-p8c
+[P8W] +     0.0 s  04:26:13  slot 3 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 3
+[P8W] +    27.4 s  04:26:40  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8W] +   112.9 s  04:28:06  game process ended: [P8] end game status=5 ms=84876
+[P8W] +   148.2 s  04:28:41  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 3
+== verdict: launcher-done
+[VIRGL3D] shm id=1 bar=4 base=0x0000380800000000 len=0x0000000200000000
+[X]  25.934:011c:0120:info:vkd3d-proton:vkd3d_config_flags_init_once: VKD3D_CONFIG=''.
+[X]  26.361:011c:0120:info:vkd3d-proton:d3d12_device_init_workarounds: Detected Linux kernel version 6.1.0
+[KERNEL] pid=96 (Cyberpunk2077.e) memory fault VA=0x0000000143059FC0 PC=0x0000000143059FC0 rw=rx in=PROT region=0x0000000142FF3000+0x0000000000910000 prot=1 kind=3 rsp=0x00000014F355FC58 live=45 inH=0
+[X] [P8CAPS] adapter[0] "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" luid 00000000:000003f5 flags 0x0
+[X] [P8CAPS] adapter[0] budget local hr=0x00000000 budget 16304 MiB usage 0 MiB reservation 8152 MiB
+[X] [P8CAPS] adapter[0] budget non-local hr=0x00000000 budget 48093 MiB usage 0 MiB reservation 24046 MiB
+[X] [P8CAPS] adapter[0] output[0] "\\.\DISPLAY1" attached 1 rect 0,0-1920,1080 rot 0
+[X] [P8CAPS]   fmt 28: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS]   fmt 87: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS]   fmt 24: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS] adapter[0] outputs: 1 (hr=0x887a0002)
+[XCMP] off=0 want=963 got=963 size=963 direct=0 fnv=0x0xB72705945A3F846D dfnv=0x0x14650FB0739D0383 first_diff=-1 tid=89 /GAME/r6/config/uiInputActions.xml
+
+## v11 v11-unpark
+== run-p8 gpu=venus phase=game run=v11-unpark 2026-11-17T04:33:28-06:00 host=sarahpc tree=/home/sarah/cp/lanes/venus-p8b
+[P8W] +     0.0 s  04:33:53  slot 3 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 3
+[P8W] +    28.4 s  04:34:21  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8W] +   107.5 s  04:35:40  game process ended: [P8] end game status=5 ms=79634
+[P8W] +   143.0 s  04:36:16  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 2
+== verdict: launcher-done
+[VIRGL3D] shm id=1 bar=4 base=0x0000380800000000 len=0x0000000200000000
+[X]  26.170:011c:0120:info:vkd3d-proton:vkd3d_config_flags_init_once: VKD3D_CONFIG=''.
+[X]  26.690:011c:0120:info:vkd3d-proton:d3d12_device_init_workarounds: Detected Linux kernel version 6.1.0
+[KERNEL] pid=96 (Cyberpunk2077.e) memory fault VA=0x0000000143059FC0 PC=0x0000000143059FC0 rw=rx in=PROT region=0x0000000142FF3000+0x0000000000910000 prot=1 kind=3 rsp=0x00000014F355FC58 live=45 inH=0
+[X] [P8CAPS] adapter[0] "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" luid 00000000:000003f5 flags 0x0
+[X] [P8CAPS] adapter[0] budget local hr=0x00000000 budget 16304 MiB usage 0 MiB reservation 8152 MiB
+[X] [P8CAPS] adapter[0] budget non-local hr=0x00000000 budget 48093 MiB usage 0 MiB reservation 24046 MiB
+[X] [P8CAPS] adapter[0] output[0] "\\.\DISPLAY1" attached 1 rect 0,0-1920,1080 rot 0
+[X] [P8CAPS]   fmt 28: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS]   fmt 87: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS]   fmt 24: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS] adapter[0] outputs: 1 (hr=0x887a0002)
+[VENUS] fence stats (ctx_destroy) retired=7 irq=3 inline=4 errors=0 waiter_tick_finds=0 stale_skips=0 post->retire_us <=25:0 <=50:0 <=100:1 <=200:4 <=500:2 <=1000:0 <=2000:0 <=5000:0 <=11000:0 >11000:0
+
+## v12 v12-unpark
+== run-p8 gpu=venus phase=game run=v12-unpark 2026-11-17T04:33:28-06:00 host=sarahpc tree=/home/sarah/cp/lanes/venus-p8c
+[P8W] +     0.0 s  04:33:53  slot 1 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 2
+[P8W] +    27.4 s  04:34:20  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8W] +   109.4 s  04:35:42  game process ended: [P8] end game status=5 ms=81259
+[P8W] +   145.0 s  04:36:18  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 1
+== verdict: launcher-done
+[VIRGL3D] shm id=1 bar=4 base=0x0000380800000000 len=0x0000000200000000
+[X]  26.055:011c:0120:info:vkd3d-proton:vkd3d_config_flags_init_once: VKD3D_CONFIG=''.
+[X]  26.529:011c:0120:info:vkd3d-proton:d3d12_device_init_workarounds: Detected Linux kernel version 6.1.0
+[KERNEL] pid=96 (Cyberpunk2077.e) memory fault VA=0x0000000143059FC0 PC=0x0000000143059FC0 rw=rx in=PROT region=0x0000000142FF3000+0x0000000000910000 prot=1 kind=3 rsp=0x00000014F355FC58 live=45 inH=0
+[X] [P8CAPS] adapter[0] "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" luid 00000000:000003f5 flags 0x0
+[X] [P8CAPS] adapter[0] budget local hr=0x00000000 budget 16304 MiB usage 0 MiB reservation 8152 MiB
+[X] [P8CAPS] adapter[0] budget non-local hr=0x00000000 budget 48093 MiB usage 0 MiB reservation 24046 MiB
+[X] [P8CAPS] adapter[0] output[0] "\\.\DISPLAY1" attached 1 rect 0,0-1920,1080 rot 0
+[X] [P8CAPS]   fmt 28: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS]   fmt 87: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS]   fmt 24: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS] adapter[0] outputs: 1 (hr=0x887a0002)
+[VENUS] fence stats (ctx_destroy) retired=7 irq=4 inline=3 errors=0 waiter_tick_finds=0 stale_skips=0 post->retire_us <=25:0 <=50:1 <=100:3 <=200:1 <=500:2 <=1000:0 <=2000:0 <=5000:0 <=11000:0 >11000:0
+
+## v13 v13-uname7
+== run-p8 gpu=venus phase=game run=v13-uname7 2026-11-17T04:38:01-06:00 host=sarahpc tree=/home/sarah/cp/lanes/venus-p8b
+[P8W] +     0.0 s  04:38:06  slot 2 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 1
+[P8W] +    27.4 s  04:38:33  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8W] +   140.7 s  04:40:27  verdict: timeout; QEMU stopped, slot released; guests on the host now: 2
+== verdict: 
+   +     0.0 s  04:38:06  slot 2 acquired; boot -smp 8 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 1
+[VIRGL3D] shm id=1 bar=4 base=0x0000380800000000 len=0x0000000200000000
+[X]  26.033:011c:0120:info:vkd3d-proton:vkd3d_config_flags_init_once: VKD3D_CONFIG=''.
+[X]  26.359:011c:0120:info:vkd3d-proton:d3d12_device_init_workarounds: Detected Linux kernel version 7.0.0
+[KERNEL] pid=96 (Cyberpunk2077.e) memory fault VA=0x0000000000000000 PC=0x0000000140A09B6C rw=r  in=HOLE region=NONE rsp=0x00000014F355FD10 live=45 inH=0 cr3frame=0x0000000229CC2000 asroot=0x000000022
+[X] [P8CAPS] adapter[0] "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" luid 00000000:000003f5 flags 0x0
+[X] [P8CAPS] adapter[0] budget local hr=0x00000000 budget 16304 MiB usage 0 MiB reservation 8152 MiB
+[X] [P8CAPS] adapter[0] budget non-local hr=0x00000000 budget 48093 MiB usage 0 MiB reservation 24046 MiB
+[X] [P8CAPS] adapter[0] output[0] "\\.\DISPLAY1" attached 1 rect 0,0-1920,1080 rot 0
+[X] [P8CAPS]   fmt 28: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS]   fmt 87: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS]   fmt 24: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS] adapter[0] outputs: 1 (hr=0x887a0002)
+[VENUS] fence stats (ctx_destroy) retired=7 irq=4 inline=3 errors=0 waiter_tick_finds=0 stale_skips=0 post->retire_us <=25:0 <=50:1 <=100:3 <=200:2 <=500:1 <=1000:0 <=2000:0 <=5000:0 <=11000:0 >11000:0
+
+## v14 v14-smp16
+== run-p8 gpu=venus phase=game run=v14-smp16 2026-11-17T04:38:01-06:00 host=sarahpc tree=/home/sarah/cp/lanes/venus-p8c
+[P8W] +     0.0 s  04:38:06  slot 1 acquired; boot -smp 16 -m 12288M -cpu host (KVM); QEMU guests on the host before ours: 1
+[P8W] +    27.4 s  04:38:33  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
+[P8W] +   106.6 s  04:39:52  game process ended: [P8] end game status=5 ms=78630
+[P8W] +   141.9 s  04:40:28  verdict: launcher-done; QEMU stopped, slot released; guests on the host now: 1
+== verdict: launcher-done
+[VIRGL3D] shm id=1 bar=4 base=0x0000380800000000 len=0x0000000200000000
+[X]  25.990:011c:0120:info:vkd3d-proton:vkd3d_config_flags_init_once: VKD3D_CONFIG=''.
+[X]  26.395:011c:0120:info:vkd3d-proton:d3d12_device_init_workarounds: Detected Linux kernel version 6.1.0
+[KERNEL] pid=96 (Cyberpunk2077.e) memory fault VA=0x00000001430406B8 PC=0x0000000140195769 rw=w  in=PROT region=0x0000000142FF3000+0x0000000000910000 prot=1 kind=3 rsp=0x00000014F355FCB0 live=45 inH=0
+[X] [P8CAPS] adapter[0] "Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))" luid 00000000:000003f5 flags 0x0
+[X] [P8CAPS] adapter[0] budget local hr=0x00000000 budget 16304 MiB usage 0 MiB reservation 8152 MiB
+[X] [P8CAPS] adapter[0] budget non-local hr=0x00000000 budget 48093 MiB usage 0 MiB reservation 24046 MiB
+[X] [P8CAPS] adapter[0] output[0] "\\.\DISPLAY1" attached 1 rect 0,0-1920,1080 rot 0
+[X] [P8CAPS]   fmt 28: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS]   fmt 87: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS]   fmt 24: 12 modes, first 640x480@60000/1000 last 1920x1080@60000/1000
+[X] [P8CAPS] adapter[0] outputs: 1 (hr=0x887a0002)
+[VENUS] fence stats (ctx_destroy) retired=7 irq=5 inline=2 errors=0 waiter_tick_finds=0 stale_skips=0 post->retire_us <=25:0 <=50:0 <=100:3 <=200:3 <=500:1 <=1000:0 <=2000:0 <=5000:0 <=11000:0 >11000:0
+
+## reading (C6-venus)
+- v4  VKD3D_CONFIG=no_upload_hvv (applied): same worker fault at PC 0x143059FC0.  Not UPLOAD-in-HVV.
+- v4  p8caps: 1 adapter, 1 output (\\.\DISPLAY1 1920x1080, 12 modes in RGBA8/BGRA8/RGB10A2), budget local 16304 MiB, non-local 48093 MiB.  Not DXGI outputs/modes/budget.
+- v5  hostmem=16G (P0's value; shm len 0x400000000): same fault.  Not the BAR size.
+- v6  hung before the window (all threads s5, no fps): one-off, stopped by PID.
+- v7  CP_XCMP (byte-exact config reads): **reached PRESS SPACE and the MAIN MENU on Venus** (verdict main-menu).
+- v8  lavapipe + CP_XCMP: main menu; the five /r6/config XMLs hash identically to Venus (fnv equal, first_diff=-1).  Not file data.
+- v9  CP_XCMP repeat: main-thread NULL+0xF8 fault (lock on a NULL object's +0xF8 byte) -- v7 was a lucky interleaving.
+- v10 a pure 60 us/4 KiB delay in place of the cross-check read: worker fault.
+- v11/v12 stale-fence-wake fix (5f77dfd5): stale_skips 177/192 withheld in the first context, still the worker fault.
+- v13 uname 7.0 (vkd3d "Detected Linux kernel version 7.0.0", as P0): worker NULL-read variant.  Not the kernel-version workaround.
+- v14 -smp 16 (P0's count): .rdata write variant.  Not the CPU count.
+So stop 11 is a race: the same build reaches the menu once in ten boots.  Every variant is a use of something
+not yet built (an empty engine array whose data is the static sentinel in .rdata, or a NULL object) on the
+main thread or a worker, right after the main thread loads /r6/config/uiInputActions.xml..inputContexts.xml.

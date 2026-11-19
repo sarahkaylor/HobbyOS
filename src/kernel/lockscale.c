@@ -144,19 +144,20 @@ int lock_class(const void *lock) {
 /* ---------------------------------------------------------------------------
  * Per-CPU audit state.
  * ------------------------------------------------------------------------- */
-static volatile uint64_t ls_held[MAX_CPUS][LS_HELD_SLOTS];
-static volatile uint64_t ls_held_pc[MAX_CPUS][LS_HELD_SLOTS];
-static volatile uint8_t ls_held_n[MAX_CPUS];
-
-static volatile uint8_t ls_irqoff_nest[MAX_CPUS];
-static volatile uint8_t ls_irqoff_active[MAX_CPUS];
-static volatile uint64_t ls_irqoff_start[MAX_CPUS];
-static volatile uint64_t ls_irqoff_total[MAX_CPUS];
-static volatile uint64_t ls_irqoff_max[MAX_CPUS];
-static volatile uint64_t ls_irqoff_max_lock[MAX_CPUS];
-static volatile uint64_t ls_irqoff_max_pc[MAX_CPUS];
-
-static volatile uint8_t ls_in_irq[MAX_CPUS];
+/* C1-k7 (docs/cp-k7.md §3): one cache-line-aligned record per CPU.  These
+ * were [MAX_CPUS] arrays -- ls_in_irq was eight bytes for all eight CPUs --
+ * that every trap (in_irq) and every spinlock acquire/release (the held
+ * stack, the IRQ-off window) wrote, so each write pulled a line another CPU
+ * had just written. */
+struct ls_cpu_state {
+  volatile uint64_t held[LS_HELD_SLOTS];
+  volatile uint64_t held_pc[LS_HELD_SLOTS];
+  volatile uint64_t irqoff_start, irqoff_total, irqoff_max, irqoff_max_lock, irqoff_max_pc;
+  volatile uint64_t preempt_site;
+  volatile int32_t preempt;
+  volatile uint8_t held_n, irqoff_nest, irqoff_active, in_irq;
+} __attribute__((aligned(64)));
+static struct ls_cpu_state ls_pc[MAX_CPUS];
 
 static volatile uint32_t ls_blockhold;
 static volatile uint32_t ls_selflock;
@@ -220,26 +221,25 @@ static void ls_report(const char *tag, const char *what, const void *lk,
 /* Kernel preemption reference count, per CPU (see lock.h).  Disabling
  * preemption does NOT disable interrupts: the tick still runs and device
  * interrupts still enter the kernel; it only defers the context switch. */
-static volatile int32_t ls_preempt[MAX_CPUS];
+/* (ls_pc[c].preempt) */
 
-static volatile uint64_t ls_preempt_site[MAX_CPUS];
 
 static inline uint32_t ls_cpu(void);
 
 void kernel_preempt_disable(void) {
   uint32_t c = ls_cpu();
-  if (ls_preempt[c]++ == 0)
-    ls_preempt_site[c] = (uint64_t)(uintptr_t)__builtin_return_address(0);
+  if (ls_pc[c].preempt++ == 0)
+    ls_pc[c].preempt_site = (uint64_t)(uintptr_t)__builtin_return_address(0);
 }
 
 void kernel_preempt_enable(void) {
   uint32_t c = ls_cpu();
-  if (ls_preempt[c] > 0) {
-    if (--ls_preempt[c] == 0)
-      ls_preempt_site[c] = 0;
+  if (ls_pc[c].preempt > 0) {
+    if (--ls_pc[c].preempt == 0)
+      ls_pc[c].preempt_site = 0;
   } else {
-    ls_preempt[c] = 0; /* unbalanced enable: clamp rather than go negative */
-    ls_preempt_site[c] = 0;
+    ls_pc[c].preempt = 0; /* unbalanced enable: clamp rather than go negative */
+    ls_pc[c].preempt_site = 0;
   }
 }
 
@@ -256,56 +256,56 @@ void lock_audit_site_override(uint64_t pc) {
   uint32_t c = ls_cpu();
   if (c >= MAX_CPUS)
     return;
-  uint8_t n = ls_held_n[c];
+  uint8_t n = ls_pc[c].held_n;
   if (n > 0 && n <= LS_HELD_SLOTS)
-    ls_held_pc[c][n - 1] = pc;
-  if (ls_preempt[c] > 0)
-    ls_preempt_site[c] = pc;
+    ls_pc[c].held_pc[n - 1] = pc;
+  if (ls_pc[c].preempt > 0)
+    ls_pc[c].preempt_site = pc;
 }
 
-int kernel_preempt_count(void) { return ls_preempt[ls_cpu()]; }
+int kernel_preempt_count(void) { return ls_pc[ls_cpu()].preempt; }
 
-void kernel_preempt_reset(void) { ls_preempt[ls_cpu()] = 0; }
+void kernel_preempt_reset(void) { ls_pc[ls_cpu()].preempt = 0; }
 
 static inline uint32_t ls_cpu(void) {
   uint32_t c = get_cpuid();
   return c < MAX_CPUS ? c : (MAX_CPUS - 1);
 }
 
-void lock_audit_irq_enter(void) { ls_in_irq[ls_cpu()] = 1; }
-void lock_audit_irq_exit(void) { ls_in_irq[ls_cpu()] = 0; }
-int lock_audit_in_irq(void) { return ls_in_irq[ls_cpu()] != 0; }
+void lock_audit_irq_enter(void) { ls_pc[ls_cpu()].in_irq = 1; }
+void lock_audit_irq_exit(void) { ls_pc[ls_cpu()].in_irq = 0; }
+int lock_audit_in_irq(void) { return ls_pc[ls_cpu()].in_irq != 0; }
 
 void lock_audit_irqoff_begin(int we_masked) {
   uint32_t c = ls_cpu();
-  uint8_t n = ls_irqoff_nest[c];
-  ls_irqoff_nest[c] = (uint8_t)(n + 1);
+  uint8_t n = ls_pc[c].irqoff_nest;
+  ls_pc[c].irqoff_nest = (uint8_t)(n + 1);
   if (n == 0 && we_masked) {
-    ls_irqoff_start[c] = timer_get_us();
-    ls_irqoff_active[c] = 1;
+    ls_pc[c].irqoff_start = timer_get_us();
+    ls_pc[c].irqoff_active = 1;
   }
 }
 
 void lock_audit_irqoff_end(int we_unmask) {
   uint32_t c = ls_cpu();
-  uint8_t n = ls_irqoff_nest[c];
+  uint8_t n = ls_pc[c].irqoff_nest;
   if (n == 0) { /* unmatched restore: ignore, never underflow */
-    ls_irqoff_active[c] = 0;
+    ls_pc[c].irqoff_active = 0;
     return;
   }
-  ls_irqoff_nest[c] = (uint8_t)(n - 1);
-  if (n == 1 && ls_irqoff_active[c] && we_unmask) {
-    uint64_t d = timer_get_us() - ls_irqoff_start[c];
-    ls_irqoff_total[c] += d;
-    if (d > ls_irqoff_max[c]) {
-      ls_irqoff_max[c] = d;
+  ls_pc[c].irqoff_nest = (uint8_t)(n - 1);
+  if (n == 1 && ls_pc[c].irqoff_active && we_unmask) {
+    uint64_t d = timer_get_us() - ls_pc[c].irqoff_start;
+    ls_pc[c].irqoff_total += d;
+    if (d > ls_pc[c].irqoff_max) {
+      ls_pc[c].irqoff_max = d;
       /* Blame the outermost lock still held when the window closes: it is the
        * one that decided to mask.  Read the stack before it is popped. */
-      uint8_t hn = ls_held_n[c];
-      ls_irqoff_max_lock[c] = hn ? ls_held[c][0] : 0;
-      ls_irqoff_max_pc[c] = hn ? ls_held_pc[c][0] : 0;
+      uint8_t hn = ls_pc[c].held_n;
+      ls_pc[c].irqoff_max_lock = hn ? ls_pc[c].held[0] : 0;
+      ls_pc[c].irqoff_max_pc = hn ? ls_pc[c].held_pc[0] : 0;
     }
-    ls_irqoff_active[c] = 0;
+    ls_pc[c].irqoff_active = 0;
   }
 }
 
@@ -315,24 +315,24 @@ void lock_audit_held_push(const void *lock, uint64_t pc) {
    * stack with "?" entries and make a later report name nothing useful. */
   if (lock_class(lock) < 0)
     return;
-  uint8_t n = ls_held_n[c];
+  uint8_t n = ls_pc[c].held_n;
   if (n >= LS_HELD_SLOTS)
     return; /* saturate: diagnostics only, never blocks the kernel */
-  ls_held[c][n] = (uint64_t)(uintptr_t)lock;
-  ls_held_pc[c][n] = pc;
-  ls_held_n[c] = (uint8_t)(n + 1);
+  ls_pc[c].held[n] = (uint64_t)(uintptr_t)lock;
+  ls_pc[c].held_pc[n] = pc;
+  ls_pc[c].held_n = (uint8_t)(n + 1);
 }
 
 void lock_audit_held_pop(const void *lock) {
   uint32_t c = ls_cpu();
   if (lock_class(lock) < 0)
     return;
-  uint8_t n = ls_held_n[c];
+  uint8_t n = ls_pc[c].held_n;
   if (n == 0)
     return;
   uint64_t a = (uint64_t)(uintptr_t)lock;
-  if (ls_held[c][n - 1] == a) {
-    ls_held_n[c] = (uint8_t)(n - 1);
+  if (ls_pc[c].held[n - 1] == a) {
+    ls_pc[c].held_n = (uint8_t)(n - 1);
     return;
   }
   /* Not innermost: either a non-LIFO release (the rank tracker owns that
@@ -341,39 +341,50 @@ void lock_audit_held_pop(const void *lock) {
    * its entry stays on the old one.  Drop it where it actually is, so a
    * phantom entry cannot make a later [BLOCKHOLD] name the wrong lock. */
   for (int i = (int)n - 2; i >= 0; i--) {
-    if (ls_held[c][i] == a) {
+    if (ls_pc[c].held[i] == a) {
       for (int j = i; j < (int)n - 1; j++) {
-        ls_held[c][j] = ls_held[c][j + 1];
-        ls_held_pc[c][j] = ls_held_pc[c][j + 1];
+        ls_pc[c].held[j] = ls_pc[c].held[j + 1];
+        ls_pc[c].held_pc[j] = ls_pc[c].held_pc[j + 1];
       }
-      ls_held_n[c] = (uint8_t)(n - 1);
+      ls_pc[c].held_n = (uint8_t)(n - 1);
       return;
     }
   }
   for (uint32_t oc = 0; oc < MAX_CPUS; oc++) {
     if (oc == c)
       continue;
-    uint8_t m = ls_held_n[oc];
+    uint8_t m = ls_pc[oc].held_n;
     for (int i = (int)m - 1; i >= 0; i--) {
-      if (ls_held[oc][i] == a) {
+      if (ls_pc[oc].held[i] == a) {
         for (int j = i; j < (int)m - 1; j++) {
-          ls_held[oc][j] = ls_held[oc][j + 1];
-          ls_held_pc[oc][j] = ls_held_pc[oc][j + 1];
+          ls_pc[oc].held[j] = ls_pc[oc].held[j + 1];
+          ls_pc[oc].held_pc[j] = ls_pc[oc].held_pc[j + 1];
         }
-        ls_held_n[oc] = (uint8_t)(m - 1);
+        ls_pc[oc].held_n = (uint8_t)(m - 1);
         return;
       }
     }
   }
 }
 
-int lock_audit_held_depth(void) { return ls_held_n[ls_cpu()]; }
+int lock_audit_held_depth(void) { return ls_pc[ls_cpu()].held_n; }
+
+/* cp-fat: the acquire site recorded for `lock` on this CPU's held stack, or 0
+ * when this CPU does not hold it (diagnostics: names a leaked hold). */
+uint64_t lock_audit_held_site(const void *lock) {
+  uint32_t c = ls_cpu();
+  uint8_t n = ls_pc[c].held_n;
+  for (int i = (int)n - 1; i >= 0; i--)
+    if (ls_pc[c].held[i] == (uint64_t)(uintptr_t)lock)
+      return ls_pc[c].held_pc[i];
+  return 0;
+}
 
 const char *lock_audit_held_outermost(void) {
   uint32_t c = ls_cpu();
-  if (!ls_held_n[c])
+  if (!ls_pc[c].held_n)
     return "-";
-  return lock_name((const void *)(uintptr_t)ls_held[c][0]);
+  return lock_name((const void *)(uintptr_t)ls_pc[c].held[0]);
 }
 
 /* ---------------------------------------------------------------------------
@@ -396,27 +407,27 @@ void lock_audit_block_point(const char *what) {
     ls_blockhold++;
     if (ls_memo_new("preempt", (void *)0x9E11)) {
       uint32_t hc = ls_cpu();
-      uint8_t hn = ls_held_n[hc];
+      uint8_t hn = ls_pc[hc].held_n;
       /* hn == 0 is the interesting case: the held stack is empty, so the
          reference belongs to an acquisition that has already popped (or
          never pushed) -- report the recorded 0->1 site, which is the only
          thing that names the leak. */
       ls_report("[BLOCKHOLD]", what,
-                hn ? (const void *)(uintptr_t)ls_held[hc][hn - 1] : (const void *)0,
-                hn ? ls_held_pc[hc][hn - 1] : ls_preempt_site[hc],
+                hn ? (const void *)(uintptr_t)ls_pc[hc].held[hn - 1] : (const void *)0,
+                hn ? ls_pc[hc].held_pc[hn - 1] : ls_pc[hc].preempt_site,
                 (uint64_t)pc);
     }
     kernel_preempt_reset();
   }
   uint32_t c = ls_cpu();
-  uint8_t n = ls_held_n[c];
+  uint8_t n = ls_pc[c].held_n;
   for (uint8_t i = 0; i < n && i < LS_HELD_SLOTS; i++) {
-    const void *lk = (const void *)(uintptr_t)ls_held[c][i];
+    const void *lk = (const void *)(uintptr_t)ls_pc[c].held[i];
     if (lock_class(lk) != LOCK_CLASS_IRQ)
       continue; /* unregistered / process-class: not this rule's business */
     ls_blockhold++;
     if (ls_memo_new(what, lk))
-      ls_report("[BLOCKHOLD]", what, lk, ls_held_pc[c][i], 0);
+      ls_report("[BLOCKHOLD]", what, lk, ls_pc[c].held_pc[i], 0);
     return; /* one report per blocking point is enough */
   }
 }
@@ -450,15 +461,15 @@ void lock_audit_count_irqsave_on_process(void) { ls_irqmask_calls++; }
 uint64_t lock_audit_irqoff_max_us(void) {
   uint64_t m = 0;
   for (uint32_t c = 0; c < MAX_CPUS; c++)
-    if (ls_irqoff_max[c] > m)
-      m = ls_irqoff_max[c];
+    if (ls_pc[c].irqoff_max > m)
+      m = ls_pc[c].irqoff_max;
   return m;
 }
 
 uint64_t lock_audit_irqoff_total_us(void) {
   uint64_t t = 0;
   for (uint32_t c = 0; c < MAX_CPUS; c++)
-    t += ls_irqoff_total[c];
+    t += ls_pc[c].irqoff_total;
   return t;
 }
 
@@ -468,8 +479,8 @@ void lock_audit_reset_counters(void) {
   ls_classerr = 0;
   ls_irqmask_calls = 0;
   for (uint32_t c = 0; c < MAX_CPUS; c++) {
-    ls_irqoff_total[c] = 0;
-    ls_irqoff_max[c] = 0;
+    ls_pc[c].irqoff_total = 0;
+    ls_pc[c].irqoff_max = 0;
   }
   for (uint32_t i = 0; i < LS_MEMO; i++) {
     ls_memo[i].what = 0;
@@ -503,21 +514,21 @@ void lock_print_report(void) {
 
   /* Worst window per CPU, with the lock that owned it: the actionable half. */
   for (uint32_t c = 0; c < MAX_CPUS; c++) {
-    if (!ls_irqoff_max[c])
+    if (!ls_pc[c].irqoff_max)
       continue;
     struct kline r;
     kl_init(&r);
     kl_s(&r, "[LOCKHEALTH-IRQOFF] cpu=");
     kl_i(&r, (long)c);
     kl_s(&r, " max_us=");
-    kl_i(&r, (long)ls_irqoff_max[c]);
+    kl_i(&r, (long)ls_pc[c].irqoff_max);
     kl_s(&r, " total_us=");
-    kl_i(&r, (long)ls_irqoff_total[c]);
+    kl_i(&r, (long)ls_pc[c].irqoff_total);
     kl_s(&r, " worst_lock=");
-    const void *lw = (const void *)(uintptr_t)ls_irqoff_max_lock[c];
+    const void *lw = (const void *)(uintptr_t)ls_pc[c].irqoff_max_lock;
     kl_s(&r, lw ? lock_name(lw) : "-");
     kl_s(&r, " pc=");
-    kl_hex(&r, ls_irqoff_max_pc[c]);
+    kl_hex(&r, ls_pc[c].irqoff_max_pc);
     kl_s(&r, "\n");
     kl_emit(&r);
   }
@@ -775,6 +786,12 @@ void ylock_acquire(ylock_t *lock) {
         }
         kl_c(&ko, '\n');
         kl_emit(&ko);
+      }
+      /* cp-fat (P9-8): a filesystem-lock holder that is "RUNNING" on a halted
+         CPU is waiting for the device token; name the token's holder. */
+      {
+        extern void blk_token_diag_row(const char *why);
+        blk_token_diag_row("at-ylock-wedge");
       }
       lock_audit_dump_ylocks();
     }

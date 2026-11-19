@@ -12,6 +12,8 @@ extern int hbInputPollMs;
 int hbConsoleWrite(const void *buf, size_t len);   /* os/log.c (patched) */
 int hbScreenWidth(void);
 int hbScreenHeight(void);
+int hbFbWidth(void);
+int hbFbHeight(void);
 
 /* xkb/ddxLoad.c (patches/xserver): keymap file loaded instead of running
  * xkbcomp. */

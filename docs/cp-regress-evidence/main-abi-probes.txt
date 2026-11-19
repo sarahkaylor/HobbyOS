@@ -1,0 +1,208 @@
+# main's glibc-2.31 x86_64 ABI probes (tools/jdk/*.c + tools/cp/sync/munmapwb.c), one single-program t3 boot each
+# L = cp-regress on integ11 13dc693b (strix:~/cp/lanes/regress); R = main 3c1cb61f (strix:~/cp/lanes/regress-ref)
+# host: strix (Ryzen Zen 5, KVM for x86_64, TCG for aarch64), QEMU 10.2.1, guest <= 12 GiB
+
+
+=== L summary
+build-probes rc=0
+hello tier_rc=1 
+dirprobe tier_rc=1 DIRPROBE O_DIRECTORY=0x10000 
+mmapro tier_rc=1 MMAPRO VERDICT PASS 
+mapfsync tier_rc=1 FSYNC VERDICT PASS 
+munmapwb tier_rc=1 MUNMAPWB VERDICT PASS 
+lockwait tier_rc=1 
+ALLDONE
+
+=== L dirprobe.serial
+[WAVE-MANIFEST] DIRPROBE.EXE
+[WAVE-TRY] DIRPROBE.EXE
+Loading program for scheduler (v2 AS): DIRPROBE.EXE
+/DIRPROBE.EXE
+[LCOMPAT] argv argc=1 a0=DIRPROBE.EXE execfn=DIRPROBE.EXE
+[ARRIVED] DIRPROBE.EXE rc>0
+DIRPROBE start
+DIRPROBE O_DIRECTORY=0x10000
+DIRPROBE done
+[KERNEL] Process 2: DIRPROBE.EXE exited unexpectedly or gracefully.
+System halt from CPU 4.
+
+=== L hello.serial
+HELLO-GLIBC: start pid=2
+HELLO-GLIBC: getcwd -> / (ok) errno=0
+HELLO-GLIBC: getcwd after chdir -> / (ok) errno=0
+HELLO-GLIBC: raw getcwd ret=2 buf='/'
+HELLO-GLIBC: uname sysname=Linux release=6.1-hobbyos machine=x86_64
+HELLO-GLIBC: clock mono=24.250494000
+HELLO-GLIBC: malloc 1M ok
+HELLO-GLIBC: map 1000000000-1000001000 r--p 00000000 00:00 0 /HELLO.EXE
+HELLO-GLIBC: map 1000001000-1000003000 r-xp 00001000 00:00 0 /HELLO.EXE
+HELLO-GLIBC: map 1000003000-1000004000 r--p 00003000 00:00 0 /HELLO.EXE
+HELLO-GLIBC: thread ok v=42
+HELLO-GLIBC: DONE
+System halt from CPU 6.
+
+=== L lockwait.serial
+[WAVE-MANIFEST] LOCKHOLD.EXE /LK.TXT 8
+[WAVE-TRY] LOCKHOLD.EXE
+Loading program for scheduler (v2 AS): LOCKHOLD.EXE
+/LOCKHOLD.EXE
+[LCOMPAT] argv argc=3 a0=LOCKHOLD.EXE a1=/LK.TXT a2=8 execfn=LOCKHOLD.EXE
+[ARRIVED] LOCKHOLD.EXE rc>0
+[WAVE-MANIFEST] LOCKHOLD.EXE /LK.TXT 1
+[WAVE-TRY] LOCKHOLD.EXE
+Loading program for scheduler (v2 AS): LOCKHOLD.EXE
+/LOCKHOLD.EXE
+[LCOMPAT] argv argc=3 a0=LOCKHOLD.EXE a1=/LK.TXT a2=1 execfn=LOCKHOLD.EXE
+[ARRIVED] LOCKHOLD.EXE rc>0
+LOCKHOLD trying
+LOCKHOLD trying
+LOCKHOLD held for 8s
+LOCKHOLD released
+LOCKHOLD held for 1s
+[KERNEL] Process 2: LOCKHOLD.EXE exited unexpectedly or gracefully.
+LOCKHOLD released
+[KERNEL] Process 3: LOCKHOLD.EXE exited unexpectedly or gracefully.
+System halt from CPU 2.
+
+=== L mapfsync.serial
+[WAVE-MANIFEST] MAPFSYNC.EXE
+[WAVE-TRY] MAPFSYNC.EXE
+Loading program for scheduler (v2 AS): MAPFSYNC.EXE
+/MAPFSYNC.EXE
+[LCOMPAT] argv argc=1 a0=MAPFSYNC.EXE execfn=MAPFSYNC.EXE
+[ARRIVED] MAPFSYNC.EXE rc>0
+FSYNC after fsync:  rc=0 errno=0 disk[0]=N (want N)
+FSYNC after fdatasync: rc=0 errno=0 disk[1]=X (want X)
+FSYNC VERDICT PASS
+[KERNEL] Process 2: MAPFSYNC.EXE exited unexpectedly or gracefully.
+System halt from CPU 3.
+
+=== L mmapro.serial
+[WAVE-MANIFEST] MMAPRO.EXE
+[WAVE-TRY] MMAPRO.EXE
+Loading program for scheduler (v2 AS): MMAPRO.EXE
+/MMAPRO.EXE
+[LCOMPAT] argv argc=1 a0=MMAPRO.EXE execfn=MMAPRO.EXE
+[ARRIVED] MMAPRO.EXE rc>0
+MMAPRO shared+write on O_RDONLY: refused errno=13
+MMAPRO shared+read=ok private+write=ok
+MMAPRO empty-file map: refused errno=19 (ENODEV=19 ENOMEM=12)
+MMAPRO VERDICT PASS
+[KERNEL] Process 2: MMAPRO.EXE exited unexpectedly or gracefully.
+System halt from CPU 5.
+
+=== L munmapwb.serial
+[WAVE-MANIFEST] MUNMAPWB.EXE
+[WAVE-TRY] MUNMAPWB.EXE
+Loading program for scheduler (v2 AS): MUNMAPWB.EXE
+/MUNMAPWB.EXE
+[LCOMPAT] argv argc=1 a0=MUNMAPWB.EXE execfn=MUNMAPWB.EXE
+[ARRIVED] MUNMAPWB.EXE rc>0
+MUNMAPWB W1 munmap=0 disk[0]=M disk[4103]=N ok
+MUNMAPWB W2 munmap(17 GiB span)=0 ms=1 disk[100]=W ok
+MUNMAPWB W3 private disk[0]=C ok
+MUNMAPWB VERDICT PASS
+[KERNEL] Process 2: MUNMAPWB.EXE exited unexpectedly or gracefully.
+System halt from CPU 5.
+
+=== R summary
+build-probes rc=0
+hello tier_rc=1 
+dirprobe tier_rc=1 DIRPROBE O_DIRECTORY=0x10000 
+mmapro tier_rc=1 MMAPRO VERDICT PASS 
+mapfsync tier_rc=1 FSYNC VERDICT PASS 
+munmapwb tier_rc=1 MUNMAPWB VERDICT PASS 
+lockwait tier_rc=1 
+ALLDONE
+
+=== R dirprobe.serial
+[WAVE-MANIFEST] DIRPROBE.EXE
+[WAVE-TRY] DIRPROBE.EXE
+Loading program for scheduler (v2 AS): DIRPROBE.EXE
+/DIRPROBE.EXE
+[LCOMPAT] argv argc=1 a0=DIRPROBE.EXE execfn=DIRPROBE.EXE
+[ARRIVED] DIRPROBE.EXE rc>0
+DIRPROBE start[PUB] who=fault_obj va=0x1080205000 off=0x91000 prot=RX priv=1 src=file zero=666 ver=1
+DIRPROBE O_DIRECTORY=0x10000
+DIRPROBE done
+[KERNEL] Process 2: DIRPROBE.EXE exited unexpectedly or gracefully.
+System halt from CPU 1.
+
+=== R hello.serial
+HELLO-GLIBC: start pid=2
+HELLO-GLIBC: getcwd -> / (ok) errno=0
+HELLO-GLIBC: getcwd after chdir -> / (ok) errno=0
+HELLO-GLIBC: raw getcwd ret=2 buf='/'
+HELLO-GLIBC: uname sysname=Linux release=6.1-hobbyos machine=x86_64
+HELLO-GLIBC: clock mono=44.942000000
+HELLO-GLIBC: malloc 1M ok
+HELLO-GLIBC: map 1000000000-1000001000 r--p 00000000 00:00 0 /HELLO.EXE
+HELLO-GLIBC: map 1000001000-1000003000 r-xp 00001000 00:00 0 /HELLO.EXE
+HELLO-GLIBC: map 1000003000-1000004000 r--p 00003000 00:00 0 /HELLO.EXE
+HELLO-GLIBC: thread ok v=42
+HELLO-GLIBC: DONE
+System halt from CPU 6.
+
+=== R lockwait.serial
+[IDLESTUCK] claims: c0=-1/2[WAVE-MANIFEST] LOCKHOLD.EXE /LK.TXT 8
+/[WAVE-TRY] LOCKHOLD.EXE
+0Loading program for scheduler (v2 AS):  cLOCKHOLD.EXE1
+/LOCKHOLD.EXE
+[LCOMPAT] argv argc=3 a0=LOCKHOLD.EXE a1=/LK.TXT a2=8 execfn=LOCKHOLD.EXE
+[ARRIVED] LOCKHOLD.EXE rc>0
+[WAVE-MANIFEST] LOCKHOLD.EXE /LK.TXT 1
+[WAVE-TRY] LOCKHOLD.EXE
+Loading program for scheduler (v2 AS): LOCKHOLD.EXE
+/LOCKHOLD.EXE
+[LCOMPAT] argv argc=3 a0=LOCKHOLD.EXE a1=/LK.TXT a2=1 execfn=LOCKHOLD.EXE
+0x0000000000000000[ARRIVED] LOCKHOLD.EXE rc>0
+LOCKHOLD trying
+LOCKHOLD trying
+LOCKHOLD held for 8s
+LOCKHOLD released
+[KERNEL] Process 2: LOCKHOLD.EXE exited unexpectedly or gracefully.
+LOCKHOLD held for 1s
+LOCKHOLD released
+[KERNEL] Process 3: LOCKHOLD.EXE exited unexpectedly or gracefully.
+System halt from CPU 2.
+
+=== R mapfsync.serial
+[WAVE-MANIFEST] MAPFSYNC.EXE
+[WAVE-TRY] MAPFSYNC.EXE
+Loading program for scheduler (v2 AS): MAPFSYNC.EXE
+/MAPFSYNC.EXE
+[LCOMPAT] argv argc=1 a0=MAPFSYNC.EXE execfn=MAPFSYNC.EXE
+[ARRIVED] MAPFSYNC.EXE rc>0
+FSYNC after fsync:  rc=0 errno=0 disk[0]=N (want N)
+FSYNC after fdatasync: rc=0 errno=0 disk[1]=X (want X)
+FSYNC VERDICT PASS
+[KERNEL] Process 2: MAPFSYNC.EXE exited unexpectedly or gracefully.
+System halt from CPU 4.
+
+=== R mmapro.serial
+[IDLESTUCK] claims: c0[WAVE-MANIFEST] MMAPRO.EXE
+=[WAVE-TRY] MMAPRO.EXE
+-1Loading program for scheduler (v2 AS): /MMAPRO.EXE2
+/MMAPRO.EXE
+[LCOMPAT] argv argc=1 a0=MMAPRO.EXE execfn=MMAPRO.EXE
+[ARRIVED] MMAPRO.EXE rc>0
+MMAPRO shared+write on O_RDONLY: refused errno=13
+MMAPRO shared+read=ok private+write=ok
+MMAPRO empty-file map: refused errno=19 (ENODEV=19 ENOMEM=12)
+MMAPRO VERDICT PASS
+[KERNEL] Process 2: MMAPRO.EXE exited unexpectedly or gracefully.
+System halt from CPU 4.
+
+=== R munmapwb.serial
+[WAVE-MANIFEST] MUNMAPWB.EXE
+[WAVE-TRY] MUNMAPWB.EXE
+Loading program for scheduler (v2 AS): MUNMAPWB.EXE
+/MUNMAPWB.EXE
+[LCOMPAT] argv argc=1 a0=MUNMAPWB.EXE execfn=MUNMAPWB.EXE
+/LIB64/libpthread.so.0[ARRIVED] MUNMAPWB.EXE rc>0
+MUNMAPWB W1 munmap=0 disk[0]=M disk[4103]=N ok
+MUNMAPWB W2 munmap(17 GiB span)=0 ms=20 disk[100]=W ok
+MUNMAPWB W3 private disk[0]=C ok
+MUNMAPWB VERDICT PASS
+[KERNEL] Process 2: MUNMAPWB.EXE exited unexpectedly or gracefully.
+System halt.

@@ -49,8 +49,8 @@
  *     objects); a MAP_SHARED *regular file* mapping is write-through to the
  *     page cache, not a distinct shared segment with another process's private
  *     view.
- *   - mremap of a MAP_PRIVATE file mapping re-reads the object at the new
- *     address: private COW dirt is not carried across a move.
+ *   - (cp/wine2: mremap of a MAP_PRIVATE object mapping now carries its COW
+ *     copies to the new address; pages still reading through refault.)
  *
  * Kernel constraints: freestanding, no libc, -mgeneral-regs-only, byte-wise
  * copies only.
@@ -99,15 +99,19 @@ static uint64_t l_up(uint64_t n) { return (n + LPG - 1) & ~(LPG - 1); }
    resident counter honest (it is the same primitive vm.c's own zap uses);
    the region lookup just skips spans with nothing mapped. */
 static void l_zap_pages(struct addr_space *as, uint64_t base, uint64_t len) {
-  for (uint64_t a = base; a < base + len; a += LPG) {
-    if (vm_region_find(as, a)) vm_unmap_page(as, a);
-  }
+  /* C1-k4: one zap for the span with the cross-CPU TLB shootdown before any
+     frame is released (vm_unmap_page flushed only this CPU, page by page). */
+  vm_zap_span(as, base, len);
 }
 
 /* Is [base, base+len) inside the MMAP arena or the DSO band -- the only two
    ranges vm_mmap accepts a MAP_FIXED target in (vm.c's rule, restated here so
    a rejected mapping cannot leave the old one half-destroyed). */
-static int l_fixed_ok(uint64_t base, uint64_t len) {
+static int l_fixed_ok(struct addr_space *as, uint64_t base, uint64_t len) {
+  /* P1 (F1): a compat address space accepts any user range (the kernel hole
+     excluded); only the native layout keeps the two fixed-placement bands. */
+  if (as && as->layout == VM_LAYOUT_COMPAT)
+    return vm_range_is_user(as, base, len);
   int in_mmap = base >= USER_MMAP_BASE_V2 && base <= USER_MMAP_LIMIT_V2 &&
                 len <= USER_MMAP_LIMIT_V2 - base;
   int in_lib = base >= USER_LIB_BASE && base <= USER_LIB_LIMIT &&
@@ -195,8 +199,12 @@ static int l_mem_mmap(struct process *p, struct trap_frame *tf) {
   uint32_t f = (uint32_t)flags;
   if ((f & L_MAP_SHARED) && (f & L_MAP_PRIVATE)) return l_ret(tf, -EINVAL);
   if (!(f & (L_MAP_SHARED | L_MAP_PRIVATE))) return l_ret(tf, -EINVAL);
-  if (f & L_MAP_FIXED_NOREPLACE)
-    return l_ret(tf, -EINVAL); /* not implemented: refuse, never report success */
+  /* P1: MAP_FIXED_NOREPLACE (Wine virtual.c probes the whole address space
+     with it): a fixed placement that answers -EEXIST over an existing
+     mapping or the kernel hole instead of replacing (vm_mmap decides,
+     atomically under vm_lock).  It used to be refused with -EINVAL, which
+     Wine read as "the address space ends here". */
+  int noreplace = (f & L_MAP_FIXED_NOREPLACE) && !(f & L_MAP_FIXED);
 
   /* Recorded region flags: translate Linux's MAP_NORESERVE (0x4000) onto
      vm.h's VM_MAP_NORESERVE.  Reservation itself is meaningless here (every
@@ -205,6 +213,7 @@ static int l_mem_mmap(struct process *p, struct trap_frame *tf) {
   if (hf & L_MAP_NORESERVE) hf = (hf & ~L_MAP_NORESERVE) | VM_MAP_NORESERVE;
   hf &= (uint32_t)(L_MAP_SHARED | L_MAP_PRIVATE | L_MAP_FIXED |
                    L_MAP_ANONYMOUS | VM_MAP_NORESERVE);
+  if (noreplace) hf |= VM_MAP_NOREPLACE;
 
   if (hf & L_MAP_ANONYMOUS) {
     /* Linux ignores fd and offset for an anonymous mapping. */
@@ -237,17 +246,32 @@ static int l_mem_mmap(struct process *p, struct trap_frame *tf) {
   if (rlen < len || addr + rlen < addr) return l_ret(tf, -ENOMEM);
 
   struct addr_space *as = l_as(p);
+  if (noreplace) {
+    if (addr & (LPG - 1)) return l_ret(tf, -EINVAL);
+    if (!addr) return l_ret(tf, -EPERM); /* below mmap_min_addr, as Linux */
+    if (!as) return l_ret(tf, -EINVAL);
+  }
   if (hf & L_MAP_FIXED) {
     if (!addr || (addr & (LPG - 1))) return l_ret(tf, -EINVAL);
-    if (!as || !l_fixed_ok(addr, rlen)) return l_ret(tf, -EINVAL);
-    /* Replace, don't overlay: vm_mmap rewrites the region records only, so the
-       old leaves would survive the swap with their old protection. */
-    l_zap_pages(as, addr, rlen);
+    if (!as) return l_ret(tf, -EINVAL);
+    if (!l_fixed_ok(as, addr, rlen))
+      /* F1: MAP_FIXED into the kernel hole / past the ceiling is ENOMEM on
+         compat; the native bands keep their historical EINVAL. */
+      return l_ret(tf, as->layout == VM_LAYOUT_COMPAT ? -ENOMEM : -EINVAL);
+    /* C1-pe: no zap here.  vm_mmap's MAP_FIXED branch drops the old leaves
+       in the same vm_lock section that rewrites the records, with the
+       cross-CPU shootdown before any frame is released.  A zap here, ahead
+       of that section, let a peer thread refault the page from the OLD
+       region in between: it read zeros (neither the old bytes nor the new
+       mapping's), and that leaf's frame was later freed without a shootdown
+       (linux_probe_pemap V5). */
   }
 
   int64_t r = sys_mmap6(addr, len, prot, (int64_t)hf, fd, off);
-  if (r == -1 && as)
-    r = -ENOMEM; /* v2 vm_mmap's only -1 is a caller-contract bug */
+  /* cp/wine2: no -1 -> -ENOMEM rewrite.  vm_mmap's "-1 = no v2 AS" cannot
+     happen once sys_mmap6 found the group's AS, so with an AS a -1 IS -EPERM
+     (EPERM == 1): the memfd F_SEAL_WRITE refusal of MAP_SHARED|PROT_WRITE.
+     The rewrite turned Linux's EPERM into ENOMEM (linux_probe_cow C11). */
   /* L81: name a refused ANONYMOUS mmap and every large anonymous mapping.
      Boehm's GC_unix_mmap_get_mem prints "mmap(PROT_NONE) failed" and aborts
      when its heap extension is refused; the message names neither the length
@@ -360,15 +384,19 @@ static int l_mem_munmap(struct process *p, struct trap_frame *tf) {
 
   struct addr_space *as = l_as(p);
   if (!as) return l_ret(tf, sys_munmap(addr, len)); /* v1 legacy path */
-  if (addr < USER_VA_BASE || addr + rlen > USER_VA_TOP)
+  if (!vm_range_is_user(as, addr, rlen))
     return l_ret(tf, -EINVAL);
 
   /* Linux: "it is not an error if the range contains no mapped pages".  Start
      at the first mapped page and let the range-remove take everything from
-     there -- it is split-aware and tolerant of holes inside the span. */
+     there -- it is split-aware and tolerant of holes inside the span.  P1:
+     found by region, not by walking a (possibly 64 GiB) hole page by page. */
   uint64_t start = addr;
-  while (start < addr + rlen && !vm_region_find(as, start)) start += LPG;
-  if (start >= addr + rlen) return l_ret(tf, 0);
+  if (!vm_region_find(as, start)) {
+    struct vm_region *nr = vm_region_above(as, addr, rlen);
+    if (!nr || nr->base >= addr + rlen) return l_ret(tf, 0);
+    start = nr->base;
+  }
   /* GB-308: unmap writes back, as Linux does -- and it must happen BEFORE
      sys_munmap drops the region records, because the write-back walks them to
      find each page's object and file offset.  This is l_mem_munmap specifically:
@@ -437,7 +465,7 @@ static int l_mem_mremap(struct process *p, struct trap_frame *tf) {
   uint64_t old_len = l_up(old_size);
   uint64_t new_len = l_up(new_size);
   if (old_len < old_size || new_len < new_size) return l_ret(tf, -ENOMEM);
-  if (old_addr < USER_VA_BASE || old_addr + old_len > USER_VA_TOP)
+  if (!vm_range_is_user(as, old_addr, old_len))
     return l_ret(tf, -EFAULT);
 
   struct vm_region *r = vm_region_find(as, old_addr);
@@ -453,11 +481,13 @@ static int l_mem_mremap(struct process *p, struct trap_frame *tf) {
   uint64_t obj_off = r->obj_off + (old_addr - r->base);
   uint64_t covered_end = r->base + r->len;
 
-  if (new_len <= old_len) {
+  /* cp/wine2: MREMAP_FIXED always moves (Linux), even at the same or a
+     smaller size; only the non-FIXED call may shrink or grow in place. */
+  int fixed = (flags & L_MREMAP_FIXED) != 0;
+  if (!fixed && new_len <= old_len) {
     if (new_len < old_len) {
-      l_zap_pages(as, old_addr + new_len, old_len - new_len);
-      if (vm_region_remove(as, old_addr + new_len, old_len - new_len) != 0)
-        return l_ret(tf, -EINVAL);
+      if (vm_unmap_span(as, old_addr + new_len, old_len - new_len) != 0)
+        return l_ret(tf, -EINVAL); /* C1-k4: zap + remove + shootdown */
     }
     return l_ret(tf, (int64_t)old_addr);
   }
@@ -465,13 +495,13 @@ static int l_mem_mremap(struct process *p, struct trap_frame *tf) {
   /* Grow: already inside the region (a merged neighbour), or extend into the
      adjacent free span.  vm_region_insert refuses any overlap, so a failed
      insert IS the "no room here" answer -- no separate probe needed. */
-  if (old_addr + new_len <= covered_end) return l_ret(tf, (int64_t)old_addr);
+  if (!fixed && old_addr + new_len <= covered_end) return l_ret(tf, (int64_t)old_addr);
   uint64_t ext = old_addr + new_len;
   uint64_t ins = (covered_end > old_addr + old_len) ? covered_end
                                                     : old_addr + old_len;
   int64_t ext_off = obj ? (int64_t)(obj_off + (ins - old_addr)) : 0;
-  if (vm_region_insert(as, ins, ext - ins, prot, kind, rflags, obj,
-                       (uint64_t)ext_off) == 0)
+  if (!fixed && vm_region_insert(as, ins, ext - ins, prot, kind, rflags, obj,
+                                 (uint64_t)ext_off) == 0)
     return l_ret(tf, (int64_t)old_addr);
 
   if (!(flags & L_MREMAP_MAYMOVE)) return l_ret(tf, -ENOMEM);
@@ -498,7 +528,7 @@ static int l_mem_mremap(struct process *p, struct trap_frame *tf) {
     if (new_addr + new_len < new_addr) return l_ret(tf, -EINVAL);
     if (new_addr < old_addr + old_len && old_addr < new_addr + new_len)
       return l_ret(tf, -EINVAL); /* overlapping move: Linux refuses */
-    if (!l_fixed_ok(new_addr, new_len)) return l_ret(tf, -EINVAL);
+    if (!l_fixed_ok(as, new_addr, new_len)) return l_ret(tf, -EINVAL);
     l_zap_pages(as, new_addr, new_len);
     int frc = vm_region_install_fixed(as, new_addr, new_len, ins_prot, kind,
                                       rflags, obj, obj_off);
@@ -511,17 +541,25 @@ static int l_mem_mremap(struct process *p, struct trap_frame *tf) {
     if (hrc != 0) return l_ret(tf, hrc);
   }
 
+  uint64_t mv_len = old_len < new_len ? old_len : new_len; /* what moves */
   if (!obj) {
-    int cr = l_copy_span(p, dst, old_addr, old_len);
+    int cr = l_copy_span(p, dst, old_addr, mv_len);
     if (cr != 0) { /* undo, so a failed move never eats the source */
       l_zap_pages(as, dst, new_len);
       vm_region_remove(as, dst, new_len);
       return l_ret(tf, cr);
     }
+  } else if (rflags & VM_MAP_PRIVATE) {
+    /* cp/wine2: a private object mapping carries its COW copies; pages that
+       still read through refault from the object at the new address. */
+    if (vm_mremap_carry_private(process_group(p), old_addr, dst, mv_len) < 0) {
+      l_zap_pages(as, dst, new_len);
+      vm_region_remove(as, dst, new_len);
+      return l_ret(tf, -ENOMEM);
+    }
   }
   if (restore_prot) (void)sys_mprotect(dst, new_len, prot);
-  l_zap_pages(as, old_addr, old_len);
-  vm_region_remove(as, old_addr, old_len);
+  (void)vm_unmap_span(as, old_addr, old_len); /* C1-k4: + cross-CPU flush */
   return l_ret(tf, (int64_t)dst);
 }
 
@@ -549,12 +587,16 @@ int l_mem_fsync_file(struct process *p, uint16_t cl, uint32_t sz,
     for (uint64_t a = r->base; a < r->base + r->len; a += LPG) {
       uint64_t off = r->obj_off + (a - r->base);
       uint64_t pg = off & ~(uint64_t)(FRAME_SIZE - 1);
-      uint64_t fr = file_obj_page(r->obj, pg);
+      if (off >= r->obj->size) break;
+      /* cp-sync: resident pages only, through the direct map (see
+         mem_writeback_range). */
+      uint64_t fr = vm_object_peek(r->obj, pg);
       if (!fr) continue;
       uint32_t n = (uint32_t)((off - pg) + LPG > FRAME_SIZE ? FRAME_SIZE - (off - pg)
                                                              : (uint64_t)LPG);
       if (off + n > r->obj->size) n = (uint32_t)(r->obj->size - off);
-      int wr = file_writeback_fat16(p, cl, sz, (uint32_t)off, (const void *)fr, n, tf);
+      int wr = file_writeback_fat16(p, cl, sz, (uint32_t)off,
+                                    (const void *)phys_to_virt(fr), n, tf);
       if (wr != 0) bad = wr;
     }
   }
@@ -575,7 +617,7 @@ static int l_mem_msync(struct process *p, struct trap_frame *tf) {
   struct addr_space *as = l_as(p);
   if (as) {
     uint64_t rlen = l_up(len);
-    if (rlen < len || addr < USER_VA_BASE || addr + rlen > USER_VA_TOP)
+    if (rlen < len || !vm_range_is_user(as, addr, rlen))
       return l_ret(tf, -ENOMEM);
     for (uint64_t a = addr; a < addr + rlen; a += LPG) {
       if (!vm_region_find(as, a)) return l_ret(tf, -ENOMEM);
@@ -585,7 +627,8 @@ static int l_mem_msync(struct process *p, struct trap_frame *tf) {
      the frame is the page cache, so success is the truth" was wrong, and
      measurably so: a mapping wrote 'Z' at offset 0, force() returned 0, and a
      plain read() in the same process returned 'A' (obj/jdk/mmaptouch.log).
-     Frames are identity-mapped, so the page-cache frame is a valid kernel
+     The page-cache frame, reached through phys_to_virt (cp-sync: compat roots
+     have no identity map), is a valid kernel
      pointer and the bytes go straight through an fd the process still holds.
      Private and read-only regions have nothing to flush.  Over-approximate: we
      write every present page of the region, not only modified ones -- there is
@@ -608,7 +651,7 @@ static int l_mem_mincore(struct process *p, struct trap_frame *tf) {
   struct addr_space *as = l_as(p);
   if (!as) return l_ret(tf, -ENOMEM);
   uint64_t rlen = l_up(len);
-  if (rlen < len || addr < USER_VA_BASE || addr + rlen > USER_VA_TOP)
+  if (rlen < len || !vm_range_is_user(as, addr, rlen))
     return l_ret(tf, -ENOMEM);
   if (!l_user_ok(p, vec, rlen / LPG, 1)) return l_ret(tf, -EFAULT);
   for (uint64_t a = addr; a < addr + rlen; a += LPG) {
@@ -748,31 +791,53 @@ const struct l_sysent l_tab_mem[] = { {L_SYS_mmap, l_mem_mmap, "mmap"}, {L_SYS_m
  * on a closed channel lost its pages silently.  Over-approximates: every present
  * page of a shared+writable region is written, because file_obj.c has no dirty
  * bits (rewriting an unmodified page writes the same bytes).  Frames are
- * identity-mapped, so the cached page is a valid kernel pointer.  Returns 0, or
+ * reached through phys_to_virt (kmem.h), so the cached page is a valid kernel
+ * pointer.  Returns 0, or
  * -EBADF when a page's file has no fd left to write through. */
 static int mem_writeback_range(struct process *p, uint64_t addr, uint64_t len,
                                struct trap_frame *tf) {
   int wrote = 0, failed = 0, skipped = 0, ro = 0;
   struct addr_space *as2 = l_as(p);
   uint64_t rlen2 = l_up(len);
-  for (uint64_t a = addr; as2 && a < addr + rlen2; a += LPG) {
+  uint64_t end = addr + rlen2;
+  /* cp-sync (merge of main): walk REGION by region, never page by page over
+     the whole range.  Wine munmaps reservations of many GiB (P1 found munmap
+     itself by region for the same reason); a per-page vm_region_find over a
+     64 GiB hole is 16M lookups.  Inside a shared+writable FAT16 region only
+     RESIDENT pages are written (vm_object_peek): a page the mapping never
+     touched is not in the object and has nothing to flush, and
+     file_obj_page() would read it from disk only to write the same bytes
+     back.  The frame is reached through the direct map (kmem.h, F1): compat
+     address spaces have no identity map of RAM. */
+  uint64_t a = addr;
+  while (as2 && a < end) {
     struct vm_region *r = vm_region_find(as2, a);
-    if (!r || !r->obj || r->obj->kind != VM_OBJ_FILE) { skipped++; continue; }
-    if (!(r->flags & VM_MAP_SHARED) || !(r->prot & VM_PROT_WRITE)) { ro++; continue; }
-    if (!r->obj->file_start_cluster || !r->obj->size) continue;
-    if (!(r->flags & VM_MAP_SHARED) || !(r->prot & VM_PROT_WRITE)) continue;
-    uint64_t off = r->obj_off + (a - r->base);
-    uint64_t pg = off & ~(uint64_t)(FRAME_SIZE - 1);
-    uint64_t fr = file_obj_page(r->obj, pg);
-    if (!fr) continue;
-    uint32_t n = (uint32_t)((off - pg) + LPG > FRAME_SIZE ? FRAME_SIZE - (off - pg)
-                                                           : (uint64_t)LPG);
-    if ((uint64_t)off + n > r->obj->size)
-      n = (uint32_t)(r->obj->size - off);
-    int wr = file_writeback_fat16(p, r->obj->file_start_cluster,
-                                 (uint32_t)r->obj->size, (uint32_t)off,
-                                 (const void *)fr, n, tf);
-    if (wr == 0) wrote++; else failed++;
+    if (!r) {
+      struct vm_region *nr = vm_region_above(as2, a, end - a);
+      if (!nr || nr->base >= end || nr->base <= a) break;
+      a = nr->base;
+      continue;
+    }
+    uint64_t rend = r->base + r->len;
+    if (rend > end) rend = end;
+    if (!r->obj || r->obj->kind != VM_OBJ_FILE) { skipped++; a = rend; continue; }
+    if (!(r->flags & VM_MAP_SHARED) || !(r->prot & VM_PROT_WRITE)) { ro++; a = rend; continue; }
+    if (!r->obj->file_start_cluster || !r->obj->size) { a = rend; continue; }
+    for (; a < rend; a += LPG) {
+      uint64_t off = r->obj_off + (a - r->base);
+      if (off >= r->obj->size) { a = rend; break; }
+      uint64_t pg = off & ~(uint64_t)(FRAME_SIZE - 1);
+      uint64_t fr = vm_object_peek(r->obj, pg);
+      if (!fr) continue;
+      uint32_t n = (uint32_t)((off - pg) + LPG > FRAME_SIZE ? FRAME_SIZE - (off - pg)
+                                                             : (uint64_t)LPG);
+      if ((uint64_t)off + n > r->obj->size)
+        n = (uint32_t)(r->obj->size - off);
+      int wr = file_writeback_fat16(p, r->obj->file_start_cluster,
+                                   (uint32_t)r->obj->size, (uint32_t)off,
+                                   (const void *)phys_to_virt(fr), n, tf);
+      if (wr == 0) wrote++; else failed++;
+    }
   }
   if (wrote) file_obj_invalidate_all();
   {   /* Bounded diagnostic: which pages the walk saw and what happened to them.

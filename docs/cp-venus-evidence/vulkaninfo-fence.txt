@@ -1,0 +1,123 @@
+# Gate P6: vulkaninfo --summary in the guest + GPU work check + fence latency (10k) + timeline + bandwidth
+# strix (Ryzen AI MAX+ 395 / RX 9070 XT), cp-venus merged with cyberpunk 15ad4a35, MODE=test wave, guest -m 12G -smp 8 KVM, 2026-11-17
+# command: bash tools/cp/venus/run_vk.sh info work fence 10000 timeline 500 bw   (src/user/cp/vn_info.c)
+# note: the 'read' bandwidth figure is invalid (the probe's read memcpy result is unused and the copy was elided); only the write figure counts
+
+qemu-slot: slot 3 of 4 held by pid 2801525 07:29:31
+render /dev/dri/renderD129 = 1002:7550 driver=amdgpu pci=0000:65:00.0
+[VIRGL3D] shm id=1 bar=4 base=0x0000380800000000 len=0x0000000200000000
+[VIRGL3D] feat offered lo=0x000000003000001B virgl=1 edid=1 uuid=0 blob=1 ctx_init=1
+[VIRGL3D] feat virgl=1 ctx_init=1 blob=1
+[VIRGL3D] capset index=2 id=4 (venus) maxver=0 maxsize=160
+[VENUS] transport blob=1 ctx_init=1 window_mib=8192 fence_slots=32
+[VIRGL3D] irq line=10 vector=42 (fences retired by INTx)
+[LCOMPAT] argv argc=8 a0=VNINFO.ELF a1=info a2=work execfn=VNINFO.ELF
+[VK] vn_info start (C6-venus)
+[VK] env VK_DRIVER_FILES=/CP/VK/share/vulkan/icd.d/virtio_icd.x86_64.json
+[VK] env VK_ICD_FILENAMES=(unset)
+[VK] env XDG_DATA_DIRS=(unset)
+[VK] env LP_NUM_THREADS=(unset)
+[VK] env DISPLAY=(unset)
+[VK] env LD_LIBRARY_PATH=/LIB64
+[VK] tsc 2.992 GHz
+[VK] loader libvulkan.so.1 loaded in 104.0 ms
+[LCOMPAT] readlink exe pid=2 bufsz=1024 -> 11
+[LCOMPAT] readlink exe pid=2 bufsz=1024 -> 11
+[VENUS] capset id=4 ver=0 len=160 resp=0x0000000000001103
+[VENUS] ctx_create2 ctx=2 capset=4 rings=64 resp=0x0000000000001100
+[VENUS] blob_create res=4097 ctx=2 flags=1 blob_id=0 size=132K resp=0x0000000000001100
+[VENUS] map res=4097 off=0x0000000000000000 size_k=132 map_info=1 resp=0x0000000000001106
+[VENUS] user map res=4097 size_k=132 map_info=1 mode=0 va=0x0000700000000000
+[VENUS] blob_create res=4098 ctx=2 flags=1 blob_id=0 size=1024K resp=0x0000000000001100
+[VENUS] map res=4098 off=0x0000000000021000 size_k=1024 map_info=1 resp=0x0000000000001106
+[VENUS] user map res=4098 size_k=1024 map_info=1 mode=0 va=0x0000700000021000
+[VK] vkCreateInstance ok in 345.0 ms
+[VK] ==========
+[VK] VULKANINFO
+[VK] ==========
+[VK] Vulkan Instance Version: 1.4.363
+[VK] Devices:
+[VK] ========
+[VK] GPU0:
+[VK] 	apiVersion         = 1.4.307
+[VK] 	driverVersion      = 26.2.6
+[VK] 	vendorID           = 0x1002
+[VK] 	deviceID           = 0x7550
+[VK] 	deviceType         = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+[VK] 	deviceName         = Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))
+[VK] 	driverID           = DRIVER_ID_MESA_VENUS
+[VK] 	driverName         = venus
+[VK] 	driverInfo         = Mesa 26.2.6
+[VK] 	conformanceVersion = 1.4.0.0
+[VK] 	deviceExtensions   = 171
+[VK] 	memoryHeap[0]      = 48093.5 MiB
+[VK] 	memoryHeap[1]      = 16304.0 MiB DEVICE_LOCAL
+[VK] 	memoryType[0]      = heap 1 DEVICE_LOCAL
+[VK] 	memoryType[1]      = heap 1 DEVICE_LOCAL
+[VK] 	memoryType[2]      = heap 0 HOST_VISIBLE HOST_COHERENT
+[VK] 	memoryType[3]      = heap 1 DEVICE_LOCAL HOST_VISIBLE HOST_COHERENT
+[VK] 	memoryType[4]      = heap 1 DEVICE_LOCAL HOST_VISIBLE HOST_COHERENT
+[VK] 	memoryType[5]      = heap 0 HOST_VISIBLE HOST_COHERENT HOST_CACHED
+[VK] 	memoryType[6]      = heap 0 HOST_VISIBLE HOST_COHERENT HOST_CACHED
+[VK] 	memoryType[7]      = heap 1 DEVICE_LOCAL
+[VK] 	memoryType[8]      = heap 0 HOST_VISIBLE HOST_COHERENT
+[VK] 	memoryType[9]      = heap 1 DEVICE_LOCAL HOST_VISIBLE HOST_COHERENT
+[VK] 	memoryType[10]      = heap 0 HOST_VISIBLE HOST_COHERENT HOST_CACHED
+[VK] 	queueFamily[0]     = count 1 flags GRAPHICS COMPUTE TRANSFER
+[VK] 	queueFamily[1]     = count 4 flags COMPUTE TRANSFER
+[VK] 	queueFamily[2]     = count 1 flags
+[VK] 	queueFamily[3]     = count 1 flags
+[VK] 	queueFamily[4]     = count 1 flags
+[VK] GPU1:
+[VK] 	apiVersion         = 1.4.307
+[VK] 	driverVersion      = 26.2.6
+[VK] 	vendorID           = 0x1002
+[VK] 	deviceID           = 0x1586
+[VK] 	deviceType         = PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU
+[VK] 	deviceName         = Virtio-GPU Venus (AMD Radeon Graphics (RADV STRIX_HALO))
+[VK] 	driverID           = DRIVER_ID_MESA_VENUS
+[VK] 	driverName         = venus
+[VK] 	driverInfo         = Mesa 26.2.6
+[VK] 	conformanceVersion = 1.4.0.0
+[VK] 	deviceExtensions   = 171
+[VK] 	memoryHeap[0]      = 26953.8 MiB
+[VK] 	memoryHeap[1]      = 53907.7 MiB DEVICE_LOCAL
+[VK] 	memoryType[0]      = heap 1 DEVICE_LOCAL
+[VK] 	memoryType[1]      = heap 1 DEVICE_LOCAL
+[VK] 	memoryType[2]      = heap 0 HOST_VISIBLE HOST_COHERENT
+[VK] 	memoryType[3]      = heap 1 DEVICE_LOCAL HOST_VISIBLE HOST_COHERENT
+[VK] 	memoryType[4]      = heap 1 DEVICE_LOCAL HOST_VISIBLE HOST_COHERENT
+[VK] 	memoryType[5]      = heap 0 HOST_VISIBLE HOST_COHERENT HOST_CACHED
+[VK] 	memoryType[6]      = heap 0 HOST_VISIBLE HOST_COHERENT HOST_CACHED
+[VK] 	memoryType[7]      = heap 1 DEVICE_LOCAL
+[VK] 	memoryType[8]      = heap 0 HOST_VISIBLE HOST_COHERENT
+[VK] 	memoryType[9]      = heap 1 DEVICE_LOCAL HOST_VISIBLE HOST_COHERENT
+[VK] 	memoryType[10]      = heap 0 HOST_VISIBLE HOST_COHERENT HOST_CACHED
+[VK] 	queueFamily[0]     = count 1 flags GRAPHICS COMPUTE TRANSFER
+[VK] 	queueFamily[1]     = count 4 flags COMPUTE TRANSFER
+[VK] 	queueFamily[2]     = count 1 flags
+[VK] 	queueFamily[3]     = count 1 flags
+[VK] 	queueFamily[4]     = count 1 flags
+[VK] using GPU0 Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADV GFX1201))
+[VK] vkCreateDevice ok in 54.0 ms (queue family 0)
+[VENUS] blob_create res=4099 ctx=2 flags=1 blob_id=10 size=4096K resp=0x0000000000001100
+[VENUS] map res=4099 off=0x0000000000200000 size_k=4096 map_info=3 resp=0x0000000000001106
+[VENUS] user map res=4099 size_k=4096 map_info=3 mode=1 va=0x0000700000121000
+[VENUS] blob_create res=4100 ctx=2 flags=1 blob_id=0 size=8192K resp=0x0000000000001100
+[VENUS] map res=4100 off=0x0000000000600000 size_k=8192 map_info=1 resp=0x0000000000001106
+[VENUS] user map res=4100 size_k=8192 map_info=1 mode=0 va=0x0000700000521000
+[VK] ok   work: GPU fill 0xC0FFEE11 + copy of 4096 KiB into host-visible type 2 (uncached/WC), fence after 11.0 ms, mismatches=0 (the host GPU executed it)
+[VK] FENCE empty-batch n=10000 wall=627 ms | submit_us p50=50.3 p99=87.7 | submit->signal_us p50=55.9 p90=73.4 p99=143.8 max=1834.6
+[VK] FENCE empty-cmdbuf n=10000 wall=1291 ms | submit_us p50=51.6 p99=106.1 | submit->signal_us p50=101.2 p90=189.9 p99=275.7 max=4213.4
+[VENUS] blob_create res=4101 ctx=2 flags=1 blob_id=20 size=4K resp=0x0000000000001100
+[VENUS] map res=4101 off=0x0000000000121000 size_k=4 map_info=3 resp=0x0000000000001106
+[VENUS] user map res=4101 size_k=4 map_info=3 mode=1 va=0x0000700000D21000
+[VK] TIMELINE n=500 submit->vkWaitSemaphores_us p50=10007.6 p90=10041.6 p99=10474.7 max=14626.9
+[VENUS] blob_create res=4102 ctx=2 flags=1 blob_id=23 size=65536K resp=0x0000000000001100
+[VENUS] map res=4102 off=0x0000000000E00000 size_k=65536 map_info=3 resp=0x0000000000001106
+[VENUS] user map res=4102 size_k=65536 map_info=3 mode=1 va=0x0000700000D22000
+[VK] bw host-visible type 2: write 3712 MB/s, read 12764546048 MB/s (64 MiB, memcpy)
+[VK] done rc=0
+[VENUS] fence stats (ctx_destroy) retired=20002 irq=9300 inline=10702 errors=0 post->retire_us <=25:4 <=50:9181 <=100:6065 <=200:4319 <=500:423 <=1000:6 <=2000:1 <=5000:3 <=11000:0 >11000:0
+--- qemu stderr (tail)
+WARNING: radv is not a conformant Vulkan implementation, testing use only.

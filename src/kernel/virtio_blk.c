@@ -17,6 +17,7 @@
 
 extern void uart_puts(const char* s);
 extern uint64_t timer_get_ms(void);
+extern uint64_t timer_get_us(void);
 extern void uart_print_hex(uint64_t val);
 extern void print_int(int val);
 extern void *memcpy(void *dest, const void *src, size_t n);
@@ -183,6 +184,7 @@ static void blk_test_abort_apply(int armed, const uint8_t *pre) {
 
 /* L67: defined below; the health hook above the wait path uses them. */
 static void blk_token_acquire(void);
+static void nvme_ns2_probe(void); /* cp/ext2 data disk, defined below */
 static void blk_token_release(void);
 /* L78: bounded variant for the block-stress probe.  Returns 1 when the token
    was taken, 0 when the holder was still inside a transfer after `timeout_ms`.
@@ -343,10 +345,10 @@ static int nvme_admin_enable(void) {
   }
   admin_sq_tail = 0;
   admin_cq_head = 0;
-  uint64_t asq = (uint64_t)&admin_sq;
+  uint64_t asq = kimg_pa(&admin_sq);
   nvme_regs[10] = (uint32_t)asq;
   nvme_regs[11] = (uint32_t)(asq >> 32);
-  uint64_t acq = (uint64_t)&admin_cq;
+  uint64_t acq = kimg_pa(&admin_cq);
   nvme_regs[12] = (uint32_t)acq;
   nvme_regs[13] = (uint32_t)(acq >> 32);
   (void)nvme_regs[11];
@@ -394,6 +396,7 @@ static int nvme_admin_enable(void) {
  * (and the driver's own read path is LBA-based, so a wrong nsze silently
  * turns into reads past the end). */
 static uint8_t id_ns[4096] __attribute__((aligned(4096)));
+static uint32_t nvme_mdts = 0xFF; /* Identify Controller MDTS (0xFF: not read) */
 
 static uint16_t nvme_identify_ns(uint32_t nsid, uint8_t *buf) {
   for (int i = 0; i < 4096; i++)
@@ -402,7 +405,7 @@ static uint16_t nvme_identify_ns(uint32_t nsid, uint8_t *buf) {
   id.opcode = 0x06;      /* Identify */
   id.nsid = nsid;
   id.cid = 3;
-  id.prp1 = (uint64_t)buf;
+  id.prp1 = virt_to_phys(buf);
   id.cdw10 = 0x00;       /* CNS = 0: identify namespace */
   return submit_admin_cmd(&id);
 }
@@ -439,7 +442,7 @@ static int nvme_ns_validate(int print_rows) {
   idc.opcode = 0x06;
   idc.nsid = 0;
   idc.cid = 4;
-  idc.prp1 = (uint64_t)id_ns;
+  idc.prp1 = virt_to_phys(id_ns);
   idc.cdw10 = 0x01;      /* CNS = 1: identify controller */
   uint16_t stc = submit_admin_cmd(&idc);
   if (stc != 0) {
@@ -450,6 +453,7 @@ static int nvme_ns_validate(int print_rows) {
   }
   uint32_t vid = id_ns[0] | (id_ns[1] << 8);
   uint32_t ssvid = id_ns[2] | (id_ns[3] << 8);
+  nvme_mdts = id_ns[77]; /* cp/ext2w: max transfer = 2^MDTS min pages; 0 = none */
 
   nvme_id.nsid = 1;
   nvme_id.nsze = nsze;
@@ -476,7 +480,7 @@ static int nvme_io_queues_create(void) {
   struct nvme_cmd create_cq = {0};
   create_cq.opcode = 0x05; /* Create I/O Completion Queue */
   create_cq.cid = 1;
-  create_cq.prp1 = (uint64_t)&io_cq;
+  create_cq.prp1 = kimg_pa(&io_cq);
   create_cq.cdw10 = ((NVME_IOQ_DEPTH - 1) << 16) | 0x01;
   create_cq.cdw11 = 0x01; /* PC = 1, IEN = 0: polled completions */
   uint16_t status_cq = submit_admin_cmd(&create_cq);
@@ -490,7 +494,7 @@ static int nvme_io_queues_create(void) {
   struct nvme_cmd create_sq = {0};
   create_sq.opcode = 0x01; /* Create I/O Submission Queue */
   create_sq.cid = 2;
-  create_sq.prp1 = (uint64_t)&io_sq;
+  create_sq.prp1 = kimg_pa(&io_sq);
   create_sq.cdw10 = ((NVME_IOQ_DEPTH - 1) << 16) | 0x01;
   create_sq.cdw11 = (1 << 16) | 0x01; /* CQID = 1, PC = 1 */
   uint16_t status_sq = submit_admin_cmd(&create_sq);
@@ -768,6 +772,12 @@ static uint16_t nvme_wait_cid(struct nvme_cmd *cmd, uint16_t slot) {
     if ((spins++ & 0x3FF) == 0) {
       extern volatile uint64_t cpu_heartbeat_ms[];
       cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
+      /* cp/ext2w (C8 stop 9): no voluntary yield here.  An arch_yield() from
+         a kernel task in this wait (tried: 8861a362) let two CPUs run the
+         flusher on its one stack -- a kernel-mode fault on a user pid with
+         the flusher's RSP in linux_probe_e2churn -- the L78 shape the
+         stress thread's comment describes.  The tick still preempts a
+         kernel task here; a user syscall's continuation never moves. */
     }
 
     /* Drain every VALID completion at the head.  Validity is the phase tag,
@@ -1302,11 +1312,8 @@ void virtio_blk_selfcheck(void) {
  *     game is mid-transfer for longer than `BKS_TOKEN_WAIT_MS`, the probe
  *     counts `busy` and yields.  It never spins on the token -- that is the
  *     L75 stall, and an unbounded wait there also parks a CPU in `safe_wfi()`.
- *   - between ops the thread halts (`safe_wfi`) for 250 ms: four wake-ups a
- *     second, no runnable loop, no scheduler state of its own.  A scheduler
- *     sleep (process_sleep_ms/arch_yield) looked cleaner but the windows that
- *     used it died at t=244 s with a SEC-4 canary panic; a kernel thread that
- *     only halts is the shape every other driver thread here already has.
+ *   - between ops the thread naps off the run queue for 250 ms
+ *     (stress_delay_ms: process_nap_ms, H8-root; it used to halt in a loop).
  *   - every failure is a counted, bounded row and the probe CONTINUES:
  *     `busy` (token timeout), `skip` (device being repaired / bad geometry),
  *     `bad` (submit error), `mismatch` (write-verify did not read back), and
@@ -1337,18 +1344,22 @@ static uint32_t stress_rnd(void) {
   return stress_seed >> 8;
 }
 
-/* Wait `ms` without touching the scheduler.  Deliberately NOT
- * process_sleep_ms()/arch_yield(): the probe is a kernel thread and the L78
- * windows that used a scheduler sleep here died at t=244 s with
- * `KERNEL PANIC: stack smashing detected (SEC-4 canary)` -- the only new
- * thing in those kernels was a kernel thread calling arch_yield() with a
- * BLOCKED state.  A halt-until-interrupt loop is what every other driver
- * thread in this kernel does; the probe wakes ~4 times a second, so the cost
- * is one idle wake-up per rate-limit period, not a spin. */
+/* Wait `ms` off the run queue (H8-root; cp-fault "What is left": the last
+ * kernel task that halted in a loop).  It used to halt until the next
+ * interrupt in a loop, which holds its CPU for the whole wait and, between
+ * halts, leaves the task READY, so every idle CPU's pick scan found it first
+ * (the H7-16/H7-17 cost vmzero had).  process_nap_ms() parks it BLOCKED with
+ * a deadline, as vmzero and the ext2 flusher do now.  (The L78 windows that
+ * died with a SEC-4 canary panic after a kernel thread called arch_yield()
+ * BLOCKED predate C6-p7b's kernel-stack pin, which made a kernel task's
+ * BLOCKED yield safe; vmzero has napped this way in every game boot since
+ * integ25.)  A nap can end early on a stray wake: loop to the deadline.
+ * Every caller has released the block token. */
 static void stress_delay_ms(uint32_t ms) {
+  extern void process_nap_ms(uint32_t ms);
   uint64_t t0 = timer_get_ms();
-  while (timer_get_ms() - t0 < ms)
-    safe_wfi();
+  for (uint64_t el; (el = timer_get_ms() - t0) < ms;)
+    process_nap_ms((uint32_t)(ms - el));
 }
 
 /* The probe's own submit path, called with the token HELD (never through
@@ -1360,7 +1371,7 @@ static int stress_read_locked(uint64_t lba, uint8_t *buf, uint32_t nsec) {
     cmd.opcode = 0x02; /* Read */
     cmd.nsid = 1;
     cmd.cid = next_io_cid();
-    cmd.prp1 = (uint64_t)&bounce_buf[0];
+    cmd.prp1 = kimg_pa(&bounce_buf[0]);
     cmd.cdw10 = (uint32_t)(lba + i);
     cmd.cdw11 = (uint32_t)((lba + i) >> 32);
     cmd.cdw12 = 0; /* 1 block */
@@ -1378,7 +1389,7 @@ static int stress_write_locked(uint64_t lba, const uint8_t *buf) {
   cmd.opcode = 0x01; /* Write */
   cmd.nsid = 1;
   cmd.cid = next_io_cid();
-  cmd.prp1 = (uint64_t)&bounce_buf[0];
+  cmd.prp1 = kimg_pa(&bounce_buf[0]);
   cmd.cdw10 = (uint32_t)lba;
   cmd.cdw11 = (uint32_t)(lba >> 32);
   cmd.cdw12 = 0;
@@ -1604,7 +1615,7 @@ static void blk_stress_thread(void *arg) {
       last_row = now;
       stress_row("alive", now);
     }
-    /* The rate limit: asleep in halt for 250 ms, four ops a second. */
+    /* The rate limit: napping for 250 ms, four ops a second. */
     stress_delay_ms(BKS_OP_MS);
   }
 }
@@ -1625,7 +1636,6 @@ void virtio_blk_stress_start(void) {
 void virtio_blk_diag_row(void) {
   if (!nvme_regs)
     return;
-  extern uint64_t cpu_pd7[512];
   uart_puts("[BLKD] cc=");
   uart_print_hex(nvme_regs[5]);
   uart_puts(" csts=");
@@ -1636,8 +1646,8 @@ void virtio_blk_diag_row(void) {
   uart_print_hex(nvme_regs[1]);
   uart_puts(" vs=");
   uart_print_hex(nvme_regs[2]);
-  uart_puts(" pd480=");
-  uart_print_hex(cpu_pd7[480]);
+  uart_puts(" regs=");
+  uart_print_hex((uint64_t)(uintptr_t)nvme_regs);
   uart_puts(" reqs=");
   print_int((int)blk_requests);
   uart_puts(" stalls=");
@@ -1664,9 +1674,17 @@ void virtio_blk_diag_row(void) {
   print_int(frame_high_water());
   uart_puts(" hole=");
   print_int(frame_hole_allocs());
+  uart_puts(" fr_hi=");
+  print_int((int)frame_hi_allocs());
   uart_puts(" mmio=");
   print_int((int)blk_mmio_changes);
   uart_puts("\n");
+  /* cp-fat: token wait-time distribution on the same 5 s timeline (only
+     when it changed). */
+  {
+    extern void blk_token_wait_row(void);
+    blk_token_wait_row();
+  }
 }
 
 int virtio_blk_init(void) {
@@ -1721,21 +1739,11 @@ int virtio_blk_init(void) {
   uint32_t bar0_high = pci_read_config(nvme_bus, nvme_slot, 0, 0x14);
   uint64_t nvme_regs_phys = (bar0_low & 0xFFFFFFF0) | ((uint64_t)bar0_high << 32);
 
-  // Setup register pointer (dynamically map BAR using index 480 of cpu_pd7)
-  extern uint64_t cpu_pd7[512];
-  cpu_pd7[480] = (nvme_regs_phys & 0xFFFFFFFFFFE00000ULL) | 0x9B;
-
-  // Flush TLB
-  uint64_t cr3_val;
-  __asm__ volatile(
-      "mov %%cr3, %0\n"
-      "mov %0, %%cr3\n"
-      : "=r"(cr3_val)
-      :
-      : "memory"
-  );
-
-  nvme_regs = (volatile uint32_t*)(0x1FC000000ULL + (nvme_regs_phys & 0x1FFFFF));
+  /* P1 (S4): the register file is an uncached ioremap window (PML4[257],
+     shared by every root).  It used to re-point identity PD7[480] at VA
+     0x1FC000000, which hid the RAM at that physical 2 MiB and was not
+     reachable from a root without the identity map. */
+  nvme_regs = (volatile uint32_t *)ioremap(nvme_regs_phys, 0x4000);
 
   uart_puts("NVMe BAR0 Phys: ");
   uart_print_hex(nvme_regs_phys);
@@ -1743,17 +1751,13 @@ int virtio_blk_init(void) {
   uart_print_hex((uint64_t)nvme_regs);
   uart_puts(")\n");
 
-  /* L75: the 2 MiB window at VA 0x1FC000000 shadows the identity mapping of
-     the same physical 2 MiB, so a frame allocated there would BE this
-     device.  Reserve the shadow range in the frame pool, and say out loud
-     whether the pool's own extent still covers the BAR (it must not: that is
-     the L65-L73 bug, where a page-cache frame was the controller's register
-     file). */
+  /* L75: say out loud whether the pool's own extent covers the BAR (it must
+     not: that is the L65-L73 bug, where a page-cache frame was the
+     controller's register file).  P1 (S4): the window no longer shadows any
+     RAM (ioremap area), so there is no shadow range to reserve. */
   {
-    extern void frame_reserve_range(uint64_t lo, uint64_t hi);
     extern int frame_hole_allocs(void);
     uint64_t win = nvme_regs_phys & 0xFFFFFFFFFFE00000ULL;
-    frame_reserve_range(0x1FC000000ULL, 0x1FE000000ULL);
     uart_puts("[BLKQ] mmio win=");
     uart_print_hex(win);
     uart_puts("-");
@@ -1762,14 +1766,13 @@ int virtio_blk_init(void) {
     /* A BAR inside the frame pool is the whole bug; the extents put the pool
        at 0x20000000-0x70000000 and 0x100000000-0x200000000 with the MMIO
        shadow reserved, so this must read 0. */
-    print_int((win >= FRAME_EXT0_BASE && win < FRAME_EXT0_TOP) ||
-              (win >= FRAME_EXT1_BASE && win < FRAME_EXT1_TOP) ? 1 : 0);
+    print_int(frame_phys_in_pool(win));
     /* And the physical page really is the controller: read CAP through the
        identity map of the window's own physical address and compare with the
        register file.  Equal means "this RAM frame would have been the NVMe
        BAR", which is what the old pool (extent 1 = 0x80000000..) handed out. */
     uart_puts(" alias_read=");
-    uart_print_hex(*(volatile uint32_t *)win);
+    uart_print_hex(*(volatile uint32_t *)phys_to_virt(win));
     uart_puts(" cap=");
     uart_print_hex(nvme_regs[0]);
     uart_puts(" hole_allocs=");
@@ -1794,15 +1797,15 @@ int virtio_blk_init(void) {
     uart_puts("\n");
     /* 32-bit stores, exactly what a page-cache memcpy ends up doing. */
     for (int i = 0; i < 1024; i++)
-      ((volatile uint32_t *)awin)[i] = 0;
+      ((volatile uint32_t *)phys_to_virt(awin))[i] = 0;
     uart_puts("[BLKQ] alias-probe wrote 4 KiB of zeros (32-bit stores) through the pool frame; cc_after=");
     uart_print_hex(nvme_regs[5]);
     uart_puts(" csts_after=");
     uart_print_hex(nvme_regs[7]);
     uart_puts(" pa_cc_read=");
-    uart_print_hex(*(volatile uint32_t *)(awin + 0x14));
+    uart_print_hex(*(volatile uint32_t *)phys_to_virt(awin + 0x14));
     uart_puts(" pa_cap_read=");
-    uart_print_hex(*(volatile uint32_t *)awin);
+    uart_print_hex(*(volatile uint32_t *)phys_to_virt(awin));
     uart_puts(" bar_cc_read=");
     uart_print_hex(nvme_regs[0]);
     uart_puts("\n");
@@ -1838,13 +1841,13 @@ int virtio_blk_init(void) {
   }
 
   // ASQ
-  uint64_t admin_sq_phys = (uint64_t)&admin_sq;
+  uint64_t admin_sq_phys = kimg_pa(&admin_sq);
   nvme_regs[10] = (uint32_t)admin_sq_phys;
   nvme_regs[11] = (uint32_t)(admin_sq_phys >> 32);
   (void)nvme_regs[11]; // Flush write
 
   // ACQ
-  uint64_t admin_cq_phys = (uint64_t)&admin_cq;
+  uint64_t admin_cq_phys = kimg_pa(&admin_cq);
   nvme_regs[12] = (uint32_t)admin_cq_phys;
   nvme_regs[13] = (uint32_t)(admin_cq_phys >> 32);
   (void)nvme_regs[13]; // Flush write
@@ -1934,6 +1937,7 @@ int virtio_blk_init(void) {
     return -1;
   }
 
+  nvme_ns2_probe(); /* cp/ext2: optional data disk (namespace 2); silent when absent */
   uart_puts("NVMe driver initialized successfully!\n");
   virtio_blk_stress_start();
   return 0;
@@ -1943,18 +1947,254 @@ int virtio_blk_init(void) {
  * held while a *lock* is held across the device wait, so the spinlock stall
  * breaker (which frees a lock whose owner stopped taking timer interrupts)
  * cannot admit a second driver entrant — the exact mechanism that used to
- * desynchronize the completion ring.  A waiter sleeps with interrupts on. */
+ * desynchronize the completion ring.  A waiter POLLS (cp-fat, see below).
+ *
+ * cp-fat (P9-8): WHO holds it.  The token is shared by the boot volume (FAT,
+ * namespace 1) and the cp/ext2 data disk (namespace 2), and a FAT directory
+ * operation (rename, unlink, create) takes it while holding fat_lock.  A token
+ * whose holder never runs again therefore surfaces as a fat_lock (or ext2_lock)
+ * wedge whose owner is "RUNNING" on a CPU that is only halting here, with no
+ * [BLKQ] row, because the waiter never reaches a device wait.  Measured shape:
+ * [YLOCK-OWNER] fat_lock pid=10 cpu=4 ost=3 osys=23 with CPU 4 in HLT.  The
+ * waiter names the holder after BLK_TOKEN_REPORT_MS; the wait itself is not
+ * bounded (a FAT metadata write has no error path that leaves the volume
+ * consistent), so this is evidence, not recovery. */
+#define BLK_TOKEN_REPORT_MS 2000u
+static volatile int32_t blk_tok_pid = -1;   /* holder's pid, -1 = none */
+static volatile int32_t blk_tok_cpu = -1;   /* holder's CPU at acquire */
+static volatile uint64_t blk_tok_ms;        /* acquire time */
+static volatile uint64_t blk_tok_site;      /* acquire return address */
+static volatile uint32_t blk_tok_long_waits; /* waits past the report mark */
+
+static void blk_token_note_owner(uint64_t site) {
+  uint32_t c = get_cpuid();
+  blk_tok_cpu = (int32_t)c;
+  blk_tok_pid = (c < MAX_CPUS) ? cpu_current_pids[c] : -1;
+  blk_tok_ms = timer_get_ms();
+  blk_tok_site = site;
+}
+
+/* One record: the token's holder, where (if anywhere) it is running, and the
+ * caller's own context.  Usable from any context (no lock taken; the fields
+ * are a racy snapshot, which is all a wedge report needs). */
+void blk_token_diag_row(const char *why) {
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[BLKTOK] ");
+  kl_s(&kl, why ? why : "state");
+  kl_s(&kl, " in_use=");
+  kl_i(&kl, (long)blk_in_use);
+  kl_s(&kl, " inside=");
+  kl_i(&kl, (long)blk_inside);
+  int32_t hp = blk_tok_pid;
+  kl_s(&kl, " holder pid=");
+  kl_i(&kl, (long)hp);
+  kl_s(&kl, " cpu=");
+  kl_i(&kl, (long)blk_tok_cpu);
+  if (blk_in_use) {
+    kl_s(&kl, " held_ms=");
+    kl_i(&kl, (long)(timer_get_ms() - blk_tok_ms));
+  }
+  kl_s(&kl, " site=");
+  kl_hex(&kl, blk_tok_site);
+  struct process *hpcb = (hp >= 0) ? process_get_pcb((int)hp) : 0;
+  if (hpcb) {
+    kl_s(&kl, " st=");
+    kl_i(&kl, (long)hpcb->state);
+    kl_s(&kl, " kern=");
+    kl_i(&kl, (long)hpcb->is_kernel_process);
+    kl_s(&kl, " osys=");
+    kl_i(&kl, (long)hpcb->last_syscall);
+  }
+  /* Is the holder on a CPU right now?  -1: on none (preempted or lost). */
+  int on = -1;
+  if (hp >= 0)
+    for (uint32_t c = 0; c < MAX_CPUS; c++)
+      if (cpu_current_pids[c] == hp) { on = (int)c; break; }
+  kl_s(&kl, " on_cpu=");
+  kl_i(&kl, (long)on);
+  uint32_t me = get_cpuid();
+  kl_s(&kl, " me pid=");
+  kl_i(&kl, (long)((me < MAX_CPUS) ? cpu_current_pids[me] : -1));
+  kl_s(&kl, " cpu=");
+  kl_i(&kl, (long)me);
+  kl_s(&kl, " holds=");
+  kl_s(&kl, lock_audit_held_outermost());
+  kl_s(&kl, " long_waits=");
+  kl_i(&kl, (long)blk_tok_long_waits);
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+}
+
+/* cp-fat (P9-8): the token wait.
+ *
+ * It was safe_wfi() in a loop, rechecking only at the CPU's next interrupt,
+ * and blk_token_release() woke nobody.  On x86_64 an AP's only periodic
+ * interrupt was CPU 0's broadcast 0x81, and CPU 0 stops sending it whenever it
+ * spins in ylock_acquire inside a syscall (SFMASK masks IF).  The waiter here
+ * usually holds the very lock CPU 0 spins on (fat_lock / fat_wr_lock around
+ * directory and FAT-sector I/O, ext2_lock around ext2 I/O): the token was
+ * released, the halted holder never woke, nothing moved again.  Measured with
+ * linux_probe_fatren (3 of 4 boots wedged): CPU 0 RFL=0x97 spinning on
+ * fat_wr_lock, the holder in HLT here, [BLKTOK] in_use=0.
+ *
+ * C1-k6 (9d47b051) bounds every task halt to 1 ms (safe_wfi arms this CPU's
+ * one-shot), which ends the wedge by itself.  On top of that, with
+ * BLK_TOKEN_RELEASE_WAKE (default on): a USER waiter that finds the token
+ * busy twice registers its CPU in blk_tok_sleepers and halts; the release
+ * sends a directed 0x81 to every registered CPU, so the waiter sees the token
+ * in microseconds instead of at the next 1 ms bound (linux_probe_fatren on
+ * integ10 + 9d47b051: +30-45 % FAT ops, halted waits 0.1-1 ms instead of
+ * >= 1 ms.  A 50 us pause-spin before the halt was measured too: renames a
+ * little faster, but 4x the wake IPIs and up to 50 us of burnt vCPU per
+ * wait, and Venus/P9 boots are vCPU-bound, so there is none).  Registration and the last recheck run with
+ * interrupts off and safe_wfi() halts with "sti; hlt", so a wake sent in
+ * between is held pending and ends the halt: no lost wake.  (0x81 on a CPU
+ * whose user thread is in kernel mode only ends the halt -- trap.c returns at
+ * once.)  A KERNEL TASK never registers: 0x81 on a kernel task is a
+ * reschedule, which preempted the ext2 flusher holding ext2_lock while every
+ * other CPU spun unpreemptibly on it (measured: [YLOCK-OWNER] ext2_lock pid=1
+ * ost=2), and a task resumed elsewhere would clear a bit no longer its own.
+ * Kernel tasks halt in plain safe_wfi(), bounded by C1-k6.  The caller's
+ * interrupt state is restored on the way out. */
+#ifndef BLK_TOKEN_RELEASE_WAKE
+#define BLK_TOKEN_RELEASE_WAKE 1
+#endif
+static volatile uint32_t blk_tok_sleepers;   /* CPUs halted on the token */
+/* Wait-time distribution (all waits that did not get the token at once). */
+static volatile uint64_t blk_tw_n, blk_tw_halts, blk_tw_ipis, blk_tw_max_us,
+    blk_tw_sum_us;
+static volatile uint64_t blk_tw_hist[6]; /* <10us <100us <1ms <10ms <100ms >= */
+
+static inline uint64_t blk_irq_save_off(void) {
+  uint64_t fl;
+  __asm__ volatile("pushfq; popq %0; cli" : "=r"(fl) : : "memory");
+  return fl;
+}
+static inline void blk_irq_restore(uint64_t fl) {
+  if (fl & 0x200) __asm__ volatile("sti" ::: "memory");
+  else __asm__ volatile("cli" ::: "memory");
+}
+
+/* Directed 0x81 to one CPU (same ICR protocol as process.c resched_cpu);
+   interrupts off around the two ICR writes so an interrupt handler on this
+   CPU cannot interleave its own IPI between them. */
+static void blk_wake_cpu(uint32_t c) {
+  uint64_t fl = blk_irq_save_off();
+  volatile uint32_t *icr_hi = (volatile uint32_t *)phys_to_virt(0xFEE00310);
+  volatile uint32_t *icr_lo = (volatile uint32_t *)phys_to_virt(0xFEE00300);
+  for (int i = 0; i < 200000 && (*icr_lo & (1u << 12)); i++)
+    __asm__ volatile("pause" ::: "memory");
+  *icr_hi = c << 24;
+  *icr_lo = 0x00002081u; /* fixed, vector 0x81, assert, edge */
+  for (int i = 0; i < 200000 && (*icr_lo & (1u << 12)); i++)
+    __asm__ volatile("pause" ::: "memory");
+  blk_irq_restore(fl);
+}
+
+void blk_token_wait_row(void);
+static void blk_tw_account(uint64_t us, int halted) {
+  uint64_t n = __atomic_add_fetch(&blk_tw_n, 1, __ATOMIC_RELAXED);
+  __atomic_add_fetch(&blk_tw_sum_us, us, __ATOMIC_RELAXED);
+  if (halted) __atomic_add_fetch(&blk_tw_halts, 1, __ATOMIC_RELAXED);
+  int b = us < 10 ? 0 : us < 100 ? 1 : us < 1000 ? 2 : us < 10000 ? 3
+        : us < 100000 ? 4 : 5;
+  __atomic_add_fetch(&blk_tw_hist[b], 1, __ATOMIC_RELAXED);
+  uint64_t m = blk_tw_max_us;
+  while (us > m && !__atomic_compare_exchange_n(&blk_tw_max_us, &m, us, 0,
+                                                __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+  }
+  if ((n & 1023) == 0) blk_token_wait_row(); /* a bounded running record */
+}
+
+/* One [BLKTOKW] row: how long token waiters waited (cp-fat). */
+void blk_token_wait_row(void) {
+  static uint64_t last_n;
+  uint64_t n = blk_tw_n;
+  if (n == last_n) return;
+  last_n = n;
+  struct kline kl;
+  kl_init(&kl);
+  kl_s(&kl, "[BLKTOKW] waits=");
+  kl_i(&kl, (long)n);
+  kl_s(&kl, " halts=");
+  kl_i(&kl, (long)blk_tw_halts);
+  kl_s(&kl, " ipis=");
+  kl_i(&kl, (long)blk_tw_ipis);
+  kl_s(&kl, " mean_us=");
+  kl_i(&kl, (long)(n ? blk_tw_sum_us / n : 0));
+  kl_s(&kl, " max_us=");
+  kl_i(&kl, (long)blk_tw_max_us);
+  kl_s(&kl, " hist(<10us,<100us,<1ms,<10ms,<100ms,more)=");
+  for (int i = 0; i < 6; i++) {
+    kl_i(&kl, (long)blk_tw_hist[i]);
+    if (i < 5) kl_c(&kl, ',');
+  }
+  kl_c(&kl, '\n');
+  kl_emit(&kl);
+}
+
 static void blk_token_acquire(void) {
+  uint64_t site = (uint64_t)(uintptr_t)__builtin_return_address(0);
+  uint64_t t0 = 0, t0us = 0;
+  int reported = 0, halted = 0;
+  uint64_t entry_fl = blk_irq_save_off();
+  blk_irq_restore(entry_fl);
+  /* Kernel tasks never register for the release wake (see above). */
+  int kern = 1;
+  {
+    struct process *cp = current_process();
+    if (cp && !cp->is_kernel_process) kern = 0;
+  }
   for (;;) {
+    if (!t0us) t0us = timer_get_us();
+    int sleep = BLK_TOKEN_RELEASE_WAKE && t0 && !kern;
+    uint32_t mybit = 0;
+    /* Interrupts off from the last check to the halt (see above); the CPU is
+       read with them off, so a kernel-task waiter cannot migrate meanwhile. */
+    if (sleep) {
+      (void)blk_irq_save_off();
+      uint32_t me = get_cpuid();
+      mybit = (me < 32) ? (1u << me) : 0;
+      if (!mybit) sleep = 0;
+      else __atomic_or_fetch(&blk_tok_sleepers, mybit, __ATOMIC_SEQ_CST);
+    }
     uint64_t flags = spinlock_acquire_irqsave(&blk_request_lock);
     if (!blk_in_use) {
       blk_in_use = 1;
+      blk_token_note_owner(site);
       spinlock_release_irqrestore(&blk_request_lock, flags);
+      if (sleep)
+        __atomic_and_fetch(&blk_tok_sleepers, ~mybit, __ATOMIC_SEQ_CST);
       break;
     }
     spinlock_release_irqrestore(&blk_request_lock, flags);
-    safe_wfi();
+    uint64_t now = timer_get_ms();
+    if (!t0) {
+      t0 = now;
+    } else if (!reported && now - t0 >= BLK_TOKEN_REPORT_MS) {
+      reported = 1;
+      uint32_t n = __atomic_add_fetch(&blk_tok_long_waits, 1, __ATOMIC_SEQ_CST);
+      if (n <= 8 || (n & 63) == 0)
+        blk_token_diag_row("wait>2s");
+    }
+    if (sleep) {
+      halted = 1;
+      safe_wfi(); /* sti; hlt -- a wake IPI pending since the cli ends it */
+      __atomic_and_fetch(&blk_tok_sleepers, ~mybit, __ATOMIC_SEQ_CST);
+    } else if (t0 && (kern || !BLK_TOKEN_RELEASE_WAKE)) {
+      halted = 1;
+      safe_wfi(); /* kernel task, or no release wake: C1-k6's 1 ms bound */
+    }
+    /* else: a user waiter's FIRST failed check retries at once and registers
+       on the next pass -- it must never halt unregistered, because nothing
+       would wake it (measured: that halt was every lost wake of the first cut
+       of this loop, and the 1-10 ms bucket once C1-k6's bound covered it). */
   }
+  blk_irq_restore(entry_fl);
+  if (t0us) blk_tw_account(timer_get_us() - t0us, halted);
+  if (reported)
+    blk_token_diag_row("wait-ended");
   if (__atomic_add_fetch(&blk_inside, 1, __ATOMIC_SEQ_CST) > 1) {
     uart_puts("[BLKRACE] two drivers inside the queue, inside=");
     print_int((int)blk_inside);
@@ -1965,31 +2205,45 @@ static void blk_token_acquire(void) {
 static void blk_token_release(void) {
   __atomic_sub_fetch(&blk_inside, 1, __ATOMIC_SEQ_CST);
   uint64_t flags = spinlock_acquire_irqsave(&blk_request_lock);
+  blk_tok_pid = -1;
+  blk_tok_cpu = -1;
   blk_in_use = 0;
   spinlock_release_irqrestore(&blk_request_lock, flags);
+  /* Wake every halted waiter (wake-all: they race for the token as usual).
+     The set is TAKEN, not read: a woken waiter that loses the race registers
+     again before it halts again, so no CPU is sent a second IPI for a halt it
+     has already left. */
+  uint32_t sl = __atomic_exchange_n(&blk_tok_sleepers, 0, __ATOMIC_SEQ_CST);
+  uint32_t self = get_cpuid();
+  while (sl) {
+    uint32_t c = (uint32_t)__builtin_ctz(sl);
+    sl &= sl - 1;
+    if (c == self || c >= MAX_CPUS) continue;
+    blk_wake_cpu(c);
+    __atomic_add_fetch(&blk_tw_ipis, 1, __ATOMIC_RELAXED);
+  }
 }
 
-/* L78: bounded token wait (see the prototype).  The first ~2 ms poll with a
- * pause; after that the caller is a kernel thread and sleeps in 1 ms slices,
- * so a probe waiting behind the game's loader costs no CPU and is always
- * preemptible.  Never call this with the token already held. */
+/* L78: bounded token wait (see the prototype).  It polls with a pause until
+ * the deadline (cp-fat: it used to halt after ~200 polls, and a halt whose
+ * wake never comes has no deadline at all); a kernel-thread caller stays
+ * preemptible by the tick.  Never call this with the token already held. */
 static int blk_token_try_acquire(uint32_t timeout_ms) {
   uint64_t t0 = timer_get_ms();
-  uint32_t spins = 0;
   for (;;) {
     uint64_t flags = spinlock_acquire_irqsave(&blk_request_lock);
     if (!blk_in_use) {
       blk_in_use = 1;
+      blk_token_note_owner((uint64_t)(uintptr_t)__builtin_return_address(0));
       spinlock_release_irqrestore(&blk_request_lock, flags);
       break;
     }
     spinlock_release_irqrestore(&blk_request_lock, flags);
     if (timer_get_ms() - t0 >= timeout_ms)
       return 0;
-    if (spins++ < 200)
-      __asm__ volatile("pause");
-    else
-      safe_wfi(); /* bounded: the deadline check above ends the wait */
+    /* cp-fat (P9-8): poll, never halt -- a halt is only bounded if some
+       interrupt arrives, and none may (see blk_token_acquire). */
+    __asm__ volatile("pause" ::: "memory");
   }
   if (__atomic_add_fetch(&blk_inside, 1, __ATOMIC_SEQ_CST) > 1) {
     uart_puts("[BLKRACE] two drivers inside the queue, inside=");
@@ -2008,7 +2262,7 @@ int virtio_blk_read_raw(uint64_t sector, void* buf, uint32_t count) {
     cmd.opcode = 0x02; // Read
     cmd.nsid = 1;      // Namespace 1
     cmd.cid = next_io_cid();
-    cmd.prp1 = (uint64_t)&bounce_buf[0];
+    cmd.prp1 = kimg_pa(&bounce_buf[0]);
     cmd.cdw10 = (uint32_t)(sector + i);
     cmd.cdw11 = (uint32_t)((sector + i) >> 32);
     cmd.cdw12 = 0; // 1 block (0)
@@ -2115,7 +2369,7 @@ int virtio_blk_write_raw(uint64_t sector, const void* buf, uint32_t count) {
     cmd.opcode = 0x01; // Write
     cmd.nsid = 1;      // Namespace 1
     cmd.cid = next_io_cid();
-    cmd.prp1 = (uint64_t)&bounce_buf[0];
+    cmd.prp1 = kimg_pa(&bounce_buf[0]);
     cmd.cdw10 = (uint32_t)(sector + i);
     cmd.cdw11 = (uint32_t)((sector + i) >> 32);
     cmd.cdw12 = 0; // 1 block (0)
@@ -2149,6 +2403,238 @@ int virtio_blk_write_raw(uint64_t sector, const void* buf, uint32_t count) {
   }
   blk_token_release();
   return res;
+}
+
+/* ---------------------------------------------------------------------------
+ * cp/ext2 (docs/cp-ext2.md): the optional DATA disk = NVMe namespace 2 of the
+ * boot controller.
+ *
+ * Why a namespace and not a second controller: everything above is a
+ * single-controller driver (one BAR window, one admin/IO queue pair, one
+ * in-flight token, one reset/epoch machine).  A second namespace on the same
+ * controller reuses all of it unchanged: the same token serialises both
+ * disks, a controller reset recovers both, and the epoch rule ("never trust a
+ * completion that overlapped a device event") covers both.  QEMU attaches it
+ * as `-drive ...,id=cpdata,if=none -device nvme-ns,drive=cpdata,nsid=2`
+ * (Makefile CPDATA hook).  Without that device, Identify(nsid=2) fails or
+ * reports nsze=0, nothing is printed and the namespace stays absent, so a
+ * boot without the data disk behaves exactly as before.
+ *
+ * Transfers are up to 8 sectors (one 4 KiB bounce page, PRP1 only), the same
+ * bounce discipline as namespace 1.  Namespace 2 never goes through the
+ * block cache: blk_cache is keyed by namespace-1 sectors.
+ * ------------------------------------------------------------------------- */
+static uint64_t ns2_nsze;    /* sectors; 0 = no data disk */
+
+static void nvme_ns2_probe(void) {
+  ns2_nsze = 0;
+  uint16_t st = nvme_identify_ns(2, id_ns);
+  if (st != 0) return;
+  uint64_t nsze = 0;
+  for (int i = 7; i >= 0; i--)
+    nsze = (nsze << 8) | id_ns[i];
+  uint32_t nlbaf = id_ns[25];
+  uint32_t flbas = id_ns[26] & 0x0F;
+  uint32_t lbads = 0;
+  if (flbas <= nlbaf)
+    lbads = id_ns[128 + 4 * flbas + 2];
+  if (nsze == 0) return;
+  if (lbads != 9) {
+    uart_puts("[BLKD] ns2 ignored: lbads=");
+    print_int((int)lbads);
+    uart_puts(" (only 512-byte sectors are supported)\n");
+    return;
+  }
+  ns2_nsze = nsze;
+  uart_puts("[BLKD] data disk nsid=2 sectors=");
+  uart_print_hex(nsze);
+  uart_puts("\n");
+}
+
+int blk_data_present(void) { return ns2_nsze != 0; }
+uint64_t blk_data_sectors(void) { return ns2_nsze; }
+
+/* cp/ext2w: multi-block commands.  A transfer of up to NS2_MAX_PAGES pages
+ * goes through one physically contiguous bounce region (allocated at the
+ * first data-disk transfer) with a PRP list, so a run of blocks is one NVMe
+ * command instead of one per 4 KiB.  The bounce copy keeps the namespace-1
+ * discipline (the device only ever DMAs into driver-owned memory, and the
+ * M6/L69 re-issue rule needs the caller's bytes intact for a second try).
+ * Bounded by the controller's MDTS; without the region the old 8-sector
+ * path through bounce_buf is used. */
+#define NS2_MAX_PAGES 128u /* 512 KiB: QEMU's default MDTS (7) with 4 KiB pages */
+static uint64_t ns2_bounce_pa;   /* physically contiguous, NS2_MAX_PAGES pages */
+static uint8_t *ns2_bounce;
+static uint64_t ns2_prpl_pa;     /* one page of PRP entries */
+static uint64_t *ns2_prpl;
+static uint32_t ns2_max_pages = 0; /* 0: not set up yet; 1: fallback */
+static uint64_t ns2_cmds, ns2_secs;
+static uint32_t ns2_max_secs;
+
+static void ns2_setup_locked(void) {
+  if (ns2_max_pages) return;
+  ns2_max_pages = 1;
+  uint32_t lim = NS2_MAX_PAGES;
+  if (nvme_mdts != 0xFF && nvme_mdts != 0) {
+    uint32_t m = nvme_mdts > 16 ? 0x10000u : (1u << nvme_mdts);
+    /* MDTS counts CAP.MPSMIN pages; this driver programs MPS = MPSMIN = 4 KiB */
+    if (nvme_id.mpsmin == 0 && m < lim) lim = m;
+  }
+  if (lim < 2) return;
+  uint64_t pl = frame_alloc();
+  uint64_t b = frame_alloc_contig((int)lim);
+  if (!pl || !b) {
+    if (pl) frame_free(pl);
+    if (b)
+      for (uint32_t i = 0; i < lim; i++) frame_free(b + (uint64_t)i * 4096u);
+    uart_puts("[BLKD] ns2 multi-block bounce unavailable: 8-sector commands\n");
+    return;
+  }
+  ns2_prpl_pa = pl;
+  ns2_prpl = (uint64_t *)phys_to_virt(pl);
+  ns2_bounce_pa = b;
+  ns2_bounce = (uint8_t *)phys_to_virt(b);
+  for (uint32_t i = 1; i < lim; i++) ns2_prpl[i - 1] = b + (uint64_t)i * 4096u;
+  ns2_max_pages = lim;
+  uart_puts("[BLKD] ns2 multi-block commands: up to ");
+  print_int((int)(lim * 8));
+  uart_puts(" sectors (mdts=");
+  print_int((int)nvme_mdts);
+  uart_puts(")\n");
+}
+
+/* One command: `nsec` sectors at `lba`, data in `dbuf` (bounce_buf: <= 8
+   sectors, or the ns2 bounce region: <= ns2_max_pages * 8).  The caller has
+   copied the payload in (write) and copies it out (read).  Caller holds the
+   token.  Same epoch discipline as namespace 1: a completion that overlapped
+   a device event is re-issued once; a second event is an error. */
+static int ns2_cmd_locked(uint64_t lba, uint32_t nsec, int wr, int big) {
+  struct nvme_cmd cmd = {0};
+  cmd.opcode = wr ? 0x01 : 0x02;
+  cmd.nsid = 2;
+  cmd.cid = next_io_cid();
+  uint32_t pages = (nsec * 512u + 4095u) / 4096u;
+  if (big) {
+    cmd.prp1 = ns2_bounce_pa;
+    if (pages == 2)
+      cmd.prp2 = ns2_bounce_pa + 4096u;
+    else if (pages > 2)
+      cmd.prp2 = ns2_prpl_pa;
+  } else {
+    cmd.prp1 = kimg_pa(&bounce_buf[0]);
+  }
+  cmd.cdw10 = (uint32_t)lba;
+  cmd.cdw11 = (uint32_t)(lba >> 32);
+  cmd.cdw12 = nsec - 1;
+  uint64_t ep0 = blk_dev_epoch;
+  if (!nvme_ready_now()) {
+    nvme_reinit();
+    ep0 = blk_dev_epoch;
+    blk_prerepair++;
+  }
+  uint16_t status = submit_io_cmd(&cmd);
+  if (status == 0 && !nvme_ready_now())
+    __atomic_add_fetch(&blk_dev_epoch, 1, __ATOMIC_SEQ_CST);
+  if (status == 0 && blk_dev_epoch != ep0) {
+    /* the payload is still in the bounce memory: re-issue as is */
+    ep0 = blk_dev_epoch;
+    cmd.cid = next_io_cid();
+    status = submit_io_cmd(&cmd);
+    blk_untrusted++;
+    if (status == 0 && blk_dev_epoch != ep0)
+      status = 0x7FFF;
+  }
+  ns2_cmds++;
+  ns2_secs += nsec;
+  if (nsec > ns2_max_secs) ns2_max_secs = nsec;
+  return status == 0 ? 0 : -1;
+}
+
+/* Vectored transfer: buffer i holds `each` sectors (each * 512 bytes). */
+static int ns2_rw_vec(uint64_t sector, void *const *bufs, uint32_t nbuf,
+                      uint32_t each, int wr) {
+  if (!ns2_nsze || nbuf == 0 || each == 0) return -1;
+  uint64_t total = (uint64_t)nbuf * each;
+  if (sector >= ns2_nsze || total > ns2_nsze - sector) return -1;
+  blk_token_acquire();
+  ns2_setup_locked();
+  int big = ns2_max_pages > 1;
+  uint32_t cap = big ? ns2_max_pages * 8u : 8u; /* sectors per command */
+  uint8_t *bb = big ? ns2_bounce : (uint8_t *)&bounce_buf[0];
+  int res = 0;
+  uint32_t bi = 0, boff = 0; /* position: buffer index, sector within it */
+  while (total > 0) {
+    uint32_t n = total > cap ? cap : (uint32_t)total;
+    /* walk the buffers for this command's n sectors */
+    uint32_t sbi = bi, sboff = boff;
+    if (wr) {
+      for (uint32_t done = 0; done < n;) {
+        uint32_t take = each - sboff;
+        if (take > n - done) take = n - done;
+        memcpy(bb + (uint64_t)done * 512u,
+               (const uint8_t *)bufs[sbi] + (uint64_t)sboff * 512u, take * 512u);
+        done += take;
+        sboff += take;
+        if (sboff == each) {
+          sboff = 0;
+          sbi++;
+        }
+      }
+    }
+    if (ns2_cmd_locked(sector, n, wr, big) != 0) {
+      res = -1;
+      break;
+    }
+    if (!wr) {
+      sbi = bi;
+      sboff = boff;
+      for (uint32_t done = 0; done < n;) {
+        uint32_t take = each - sboff;
+        if (take > n - done) take = n - done;
+        memcpy((uint8_t *)bufs[sbi] + (uint64_t)sboff * 512u,
+               bb + (uint64_t)done * 512u, take * 512u);
+        done += take;
+        sboff += take;
+        if (sboff == each) {
+          sboff = 0;
+          sbi++;
+        }
+      }
+    }
+    bi = sbi;
+    boff = sboff;
+    sector += n;
+    total -= n;
+    /* L9 liveness: this core is provably alive after a completed command */
+    {
+      extern volatile uint64_t cpu_heartbeat_ms[];
+      cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
+    }
+  }
+  blk_token_release();
+  return res;
+}
+
+int blk_data_read(uint64_t sector, void *buf, uint32_t count) {
+  void *b[1] = {buf};
+  return ns2_rw_vec(sector, b, 1, count, 0);
+}
+
+int blk_data_write(uint64_t sector, const void *buf, uint32_t count) {
+  void *b[1];
+  memcpy(&b[0], &buf, sizeof buf); /* drop const: a write only reads it */
+  return ns2_rw_vec(sector, b, 1, count, 1);
+}
+
+int blk_data_rw_vec(uint64_t sector, void *const *bufs, uint32_t nbuf,
+                    uint32_t nsec_each, int wr) {
+  return ns2_rw_vec(sector, bufs, nbuf, nsec_each, wr);
+}
+
+void blk_data_stats(uint64_t *cmds, uint64_t *sectors, uint32_t *max_sectors) {
+  if (cmds) *cmds = ns2_cmds;
+  if (sectors) *sectors = ns2_secs;
+  if (max_sectors) *max_sectors = ns2_max_secs;
 }
 
 #else
@@ -2593,3 +3079,31 @@ int virtio_blk_write_sector(uint64_t sector, const void* buf, uint32_t count) {
   blk_cache_invalidate(sector, count);
   return rc;
 }
+
+#ifndef __x86_64__
+/* cp/ext2: the data disk is an x86_64 NVMe namespace (see the x86 section);
+ * the ARM virtio-mmio transport is single-device, so ARM has none. */
+int blk_data_present(void) { return 0; }
+uint64_t blk_data_sectors(void) { return 0; }
+int blk_data_read(uint64_t sector, void *buf, uint32_t count) {
+  (void)sector; (void)buf; (void)count;
+  return -1;
+}
+int blk_data_write(uint64_t sector, const void *buf, uint32_t count) {
+  (void)sector; (void)buf; (void)count;
+  return -1;
+}
+int blk_data_rw_vec(uint64_t sector, void *const *bufs, uint32_t nbuf,
+                    uint32_t nsec_each, int wr) {
+  (void)sector; (void)bufs; (void)nbuf; (void)nsec_each; (void)wr;
+  return -1;
+}
+void blk_data_stats(uint64_t *cmds, uint64_t *sectors, uint32_t *max_sectors) {
+  if (cmds) *cmds = 0;
+  if (sectors) *sectors = 0;
+  if (max_sectors) *max_sectors = 0;
+}
+/* cp-fat: the ARM transport has no shared token holder to name. */
+void blk_token_diag_row(const char *why) { (void)why; }
+void blk_token_wait_row(void) {}
+#endif

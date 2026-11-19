@@ -1,0 +1,64 @@
+# BEFORE: lane tree at 721266a9 (base kernel) + the new probes, strix QEMU/KVM -cpu host (default), 2026-11-15
+# bash tools/gate/t3_linux_probe.sh thr / join
+
+--- thr (base kernel)
+--- probe rows ---
+[LP] thr probe start pid=2
+[LP] K1 glibc-pthread flags=0x3d0f00 tid=1 ptid=1 child_tid=1 fs_ok=1 ctid_after=0 parks=1 woke=1 eagain=0 other=0 join_us=99000 ok
+[LP] K2 musl-pthread flags=0x7d0f00 tid=1 ptid=1 child_tid=1 fs_ok=1 ctid_after=0 parks=1 woke=1 eagain=0 other=0 join_us=92000 ok
+[LP] K3 joinE-settid flags=0x1050f00 tid=3 ctid_after_exit=3 mark=1 ok
+[LP] K4 minimal flags=0x10900 clone=1 ran=1 (report-only: Linux accepts; HobbyOS keeps fs/files per group and refuses)
+[LP] X1 thread-no-sighand flags=0x10100 -> 3 want -22 FAIL
+[LP] X2 sighand-no-vm flags=0x811 -> -38 want -22 FAIL
+[LP] X3 fs-newns flags=0x20211 -> -38 want -22 FAIL
+[LP] X4 pidfd-parent-settid flags=0x101011 -> -38 want -22 FAIL
+[LP] X6 linuxthreads-vm-sighand flags=0x911 -> -38 want -22 (report-only)
+[LP] X7 vm-process flags=0x111 -> -38 want -22 (report-only)
+[LP] F1 glibc-fork flags=0x1200011 pid=3 status=0x700 parent_ctid=0 ok
+[LP] F2 fork57 pid=3 status=0x900 ok
+[LP] V1 vfork58 pid=-38 shared_seen=0 status=0xfffffffd FAIL
+[LP] V2 spawn-shape flags=0x4111 pid=-38 err_seen=0 child_pid=0 status=0xfffffffd FAIL
+[LP] V3 posix_spawn-enoent r=38 pid=-1 FAIL
+[LP] R1 robust-abi set(23)=-22 set(24)=0 get=0 head_ok=1 len=24 ok
+[LP] R2 robust-death owner=3 wait=0 word_after=0xc0000003 (want 0xC0000000) FAIL
+[LP] G1 exit_group-from-worker status=0xffffffff ms=4063 FAIL
+[LP] G2 leader-exits-first status=0x2b00 ok
+[LP] L-futex tgkill=0 latency_us=13000 handler_on=1 after: returned=0 ret=0 errno=0 (want restart) ok
+[LP] L-nanosleep tgkill=0 latency_us=11000 handler_on=1 after: returned=0 ret=0 errno=0 (want EINTR) FAIL
+[LP] L-sigsuspend tgkill=0 latency_us=10000 handler_on=1 after: returned=1 ret=-1 errno=4 (want EINTR) ok
+--- unhandled Linux syscalls (name the next handler) ---
+[LCOMPAT] argv argc=1 a0=PROBE.ELF execfn=PROBE.ELF
+[LCOMPAT] clone flags=0x3D0F00 stack=0x108001FFF0 tls=0x1000010AC0 -> 1
+[LCOMPAT] clone flags=0x7D0F00 stack=0x108001FFF0 tls=0x1000010CC0 -> 1
+[LCOMPAT] clone flags=0x1050F00 stack=0x108001FFF0 tls=0x0 -> 3
+[LCOMPAT] clone flags=0x10900 stack=0x108002FFF0 tls=0x0 -> 1
+[LCOMPAT] clone flags=0x10100 stack=0x108003FFF0 tls=0x0 -> 3
+[LCOMPAT] clone refused flags=0x0x811 (no CLONE_VM|CLONE_THREAD: no fork/COW in this kernel)
+[LCOMPAT] clone refused flags=0x0x20211 (no CLONE_VM|CLONE_THREAD: no fork/COW in this kernel)
+[LCOMPAT] clone refused flags=0x0x101011 (no CLONE_VM|CLONE_THREAD: no fork/COW in this kernel)
+[LCOMPAT] clone refused flags=0x0x911 (no CLONE_VM|CLONE_THREAD: no fork/COW in this kernel)
+[LCOMPAT] ENOSYS nr=58 name=PROBE.ELF pid=2 rip=0x10000038E6 rdi=0x1
+[LCOMPAT] fault sig=11 pid=5 tgid=2 tls=0x10800D2F38 live_fs=0x0x10800D2F38
+[LCOMPAT] fault-no-handler pid=5 sig=11 ipc=0x0x10800D2E00 rsp=0x0x10800D2DE8 vec=14 cr2=0x0x10800D2E00 live=3 -> default action
+--- faults / exits ---
+[EXITPC] pid=3 last_user_pc=0x10000037C6 code=0x7
+[EXITPC] pid=3 last_user_pc=0x10000038A9 code=0x9
+[EXITPC] pid=4 last_user_pc=0x1000004C21 code=0x63
+[KERNEL] pid=5 (PROBE.ELF) memory fault VA=0x00000010800D2E00 PC=0x00000010800D2E00 rw=rx in=PROT region=0x00000010800B2000+0x0000000000021000 prot=3 kind=3 rsp=0x00000010800D2DE8 live=3 inH=0 cr3frame=0x0000000200C06000 asroot=0x0000000200C06000 sys=3 ret=0xFFFFFFFFFFFFFFF7 rbx=0x00000017FFFFFD00 rdi=0x00000010800D2E10 rsi=0x0000000000000001 rbp=0x00000010800D2DE0 rbp0=0x00000010800D2E00 ret=0x00000010000074A7 -> killed
+[EXITPC] pid=5 last_user_pc=0x1000006050 code=0x4000000B
+t3_linux_probe: FAIL — thr never printed '[LP] done rc=0' (tier rc=1)
+
+--- join, NEW probe source on the base kernel (rows A and E pass: both were probe defects)
+--- probe rows ---
+[LP] join probe start
+[LP] A park-first wait=0 wake=1 flag=1
+[LP] B wake-before-look wait=0 flag=1
+[LP] C join-park-first rc=0 us=133000 ran=1
+[LP] D join-after-exit rc=0 us=0
+[LP] E nocleartid pid=1 ctid=1 mark=1 ok
+[LP] done rc=0
+--- unhandled Linux syscalls (name the next handler) ---
+
+--- base integ join console (~/cp/integ, cyberpunk merge): the [FUTEX]/[IPI] rows that split row A, and the kernel WAKE record woke=1 while the row read wake=-1
+156:[LP] [IPI] self=0 to=1 t=1163
+157-A park-first wait=0 wake=-1 flag=1[FUTEX] ##1 WAKE pid=1 as=0x75B04230 key=0x100000D12C rip=0x1000004191 n=1 bitset=0xFFFFFFFF woke=1 of=2

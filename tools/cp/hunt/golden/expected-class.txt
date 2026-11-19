@@ -1,0 +1,39 @@
+== classify golden: tools/cp/hunt/golden/serial-mini.txt (29 lines, sha f74748f29fba9846)
+   verdict: main-menu
+   rc: 0
+   launch_s: 21.3
+   menu_s: 243.5
+   launch_to_menu_s: 222.2
+   REDEngineErrorReporter: started (exited)
+-- kernel faults: 2 rows, 2 signatures
+       1  L18      user-fault: [KERNEL] User process fault! Vector: 14
+       1  L19      lcompat-fault: [LCOMPAT] fault sig=11 pid=N rip=0x# addr=0x#
+-- kernel stalls / lost wakes / timeouts: 3 rows, 2 signatures
+       2  L16      venus: [VENUS] fence_wait2 timeout pid=N ctx=N ring=N
+       1  L20      nfspipe: [NFSPIPE] stall inflight=N issued=N replies=N
+-- kernel diagnostics (instrument rows): 4 rows, 3 signatures
+       2  L13      badelr: elr~0x140000000 in Cyberpunk2077.e
+       1  L26      watchdog: [WATCHDOG] console silent for more than 20s
+       1  L29      cons-takeover: [CONS] takeover cpu=N holder=N why=stall watched_us=N wall_us=N
+-- [EXITPC] non-zero exit codes: 1 rows, 1 signatures
+       1  L5       wine code=0xC0000135 DLL_NOT_FOUND
+-- process exits (by name): 2 rows, 2 signatures
+       1  L4       wine
+       1  L15      REDEngineErrorR
+-- audio (alsa-lib in the guest): 2 rows, 2 signatures
+       1  L27      alsa-lib snd_pcm_recover: underrun occurred
+       1  L28      kernel [SND] xrun row
+-- Wine err: lines: 4 rows, 4 signatures
+       1  L3       winediag:getaddrinfo Failed to resolve your host name IP  [benign: no DNS name for the guest]
+       1  L7       wineboot:process_run_key Error running cmd L"C:\\windows\\system32\\winemenubuilder.exe -a -r" (N).  [benign: winemenubuilder disabled in the prefix]
+       1  L8       module:import_dll Library mfc140u.dll (which is needed by L"Z:\\GAME\\bin\\x64\\CChromaEditorLibrary64.dll") not found  [benign: Razer Chroma plugin needs MFC; game ignores it]
+       1  L25      wine: failed to start L"C:\windows\syswow64\rundll32.exe": #  [benign: no 32-bit Wine: the prefix update's Wow64Install step (stale prefix stamp, cp-hunt H1-04)]
+-- DXVK / vkd3d-proton err+warn: 3 rows, 3 signatures
+       1  L9       err:vkd3d-proton:d3d12_device_create Something went wrong 0x#.  [new]
+       1  L10      err: DXGI: Failed to parse display metadata + colorimetry info, using blank.  [benign: DXVK: no EDID / HDR metadata]
+       1  L11      warn: DXGI: MakeWindowAssociation: Ignoring flags  [benign: DXVK: flags it does not implement]
+-- REDEngineErrorReporter: 2 rows, 2 signatures
+       1  L12      REDEngineErrorReporter.exe loaded
+       1  L15      REDEngineErrorReporter exited
+-- [THRS] per process: rows, anon MiB first/max/last, res MiB first/max/last, max threads
+   Cyberpunk2077.e        3    1000    1200    1200      400    500    450    52

@@ -79,7 +79,12 @@ static void test_evdev_mouse_clamp(void) {
     evdev_mouse_byte(&d, 0x80, cap_emit, &d);
     evdev_mouse_byte(&d, 0x00, cap_emit, &d);
   }
-  EXPECT_EQ(cap.value[cap.n - 3], 0);
+  /* Each packet: ABS_X, ABS_Y, REL_X (the raw -128), SYN. */
+  EXPECT_EQ(cap.type[cap.n - 4], EVDEV_EV_ABS);
+  EXPECT_EQ(cap.value[cap.n - 4], 0);
+  EXPECT_EQ(cap.type[cap.n - 2], EVDEV_EV_REL);
+  EXPECT_EQ(cap.code[cap.n - 2], EVDEV_REL_X);
+  EXPECT_EQ((int32_t)cap.value[cap.n - 2], -128);
 }
 
 static void test_evdev_wheel_vmmouse(void) {

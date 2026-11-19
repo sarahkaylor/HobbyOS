@@ -1,0 +1,174 @@
+# main (b1f3ef56) GB-308 glibc-2.31 probes (tools/jdk/*.c + tools/cp/sync/munmapwb.c) on cp-sync, strix KVM, one t3 boot each (obj/main-gates.sh, obj/one.sh)
+# built with GLIBC231=~/cp/sysroot-glibc231 bash tools/jdk/build-probes.sh; staged with tools/jdk/stage.sh via T3_STAGE; booted with tools/t3_tier.sh intel under tools/cp/qemu-slot.sh
+
+## hello
+HELLO-GLIBC: start pid=2
+HELLO-GLIBC: getcwd -> / (ok) errno=0
+HELLO-GLIBC: getcwd after chdir -> / (ok) errno=0
+HELLO-GLIBC: raw getcwd ret=2 buf='/'
+HELLO-GLIBC: uname sysname=Linux release=6.1-hobbyos machine=x86_64
+HELLO-GLIBC: clock mono=3.617000000
+HELLO-GLIBC: malloc 1M ok
+HELLO-GLIBC: map 1000000000-1000001000 r--p 00000000 00:00 0 /HELLO.EXE
+HELLO-GLIBC: map 1000001000-1000003000 r-xp 00001000 00:00 0 /HELLO.EXE
+HELLO-GLIBC: map 1000003000-1000004000 r--p 00003000 00:00 0 /HELLO.EXE
+HELLO-GLIBC: thread ok v=42
+HELLO-GLIBC: DONE
+[KERNEL] Process 2: HELLO.EXE exited unexpectedly or gracefully.
+
+## dirprobe
+[WAVE-MANIFEST] DIRPROBE.EXE
+[WAVE-TRY] DIRPROBE.EXE
+DIRPROBE.EXE
+/DIRPROBE.EXE
+[LCOMPAT] argv argc=1 a0=DIRPROBE.EXE execfn=DIRPROBE.EXE
+[ARRIVED] DIRPROBE.EXE rc>0
+DIRPROBE start[PUB] who=fault_obj va=0x1080205000 off=0x91000 prot=RX priv=1 src=file zero=666 ver=1
+DIR /            opendir fd=3 errno=0
+DIR /              - . (type 4)
+DIR /              - .. (type 4)
+DIR /              - EFI (type 4)
+DIR /              - BOOT (type 4)
+DIR /              - HOME (type 4)
+DIR /              - CERTS (type 4)
+DIR /            entries_first_page=34 bytes=1016
+DIR /            plain   fd=3 errno=0
+DIR /JDK         opendir fd=-1 errno=2
+DIR /JDK         plain   fd=-1 errno=2
+DIR /JDK/lib     opendir fd=-1 errno=2
+DIR /JDK/lib     plain   fd=-1 errno=2
+DIR /C           opendir fd=-1 errno=2
+DIR /C           plain   fd=-1 errno=2
+DIR /JDKTMP      opendir fd=-1 errno=2
+DIR /JDKTMP      plain   fd=-1 errno=2
+DIR /nope-not-here opendir fd=-1 errno=2
+DIR /nope-not-here plain   fd=-1 errno=2
+DIRPROBE O_DIRECTORY=0x10000
+DIRPROBE done
+[KERNEL] Process 2: DIRPROBE.EXE exited unexpectedly or gracefully.
+
+## mmapro
+[WAVE-MANIFEST] MMAPRO.EXE
+[WAVE-TRY] MMAPRO.EXE
+Loading program for scheduler (v2 AS): MMAPRO.EXE
+/MMAPRO.EXE
+[LCOMPAT] argv argc=1 a0=MMAPRO.EXE execfn=MMAPRO.EXE
+[ARRIVED] MMAPRO.EXE rc>0
+MMAPRO shared+write on O_RDONLY: refused errno=13
+MMAPRO shared+read=ok private+write=ok
+MMAPRO empty-file map: refused errno=19 (ENODEV=19 ENOMEM=12)
+MMAPRO VERDICT PASS
+[KERNEL] Process 2: MMAPRO.EXE exited unexpectedly or gracefully.
+
+## mapfsync
+[WAVE-MANIFEST] MAPFSYNC.EXE
+[WAVE-TRY] MAPFSYNC.EXE
+Loading program for scheduler (v2 AS): MAPFSYNC.EXE
+/MAPFSYNC.EXE
+[LCOMPAT] argv argc=1 a0=MAPFSYNC.EXE execfn=MAPFSYNC.EXE
+[ARRIVED] MAPFSYNC.EXE rc>0
+FSYNC after fsync:  rc=0 errno=0 disk[0]=N (want N)
+FSYNC after fdatasync: rc=0 errno=0 disk[1]=X (want X)
+FSYNC VERDICT PASS
+[KERNEL] Process 2: MAPFSYNC.EXE exited unexpectedly or gracefully.
+
+## lockwait
+[WAVE-MANIFEST] LOCKHOLD.EXE /LK.TXT 8
+[WAVE-TRY] LOCKHOLD.EXE
+Loading program for scheduler (v2 AS): LOCKHOLD.EXE
+/LOCKHOLD.EXE
+[LCOMPAT] argv argc=3 a0=LOCKHOLD.EXE a1=/LK.TXT a2=8 execfn=LOCKHOLD.EXE
+[ARRIVED] LOCKHOLD.EXE rc>0
+[WAVE-MANIFEST] LOCKHOLD.EXE /LK.TXT 1
+[WAVE-TRY] LOCKHOLD.EXE
+Loading program for scheduler (v2 AS): LOCKHOLD.EXE
+/LOCKHOLD.EXE
+[LCOMPAT] argv argc=3 a0=LOCKHOLD.EXE a1=/LK.TXT a2=1 execfn=LOCKHOLD.EXE
+[ARRIVED] LOCKHOLD.EXE rc>0
+LOCKHOLD trying
+LOCKHOLD held for 1s
+LOCKHOLD trying
+LOCKHOLD released
+[KERNEL] Process 3: LOCKHOLD.EXE exited unexpectedly or gracefully.
+LOCKHOLD held for 8s
+LOCKHOLD released
+[KERNEL] Process 2: LOCKHOLD.EXE exited unexpectedly or gracefully.
+
+## munmapw
+[WAVE-MANIFEST] MUNMAPW.EXE
+[WAVE-TRY] MUNMAPW.EXE
+Loading program for scheduler (v2 AS): MUNMAPW.EXE
+/MUNMAPW.EXE
+[LCOMPAT] argv argc=1 a0=MUNMAPW.EXE execfn=MUNMAPW.EXE
+[ARRIVED] MUNMAPW.EXE rc>0
+[WAVE-MANIFEST] READIT.EXE
+[WAVE-TRY] READIT.EXE
+Loading program for scheduler (v2 AS): READIT.EXE
+/READIT.EXE
+0x0000000000000000[LCOMPAT] argv argc=1 a0=READIT.EXE execfn=READIT.EXE
+0x0000000000000000[ARRIVED] READIT.EXE rc>0
+READIT absent
+[KERNEL] Process 3: READIT.EXE exited unexpectedly or gracefully.
+MUNMAPW wrote M@0, in-mapping=M
+MUNMAPW unmapped (no msync)
+MUNMAPW wrote PLAIN.TXT
+[KERNEL] Process 2: MUNMAPW.EXE exited unexpectedly or gracefully.
+
+## munmapwb
+[WAVE-MANIFEST] MUNMAPWB.EXE
+[WAVE-TRY] MUNMAPWB.EXE
+Loading program for scheduler (v2 AS): MUNMAPWB.EXE
+/MUNMAPWB.EXE
+[LCOMPAT] argv argc=1 a0=MUNMAPWB.EXE execfn=MUNMAPWB.EXE
+[ARRIVED] MUNMAPWB.EXE rc>0
+MUNMAPWB W1 munmap=0 disk[0]=M disk[4103]=N ok
+MUNMAPWB W2 munmap(17 GiB span)=0 ms=1 disk[100]=W ok
+MUNMAPWB W3 private disk[0]=C ok
+MUNMAPWB VERDICT PASS
+[KERNEL] Process 2: MUNMAPWB.EXE exited unexpectedly or gracefully.
+
+## munmapwb-pre
+# A/B: the fix-up reverted to the merge commit f752acca version (see below)
+[WAVE-MANIFEST] MUNMAPWB.EXE
+[WAVE-TRY] MUNMAPWB.EXE
+Loading program for scheduler (v2 AS): MUNMAPWB.EXE
+/MUNMAPWB.EXE
+[LCOMPAT] argv argc=1 a0=MUNMAPWB.EXE execfn=MUNMAPWB.EXE
+[ARRIVED] MUNMAPWB.EXE rc>0
+[BADVEC] fatal frame=0x0000000076725620 in_user=1 vector_slot=0x0000000076725728 cs_slot=0x0000000076725738
+[KERNEL] FATAL: Exception in Kernel Mode! Vector: 14 Error Code: 0x0000000000000000
+  RIP: 0x0000000070019B70  RSP: 0x0000000076725760
+[KERNEL] Process 2: MUNMAPWB.EXE exited unexpectedly or gracefully.
+[BLOCKHOLD] site=schedule pc=0x70001FCD extra=0x1 cpu=0
+
+## mapfsync-pre
+# A/B: the fix-up reverted to the merge commit f752acca version (see below)
+[WAVE-MANIFEST] MAPFSYNC.EXE
+[WAVE-TRY] MAPFSYNC.EXE
+Loading program for scheduler (v2 AS): MAPFSYNC.EXE
+/MAPFSYNC.EXE
+[BLOCKHOLD] site=schedule pc=0x70001FCD extra=0x1 cpu=6
+[LCOMPAT] argv argc=1 a0=MAPFSYNC.EXE execfn=MAPFSYNC.EXE
+[ARRIVED] MAPFSYNC.EXE rc>0
+FSYNC after fsync:  rc=0 errno=0 disk[0]=N (want N)
+FSYNC after fdatasync: rc=0 errno=0 disk[1]=A (want X)
+FSYNC VERDICT FAIL
+[KERNEL] Process 2: MAPFSYNC.EXE exited unexpectedly or gracefully.
+
+# Notes
+# - munmapw: MUNMAPW and READIT are two lines of one wave, which runs them
+#   concurrently; READIT ran first ("READIT absent").  Not a verdict.  Replaced
+#   by tools/cp/sync/munmapwb.c, one process: W1 write+munmap+fresh-fd read,
+#   W2 the same with a 17 GiB munmap span (16 GiB PROT_NONE + 1 GiB hole),
+#   W3 MAP_PRIVATE stays off the file.
+# - munmapwb-pre: src/kernel/linux_compat_mem.c from the merge commit f752acca
+#   (main's write-back: physical frame address used as a pointer, page-by-page
+#   walk) and everything else final -> kernel-mode #PF in the first munmap.
+#   Fixed by 464dafcf.
+# - mapfsync-pre: src/kernel/ext2_compat.c + linux_compat_fd.c from f752acca,
+#   everything else final -> fdatasync leaves disk[1]=A (e2c_fdatasync answered
+#   0 for the FAT16 fd before l_fd_fsync could flush).  Fixed by 0259c84c.
+# - dirprobe: /JDK, /JDK/lib, /C, /JDKTMP are ENOENT because no JDK is staged
+#   (none on strix); "/" lists "." and ".." once (main's getdents dot filter).
+# - lockwait: the 1 s holder took the lock, the 8 s one printed "trying" and
+#   got "held" only after "released": F_SETLKW blocks (vfs_compat.c vx_fcntl).

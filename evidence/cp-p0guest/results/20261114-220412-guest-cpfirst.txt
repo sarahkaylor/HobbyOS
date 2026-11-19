@@ -1,0 +1,6 @@
+# guest cpfirst 2026-11-14T22:04:12-06:00 host=sarahpc cpu=avx-off cpu=host,-avx,-avx2,-fma,-f16c,-vaes,-vpclmulqdq,-avx-vnni,-avx-ifma,-avx-vnni-int8,-avx-ne-convert,-avx-vnni-int16,-avx512f,-avx512dq,-avx512ifma,-avx512cd,-avx512bw,-avx512vl,-avx512vbmi,-avx512vbmi2,-avx512vnni,-avx512bitalg,-avx512-vpopcntdq,-avx512-bf16,-avx512-vp2intersect,-avx512-fp16 shim=1 vkfilter=order
+# waiting for ~/cp/measure.lock
+# lock acquired 2026-11-14T22:07:11-06:00
+cpfirst run=1 tag=first-040712-1 geom=1280x720 seconds=38.2 screen="PRESS (=) TO CONTINUE"
+cpfirst run=2 tag=first-040756-2 geom=1280x720 seconds=37.8 screen="PRESS (=) TO CONTINUE"
+# done 2026-11-14T22:08:40-06:00

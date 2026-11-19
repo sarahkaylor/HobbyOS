@@ -396,7 +396,9 @@ probe_guest() { # $1 = why we are sampling
   # If no monitor was ever attached, or the socket is already gone at entry, that
   # is the (named) ABSENT/SKIPPED case, not a mid-sample failure.
   if [ -z "${MON_SOCK:-}" ]; then
-    { echo ""; echo "=== T3 guest sample: SKIPPED — no monitor attached (T3_MONITOR not set; $why) ==="; } >>"$LOG"
+    # C0-console: ONE write (printf), not echo "" + echo: QEMU appends the guest's
+    # serial to the same file, and its bytes landed between two writes mid-row.
+    printf '\n%s\n' "=== T3 guest sample: SKIPPED — no monitor attached (T3_MONITOR not set; $why) ===" >>"$LOG"
     return 0
   fi
   if [ ! -S "$MON_SOCK" ]; then
@@ -444,7 +446,7 @@ probe_guest() { # $1 = why we are sampling
   # this only annotates the log, it does not set rc.  GB-105: judged by the
   # shared classifier (single source of truth).
   if instrument_failure_evident "$st" "$MON_SOCK" "$started"; then
-    { echo ""; echo "=== T3 guest sample: INSTRUMENT-FAILURE — monitor read ended abnormally (rc=$st; $why) — sample truncated; tier verdict still graded below ==="; } >>"$LOG"
+    printf '\n%s\n' "=== T3 guest sample: INSTRUMENT-FAILURE — monitor read ended abnormally (rc=$st; $why) — sample truncated; tier verdict still graded below ===" >>"$LOG"
     INSTRUMENT_FAILED=1   # a distinguishable third outcome, not PASS and not FAIL
   fi
   return 0   # probe failure must NEVER abort the tier

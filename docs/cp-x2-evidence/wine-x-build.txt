@@ -1,0 +1,75 @@
+# strix, 2026-11-16, CP_WINE_VARIANT=x tools/cp/build-wine.sh all (log ~/cp/wine-build-x.log)
+build-wine: pins verified (tools/cp/fetch-runtime.sh)
+build-wine: sysroot: /home/sarah/cp/sysroot-glibc231 (CP_WINE_SYSROOT, read-only)
+build-wine: source: /home/sarah/cp/wine-build-x/src/wine-11.0 (cached)
+build-wine: configure: variant x: X11 + FreeType from /home/sarah/cp/x11-build-x2/destdir/CP/X11, libvulkan for configure from /home/sarah/cp/wine-build-x/vkstub
+build-wine: configure: CC='clang --sysroot=/home/sarah/cp/sysroot-glibc231', PE: clang --target=x86_64-windows
+build-wine: feature x          ON   #define SONAME_LIBX11 "libX11.so.6"
+build-wine: feature xext       ON   #define SONAME_LIBXEXT "libXext.so.6"
+build-wine: feature xinput     ON   #define SONAME_LIBXI "libXi.so.6"
+build-wine: feature xinput2    ON   #define HAVE_X11_EXTENSIONS_XINPUT2_H 1
+build-wine: feature xrandr     ON   #define SONAME_LIBXRANDR "libXrandr.so.2"
+build-wine: feature xrender    ON   #define SONAME_LIBXRENDER "libXrender.so.1"
+build-wine: feature xfixes     ON   #define SONAME_LIBXFIXES "libXfixes.so.3"
+build-wine: feature xcursor    ON   #define SONAME_LIBXCURSOR "libXcursor.so.1"
+build-wine: feature xinerama   ON   #define SONAME_LIBXINERAMA "libXinerama.so.1"
+build-wine: feature xcomposite ON   #define SONAME_LIBXCOMPOSITE "libXcomposite.so.1"
+build-wine: feature xshape     ON   #define HAVE_X11_EXTENSIONS_SHAPE_H 1
+build-wine: feature xshm       ON   #define HAVE_LIBXXSHM 1
+build-wine: feature freetype   ON   #define SONAME_LIBFREETYPE "libfreetype.so.6"
+build-wine: feature vulkan     ON   #define SONAME_LIBVULKAN "libvulkan.so.1"
+build-wine: configure: PE compiler = x86_64_CC='clang -D__STDC__'
+build-wine: configure: preloader LDFLAGS = WINEPRELOADER_LDFLAGS='-nostartfiles -nodefaultlibs -static-pie'
+build-wine: configure: loader LDFLAGS    = WINELOADER_LDFLAGS='-Wl,--export-dynamic -pie'
+build-wine: build: make -j16 (log /home/sarah/cp/wine-build-x/build.log)
+build-wine: build: done in 75 s
+build-wine: install: 204M staged at /home/sarah/cp/wine-build-x/stage/CP/WINE (strip-debug=1)
+build-wine: install: manifest /home/sarah/cp/wine-build-x/stage-manifest.sha256 (931 files)
+build-wine: audit: 30 ELF objects; max GLIBC_ symbol version required = GLIBC_2.29 (report /home/sarah/cp/wine-build-x/audit.txt)
+build-wine: audit: DT_NEEDED union: libc.so.6 libdl.so.2 libgcc_s.so.1 libm.so.6 libpthread.so.0 libresolv.so.2 libX11.so.6 libXext.so.6 ntdll.so win32u.so 
+build-wine: audit: dlopen SONAME_LIBFREETYPE=libfreetype.so.6 -> /CP/X11/lib/libfreetype.so.6
+build-wine: audit: dlopen SONAME_LIBODBC=libodbc.so -> absent on purpose (odbc32 fails soft)
+build-wine: audit: dlopen SONAME_LIBVULKAN=libvulkan.so.1 -> /CP/VK (C5-vk2's loader; not in this stage)
+build-wine: audit: dlopen SONAME_LIBX11=libX11.so.6 -> /CP/X11/lib/libX11.so.6
+build-wine: audit: dlopen SONAME_LIBXCOMPOSITE=libXcomposite.so.1 -> /CP/X11/lib/libXcomposite.so.1
+build-wine: audit: dlopen SONAME_LIBXCURSOR=libXcursor.so.1 -> /CP/X11/lib/libXcursor.so.1
+build-wine: audit: dlopen SONAME_LIBXEXT=libXext.so.6 -> /CP/X11/lib/libXext.so.6
+build-wine: audit: dlopen SONAME_LIBXFIXES=libXfixes.so.3 -> /CP/X11/lib/libXfixes.so.3
+build-wine: audit: dlopen SONAME_LIBXI=libXi.so.6 -> /CP/X11/lib/libXi.so.6
+build-wine: audit: dlopen SONAME_LIBXINERAMA=libXinerama.so.1 -> /CP/X11/lib/libXinerama.so.1
+build-wine: audit: dlopen SONAME_LIBXRANDR=libXrandr.so.2 -> /CP/X11/lib/libXrandr.so.2
+build-wine: audit: dlopen SONAME_LIBXRENDER=libXrender.so.1 -> /CP/X11/lib/libXrender.so.1
+build-wine: audit: x closure: every DT_NEEDED and every dlopen soname resolves in {Wine stage} + {/CP/X11} + {glibc 2.31} (+ /CP/VK for vulkan): yes
+EXIT=0
+
+# audit.txt
+/CP/WINE/bin/wineserver                                                GLIBC_max=2.17   interp=/lib64/ld-linux-x86-64.so.2 needed=libdl.so.2 libc.so.6 
+/CP/WINE/bin/wine                                                      GLIBC_max=2.3    interp=/lib64/ld-linux-x86-64.so.2 needed=libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/nsiproxy.so                              GLIBC_max=2.14   interp=- needed=ntdll.so libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/avicap32.so                              GLIBC_max=2.2.5  interp=- needed=ntdll.so libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/wineps.so                                GLIBC_max=2.14   interp=- needed=ntdll.so win32u.so libm.so.6 libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/dnsapi.so                                GLIBC_max=2.2.5  interp=- needed=ntdll.so libresolv.so.2 libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/kerberos.so                              GLIBC_max=2.2.5  interp=- needed=ntdll.so libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/winspool.so                              GLIBC_max=2.2.5  interp=- needed=ntdll.so libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/dwrite.so                                GLIBC_max=2.14   interp=- needed=ntdll.so libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/win32u.so                                GLIBC_max=2.29   interp=- needed=ntdll.so libpthread.so.0 libm.so.6 libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/ctapi32.so                               GLIBC_max=2.2.5  interp=- needed=ntdll.so libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/winex11.so                               GLIBC_max=2.14   interp=- needed=ntdll.so win32u.so libXext.so.6 libX11.so.6 libpthread.so.0 libm.so.6 libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/ws2_32.so                                GLIBC_max=2.14   interp=- needed=ntdll.so libpthread.so.0 libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/qcap.so                                  GLIBC_max=2.14   interp=- needed=ntdll.so libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/winevulkan.so                            GLIBC_max=2.14   interp=- needed=ntdll.so win32u.so libpthread.so.0 libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/winebth.so                               GLIBC_max=2.2.5  interp=- needed=ntdll.so libpthread.so.0 libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/odbc32.so                                GLIBC_max=2.14   interp=- needed=ntdll.so libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/winebus.so                               GLIBC_max=2.14   interp=- needed=ntdll.so libpthread.so.0 libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/opengl32.so                              GLIBC_max=2.14   interp=- needed=ntdll.so win32u.so libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/ntdll.so                                 GLIBC_max=2.25   interp=- needed=libpthread.so.0 libdl.so.2 libgcc_s.so.1 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/localspl.so                              GLIBC_max=2.14   interp=- needed=ntdll.so libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/wine-preloader                           GLIBC_max=none   interp=- needed=
+/CP/WINE/lib/wine/x86_64-unix/msv1_0.so                                GLIBC_max=2.15   interp=- needed=ntdll.so libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/wine                                     GLIBC_max=2.14   interp=/lib64/ld-linux-x86-64.so.2 needed=libdl.so.2 libpthread.so.0 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/mountmgr.so                              GLIBC_max=2.14   interp=- needed=ntdll.so libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/winedmo.so                               GLIBC_max=2.2.5  interp=- needed=ntdll.so libpthread.so.0 libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/netapi32.so                              GLIBC_max=2.2.5  interp=- needed=ntdll.so libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/bcrypt.so                                GLIBC_max=2.2.5  interp=- needed=ntdll.so libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/crypt32.so                               GLIBC_max=2.14   interp=- needed=ntdll.so libdl.so.2 libc.so.6 
+/CP/WINE/lib/wine/x86_64-unix/secur32.so                               GLIBC_max=2.2.5  interp=- needed=ntdll.so libdl.so.2 libc.so.6 

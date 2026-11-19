@@ -1,0 +1,22 @@
+# P9 fp720 (run-hunt.sh fp720), strix, Venus, 32 GiB guest under /tmp/cp-bigguest.lock; paired back to back, both with H9-hunt4 GPU guest running alongside
+== lane (cp-root tree, batch boot root-fp1, 11:17-11:23, mean load1 8.7)
+phase           rows          game s   median     p10     min     max    mean
+launch            78          10-126     91.2    86.3     0.0   166.9   105.5
+menu              11         128-142    150.5   143.8   142.0   159.8   151.2
+loading           53         144-222    149.5    28.0    21.0   178.4   114.8
+world             59         224-312     26.6    25.1    22.6    32.6    27.5
+prof-fp-world     14         314-333     30.8    29.9    29.3    32.4    30.8
+== integ25 (root-base tree, base-fp1, 11:23-11:30, mean load1 7.7)
+phase           rows          game s   median     p10     min     max    mean
+launch            77          11-126    114.6    97.7     0.0   202.9   138.1
+menu              12         130-144    131.8   123.9   122.9   180.4   134.8
+loading           63         146-239    117.4    25.2    18.2   143.8    95.6
+world             60         242-330     25.5    24.0    19.2    30.8    25.7
+prof-fp-world     14         332-352     30.6    29.6    29.2    31.3    30.5
+== reference: integ25 batch boot integ25-fp1 (06:08, quiet host, no other GPU guest)
+phase           rows          game s   median     p10     min     max    mean
+launch            79           9-126    114.3   105.8     0.0   203.2   134.7
+menu              12         129-144    198.1   181.1   177.9   205.7   193.7
+loading           45         146-212    171.3    31.8    25.7   220.1   135.0
+world             61         215-304     29.8    27.6    25.7    37.0    30.8
+prof-fp-world     13         306-324     37.0    35.5    35.1    38.3    36.9

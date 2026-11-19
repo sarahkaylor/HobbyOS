@@ -1,4 +1,6 @@
 #include "lock.h"
+#include "console.h"
+#include "process.h"
 #include <stdint.h>
 
 /** The single console lock, shared with the arch-independent print
@@ -20,6 +22,7 @@ static volatile uint32_t *const UART0_FR = (uint32_t *)(UART0_BASE + 0x18);
  */
 void uart_init(void) {
   spinlock_init(&uart_lock);
+  cons_init();
 }
 
 /** Lock-free PL011 write body — the only code that touches the UART
@@ -36,31 +39,54 @@ static void uart_putc_body(char c) {
   *UART0_DR = (uint32_t)(c);
 }
 
-/** Raw single character — lock-free, for deadlock diagnostics only. */
+/* ---- C0-console arch hooks (src/kernel/kconsole.c) ---- */
+void cons_hw_tx(const char *s, int n) {
+  for (int i = 0; i < n; i++)
+    uart_putc_body(s[i]);
+}
+
+uint64_t cons_hw_irqsave(void) {
+  uint64_t f;
+  __asm__ volatile("mrs %0, daif\n msr daifset, #2" : "=r"(f) : : "memory");
+  return f;
+}
+
+void cons_hw_irqrestore(uint64_t f) {
+  __asm__ volatile("msr daif, %0" : : "r"(f) : "memory");
+}
+
+int cons_hw_irqs_on(uint64_t f) { return (f & 0x80) == 0; }
+
+const void *cons_hw_ctx(uint32_t cpu) {
+  (void)cpu; /* current_process() reads this CPU's slot, lock-free */
+  return (const void *)current_process();
+}
+
+int cons_hw_in_panic(void) { return 0; }
+int cons_hw_bootarg(char *buf, int cap) { (void)buf; (void)cap; return 0; }
+void cons_hw_relax(void) { __asm__ volatile("yield"); }
+
+/** Single character into this CPU's line slot (kconsole.c). */
 void panic_putc(char c) {
-  uart_putc_body(c);
+  cons_kputc(c);
 }
 
-/** GB-097's lock-free NON-panic character sink (the x64 name): a returning
-    path that already holds uart_lock must write through this, not through
-    panic_putc(), which is reserved for non-returning callers. */
+/** GB-097's NON-panic character sink (the x64 name); line-buffered since
+    C0-console like every kernel writer. */
 void uart_putc_dbg(char c) {
-  uart_putc_body(c);
+  cons_kputc(c);
 }
 
-/** Raw string — lock-free, for deadlock diagnostics only. */
+/** String into this CPU's line slot (kconsole.c). */
 void panic_puts(const char *s) {
-  while (*s != '\0') {
-    uart_putc_body(*s);
-    s++;
-  }
+  cons_kwrite(s, -1);
 }
 
 /* *_raw2 family: the deadlock-diagnostic console surface that
  * wd_dump_proc_table() (process.c) calls on BOTH architectures. Lock-free
  * and exception-safe (raw MMIO only), like the x64 panic_putc2 path. */
 static void panic_putc2(char c) {
-  uart_putc_body(c);
+  cons_kputc(c); /* arm has one UART: the same line-atomic console */
 }
 
 void panic_puts2(const char *s) {
@@ -100,9 +126,7 @@ void print_int_raw2(int val) {
 
 /** Single character, serialized against all other console output. */
 void uart_putc(char c) {
-  uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
-  uart_putc_body(c);
-  spinlock_release_irqrestore(&uart_lock, flags);
+  cons_kputc(c);
 }
 
 /**
@@ -110,10 +134,5 @@ void uart_putc(char c) {
  * Uses a spinlock to ensure atomic output from multiple CPUs.
  */
 void uart_puts(const char *s) {
-  uint64_t flags = spinlock_acquire_irqsave(&uart_lock);
-  while (*s != '\0') {
-    uart_putc_body(*s);
-    s++;
-  }
-  spinlock_release_irqrestore(&uart_lock, flags);
+  cons_kwrite(s, -1);
 }

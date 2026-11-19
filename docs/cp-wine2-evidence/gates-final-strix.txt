@@ -1,0 +1,46 @@
+tree=/home/sarah/cp/lanes/wine2-prev rev=1b7f3c8f+harness start=2026-11-16T00:55:26-06:00
+build rc=0
+probe avx rc=0 [LP] done rc=0 fails=0
+probe clock rc=0 [LP] done rc=0 fails=0
+probe cow rc=0 [LP] done rc=0 fails=0
+probe exec rc=0 [LP] done rc=0 fails=0
+probe ext2 rc=1 t3_linux_probe: FAIL — ext2 never printed '[LP] done rc=0' (tier rc=1) fails=69
+probe ext2b rc=1 t3_linux_probe: FAIL — ext2b never printed '[LP] done rc=0' (tier rc=1) fails=65
+probe fd rc=0 [LP] done rc=0 fails=0
+probe fpu_sig rc=0 [LP] done rc=0 fails=0
+probe futex_sig rc=0 [LP] done rc=0 fails=0
+probe glibc rc=0 [LP] done rc=0 fails=0
+probe gs rc=0 [LP] done rc=0 fails=0
+probe hello rc=0 [LP] done rc=0 fails=0
+probe join rc=0 [LP] done rc=0 fails=0
+probe lowva rc=0 [LP] done rc=0 fails=0
+probe mem rc=0 [LP] done rc=0 fails=0
+probe mmap_race rc=0 [LP] done rc=0 fails=0
+probe proc rc=0 [LP] done rc=0 fails=0
+probe redzone rc=0 [LP] done rc=0 fails=0
+probe thr rc=0 [LP] done rc=0 fails=0
+probe timers rc=0 [LP] done rc=0 fails=0
+probe tmpfs rc=0 [LP] done rc=0 fails=0
+probe tramp_sig rc=0 [LP] done rc=0 fails=0
+probe trapsig rc=0 [LP] done rc=0 fails=0
+probe vmcommit rc=0 [LP] done rc=0 fails=0
+probe wad rc=0 [LP] done rc=0 fails=0
+probe wpfx rc=0 [LP] done rc=0 fails=0
+probe wsys rc=0 [LP] done rc=0 fails=0
+probe xwire rc=0 [LP] done rc=0 fails=0
+ext2_gate rc=0 boot 1: 75 ok rows; t3_linux_probe: PASS — ext2 reached its done marker boot 2: 14 ok rows; t3_linux_probe: PASS — ext2 reached its done marker boot 3: 125 main ok rows, 9 helper ok rows; t3_linux_probe: PASS — ext2b reached its done marker ext2_gate: PASS 
+unit rc=1 [TXT] PROBEGET off=0x0 -> the probe's own cache-bypassed read (second read agreed or was the zero replay); cache frame was POISONED, published the device's bytes (identity asserted) Tests run:    451 Tests failed: 2  src/kernel/virtio_gpu_test.c:214 src/kernel/virtio_gpu_test.c:244 
+host_tests rc=2 20 pass-lines; errors: make: *** [Makefile:4441: host_tests] Error 3 
+castscan rc=1 src/kernel/arch/x64/trap.c	P2I	idt_set_gate(3, (uint64_t)exception_3, 0x08, 0xEE); src/kernel/arch/x64/trap.c	P2I	idt_set_gate(4, (uint64_t)exception_4, 0x08, 0xEE); 
+arm_build rc=0
+ALLDONE 2026-11-16T01:17:07-06:00
+## after ec5f6c6b (frame-order test + castscan rows), same tree:
+castscan: 362 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+[host-tests] done: 38/40 passed
+## merged tree (be493220 + ec5f6c6b), host-only gates:
+[host-tests] done: 38/40 passed
+Tests failed!
+EXPECT_EQ FAILED: gpu_abi_pages_for(64ull * 1024 * 1024 + 1) == 0 at src/kernel/virtio_gpu_test.c:214
+EXPECT_EQ FAILED: gpu_abi_res_ok(&r) == 0 at src/kernel/virtio_gpu_test.c:244
+Tests run:    451
+Tests failed: 2

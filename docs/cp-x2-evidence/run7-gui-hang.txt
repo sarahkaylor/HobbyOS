@@ -1,0 +1,44 @@
+# run7 (strix, cyberpunk 8b9fc2c9 kernel, one-screen XHOBBY 935c760f, 4 guests): excerpt
+[X] hobbyos: one screen: :0.0 depth 24 (HB_SECOND_SCREEN=0: no :0.1; Composite and RandR's Xinerama can be advertised)
+[P4] winep4 launcher (C4-x2)
+[P4] mount 10.0.2.2:/srv/nfs/cp-x2-p4g -> /CP ok
+[P4] begin wineboot : wineboot -i
+[P4] end wineboot status=53 ms=333700
+[P4] quiesce after wineboot: extra=4
+[P4] wineboot tree still alive after the quiesce window: wineserver -k
+[P4] begin kill-boot : wineserver -k
+[P4] end kill-boot status=0 ms=6027
+[P4] quiesce after kill-boot: extra=0
+[P4] begin hold : desktop holder (background)
+[P4] hold pid=43
+[P4] warm-up done
+[P4] begin rawinput : wine Z:\CP\P4\rawinput.exe 120000
+[X] [RI] rawinput probe (C4-x2) mode=mouselook
+[X] [RI] hold desktop=0x10020 ms=7200000
+[X] 0044:err:winediag:nodrv_CreateWindow Application tried to create a window, but no driver could be loaded.
+[X] 002c:err:winediag:nodrv_CreateWindow Application tried to create a window, but no driver could be loaded.
+[X] 006c:err:winediag:nodrv_CreateWindow Application tried to create a window, but no driver could be loaded.
+no-reply=136 nfshard-retry=34 giveup=0 max_waited_ms=1506
+--- last scheduler snapshot (no READY work):
+  [ALIVE-SET] slot=1 pid=1 st=5 parent=-1 claimed_by=-1 pc=0x100000696b mod=0x1000000000+0x696b XSESSION.BIN
+  [ALIVE-SET] slot=3 pid=3 st=5 parent=1 claimed_by=-1 pc=0x100020f64b mod=0x1000000000+0x20f64b /XHOBBY.BIN
+  [ALIVE-SET] slot=9 pid=9 st=3 parent=1 claimed_by=0 pc=0x100033ae2e mod=0x1000000000+0x33ae2e /ICEWM.BIN
+  [ALIVE-SET] slot=12 pid=12 st=5 parent=1 claimed_by=-1 pc=0x10000758f4 mod=0x1000000000+0x758f4 /XEYESR.BIN
+  [ALIVE-SET] slot=14 pid=14 st=5 parent=1 claimed_by=-1 pc=0x10000066f4 mod=0x1000000000+0x66f4 /WINEP4.BIN
+  [ALIVE-SET] slot=43 pid=43 st=3 parent=14 claimed_by=2 pc=0x1080175198 mod=0x1080060000+0x115198 rawinput.exe
+  [ALIVE-SET] slot=45 pid=45 st=3 parent=44 claimed_by=3 pc=0x1080127648 mod=0x1080008000+0x11f648 wineserver
+  [ALIVE-SET] slot=49 pid=49 st=5 parent=48 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca services.exe
+  [ALIVE-SET] slot=50 pid=50 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca services.exe
+  [ALIVE-SET] slot=52 pid=52 st=5 parent=51 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca winedevice.exe
+  [ALIVE-SET] slot=54 pid=54 st=5 parent=14 claimed_by=-1 pc=0x1080050390 mod=0x108003d000+0x13390 rawinput.exe
+  [ALIVE-SET] slot=55 pid=55 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca services.exe
+  [ALIVE-SET] slot=57 pid=57 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca winedevice.exe
+  [ALIVE-SET] slot=58 pid=58 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca winedevice.exe
+  [ALIVE-SET] slot=59 pid=59 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca services.exe
+  [ALIVE-SET] slot=60 pid=60 st=8 parent=-1 claimed_by=-1 pc=0x108017895d mod=0x1080060000+0x11895d winedevice.exe
+  [ALIVE-SET] slot=61 pid=61 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca winedevice.exe
+  [ALIVE-SET] slot=63 pid=63 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca services.exe
+  [ALIVE-SET] slot=65 pid=65 st=5 parent=64 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca explorer.exe
+  [ALIVE-SET] slot=67 pid=67 st=5 parent=66 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca explorer.exe
+  [ALIVE-SET] slot=68 pid=68 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca explorer.exe
+  [ALIVE-SET] slot=69 pid=69 st=5 parent=-1 claimed_by=-1 pc=0x10800503ca mod=0x108003d000+0x133ca explorer.exe

@@ -1,0 +1,130 @@
+# Gate P5 rows 2-4 rerun with the TREE-BUILT X server (no P5_XHOBBY override) + C4-x3's fullscr probe, strix KVM -cpu host -smp 8 -m 12288M, 4 guests on the host
+# tree: cp-x3 696b24d3 (cyberpunk 949ba008 + SysV shm + MIT-SHM); Wine ~/cp/wine-build-x; X stage ~/cp/x11-build-x2; HB_SECOND_SCREEN=0
+# command: CP_WINE_STAGE=$HOME/cp/wine-build-x/stage/CP/WINE WINE_BUILD=$HOME/cp/wine-build-x CP_VK_WORK=$HOME/cp/vk2-build CP_X11_WORK=$HOME/cp/x11-build-x2 CP_P5_PE=$HOME/cp/vk2-pe P5_EXPORT=/srv/nfs/cp-x3-p5 P5_PROBES="vkcube d3d11 d3d12 fullscr" P5_XSESSION_ENV="HB_SECOND_SCREEN=0" PATH=$HOME/.local/bin:$PATH MAKEFLAGS=-j16 TOOLS_SKIP=1 bash tools/cp/p5/run-wine-p5.sh
+# verdict: vkcube PASS, d3d11 PASS, d3d12 PASS (Gate P5 rows 2-4); fullscr: screendumps all right, M5 rect check FAIL (see docs/cp-x3.md §4; fixed probe in run fs3)
+== X server: the tree's ::/XHOBBY.BIN, sha256 9b161eded42374e06415d4033a35763aff8f6a061d8f34b5a0eebff95cbafa07
+[P5W] waiting for a QEMU slot (tools/cp/qemu-slot.sh semantics)
+[P5W] slot 1 acquired 00:05:42; boot: -smp 8 -m 12288M -cpu host (KVM)
+[P5W] qemu pid 1571826
+[P5W] +0 s: (no [P5] row yet)
+[P5W] screendump vkcube-t20s.ppm at +122 s; QEMU guests on the host now (incl. this one): 4
+[P5W] screendump vkcube-t50s.ppm at +152 s; QEMU guests on the host now (incl. this one): 3
+[P5W] screendump d3d11-t20s.ppm at +194 s; QEMU guests on the host now (incl. this one): 4
+[P5W] screendump d3d11-t50s.ppm at +224 s; QEMU guests on the host now (incl. this one): 3
+[P5W] screendump d3d12-t20s.ppm at +268 s; QEMU guests on the host now (incl. this one): 3
+[P5W] screendump d3d12-t50s.ppm at +299 s; QEMU guests on the host now (incl. this one): 4
+[P5W] +301 s: [P5] begin d3d12 : wine Z:\CP\P5\D3D12\d3d12tri.exe 65 640 480
+[P5W] screendump fs-M3-1280x720.ppm at +318 s
+[P5W] screendump fs-M4-1920x1080.ppm at +326 s
+[P5W] screendump fs-M5-1280x720.ppm at +334 s
+[P5W] screendump fs-restored.ppm at +344 s
+[P5W] guests on the host at the end of the run: 1 (incl. none of ours)
+[P5W] boot finished after 369 s; lock released
+[P5W] --- [P5] rows and probe rows (serial) ---
+[P5] winep5 launcher (C5-vk2)
+[P5] mount 10.0.2.2:/srv/nfs/cp-x3-p5 -> /CP ok
+[P5] begin wineboot : wineboot -i
+[P5] end wineboot status=0 ms=62834
+[P5] quiesce after wineboot: extra=0
+[P5] begin keepalive (background) : wine Z:\CP\P5\VK\vkcube.exe --idle 7200
+[P5] keepalive pid=115
+[P5] begin winprobe01 : wine Z:\CP\P5\VK\vkcube.exe --winprobe
+[P5] end winprobe01 status=0 ms=22426
+[P5] warm-up: display driver loaded
+[P5] begin vkcube : wine Z:\CP\P5\VK\vkcube.exe 65 640 480
+[VK] loader vulkan-1.dll (C:\windows\system32\vulkan-1.dll) loaded in 115.0 ms
+[VK] device: llvmpipe (LLVM 21.1.8, 256 bits) (api 1.4.354) instance+enumerate 153.0 ms
+[VK] RESULT frames=56443 wall=65001.0 ms fps=868.34 | per-frame total median 1.00 p90 1.00 worst(after frame 0) 1687.00 ms | swapchain 640x480 4 images FIFO | recreated=0 suboptimal=0
+[VK] done rc=0
+[P5] end vkcube status=0 ms=71535
+[P5] begin d3d11 : wine Z:\CP\P5\D3D11\d3d11tri.exe 65 640 480
+[D3D11] module d3d11.dll          Z:\CP\P5\D3D11\d3d11.dll
+[D3D11] module dxgi.dll           Z:\CP\P5\D3D11\dxgi.dll
+[D3D11] module d3dcompiler_47.dll C:\windows\system32\d3dcompiler_47.dll
+[D3D11] adapter: "llvmpipe (LLVM 21.1.8, 256 bits)" vendor 0x10005 device 0x0000 dedicated video memory 11520 MiB
+[D3D11] RESULT frames=26834 wall=65000.0 ms fps=412.83 | per-frame median 2.00 p90 3.00 worst(after frame 0) 2237.00 ms
+[D3D11] done rc=0
+[P5] end d3d11 status=0 ms=71276
+[P5] begin d3d12 : wine Z:\CP\P5\D3D12\d3d12tri.exe 65 640 480
+[D3D12] module d3d12.dll          Z:\CP\P5\D3D12\d3d12.dll
+[D3D12] module d3d12core.dll      Z:\CP\P5\D3D12\d3d12core.dll
+[D3D12] module dxgi.dll           Z:\CP\P5\D3D12\dxgi.dll
+[D3D12] module d3dcompiler_47.dll C:\windows\system32\d3dcompiler_47.dll
+[D3D12] adapter: "llvmpipe (LLVM 21.1.8, 256 bits)" vendor 0x10005 device 0x0000 dedicated video memory 11520 MiB
+[D3D12] RESULT frames=27527 wall=65000.0 ms fps=423.49 | per-frame median 2.00 p90 2.00 worst(after frame 0) 2072.00 ms
+[D3D12] done rc=0
+[P5] end d3d12 status=0 ms=74764
+[P5] begin fullscr : wine Z:\CP\P5\FS\fullscr.exe run 6000
+[FS] fullscr probe (C4-x3) mode=run pid=384
+[FS] M1 modes=36 has1280x720=1 has1920x1080=1 current=1920x1080 registry=1920x1080
+[FS] M2 ChangeDisplaySettingsEx 1280x720 rc=0 in 1634 ms metrics=1280x720 current=1280x720
+[FS] M3 window rect=0,0,1280,720 client=1280x720 fg=1 settled_ms=102
+[FS] hold M3 1280x720 6000 ms
+[FS] M4 ChangeDisplaySettingsEx 1920x1080 rc=0 in 115 ms metrics=1920x1080 current=1920x1080
+[FS] M4 window rect=0,0,1920,1080 client=1920x1080 fg=1 settled_ms=100
+[FS] hold M4 1920x1080 6000 ms
+[FS] M5 ChangeDisplaySettingsEx 1280x720 rc=0 in 107 ms metrics=1280x720 current=1280x720
+[FS] M5 window rect=0,0,1920,1080 client=1920x1080 fg=1 settled_ms=100
+[FS] FAIL window does not cover the mode
+[FS] hold M5 1280x720 6000 ms
+[FS] M5 exit without restoring (desktop mode was 1920x1080)
+[FS] done rc=1
+[P5] end fullscr status=256 ms=25442
+[P5] begin fscheck : wine Z:\CP\P5\FS\fullscr.exe check 30000
+[FS] fullscr probe (C4-x3) mode=check pid=392
+[FS] M6 check current=1920x1080 registry=1920x1080 metrics=1920x1080 after 517 ms
+[FS] done rc=0
+[P5] end fscheck status=0 ms=2030
+[P5] fullscr restored-desktop shot
+[P5] begin kill : wineserver -k
+[P5] end kill status=0 ms=415
+[P5] quiesce after kill: extra=1
+[P5] done
+[P5W] vkcube vkcube-t20s.ppm: clear=244728 saturated=63032 bbox=(44, 70, 682, 548) hash=916b757e47c22f91
+[P5W] vkcube vkcube-t50s.ppm: clear=246208 saturated=61520 bbox=(44, 70, 682, 548) hash=28067af0e7075e2b
+[P5W] vkcube: PASS
+[P5W] d3d11 d3d11-t20s.ppm: clear=237268 saturated=48272 bbox=(724, 70, 1362, 548) hash=f68e232897e61b2e
+[P5W] d3d11 d3d11-t50s.ppm: clear=237248 saturated=48316 bbox=(724, 70, 1362, 548) hash=fe09363d1cc90cc7
+[P5W] d3d11: PASS
+[P5W] d3d12 d3d12-t20s.ppm: clear=237316 saturated=46492 bbox=(724, 574, 1362, 1052) hash=8c7620b0c0d3a229
+[P5W] d3d12 d3d12-t50s.ppm: clear=237304 saturated=46476 bbox=(724, 574, 1362, 1052) hash=b2d7ecca8a304651
+[P5W] d3d12: PASS
+[P5W] fullscr fs-M3-1280x720: glass 1920x1080, markers ok, non-black outside the mode: 0
+[P5W] fullscr fs-M4-1920x1080: glass 1920x1080, markers ok, non-black outside the mode: 0
+[P5W] fullscr fs-M5-1280x720: glass 1920x1080, markers ok, non-black outside the mode: 0
+[P5W] fullscr fs-restored: glass 1920x1080, (8,8)=f9f5f0 (1271,8)=505078 (1910,1070)=181838 -> pattern gone
+[P5W] fullscr: FAIL
+[P5W] NFS: no-reply rows=0 [NFSHARD] retry rows=0 longest waited_ms=0 GIVE UP=0 NFLK rc=-1=0
+[P5W] FAIL: fullscr: launcher end row for fullscr: [P5] end fullscr status=256 ms=25442
+[P5W] FAIL: fullscr: want two '[FS] done rc=0' rows (run + check)
+[P5W] FAIL: fullscr: [FS] FAIL window does not cover the mode
+faults=0
+## [SHM] rows (kernel; process-named)
+[SHM] get pid=20 (wineboot.exe) a=0 b=0x30000 -> 256
+[SHM] at pid=20 (wineboot.exe) a=256 b=0x1081653000 -> 196608
+[SHM] at pid=3 (/XHOBBY.BIN) a=256 b=0x1080000000 -> 196608
+[SHM] rmid pid=20 (wineboot.exe) a=256 b=0x0 -> 0
+[SHM] get pid=189 (vkcube.exe) a=0 b=0x140000 -> 512
+[SHM] at pid=189 (vkcube.exe) a=512 b=0x1081605000 -> 1310720
+[SHM] at pid=3 (/XHOBBY.BIN) a=512 b=0x1080000000 -> 1310720
+[SHM] rmid pid=189 (vkcube.exe) a=512 b=0x0 -> 0
+[SHM] get pid=210 (d3d11tri.exe) a=0 b=0x140000 -> 768
+[SHM] at pid=210 (d3d11tri.exe) a=768 b=0x1081FAE000 -> 1310720
+[SHM] at pid=3 (/XHOBBY.BIN) a=768 b=0x1080000000 -> 1310720
+[SHM] rmid pid=210 (d3d11tri.exe) a=768 b=0x0 -> 0
+[SHM] get pid=238 (d3d12tri.exe) a=0 b=0x140000 -> 1024
+[SHM] at pid=238 (d3d12tri.exe) a=1024 b=0x1081FAE000 -> 1310720
+[SHM] at pid=3 (/XHOBBY.BIN) a=1024 b=0x1080000000 -> 1310720
+[SHM] rmid pid=238 (d3d12tri.exe) a=1024 b=0x0 -> 0
+[SHM] get pid=266 (fullscr.exe) a=0 b=0x3C0000 -> 1280
+[SHM] at pid=266 (fullscr.exe) a=1280 b=0x1085171000 -> 3932160
+[SHM] at pid=3 (/XHOBBY.BIN) a=1280 b=0x1080000000 -> 3932160
+[SHM] rmid pid=266 (fullscr.exe) a=1280 b=0x0 -> 0
+[SHM] get pid=266 (fullscr.exe) a=0 b=0x870000 -> 257
+[SHM] at pid=266 (fullscr.exe) a=257 b=0x1085531000 -> 8847360
+[SHM] at pid=3 (/XHOBBY.BIN) a=257 b=0x10803C0000 -> 8847360
+[SHM] rmid pid=266 (fullscr.exe) a=257 b=0x0 -> 0
+[SHM] get pid=266 (fullscr.exe) a=0 b=0x3C0000 -> 1536
+[SHM] at pid=266 (fullscr.exe) a=1536 b=0x1080DDD000 -> 3932160
+[SHM] at pid=3 (/XHOBBY.BIN) a=1536 b=0x1080C30000 -> 3932160
+[SHM] rmid pid=266 (fullscr.exe) a=1536 b=0x0 -> 0

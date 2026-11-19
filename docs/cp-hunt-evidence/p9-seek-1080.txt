@@ -1,0 +1,13 @@
+# H1-hunt: boot_p9.py seek cannot find the main-menu focus when the game runs at 1920x1080 (strix, h-fq1: Resolution=1920x1080 via tools/cp/hunt/prep-settings.sh, P9_XSCREEN=1920x1080)
+[P9W] +   103.9 s  02:51:40  kernel: [P7] scanout taken res/window 4161 20971570 seq=1
+[P9W] +   193.5 s  02:53:10  main menu OCR at s008-t000110-pre: ['NEW GAME', 'LOAD GAME', 'CONTINUE', 'SETTINGS', 'CREDITS', 'QUIT GAME']
+[P9W] focus s011-t000122-menu-load0: no highlighted row
+[P9W] focus s012-t000126-menu-load1: no highlighted row
+[P9W] focus s013-t000129-menu-load2: no highlighted row
+[P9W] focus s014-t000132-menu-load3: no highlighted row
+[P9W] focus s015-t000135-menu-load4: no highlighted row
+[P9W] focus s016-t000137-menu-load5: no highlighted row
+[P9W] focus s017-t000139-menu-load6: no highlighted row
+[P9W] +   222.3 s  02:53:39  SEEK FAILED menu-load: main menu row 'LOAD GAME' not focused after 6 x down
+[P9W] +   225.7 s  02:53:42  verdict: seek-failed:menu-load; QEMU stopped, slot released; guests on the host now: 1
+# cause: boot_p9.canon() returns a 1920x1080 shot unchanged when --xscreen is 1920x1080 (the ctl1 layout: a 1280x720 window at 320,180); MENUS rows (469..692) are that layout, the full-screen 1080p menu is 1.5x larger -> no yellow frame in rows 420..715 / x 400..800.

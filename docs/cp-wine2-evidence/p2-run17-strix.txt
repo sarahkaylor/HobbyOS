@@ -1,0 +1,46 @@
+# P2 gate run17 (merged 3521564d + trap fixes)
+G1 wine cmd /c echo hello prints hello : FAIL   ([P2] end echo status=timeout ms=304046)
+G2 winprobe.exe every marker + exit 0  : FAIL   ([P2] end winprobe status=timeout ms=302595; 41 markers, 41 missing/failed)
+G3 wineserver -k leaves no processes   : FAIL   ([P2] end kill status=0 ms=342; [P2] ps-extra count=2)
+extra: winprobe from C:\ (tmpfs)       :  ()
+== /etc/exports restored (cmp identical to the pre-run copy)
+== removed /srv/nfs/cp-wine2-p2
+[P2] winep2 launcher (C2-wine2)
+[P2] ps-before count=1
+[P2] mount 10.0.2.2:/srv/nfs/cp-wine2-p2 -> /CP ok
+[P2] begin nfscount : pfxls -c /CP/WINE/lib/wine/x86_64-windows /CP/WINE/lib/wine/x86_64-unix /CP/WINE/share/wine
+[P2] end nfscount status=0 ms=221
+[P2] begin wineboot : wineboot -i
+wine: created the configuration directory '/tmp/pfx'
+0054:err:module:import_dll Library ‹}øH‰ñÿÙ (which is needed by L"C:\\windows\\system32\\kernelbase.dll") not found
+0054:err:seh:NtRaiseException Unhandled exception code c0000005 flags 0 addr 0x6ffffff7210d
+wine: could not load kernel32.dll, status c0000135
+[P2] end wineboot status=53 ms=305896
+wine: failed to start L"C:\\windows\\syswow64\\rundll32.exe": c0000135
+[P2] quiesce after wineboot: extra=1
+[P2] begin pfxls : pfxls /tmp/pfx
+[P2] end pfxls status=0 ms=54
+[P2] begin echo : wine cmd /c echo hello
+[P2] timeout echo after 300s: SIGKILL pid=61
+[P2] end echo status=timeout ms=304046
+[P2] quiesce after echo: extra=6
+[P2] begin winprobe : wine Z:\CP\WPROBE\winprobe.exe
+[P2] timeout winprobe after 300s: SIGKILL pid=93
+[P2] end winprobe status=timeout ms=302595
+[P2] begin copy : wine cmd /c copy /y Z:\CP\WPROBE\winprobe.exe C:\winprobe.exe
+[P2] timeout copy after 300s: SIGKILL pid=95
+[P2] end copy status=timeout ms=303503
+[P2] begin kill : wineserver -k
+[P2] end kill status=0 ms=342
+[P2] ps-after count=3
+[P2] leftover pid=24 name=winedevice.exe
+[P2] leftover pid=84 name=wine
+[P2] ps-extra count=2
+[P2] done
+[P2] ps-before count=1
+[P2] ps-before pid=2 ppid=-1 state=3 name=WINEP2.BIN
+[P2] ps-after count=3
+[P2] ps-after pid=2 ppid=-1 state=3 name=WINEP2.BIN
+[P2] ps-after pid=24 ppid=23 state=9 name=winedevice.exe
+[P2] ps-after pid=84 ppid=83 state=5 name=wine
+[P2] ps-extra count=2

@@ -1,0 +1,7 @@
+# H1-hunt round 2: one fpsprobe 720p audio boot on integ18 = 0a985aa2 (cp-audio2 merged), strix, h2i18-a1; tools/cp/audio2/gamecheck.sh (H5-audio2) over this boot and the integ17 soak
+h2i18-a1 dropouts=7 dropout_ms=610.0 wav_s=317.42 alsa_underrun_rows=0 kernel_xruns=0 held=441 max100ms=10560 xrun_rows[] stalls=57 stolen_ms=8401
+h2-soak1 dropouts=8 dropout_ms=720.0 wav_s=1844.21 alsa_underrun_rows=3 kernel_xruns=0 held=0 max100ms=? xrun_rows[wok/drt:37 ] stalls=35 stolen_ms=3299
+[SND] zeros rows: h2i18-a1 8, h2-soak1 0 (the row is new in integ18)
+world             62         212-304     40.3    27.0    14.9    48.5    38.3
+-- kernel faults: 0 rows, 0 signatures
+# recorded, not chased (H5-audio2 owns H1-01): 7 WAV dropouts in a ~5 min boot, 0 alsa-lib underrun rows, 0 kernel xruns (441 held back) on integ18; the integ17 soak had 8 dropouts in 28 min with 37 kernel xrun rows.

@@ -1,0 +1,8 @@
+console                 parks freerace rootsw0 why (park rows)
+rootfree                   40      0      0 td=1025  30 why=irq  10 why=thr 
+total parks=40 freerace=0 rootsw0=0 consoles=95
+/home/sarah/cp/lanes/root/obj/cp-p9/root-cold1/serial.log parks=0 freerace=0 rootsw0=0
+/home/sarah/cp/lanes/root/obj/cp-p9/root-fp1/serial.log parks=0 freerace=0 rootsw0=0
+/home/sarah/cp/lanes/root/obj/cp-p8/root-lvp1/serial.log parks=0 freerace=0 rootsw0=0
+/home/sarah/cp/lanes/root/obj/cp-p8/root-lvp2/serial.log parks=0 freerace=0 rootsw0=0
+/home/sarah/cp/lanes/root/obj/cp-p8/root-venus/serial.log parks=0 freerace=0 rootsw0=0

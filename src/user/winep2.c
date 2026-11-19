@@ -1,0 +1,345 @@
+/* src/user/winep2.c - Gate P2 launcher (lane C2-wine2, docs/cyberpunk.md §6 P2).
+ *
+ * A NATIVE HobbyOS program, the only wave member of the boot that
+ * tools/cp/run-wine-p2.sh stages.  It mounts the localhost-only NFS export that
+ * holds /CP/WINE (plus /CP/WPROBE/winprobe.exe), and runs, in order:
+ *
+ *   ps                                   (before)
+ *   wineboot -i                          WINEPREFIX=/tmp/pfx: the compat tmpfs
+ *   wine cmd /c echo hello               gate row 1: "hello"
+ *   wine Z:\CP\WPROBE\winprobe.exe       gate row 2: every [WP] marker, exit 0
+ *   wine cmd /c copy ... C:\  + wine C:\winprobe.exe
+ *                                        extra: the same probe mapped from the
+ *                                        tmpfs prefix (MAP_PRIVATE of tmpfs)
+ *   wineserver -k                        gate row 3
+ *   ps                                   (after; no process the before list
+ *                                        did not have may remain)
+ *
+ * Each step is bracketed by "[P2] begin <tag>" / "[P2] end <tag> status=<n>"
+ * rows; the children inherit fd 1/2 = the console, so their output lands
+ * between the brackets in the serial log, which is what the host script grades.
+ * The prefix is on the compat tmpfs: this native process sees the FAT /tmp, so
+ * it never touches the prefix itself -- Wine creates it (cp-sys.md §2).
+ *
+ * Prefix-on-ext2 mode (lane C3-pfx, Gate P3 "the prefix survives a reboot";
+ * docs/cp-pfx.md): built with -DP2_PFX_PHASE=1 or 2 and WINEPREFIX=/EXT/pfx
+ * on the ext2 data disk (NVMe namespace 2).  /tmp stays the compat tmpfs (the
+ * wineserver socket dir).
+ *   phase 1: ps, wineboot -i, wait for the whole tree (wineserver included:
+ *            it saves the hives as it exits), pfxls, sync(2) (tools/cp/pfx/
+ *            pfxsync.c: the native ABI has none), done -- the kernel
+ *            then halts (clean shutdown; nothing is killed)
+ *   phase 2: (next boot, same disk, no wineboot -i) pfxls, wine cmd /c echo
+ *            hello, winprobe.exe from Z:, copy to C:\ (the ext2 prefix) and
+ *            run it from there, wineserver -k, ps
+ * The host script compares prefix manifests between the boots.
+ */
+#include <fcntl.h>
+#include <errno.h>
+#include "libc.h"
+
+#define NFS_SERVER "10.0.2.2"
+#ifndef WINE_EXPORT
+#define WINE_EXPORT "/srv/nfs/cp-wine2-p2"
+#endif
+#ifndef P2_WINEDEBUG
+#define P2_WINEDEBUG "err+all,fixme-all"
+#endif
+#define MNT "/CP"
+#ifndef P2_B2_INIT_WAIT_S
+#define P2_B2_INIT_WAIT_S 600 /* boot 2: the bounded wait for wineboot --init */
+#endif
+#ifndef P2_BOOT_QUIESCE_S
+#define P2_BOOT_QUIESCE_S 3600 /* run23 finished near 1500 s: the shared NFS
+                                     readahead window thrashes (docs/cp-nfs.md §7) */
+#endif
+
+static void pc(const char *s) { print_console(s); }
+static void pd(long v) {
+  char b[24]; int n = 0; unsigned long u;
+  if (v < 0) { b[n++] = '-'; u = (unsigned long)(-(v + 1)) + 1UL; } else u = (unsigned long)v;
+  char t[24]; int m = 0;
+  if (u == 0) t[m++] = '0';
+  while (u) { t[m++] = (char)('0' + u % 10); u /= 10; }
+  while (m) b[n++] = t[--m];
+  b[n] = 0; pc(b);
+}
+#define P2_STR2(x) #x
+#define P2_STR(x) P2_STR2(x)
+static void census_and_exit(void);
+static uint64_t now_ms(void) { return (uint64_t)sysinfo(1, 0, 0); } /* uptime ms */
+
+static struct sys_procinfo before[192], after[192];
+static int nbefore, nafter;
+
+static int snap(struct sys_procinfo *l, const char *tag) {
+  int n = sysinfo(3, l, (int)(192 * sizeof(struct sys_procinfo)));
+  pc("[P2] ps-"); pc(tag); pc(" count="); pd(n); pc("\n");
+  for (int i = 0; i < n; i++) {
+    pc("[P2] ps-"); pc(tag); pc(" pid="); pd(l[i].pid); pc(" ppid="); pd(l[i].parent_pid);
+    pc(" state="); pd(l[i].state); pc(" name="); pc(l[i].name); pc("\n");
+  }
+  return n < 0 ? 0 : n;
+}
+
+#ifdef P2_PFX_PHASE
+#define P2_PREFIX "/EXT/pfx"
+#else
+#define P2_PREFIX "/tmp/pfx"
+#endif
+
+static char *envp[] = {
+  (char *)"WINELOADER=/CP/WINE/bin/wine",
+  (char *)"WINESERVER=/CP/WINE/bin/wineserver",
+  (char *)"WINEPREFIX=" P2_PREFIX,
+  (char *)"WINEDLLPATH=/CP/WINE/lib/wine",
+  (char *)"LD_LIBRARY_PATH=/LIB64:/CP/WINE/lib/wine/x86_64-unix",
+  (char *)"WINEDEBUG=" P2_WINEDEBUG,
+  (char *)"HOME=/tmp",
+  (char *)"USER=root",
+  (char *)"PATH=/CP/WINE/bin",
+  (char *)"LANG=C",
+  0
+};
+
+/* Optional per-step debug channels for the steps after wineboot
+   (iteration aid: P2_STEP_WINEDEBUG; the gate leaves it unset). */
+#ifdef P2_STEP_WINEDEBUG
+static void step_debug(void) {
+  for (int i = 0; envp[i]; i++)
+    if (envp[i][0] == 'W' && envp[i][4] == 'D' && envp[i][5] == 'E' && envp[i][6] == 'B')
+      envp[i] = (char *)"WINEDEBUG=" P2_STEP_WINEDEBUG;
+}
+#else
+static void step_debug(void) {}
+#endif
+
+/* Run one step: spawn, wait up to `secs`, print the bracket rows. */
+static int step(const char *tag, const char *path, char *const argv[], int secs) {
+  pc("[P2] begin "); pc(tag); pc(" :");
+  for (int i = 0; argv[i]; i++) { pc(" "); pc(argv[i]); }
+  pc("\n");
+  uint64_t t0 = now_ms();
+  int pid = spawn_ex(path, argv, envp, 0, 0);
+  if (pid < 0) {
+    pc("[P2] end "); pc(tag); pc(" status=spawn-failed errno="); pd(errno); pc("\n");
+    return -1;
+  }
+  int status = -1, wp = 0;
+  for (int s = 0; s < secs * 4; s++) {
+    wp = waitpid(pid, &status, 1 /* WNOHANG */);
+    if (wp != 0) break;
+    usleep(250000);
+  }
+  if (wp == 0) {
+    pc("[P2] timeout "); pc(tag); pc(" after "); pd(secs); pc("s: SIGKILL pid="); pd(pid); pc("\n");
+    kill(pid, 9);
+    waitpid(pid, &status, 0);
+    pc("[P2] end "); pc(tag); pc(" status=timeout ms="); pd((long)(now_ms() - t0)); pc("\n");
+    return -2;
+  }
+  pc("[P2] end "); pc(tag); pc(" status="); pd(status); pc(" ms="); pd((long)(now_ms() - t0)); pc("\n");
+  return status;
+}
+
+/* Wait until every process the before-census did not have is gone (the
+   wineserver lingers ~3 s after its last client).  Between steps only:
+   HobbyOS reuses a pid at once (pid == process slot), and a wineserver that
+   is still reaping a dead client polls kill(old_pid, 0) and finally SIGKILLs
+   it (server/process.c process_sigkill) -- which lands on the NEXT step's
+   wine if it was handed the same pid (measured: "wine exited (signal 9)"). */
+static void quiesce(const char *tag, int secs) {
+  int extra = 0;
+  for (int t = 0; t < secs * 4; t++) {
+    struct sys_procinfo tmp[192];
+    int m = sysinfo(3, tmp, (int)sizeof tmp);
+    extra = 0;
+    for (int i = 0; i < m; i++) {
+      int seen = 0;
+      for (int j = 0; j < nbefore; j++) if (before[j].pid == tmp[i].pid) seen = 1;
+      if (!seen && tmp[i].pid != getpid()) extra++;
+    }
+    if (extra == 0) break;
+    usleep(250000);
+  }
+  pc("[P2] quiesce after "); pc(tag); pc(": extra="); pd(extra); pc("\n");
+}
+
+#ifdef P2_PFX_PHASE
+/* Wait until no process named `name` exists (or `secs` pass). */
+static int name_is(const char *a, const char *b) {
+  int i = 0;
+  for (; a[i] && b[i]; i++) if (a[i] != b[i]) return 0;
+  return a[i] == b[i];
+}
+static __attribute__((unused)) void wait_gone(const char *name, int secs) {
+  uint64_t t0 = now_ms();
+  int n = 0;
+  for (int t = 0; t < secs; t++) {
+    struct sys_procinfo tmp[192];
+    int m = sysinfo(3, tmp, (int)sizeof tmp);
+    n = 0;
+    for (int i = 0; i < m; i++) if (name_is(tmp[i].name, name)) n++;
+    if (n == 0) break;
+    usleep(1000000);
+  }
+  pc("[P2] wait for "); pc(name); pc(" to exit: left="); pd(n); pc(" ms="); pd((long)(now_ms() - t0)); pc("\n");
+}
+#endif
+
+int main(void) {
+  pc("[P2] winep2 launcher (C2-wine2)\n");
+  nbefore = snap(before, "before");
+  char src[160];
+  int n = 0;
+  for (int i = 0; NFS_SERVER[i]; i++) src[n++] = NFS_SERVER[i];
+  src[n++] = ':';
+  for (int i = 0; WINE_EXPORT[i]; i++) src[n++] = WINE_EXPORT[i];
+  src[n] = 0;
+  if (mount(src, MNT) != 0) {
+    pc("[P2] mount FAILED errno="); pd(errno); pc("\n[P2] done\n");
+    return 2;
+  }
+  pc("[P2] mount "); pc(src); pc(" -> " MNT " ok\n");
+
+#ifdef P2_PFX_PHASE
+  pc("[P2] prefix-on-ext2 phase " P2_STR(P2_PFX_PHASE) ": WINEPREFIX=" P2_PREFIX "\n");
+  char *a_pls[] = { (char *)"pfxls", (char *)P2_PREFIX, 0 };
+#if P2_PFX_PHASE == 1
+  char *a_boot1[] = { (char *)"wineboot", (char *)"-i", 0 };
+  step("wineboot", "/CP/WINE/bin/wine", a_boot1, 900);
+  quiesce("wineboot", P2_BOOT_QUIESCE_S);
+  step("pfxls", "/PFXLS.ELF", a_pls, 60);
+  char *a_sync[] = { (char *)"pfxsync", 0 };
+  if (step("sync", "/PFXSYNC.ELF", a_sync, 60) == 0) pc("[P2] sync done\n");
+#else
+  step("pfxls-before", "/PFXLS.ELF", a_pls, 60);
+  char *a_echo2[] = { (char *)"wine", (char *)"cmd", (char *)"/c", (char *)"echo", (char *)"hello", 0 };
+  step("echo", "/CP/WINE/bin/wine", a_echo2, 900);
+  /* A fresh wineserver runs `wineboot --init` for its first client (the
+     prefix is NOT re-installed: update_wineprefix sees the same timestamp),
+     and every later client waits up to 5 min for its boot event.  Over this
+     NFS that --init (services.exe, the winedevice drivers) takes longer than
+     5 min (measured in the first two-boot run: winprobe, started 2 min after
+     echo, sat in "boot event wait timed out" until its 300 s step timeout).
+     So wait for wineboot.exe itself to finish before the graded steps --
+     bounded: in runs 1 and 3 that --init never finished (every client
+     BLOCKED in read() on its server reply pipe, wineserver polling: the
+     C1-k4 lost-wakeup shape, docs/cp-pfx.md §1.6); later clients then wait
+     out Wine's 5-minute boot-event timeout and run (echo did: 344 s). */
+  wait_gone("wineboot.exe", P2_B2_INIT_WAIT_S);
+  char *a_wp2[] = { (char *)"wine", (char *)"Z:\\CP\\WPROBE\\winprobe.exe", 0 };
+  step("winprobe", "/CP/WINE/bin/wine", a_wp2, 900);
+  char *a_cp2[] = { (char *)"wine", (char *)"cmd", (char *)"/c", (char *)"copy", (char *)"/y",
+                    (char *)"Z:\\CP\\WPROBE\\winprobe.exe", (char *)"C:\\winprobe.exe", 0 };
+  if (step("copy", "/CP/WINE/bin/wine", a_cp2, 900) == 0) {
+    char *a_wpc2[] = { (char *)"wine", (char *)"C:\\winprobe.exe", 0 };
+    step("winprobe-c", "/CP/WINE/bin/wine", a_wpc2, 900);
+  }
+  char *a_k2[] = { (char *)"wineserver", (char *)"-k", 0 };
+  step("kill", "/CP/WINE/bin/wineserver", a_k2, 60);
+  quiesce("kill", 60);
+  step("pfxls-after", "/PFXLS.ELF", a_pls, 60);
+  char *a_sync[] = { (char *)"pfxsync", 0 };
+  if (step("sync", "/PFXSYNC.ELF", a_sync, 60) == 0) pc("[P2] sync done\n");
+#endif
+  census_and_exit();
+  return 0;
+#endif
+  /* bin/wineboot is a symlink to wine; spawning the NFS symlink itself
+     answers ENOENT (measured), so do what execve of the link does on Linux:
+     run the wine binary with argv[0] = "wineboot". */
+  /* the builtin dirs as a compat process reads them over NFS (diagnostic) */
+  char *a_cnt[] = { (char *)"pfxls", (char *)"-c", (char *)"/CP/WINE/lib/wine/x86_64-windows",
+                    (char *)"/CP/WINE/lib/wine/x86_64-unix", (char *)"/CP/WINE/share/wine", 0 };
+  step("nfscount", "/PFXLS.ELF", a_cnt, 60);
+  char *a_hash[] = { (char *)"pfxls", (char *)"-h",
+    (char *)"/CP/WINE/lib/wine/x86_64-unix/ntdll.so",
+    (char *)"/CP/WINE/lib/wine/x86_64-windows/kernelbase.dll",
+    (char *)"/CP/WINE/lib/wine/x86_64-windows/ntdll.dll",
+    (char *)"/CP/WINE/lib/wine/x86_64-windows/wineboot.exe",
+    (char *)"/CP/WINE/lib/wine/x86_64-windows/setupapi.dll",
+    (char *)"/CP/WINE/share/wine/wine.inf", 0 };
+  step("nfshash", "/PFXLS.ELF", a_hash, 120);
+#ifdef P2_LS_ONLY
+  /* the same files read by 6 processes at once */
+  a_hash[1] = (char *)"-H";
+  char *a_hash6[16] = { a_hash[0], (char *)"-H", (char *)"6" };
+  for (int i = 2; a_hash[i] && i < 12; i++) a_hash6[i + 1] = a_hash[i];
+  step("nfshash6", "/PFXLS.ELF", a_hash6, 300);
+#endif
+#ifdef P2_LS_ONLY
+  pc("[P2] done\n");
+  return 0;
+#endif
+  char *a_boot[] = { (char *)"wineboot", (char *)"-i", 0 };
+  step("wineboot", "/CP/WINE/bin/wine", a_boot, 900);
+  /* wineboot -i outlives its launcher here: the prefix's DefaultInstall
+     reads ~150 MB of builtin DLLs over NFS (1.3 KiB per RPC on this client),
+     which takes longer than the 5 minutes Wine's run_wineboot waits for the
+     boot event ("boot event wait timed out", the launcher then exits 53).
+     The work itself carries on in wineboot.exe/rundll32.exe, so wait for the
+     whole tree to finish before the next step uses the prefix. */
+  quiesce("wineboot", P2_BOOT_QUIESCE_S);
+  /* the prefix as a compat process sees it (diagnostic rows, not graded) */
+  char *a_ls[] = { (char *)"pfxls", (char *)"/tmp/pfx", 0 };
+  step("pfxls", "/PFXLS.ELF", a_ls, 60);
+  step_debug();
+
+#ifndef P2_BOOT_ONLY
+  char *a_echo[] = { (char *)"wine", (char *)"cmd", (char *)"/c", (char *)"echo", (char *)"hello", 0 };
+  step("echo", "/CP/WINE/bin/wine", a_echo, 300);
+  quiesce("echo", 30);
+
+  char *a_wp[] = { (char *)"wine", (char *)"Z:\\CP\\WPROBE\\winprobe.exe", 0 };
+  step("winprobe", "/CP/WINE/bin/wine", a_wp, 300);
+
+  char *a_cp[] = { (char *)"wine", (char *)"cmd", (char *)"/c", (char *)"copy", (char *)"/y",
+                   (char *)"Z:\\CP\\WPROBE\\winprobe.exe", (char *)"C:\\winprobe.exe", 0 };
+  if (step("copy", "/CP/WINE/bin/wine", a_cp, 300) == 0) {
+    char *a_wpc[] = { (char *)"wine", (char *)"C:\\winprobe.exe", 0 };
+    step("winprobe-c", "/CP/WINE/bin/wine", a_wpc, 300);
+  }
+
+#endif
+  char *a_k[] = { (char *)"wineserver", (char *)"-k", 0 };
+  step("kill", "/CP/WINE/bin/wineserver", a_k, 60);
+  census_and_exit();
+  return 0;
+}
+
+/* The after-census (G3) and the final "[P2] done" row. */
+static void census_and_exit(void) {
+  /* Let the server and its clients finish exiting before the census. */
+  int extra = 0;
+  for (int tries = 0; tries < 20; tries++) {
+    usleep(500000);
+    struct sys_procinfo tmp[192];
+    int m = sysinfo(3, tmp, (int)sizeof tmp);
+    extra = 0;
+    for (int i = 0; i < m; i++) {
+      int seen = 0;
+      for (int j = 0; j < nbefore; j++) if (before[j].pid == tmp[i].pid) seen = 1;
+      if (!seen && tmp[i].pid != getpid()) extra++;
+    }
+    if (extra == 0) break;
+  }
+  nafter = snap(after, "after");
+  extra = 0;
+  for (int i = 0; i < nafter; i++) {
+    int seen = 0;
+    for (int j = 0; j < nbefore; j++) if (before[j].pid == after[i].pid) seen = 1;
+    if (!seen && after[i].pid != getpid()) {
+      extra++;
+      pc("[P2] leftover pid="); pd(after[i].pid); pc(" name="); pc(after[i].name); pc("\n");
+    }
+  }
+  pc("[P2] ps-extra count="); pd(extra); pc("\n");
+  /* never leave a wedged tree behind for the halt */
+  for (int i = 0; i < nafter; i++) {
+    int seen = 0;
+    for (int j = 0; j < nbefore; j++) if (before[j].pid == after[i].pid) seen = 1;
+    if (!seen && after[i].pid != getpid()) kill(after[i].pid, 9);
+  }
+  pc("[P2] done\n");
+}

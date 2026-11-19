@@ -67,6 +67,9 @@
 #include "miline.h"
 #include "randrstr.h"
 #include "shadow.h"
+#ifdef MITSHM
+#include "shmint.h"
+#endif
 #include "hobbyos.h"
 
 /* ---- HobbyOS native calls (repo libc.a; declared here so this file
@@ -99,6 +102,9 @@ typedef struct {
     int fbWidth, fbHeight;      /* real framebuffer size */
     void *shadow;               /* fb's drawing target */
     int shadowStride;           /* bytes */
+    int maxWidth, maxHeight;    /* shadow allocation = largest RandR size */
+    int viewWidth, viewHeight;  /* RandR CRTC mode: the part on the glass
+                                 * (top-left aligned, 1:1); 0 = CRTC off */
     uint32_t palette[256];      /* depth 8: index -> B8G8R8A8 word */
     ColormapPtr loggedCmap;     /* depth 8: last colormap logged */
     CreateScreenResourcesProcPtr createScreenResources;
@@ -245,10 +251,24 @@ hbFlushBatch(struct hb_fb_rect32 *r, int n)
     hbFlushRects += n;
 }
 
+/* What of a screen is on the glass: its size, cut to the RandR CRTC mode
+ * (top-left aligned, 1:1, no scaling) and to the framebuffer. */
+static void
+hbVisible(const HbScreenRec *scr, int *w, int *h)
+{
+    *w = scr->width < scr->fbWidth ? scr->width : scr->fbWidth;
+    *h = scr->height < scr->fbHeight ? scr->height : scr->fbHeight;
+    if (scr->viewWidth >= 0 && scr->viewWidth < *w)
+        *w = scr->viewWidth;
+    if (scr->viewHeight >= 0 && scr->viewHeight < *h)
+        *h = scr->viewHeight;
+}
+
 /* Present the WHOLE shadow of one screen (arbitration transitions use this:
  * the incoming owner has to cover whatever the outgoing owner left behind).
  * Depth 8 clears the rest of the framebuffer first, so the game is a clean
- * 640x400 (or 320x200) picture on black rather than on a frozen desktop. */
+ * 640x400 (or 320x200) picture on black rather than on a frozen desktop.
+ * Depth 24 blacks out whatever lies outside a smaller RandR mode. */
 static void
 hbPresentFull(ScreenPtr pScreen)
 {
@@ -257,8 +277,17 @@ hbPresentFull(ScreenPtr pScreen)
 
     if (!scr || !scr->fb || !scr->shadow)
         return;
-    w = scr->width < scr->fbWidth ? scr->width : scr->fbWidth;
-    h = scr->height < scr->fbHeight ? scr->height : scr->fbHeight;
+    hbVisible(scr, &w, &h);
+    if (scr->depth != 8 && (w < scr->fbWidth || h < scr->fbHeight)) {
+        /* A RandR mode smaller than the glass: black around it. */
+        for (y = 0; y < scr->fbHeight; y++) {
+            uint32_t *row = scr->fb + (size_t) y * scr->fbStride;
+            if (y >= h)
+                memset(row, 0, (size_t) scr->fbWidth * 4);
+            else if (w < scr->fbWidth)
+                memset(row + w, 0, (size_t) (scr->fbWidth - w) * 4);
+        }
+    }
     if (scr->depth == 8) {
         hbLoadPalette(pScreen);
         for (y = 0; y < scr->fbHeight; y++)
@@ -303,6 +332,8 @@ hbShadowUpdate(ScreenPtr pScreen, shadowBufPtr pBuf)
         return;
     if (scr->depth == 8)
         hbLoadPalette(pScreen);
+    int visW, visH;
+    hbVisible(scr, &visW, &visH);
 
     /* L89: price the present.  The shadow->fb copy is cheap per byte; what
      * is not cheap is the number of damage boxes, because each one is a row
@@ -336,8 +367,8 @@ hbShadowUpdate(ScreenPtr pScreen, shadowBufPtr pBuf)
         int y2 = box->y2 > scr->fbHeight ? scr->fbHeight : box->y2;
         int y;
 
-        if (x2 > scr->width) x2 = scr->width;
-        if (y2 > scr->height) y2 = scr->height;
+        if (x2 > visW) x2 = visW;
+        if (y2 > visH) y2 = visH;
         if (x1 >= x2 || y1 >= y2)
             continue;
         hbx_px_frame += (unsigned long long) (x2 - x1) * (unsigned long long) (y2 - y1);
@@ -675,6 +706,86 @@ hbViewableChild(ScreenPtr pScreen)
     return NULL;
 }
 
+/* ---- P7 (docs/cp-p7.md, F5): who may scan out ---------------------------
+ * The kernel lets a Vulkan client put its swapchain image on the scanout
+ * (GPU_IOC_SCANOUT_BLOB) only for the window this server reports as covering
+ * the whole of what is on the glass, unobscured: the one window whose
+ * clipList is the entire screen.  Clip lists partition the screen, so there
+ * is at most one.  The report travels on the flush path as a single control
+ * rect {HB_FSCTL_MAGIC, 1, window, w << 16 | h}; the kernel hands the screen
+ * back to us the moment the report changes -- another window on top (focus
+ * loss, a menu, a dialog), the window unmapped or moved, a RandR mode change
+ * -- and while a client owns the scanout it drops our flushes (we keep
+ * drawing the shadow into the framebuffer; the hand-back transfers all of
+ * it).  A kernel without P7 refuses the control rect (-EINVAL): logged once,
+ * nothing else changes. */
+#define HB_FSCTL_MAGIC 0x48425037 /* "HBP7", src/include/virtio_gpu_blob.h */
+#define HB_FSCTL_OP_FS 1
+static XID hbFsReported = (XID) ~0;
+static int hbFsRepW = -1, hbFsRepH = -1, hbFsRows, hbFsBroken;
+
+static WindowPtr
+hbFullscreenWindow(ScreenPtr pScreen, int w, int h)
+{
+    BoxRec box = { 0, 0, (short) w, (short) h };
+    WindowPtr p = pScreen->root, c;
+
+    if (!p || w <= 0 || h <= 0)
+        return NULL;
+    /* Descend through the topmost viewable child that is visible over the
+     * whole box (its borderClip holds every pixel of it). */
+    for (;;) {
+        for (c = p->firstChild; c; c = c->nextSib)
+            if (c->viewable &&
+                RegionContainsRect(&c->borderClip, &box) == rgnIN)
+                break;
+        if (!c)
+            break;
+        p = c;
+    }
+    if (p == pScreen->root || RegionContainsRect(&p->clipList, &box) != rgnIN)
+        return NULL;
+    return p;
+}
+
+static void
+hbScanoutPoll(void)
+{
+    ScreenPtr pScreen = screenInfo.numScreens > 0 ? screenInfo.screens[0] : NULL;
+    HbScreenRec *scr = hbScreenOf(pScreen);
+    WindowPtr pWin = NULL;
+    XID id = 0;
+    int w = 0, h = 0;
+
+    if (!scr || hbFsBroken)
+        return;
+    hbVisible(scr, &w, &h);
+    /* The depth-8 :0.1 owning the glass, or a CRTC that is off: nobody. */
+    if (!hbSecondActive && hbOwner == pScreen->myNum && scr->viewWidth != 0 &&
+        scr->depth != 8 && w == pScreen->width && h == pScreen->height)
+        pWin = hbFullscreenWindow(pScreen, w, h);
+    if (pWin)
+        id = pWin->drawable.id;
+    else
+        w = h = 0;
+    if (id == hbFsReported && w == hbFsRepW && h == hbFsRepH)
+        return;
+    {
+        struct hb_fb_rect32 r = { HB_FSCTL_MAGIC, HB_FSCTL_OP_FS, (int32_t) id,
+                                  (int32_t) (((uint32_t) w << 16) | (uint32_t) h) };
+        if (flush_fb_rects(&r, 1) < 0) {
+            hbFsBroken = 1;
+            ErrorF("hobbyos: kernel has no P7 scanout control (fullscreen report refused)\n");
+            return;
+        }
+    }
+    hbFsReported = id;
+    hbFsRepW = w;
+    hbFsRepH = h;
+    if (hbFsRows++ < 64)
+        ErrorF("hobbyos: fullscreen window 0x%lx %dx%d\n", (unsigned long) id, w, h);
+}
+
 /* Registered as a server block handler by InitOutput: runs once per server
  * loop pass, before the per-screen shadow block handlers.  Two state
  * transitions to notice: a screen-1 window appeared (game takes the glass) or
@@ -685,6 +796,7 @@ hbOwnershipPoll(void *blockData, void *timeout)
     ScreenPtr pDesktop, pGame;
     WindowPtr pWin;
 
+    hbScanoutPoll();
     if (screenInfo.numScreens < 2)
         return;
     pDesktop = screenInfo.screens[0];
@@ -711,7 +823,35 @@ hbOwnershipPoll(void *blockData, void *timeout)
     }
 }
 
-/* ---- RandR: one fixed output/mode (enough for clients that query it) --- */
+/* ---- RandR ---------------------------------------------------------------
+ * Screen 0 (depth 24) offers one mode per common resolution that fits the
+ * framebuffer, plus the framebuffer's own (preferred), on one CRTC/output
+ * "HOBBYFB".  A mode set is REAL: RRSetScreenSize resizes the root window and
+ * the screen pixmap (the shadow is allocated once at the largest size, so the
+ * row stride never changes), and RRSetCrtcConfig picks the part of the screen
+ * that is on the glass -- top-left aligned, 1:1, black around it (no
+ * scaling; the scanout stays the framebuffer's size).  Requests the model
+ * cannot honour -- rotation, a CRTC offset, a size outside the range -- fail
+ * with the RandR error a client expects (RRSetConfigFailed / BadMatch), never
+ * silently.  The depth-8 :0.1 keeps its one fixed mode.  Timings are
+ * synthetic 60 Hz (dotClock = hTotal * vTotal * 60) so clients that derive a
+ * refresh rate (Wine) read 60, and the output's physical size is the 96 dpi
+ * size, not 0x0. */
+#define HB_RR_MIN_W 320
+#define HB_RR_MIN_H 200
+static const short hbRRSizes[][2] = {
+    {2560, 1440}, {1920, 1200}, {1920, 1080}, {1680, 1050}, {1600, 1200},
+    {1600, 900}, {1440, 900}, {1366, 768}, {1280, 1024}, {1280, 960},
+    {1280, 800}, {1280, 720}, {1024, 768}, {800, 600}, {640, 480},
+};
+#define HB_RR_MAX_MODES (1 + (int) (sizeof hbRRSizes / sizeof hbRRSizes[0]))
+
+static int
+hbMm(int px)
+{
+    return (px * 254 + 480) / 960;      /* 96 dpi */
+}
+
 static Bool
 hbRRGetInfo(ScreenPtr pScreen, Rotation *rotations)
 {
@@ -723,6 +863,25 @@ static Bool
 hbRRCrtcSet(ScreenPtr pScreen, RRCrtcPtr crtc, RRModePtr mode, int x, int y,
             Rotation rotation, int numOutput, RROutputPtr *outputs)
 {
+    HbScreenRec *scr = hbScreenOf(pScreen);
+
+    if (!scr)
+        return FALSE;
+    if (mode && (rotation != RR_Rotate_0 || x != 0 || y != 0 ||
+                 (int) mode->mode.width > scr->maxWidth ||
+                 (int) mode->mode.height > scr->maxHeight)) {
+        ErrorF("hobbyos: randr: refusing crtc %ux%u+%d+%d rot %u (only 0,0, "
+               "unrotated, <= %dx%d)\n", mode->mode.width, mode->mode.height,
+               x, y, (unsigned) rotation, scr->maxWidth, scr->maxHeight);
+        return FALSE;
+    }
+    scr->viewWidth = mode ? (int) mode->mode.width : 0;
+    scr->viewHeight = mode ? (int) mode->mode.height : 0;
+    ErrorF("hobbyos: randr: crtc %s %dx%d on screen %dx%d\n",
+           mode ? "mode" : "off", scr->viewWidth, scr->viewHeight,
+           pScreen->width, pScreen->height);
+    if (hbOwner == scr->screenNum)
+        hbPresentFull(pScreen);
     return RRCrtcNotify(crtc, mode, x, y, rotation, NULL, numOutput, outputs);
 }
 
@@ -730,47 +889,122 @@ static Bool
 hbRRScreenSetSize(ScreenPtr pScreen, CARD16 width, CARD16 height,
                   CARD32 mmWidth, CARD32 mmHeight)
 {
-    /* The framebuffer is fixed; only the current size is accepted. */
-    return width == pScreen->width && height == pScreen->height;
+    HbScreenRec *scr = hbScreenOf(pScreen);
+    PixmapPtr pix;
+
+    if (!scr)
+        return FALSE;
+    if (scr->depth == 8 || width < HB_RR_MIN_W || height < HB_RR_MIN_H ||
+        width > scr->maxWidth || height > scr->maxHeight)
+        return width == pScreen->width && height == pScreen->height;
+    pScreen->mmWidth = mmWidth ? (int) mmWidth : hbMm(width);
+    pScreen->mmHeight = mmHeight ? (int) mmHeight : hbMm(height);
+    if (width == pScreen->width && height == pScreen->height)
+        return TRUE;
+    pix = pScreen->GetScreenPixmap(pScreen);
+    SetRootClip(pScreen, ROOT_CLIP_NONE);
+    pScreen->width = width;
+    pScreen->height = height;
+    scr->width = width;
+    scr->height = height;
+    /* Keep the shadow's row stride: devKind > 0 is taken as given (a -1
+     * would recompute it from the new width). */
+    pScreen->ModifyPixmapHeader(pix, width, height, -1, -1,
+                                scr->shadowStride, NULL);
+    update_desktop_dimensions();
+    SetRootClip(pScreen, ROOT_CLIP_FULL);
+    ScreenRestructured(pScreen);
+    RRScreenSizeNotify(pScreen);
+    ErrorF("hobbyos: randr: screen %d now %dx%d (%dx%d mm)\n",
+           pScreen->myNum, width, height, pScreen->mmWidth, pScreen->mmHeight);
+    if (hbOwner == scr->screenNum)
+        hbPresentFull(pScreen);
+    return TRUE;
+}
+
+static RRModePtr
+hbRRMode(int w, int h)
+{
+    xRRModeInfo info;
+    char name[32];
+
+    snprintf(name, sizeof name, "%dx%d", w, h);
+    memset(&info, 0, sizeof info);
+    info.width = w;
+    info.height = h;
+    info.hSyncStart = w + 48;
+    info.hSyncEnd = w + 80;
+    info.hTotal = w + 160;
+    info.vSyncStart = h + 3;
+    info.vSyncEnd = h + 8;
+    info.vTotal = h + 45;
+    info.dotClock = (CARD32) info.hTotal * info.vTotal * 60;
+    info.nameLength = strlen(name);
+    return RRModeGet(&info, name);
 }
 
 static Bool
 hbRandRInit(ScreenPtr pScreen)
 {
+    HbScreenRec *scr = hbScreenOf(pScreen);
     rrScrPrivPtr pScrPriv;
-    RRModePtr mode;
+    RRModePtr modes[HB_RR_MAX_MODES], cur;
     RRCrtcPtr crtc;
     RROutputPtr output;
-    xRRModeInfo modeInfo;
-    char name[64];
+    int n = 0, i, k;
 
-    if (!RRScreenInit(pScreen))
+    if (!scr || !RRScreenInit(pScreen))
         return FALSE;
     pScrPriv = rrGetScrPriv(pScreen);
     pScrPriv->rrGetInfo = hbRRGetInfo;
     pScrPriv->rrCrtcSet = hbRRCrtcSet;
     pScrPriv->rrScreenSetSize = hbRRScreenSetSize;
-    RRScreenSetSizeRange(pScreen, pScreen->width, pScreen->height,
-                         pScreen->width, pScreen->height);
-    snprintf(name, sizeof name, "%dx%d", pScreen->width, pScreen->height);
-    memset(&modeInfo, 0, sizeof modeInfo);
-    modeInfo.width = pScreen->width;
-    modeInfo.height = pScreen->height;
-    modeInfo.nameLength = strlen(name);
-    mode = RRModeGet(&modeInfo, name);
-    if (!mode)
+    /* The current size first: it is the preferred mode. */
+    cur = hbRRMode(pScreen->width, pScreen->height);
+    if (!cur)
         return FALSE;
+    modes[n++] = cur;
+    if (scr->depth != 8) {
+        RRScreenSetSizeRange(pScreen, HB_RR_MIN_W, HB_RR_MIN_H,
+                             scr->maxWidth, scr->maxHeight);
+        for (i = 0; i < HB_RR_MAX_MODES - 1; i++) {
+            int w = hbRRSizes[i][0], h = hbRRSizes[i][1];
+            Bool dup = FALSE;
+
+            if (w > scr->maxWidth || h > scr->maxHeight)
+                continue;
+            for (k = 0; k < n; k++)
+                if ((int) modes[k]->mode.width == w && (int) modes[k]->mode.height == h)
+                    dup = TRUE;
+            if (dup)
+                continue;
+            if (!(modes[n] = hbRRMode(w, h)))
+                return FALSE;
+            n++;
+        }
+    }
+    else
+        RRScreenSetSizeRange(pScreen, pScreen->width, pScreen->height,
+                             pScreen->width, pScreen->height);
     crtc = RRCrtcCreate(pScreen, NULL);
     if (!crtc)
         return FALSE;
     RRCrtcGammaSetSize(crtc, 256);
     output = RROutputCreate(pScreen, "HOBBYFB", 7, NULL);
     if (!output || !RROutputSetClones(output, NULL, 0) ||
-        !RROutputSetModes(output, &mode, 1, 0) ||
+        !RROutputSetModes(output, modes, n, 1) ||
         !RROutputSetCrtcs(output, &crtc, 1) ||
         !RROutputSetConnection(output, RR_Connected))
         return FALSE;
-    RRCrtcNotify(crtc, mode, 0, 0, RR_Rotate_0, NULL, 1, &output);
+    RROutputSetPhysicalSize(output, hbMm(pScreen->width), hbMm(pScreen->height));
+    scr->viewWidth = pScreen->width;
+    scr->viewHeight = pScreen->height;
+    RRCrtcNotify(crtc, cur, 0, 0, RR_Rotate_0, NULL, 1, &output);
+    LogMessage(X_INFO, "hobbyos: randr: screen %d: %d mode(s), size range "
+               "%dx%d..%dx%d\n", pScreen->myNum, n,
+               scr->depth != 8 ? HB_RR_MIN_W : pScreen->width,
+               scr->depth != 8 ? HB_RR_MIN_H : pScreen->height,
+               scr->maxWidth, scr->maxHeight);
     return TRUE;
 }
 
@@ -813,15 +1047,49 @@ hbDepthFromEnv(void)
     return 24;
 }
 
-/* HB_SECOND_SCREEN=1 forces the depth-8 :0.1 screen even when :0.0 is already
- * depth 8 (two answers to XMatchVisualInfo; harmless, and useful for probing
- * the second-screen path without a 24-bit desktop). */
-static Bool
+/* HB_SCREEN_SIZE=WxH (lane C9-play): the depth-24 screen's startup size,
+ * like "-screen WxH" but read from the environment, so XSESSION.BIN's
+ * /X11/XSESSION.ENV can set it per disk image (tools/cp/p8/run-p8.sh
+ * P8_XSCREEN).  Unset keeps the framebuffer's size (1920x1080).  A game whose
+ * borderless window is exactly this size covers the screen, which is what the
+ * P7 scanout path (hbScanoutPoll) needs; the picture sits top-left on the
+ * glass like a RandR mode, and RandR can still switch to the full size. */
+static void
+hbScreenSizeFromEnv(int *w, int *h)
+{
+    const char *s = getenv("HB_SCREEN_SIZE");
+    int ew, eh;
+
+    if (!s || !*s)
+        return;
+    if (sscanf(s, "%dx%d", &ew, &eh) == 2 && ew >= 320 && eh >= 200 && ew <= 8192 && eh <= 8192) {
+        *w = ew;
+        *h = eh;
+        ErrorF("hobbyos: HB_SCREEN_SIZE=%s: screen 0 starts at %dx%d\n", s, ew, eh);
+    }
+    else
+        ErrorF("hobbyos: HB_SCREEN_SIZE=%s ignored (want WxH, 320x200..8192x8192)\n", s);
+}
+
+/* HB_SECOND_SCREEN selects the depth-8 :0.1 screen:
+ *   unset/empty  the default -- added when :0.0 is depth 24;
+ *   0            never: ONE screen (Wine sessions, lane C4-x2).  With :0.1
+ *                gone ScreenCount is 1, so RandR's Xinerama shim
+ *                (randr/rrxinerama.c skips it for > 1 screen) and Composite
+ *                (composite/compext.c refuses any PseudoColor root) are
+ *                advertised again -- docs/cp-x11.md §3.1 item 3;
+ *   anything else  always, even when :0.0 is already depth 8 (two answers to
+ *                XMatchVisualInfo; useful for probing the second-screen path
+ *                without a 24-bit desktop).
+ * Returns -1 (default), 0 (never) or 1 (always). */
+static int
 hbSecondScreenFromEnv(void)
 {
     const char *s = getenv("HB_SECOND_SCREEN");
 
-    return s && *s && *s != '0';
+    if (!s || !*s)
+        return -1;
+    return *s == '0' ? 0 : 1;
 }
 
 static Bool
@@ -847,6 +1115,8 @@ hbScreenInit(ScreenPtr pScreen, int argc, char **argv)
     else {
         scr->width = hbReqWidth ? hbReqWidth : scr->fbWidth;
         scr->height = hbReqHeight ? hbReqHeight : scr->fbHeight;
+        if (!hbReqWidth && pScreen->myNum == 0)
+            hbScreenSizeFromEnv(&scr->width, &scr->height);
     }
 
     fbmap = map_fb();
@@ -856,8 +1126,18 @@ hbScreenInit(ScreenPtr pScreen, int argc, char **argv)
         return FALSE;
     }
     scr->fb = fbmap;
-    scr->shadowStride = PixmapBytePad(scr->width, scr->depth);
-    scr->shadow = calloc((size_t) scr->shadowStride, scr->height);
+    /* Depth 24: allocate for the largest RandR size (the framebuffer's, or a
+     * larger -screen request) so a later RRSetScreenSize only changes the
+     * pixmap header.  Depth 8 stays exactly its own size. */
+    scr->maxWidth = scr->width;
+    scr->maxHeight = scr->height;
+    if (scr->depth != 8) {
+        if (scr->fbWidth > scr->maxWidth) scr->maxWidth = scr->fbWidth;
+        if (scr->fbHeight > scr->maxHeight) scr->maxHeight = scr->fbHeight;
+    }
+    scr->viewWidth = scr->viewHeight = -1;     /* hbRandRInit sets them */
+    scr->shadowStride = PixmapBytePad(scr->maxWidth, scr->depth);
+    scr->shadow = calloc((size_t) scr->shadowStride, scr->maxHeight);
     if (!scr->shadow)
         return FALSE;
 
@@ -880,13 +1160,19 @@ hbScreenInit(ScreenPtr pScreen, int argc, char **argv)
      * PixmapBytePad(width, root depth), which is exactly shadowStride.  The
      * bpp argument is the SCREEN's bits per pixel, not the depth: depth 24
      * runs at 32 bpp (B8G8R8A8), and fbScreenInit rejects a non-power-of-two
-     * bpp (Ones(24) != 1) -- passing scr->depth here is a fatal error. */
+     * bpp (Ones(24) != 1) -- passing scr->depth here is a fatal error.
+     * The stride argument is maxWidth (the shadow's row length). */
     if (!fbScreenInit(pScreen, scr->shadow, scr->width,
                       scr->height, dpi, dpi,
-                      scr->width, scr->depth == 8 ? 8 : 32))
+                      scr->maxWidth, scr->depth == 8 ? 8 : 32))
         return FALSE;
     if (hbRender && !fbPictureInit(pScreen, 0, 0))
         return FALSE;
+#ifdef MITSHM
+    /* MIT-SHM (lane C4-x3): fb can wrap a client's segment as a pixmap, so
+     * ShmCreatePixmap works (QueryVersion reports sharedPixmaps). */
+    ShmRegisterFbFuncs(pScreen);
+#endif
     if (scr->depth == 8) {
         hbRealizeWindowOrig = pScreen->RealizeWindow;
         pScreen->RealizeWindow = hbRealizeWindow;
@@ -940,7 +1226,7 @@ InitOutput(ScreenInfo *screen_info, int argc, char **argv)
         /* depth, bpp: the screen depth plus what RENDER wants */
         {1, 1}, {4, 8}, {8, 8}, {16, 16}, {24, 32}, {32, 32}
     };
-    int i;
+    int i, second;
 
     for (i = 0; i < (int) (sizeof depths / sizeof depths[0]); i++) {
         screen_info->formats[i].depth = depths[i][0];
@@ -960,13 +1246,18 @@ InitOutput(ScreenInfo *screen_info, int argc, char **argv)
     /* Then the depth-8 client screen (:0.1).  A failure here is NOT fatal:
      * the session keeps the desktop and the launcher falls back to :0.0,
      * where Doom prints its own one-line diagnosis. */
-    if (hbScreens[0].depth != 8 || hbSecondScreenFromEnv()) {
+    second = hbSecondScreenFromEnv();
+    if (second == 1 || (second < 0 && hbScreens[0].depth != 8)) {
         if (AddScreen(hbScreenInit, argc, argv) == -1)
             ErrorF("hobbyos: screen 1 (depth 8 PseudoColor :0.1) not added\n");
         else
             ErrorF("hobbyos: two screens: :0.0 depth %d, :0.1 depth 8"
                    " PseudoColor\n", hbScreens[0].depth);
     }
+    else if (second == 0)
+        ErrorF("hobbyos: one screen: :0.0 depth %d (HB_SECOND_SCREEN=0: no "
+               ":0.1; Composite and RandR's Xinerama can be advertised)\n",
+               hbScreens[0].depth);
 
     /* Presentation arbitration + pointer/keyboard hand-over.  A registered
      * block handler runs before the per-screen shadow block handlers, so a
@@ -1068,6 +1359,7 @@ ddxUseMsg(void)
     ErrorF("HB_XDEPTH=8            environment: make :0.0 a whole-screen depth 8\n");
     ErrorF("                       PseudoColor screen (no :0.1)\n");
     ErrorF("HB_SECOND_SCREEN=1     environment: always add the depth-8 :0.1\n");
+    ErrorF("HB_SECOND_SCREEN=0     environment: never add it (one screen)\n");
     ErrorF("+/-render              turn on/off RENDER extension support (default on)\n");
     ErrorF("-xkm file              compiled keymap to load (default /X11/US.XKM)\n");
     ErrorF("-verbose [n]           stderr log verbosity (default 0; 3 if n omitted)\n");
@@ -1139,4 +1431,19 @@ int
 hbScreenHeight(void)
 {
     return hbScreens[0].height;
+}
+
+/* The glass: absolute pointer devices (vmmouse, virtio-tablet) report a
+ * position on the whole framebuffer, which is screen 0's pixel grid at any
+ * RandR size (top-left aligned, 1:1). */
+int
+hbFbWidth(void)
+{
+    return hbScreens[0].fbWidth > 0 ? hbScreens[0].fbWidth : hbScreens[0].width;
+}
+
+int
+hbFbHeight(void)
+{
+    return hbScreens[0].fbHeight > 0 ? hbScreens[0].fbHeight : hbScreens[0].height;
 }

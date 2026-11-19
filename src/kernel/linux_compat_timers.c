@@ -46,8 +46,12 @@
 #include "kline.h"
 #include "linux_syscall.h"
 #include "process.h"
+#include "frame.h" /* C1-k5: epoll entry arrays */
+#include "kmem.h"
 
-#define LT_MAX 48
+/* C1-k5: 256 (was 48): one table holds every itimer, POSIX timer and timerfd
+   in the system; a slot is 56 B. */
+#define LT_MAX 256
 
 /* Same contract as every other l_tab_* handler: write the result and say
    "answered" (linux_compat_fd.c/linux_compat_mem.c each carry this three-line
@@ -71,8 +75,8 @@ struct l_tmr {
   int pid;      /* owning process group (leader pid) */
   int sig;      /* signal to raise, 0 = none */
   int slot;     /* timerfd: which fd-slot record this is (unused: kind identity) */
-  uint64_t next;      /* absolute monotonic ms, 0 = disarmed */
-  uint64_t interval;  /* ms, 0 = one-shot */
+  uint64_t next;      /* absolute monotonic us (timer_get_us), 0 = disarmed */
+  uint64_t interval;  /* us, 0 = one-shot (C1-k6: was ms) */
   uint64_t expir;     /* expirations not yet consumed (timerfd) */
   int32_t clockid;
 };
@@ -98,25 +102,46 @@ struct lt_itimerval {
   struct lt_timeval value;
 };
 
-static int64_t ts_to_ms(const struct lt_timespec *ts) {
+/* C1-k6: the table is in microseconds.  A value rounds UP to the next
+   microsecond (a timer never fires early); a huge tv_sec saturates. */
+static int64_t ts_to_us(const struct lt_timespec *ts) {
   if (ts->sec < 0 || ts->nsec < 0 || ts->nsec >= 1000000000LL) return -1;
-  return ts->sec * 1000 + ts->nsec / 1000000;
+  int64_t sec = ts->sec > 9000000000000LL ? 9000000000000LL : ts->sec;
+  return sec * 1000000 + (ts->nsec + 999) / 1000;
 }
 
-static int64_t tv_to_ms(const struct lt_timeval *tv) {
+static int64_t tv_to_us(const struct lt_timeval *tv) {
   if (tv->sec < 0 || tv->usec < 0 || tv->usec >= 1000000LL) return -1;
-  return tv->sec * 1000 + tv->usec / 1000;
+  int64_t sec = tv->sec > 9000000000000LL ? 9000000000000LL : tv->sec;
+  return sec * 1000000 + tv->usec;
 }
 
-static void ms_to_timespec(uint64_t ms, struct lt_timespec *ts) {
-  ts->sec = (int64_t)(ms / 1000);
-  ts->nsec = (int64_t)(ms % 1000) * 1000000;
+static void us_to_timespec(uint64_t us, struct lt_timespec *ts) {
+  ts->sec = (int64_t)(us / 1000000);
+  ts->nsec = (int64_t)(us % 1000000) * 1000;
 }
 
-static void ms_to_timeval(uint64_t ms, struct lt_timeval *tv) {
-  tv->sec = (int64_t)(ms / 1000);
-  tv->usec = (int64_t)(ms % 1000) * 1000;
+static void us_to_timeval(uint64_t us, struct lt_timeval *tv) {
+  tv->sec = (int64_t)(us / 1000000);
+  tv->usec = (int64_t)(us % 1000000);
 }
+
+/* C1-k6: an absolute it_value on clock `clockid` -> the table's monotonic
+   microseconds.  The realtime clocks (0, 5, 8, 11) are shifted by the
+   current realtime-monotonic offset; the rest are the monotonic base. */
+static uint64_t lt_abs_to_mono(int clockid, uint64_t v) {
+  extern uint64_t timer_get_us(void);
+  extern uint64_t hb_clock_realtime_us(void);
+  if (clockid == 0 || clockid == 5 || clockid == 8 || clockid == 11) {
+    uint64_t rt = hb_clock_realtime_us(), mono = timer_get_us();
+    return v > rt ? mono + (v - rt) : mono; /* already past: due now */
+  }
+  return v ? v : 1;
+}
+
+/* C1-k6: an armed timer gets a one-shot covering its next expiry, so it
+   fires on time instead of at the next 10 ms tick (process.c). */
+extern void sched_hrt_cover_ext(uint64_t deadline_us);
 
 static int lt_alloc(int kind, int pid, int sig) {
   uint64_t f = spinlock_acquire_irqsave(&lt_lock);
@@ -134,6 +159,7 @@ static int lt_alloc(int kind, int pid, int sig) {
   lt[i].next = 0;
   lt[i].interval = 0;
   lt[i].expir = 0;
+  lt[i].clockid = 1; /* CLOCK_MONOTONIC until the caller says otherwise */
   spinlock_release_irqrestore(&lt_lock, f);
   return i;
 }
@@ -146,41 +172,68 @@ static void lt_free(int i) {
   spinlock_release_irqrestore(&lt_lock, f);
 }
 
-static void lt_arm(int i, uint64_t next_ms, uint64_t interval_ms) {
+static void lt_arm(int i, uint64_t next_us, uint64_t interval_us) {
   uint64_t f = spinlock_acquire_irqsave(&lt_lock);
-  lt[i].next = next_ms;
-  lt[i].interval = interval_ms;
+  lt[i].next = next_us;
+  lt[i].interval = interval_us;
   spinlock_release_irqrestore(&lt_lock, f);
+  if (next_us) sched_hrt_cover_ext(next_us);
 }
 
-/* The tick.  Called from the PIT interrupt on CPU 0 (arch/x64/timer.c), i.e.
-   once per 10 ms, with interrupts off; everything below is lock-only and
-   allocation-free. */
+/* C1-k6: count the expiries due by `now` and advance `next` past it.
+   Caller holds lt_lock.  Returns the number of expiries added. */
+static uint64_t lt_catch_up_locked(int i, uint64_t now) {
+  uint64_t next = lt[i].next;
+  if (!next || now < next) return 0;
+  uint64_t n = 1;
+  if (lt[i].interval) {
+    n += (now - next) / lt[i].interval;
+    lt[i].next = next + n * lt[i].interval;
+  } else {
+    lt[i].next = 0;
+  }
+  lt[i].expir += n;
+  return n;
+}
+
+/* The tick.  Called from the PIT interrupt on CPU 0 (arch/x64/timer.c) once
+   per 10 ms, and -- C1-k6 -- from any CPU's high-resolution one-shot, with
+   interrupts off; everything below is lock-only and allocation-free.  `now`
+   is timer_get_us.  The expiry is re-checked under lt_lock, so two CPUs that
+   tick at once cannot both fire one expiry. */
 void linux_compat_timer_tick(uint64_t now) {
   for (int i = 0; i < LT_MAX; i++) {
     if (!lt[i].used || !lt[i].next || now < lt[i].next) continue;
     int kind, pid, sig;
-    uint64_t interval;
+    uint64_t n;
     {
       uint64_t f = spinlock_acquire_irqsave(&lt_lock);
       kind = lt[i].kind;
       pid = lt[i].pid;
       sig = lt[i].sig;
-      interval = lt[i].interval;
       /* Advance BEFORE the signal so a handler that rearms cannot double-fire
          this tick, and so a slow consumer sees real overruns. */
-      if (interval)
-        lt[i].next += interval;
-      else
-        lt[i].next = 0;
-      lt[i].expir++;
+      n = lt[i].used ? lt_catch_up_locked(i, now) : 0;
       spinlock_release_irqrestore(&lt_lock, f);
     }
-    if (kind != LT_TFD && sig > 0) {
+    if (n && kind != LT_TFD && sig > 0) {
       extern int process_signal(int pid, int sig);
       (void)process_signal(pid, sig);
     }
   }
+}
+
+/* C1-k6: the nearest armed expiry of any timer (0 = none), read without the
+   lock (aligned 64-bit loads; a stale value costs one empty fire).  Called
+   by the one-shot's fire under proc_lock, so it must not take lt_lock. */
+uint64_t linux_compat_timer_next_us(void) {
+  uint64_t best = 0;
+  for (int i = 0; i < LT_MAX; i++) {
+    uint64_t n = __atomic_load_n(&lt[i].next, __ATOMIC_RELAXED);
+    if (!n || !__atomic_load_n(&lt[i].used, __ATOMIC_RELAXED)) continue;
+    if (!best || n < best) best = n;
+  }
+  return best;
 }
 
 /* ---- fd side: a timerfd is a FILE_TYPE_TIMERFD global file ---------------- */
@@ -202,41 +255,49 @@ int lt_timerfd_new(int clockid, int flags) {
 void lt_timerfd_release(int slot) { lt_free(slot); }
 
 int lt_timerfd_settime(int slot, int flags, const struct lt_itimerspec *its) {
-  extern uint64_t timer_get_ms(void);
-  int64_t val = ts_to_ms(&its->value);
-  int64_t itv = ts_to_ms(&its->interval);
+  extern uint64_t timer_get_us(void);
+  int64_t val = ts_to_us(&its->value);
+  int64_t itv = ts_to_us(&its->interval);
   if (val < 0 || itv < 0) return -EINVAL;
   if (slot < 0 || slot >= LT_MAX || !lt[slot].used) return -EBADF;
   uint64_t next = 0;
   if (val > 0) {
-    next = (flags & 1 /* TIMER_ABSTIME */) ? (uint64_t)val
-                                           : timer_get_ms() + (uint64_t)val;
+    next = (flags & 1 /* TIMER_ABSTIME */)
+               ? lt_abs_to_mono(lt[slot].clockid, (uint64_t)val)
+               : timer_get_us() + (uint64_t)val;
   }
   uint64_t f = spinlock_acquire_irqsave(&lt_lock);
   lt[slot].next = next;
   lt[slot].interval = (uint64_t)itv;
-  if (next) lt[slot].expir = 0; /* arming discards unread expiries, as Linux */
+  lt[slot].expir = 0; /* (re)arming or disarming discards unread expiries, as Linux */
   spinlock_release_irqrestore(&lt_lock, f);
+  if (next) sched_hrt_cover_ext(next);
   return 0;
 }
 
 int lt_timerfd_gettime(int slot, struct lt_itimerspec *its) {
-  extern uint64_t timer_get_ms(void);
+  extern uint64_t timer_get_us(void);
   if (slot < 0 || slot >= LT_MAX || !lt[slot].used) return -EBADF;
+  uint64_t now = timer_get_us();
   uint64_t f = spinlock_acquire_irqsave(&lt_lock);
+  (void)lt_catch_up_locked(slot, now);
   uint64_t next = lt[slot].next, itv = lt[slot].interval;
   spinlock_release_irqrestore(&lt_lock, f);
-  uint64_t now = timer_get_ms();
-  ms_to_timespec(itv, &its->interval);
-  ms_to_timespec(next && next > now ? next - now : 0, &its->value);
+  us_to_timespec(itv, &its->interval);
+  us_to_timespec(next && next > now ? next - now : 0, &its->value);
   return 0;
 }
 
 /* -EAGAIN when nothing has expired and the fd is non-blocking; the caller
-   (file_read) decides how to park. */
+   (file_read) decides how to park.  C1-k6: expiries are counted from the
+   clock at read time (lt_catch_up_locked), not only at the tick, so a read
+   or poll right after the deadline sees it. */
 int lt_timerfd_take(int slot, uint64_t *out) {
+  extern uint64_t timer_get_us(void);
   if (slot < 0 || slot >= LT_MAX || !lt[slot].used) return -EBADF;
+  uint64_t now = timer_get_us();
   uint64_t f = spinlock_acquire_irqsave(&lt_lock);
+  (void)lt_catch_up_locked(slot, now);
   uint64_t n = lt[slot].expir;
   lt[slot].expir = 0;
   spinlock_release_irqrestore(&lt_lock, f);
@@ -245,8 +306,11 @@ int lt_timerfd_take(int slot, uint64_t *out) {
 }
 
 int lt_timerfd_pending(int slot) {
+  extern uint64_t timer_get_us(void);
   if (slot < 0 || slot >= LT_MAX || !lt[slot].used) return 0;
-  return lt[slot].expir != 0;
+  if (lt[slot].expir != 0) return 1;
+  uint64_t nx = lt[slot].next;
+  return nx && timer_get_us() >= nx;
 }
 
 uint64_t lt_timerfd_next(int slot) {
@@ -276,7 +340,7 @@ static int l_tmr_setitimer(struct process *p, struct trap_frame *tf) {
   struct lt_itimerval nv;
   if (unew && l_copy_from_user(p, &nv, unew, sizeof nv) != 0)
     return l_ret(tf, -EFAULT);
-  extern uint64_t timer_get_ms(void);
+  extern uint64_t timer_get_us(void);
   int i = lt_itimer_index(grp);
   if (uold) {
     struct lt_itimerval ov;
@@ -286,23 +350,23 @@ static int l_tmr_setitimer(struct process *p, struct trap_frame *tf) {
       uint64_t f = spinlock_acquire_irqsave(&lt_lock);
       uint64_t next = lt[i].next, itv = lt[i].interval;
       spinlock_release_irqrestore(&lt_lock, f);
-      uint64_t now = timer_get_ms();
-      ms_to_timeval(itv, &ov.interval);
-      ms_to_timeval(next && next > now ? next - now : 0, &ov.value);
+      uint64_t now = timer_get_us();
+      us_to_timeval(itv, &ov.interval);
+      us_to_timeval(next && next > now ? next - now : 0, &ov.value);
     }
     if (l_copy_to_user(p, uold, &ov, sizeof ov) != 0)
       return l_ret(tf, -EFAULT);
   }
   if (!unew) return l_ret(tf, 0);
-  int64_t val = tv_to_ms(&nv.value);
-  int64_t itv = tv_to_ms(&nv.interval);
+  int64_t val = tv_to_us(&nv.value);
+  int64_t itv = tv_to_us(&nv.interval);
   if (val < 0 || itv < 0) return l_ret(tf, -EINVAL);
   if (i < 0 && val > 0) {
     i = lt_alloc(LT_ITIMER, grp->pid, L_SIGALRM);
     if (i < 0) return l_ret(tf, -ENOMEM);
   }
   if (i >= 0) {
-    uint64_t next = val > 0 ? timer_get_ms() + (uint64_t)val : 0;
+    uint64_t next = val > 0 ? timer_get_us() + (uint64_t)val : 0;
     lt_arm(i, next, itv > 0 ? (uint64_t)itv : 0);
   }
   return l_ret(tf, 0);
@@ -320,13 +384,13 @@ static int l_tmr_getitimer(struct process *p, struct trap_frame *tf) {
   ov.value.sec = ov.value.usec = 0;
   int i = lt_itimer_index(grp);
   if (i >= 0) {
-    extern uint64_t timer_get_ms(void);
+    extern uint64_t timer_get_us(void);
     uint64_t f = spinlock_acquire_irqsave(&lt_lock);
     uint64_t next = lt[i].next, itv = lt[i].interval;
     spinlock_release_irqrestore(&lt_lock, f);
-    uint64_t now = timer_get_ms();
-    ms_to_timeval(itv, &ov.interval);
-    ms_to_timeval(next && next > now ? next - now : 0, &ov.value);
+    uint64_t now = timer_get_us();
+    us_to_timeval(itv, &ov.interval);
+    us_to_timeval(next && next > now ? next - now : 0, &ov.value);
   }
   if (l_copy_to_user(p, uold, &ov, sizeof ov) != 0) return l_ret(tf, -EFAULT);
   return l_ret(tf, 0);
@@ -339,22 +403,26 @@ static int l_tmr_alarm(struct process *p, struct trap_frame *tf) {
   unsigned secs = (unsigned)l_arg(tf, 0);
   struct process *grp = process_group(p);
   if (!grp) return l_ret(tf, -EINVAL);
-  extern uint64_t timer_get_ms(void);
+  extern uint64_t timer_get_us(void);
   unsigned prev = 0;
   int i = lt_itimer_index(grp);
   if (i >= 0) {
     uint64_t f = spinlock_acquire_irqsave(&lt_lock);
     uint64_t next = lt[i].next;
     spinlock_release_irqrestore(&lt_lock, f);
-    uint64_t now = timer_get_ms();
-    if (next && next > now) prev = (unsigned)((next - now + 999) / 1000);
+    uint64_t now = timer_get_us();
+    /* Linux rounds the remaining time to the NEAREST second, minimum 1. */
+    if (next && next > now) {
+      prev = (unsigned)((next - now + 500000) / 1000000);
+      if (!prev) prev = 1;
+    }
   }
   if (i < 0 && secs > 0) {
     i = lt_alloc(LT_ITIMER, grp->pid, L_SIGALRM);
     if (i < 0) return l_ret(tf, -ENOMEM);
   }
   if (i >= 0)
-    lt_arm(i, secs ? timer_get_ms() + (uint64_t)secs * 1000 : 0, 0);
+    lt_arm(i, secs ? timer_get_us() + (uint64_t)secs * 1000000 : 0, 0);
   return l_ret(tf, (int64_t)prev);
 }
 
@@ -365,8 +433,10 @@ static int l_tmr_pause(struct process *p, struct trap_frame *tf) {
   (void)tf;
   if (!p) return 1;
   uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-  p->wake_ms = 0;
-  p->state = PROC_STATE_BLOCKED;
+  if (process_park_ok_locked(p)) { /* C1-k4: never re-park the dead */
+    p->wake_ms = 0;
+    p->state = PROC_STATE_BLOCKED;
+  }
   spinlock_release_irqrestore(&proc_lock, flags);
   return -2;
 }
@@ -381,7 +451,8 @@ static int l_tmr_create(struct process *p, struct trap_frame *tf) {
   uint64_t usev = l_arg(tf, 1);
   uint64_t utid = l_arg(tf, 2);
   if (!utid) return l_ret(tf, -EFAULT);
-  (void)clockid; /* every supported clock shares the monotonic ms base */
+  /* every supported clock shares the monotonic base; the clock id only
+     decides how an ABSTIME it_value is read (C1-k6: lt_abs_to_mono) */
   int sig = 0;
   if (usev) {
     struct {
@@ -404,6 +475,7 @@ static int l_tmr_create(struct process *p, struct trap_frame *tf) {
   if (!grp) return l_ret(tf, -EINVAL);
   int i = lt_alloc(LT_POSIX, grp->pid, sig);
   if (i < 0) return l_ret(tf, -ENOMEM);
+  lt[i].clockid = clockid;
   int32_t handle = i + 1; /* timer_t is an opaque int here; 0 is never valid */
   if (l_copy_to_user(p, utid, &handle, sizeof handle) != 0) {
     lt_free(i);
@@ -431,24 +503,25 @@ static int l_tmr_settime(struct process *p, struct trap_frame *tf) {
   struct lt_itimerspec nv;
   if (unew && l_copy_from_user(p, &nv, unew, sizeof nv) != 0)
     return l_ret(tf, -EFAULT);
-  extern uint64_t timer_get_ms(void);
+  extern uint64_t timer_get_us(void);
   if (uold) {
     struct lt_itimerspec ov;
     uint64_t f = spinlock_acquire_irqsave(&lt_lock);
     uint64_t next = lt[i].next, itv = lt[i].interval;
     spinlock_release_irqrestore(&lt_lock, f);
-    uint64_t now = timer_get_ms();
-    ms_to_timespec(itv, &ov.interval);
-    ms_to_timespec(next && next > now ? next - now : 0, &ov.value);
+    uint64_t now = timer_get_us();
+    us_to_timespec(itv, &ov.interval);
+    us_to_timespec(next && next > now ? next - now : 0, &ov.value);
     if (l_copy_to_user(p, uold, &ov, sizeof ov) != 0) return l_ret(tf, -EFAULT);
   }
   if (!unew) return l_ret(tf, 0);
-  int64_t val = ts_to_ms(&nv.value);
-  int64_t itv = ts_to_ms(&nv.interval);
+  int64_t val = ts_to_us(&nv.value);
+  int64_t itv = ts_to_us(&nv.interval);
   if (val < 0 || itv < 0) return l_ret(tf, -EINVAL);
   uint64_t next = 0;
   if (val > 0)
-    next = (flags & 1) ? (uint64_t)val : timer_get_ms() + (uint64_t)val;
+    next = (flags & 1) ? lt_abs_to_mono(lt[i].clockid, (uint64_t)val)
+                       : timer_get_us() + (uint64_t)val;
   lt_arm(i, next, itv > 0 ? (uint64_t)itv : 0);
   return l_ret(tf, 0);
 }
@@ -459,14 +532,14 @@ static int l_tmr_gettime(struct process *p, struct trap_frame *tf) {
   int i = lt_posix_of(p, handle);
   if (i < 0) return l_ret(tf, -EINVAL);
   if (!ucur) return l_ret(tf, -EFAULT);
-  extern uint64_t timer_get_ms(void);
+  extern uint64_t timer_get_us(void);
   struct lt_itimerspec cv;
   uint64_t f = spinlock_acquire_irqsave(&lt_lock);
   uint64_t next = lt[i].next, itv = lt[i].interval;
   spinlock_release_irqrestore(&lt_lock, f);
-  uint64_t now = timer_get_ms();
-  ms_to_timespec(itv, &cv.interval);
-  ms_to_timespec(next && next > now ? next - now : 0, &cv.value);
+  uint64_t now = timer_get_us();
+  us_to_timespec(itv, &cv.interval);
+  us_to_timespec(next && next > now ? next - now : 0, &cv.value);
   if (l_copy_to_user(p, ucur, &cv, sizeof cv) != 0) return l_ret(tf, -EFAULT);
   return l_ret(tf, 0);
 }
@@ -495,37 +568,123 @@ static int l_tmr_delete(struct process *p, struct trap_frame *tf) {
  * Not a timer, but the same question ("does a wait with a timeout behave")
  * and the same missing-syscall list: epoll_create/create1/ctl/wait/pwait all
  * answered ENOSYS.  This is a LEVEL-TRIGGERED implementation over the one
- * readiness engine the kernel already has (file_poll): every wake re-polls the
- * registered set, and a wait with no ready fd parks with a 10 ms slice until
- * its deadline.  That is enough for a timerfd/socket/pipe event loop and it
- * does not invent a second poller; EPOLLET/EPOLLONESHOT are accepted and
- * ignored (level-triggered is the documented fallback of last resort, and no
- * guest in this tree asks for edge semantics yet).
+ * readiness engine the kernel already has (file_poll_fd): every wake re-polls
+ * the registered set.  EPOLLET/EPOLLONESHOT are accepted and ignored
+ * (level-triggered is the documented fallback of last resort; wineserver
+ * asks for neither).
+ *
+ * C1-k4: the interest list held 32 fds and 8 instances system-wide.
+ * wineserver keeps one fd per client thread (its request pipe) plus one per
+ * process (its socket) in ONE epoll set; the 33rd add failed with ENOSPC,
+ * wineserver perror()s and carries on, and that thread's requests are never
+ * read again -- the client sits in read(reply_fd) forever (P2's wineboot
+ * hang shape: every client BLOCKED, no futex, no timer, server polling).
+ * Now 1024 fds per instance (the game: ~190 threads), 16 instances, and the
+ * wait is woken by poll_notify() instead of re-scanning in 10 ms slices.
  */
-#define LE_MAX 8
+/* C1-k5 (docs/cp-k5.md §3): one interest list holds up to MAX_OPEN_FDS fds
+ * (a set can name every fd its process can open), 64 instances system-wide.
+ * The entry array (16 B x 4096 = 64 KiB) is no longer inline: it comes from
+ * the frame pool the first time a slot is used and stays with the slot (the
+ * static part is ~100 B per instance). */
+#ifdef __x86_64__
+#define LE_MAX 64
+#define LE_FDS MAX_OPEN_FDS
+#else
+#define LE_MAX 8 /* the compat class is x86_64-only; keep ARM's .bss small */
 #define LE_FDS 32
+#endif
+#define LE_ENT_PAGES ((int)((LE_FDS * 16 + 4095) / 4096))
+struct le_ent {
+  int fd;
+  uint32_t events;
+  uint64_t data;
+};
+_Static_assert(sizeof(struct le_ent) == 16, "le_ent is 16 bytes");
 struct l_epoll {
   int used;
   int pid;
   int n;
-  uint64_t deadline; /* 0 = none; set on the first pass of a timed wait */
-  struct {
-    int fd;
-    uint32_t events;
-    uint64_t data;
-  } e[LE_FDS];
+  int rot;   /* C1-k4: round-robin start, so a busy fd cannot starve the rest */
+  uint32_t busy;      /* C1-k4: consecutive waits answered at once ([EPOLLSPIN]) */
+  uint64_t busy_t0;   /* ms of the first of them */
+  uint64_t spin_rows; /* [EPOLLSPIN] rows printed */
+  int hw;    /* C1-k4: high-water mark of n (one [EPOLLHW] row per new 2^k) */
+  struct le_ent *e; /* LE_FDS entries (frame pool, kept with the slot) */
 };
 static struct l_epoll le[LE_MAX];
+
+/* C1-k6 round 2 (docs/cp-k6.md §12): event-driven rescans.  Each entry
+ * remembers its object's notification key (file_poll_keybit: 0..62, 64 =
+ * notifies without a key, 65 = never notifies), refreshed by every full
+ * scan.  A keyed poll_notify_obj() ORs its bit into le_pend of each set
+ * whose filter has it; the next wait rechecks only the entries that bit
+ * names, the keyless and non-notifying entries, and the entries it
+ * reported last time (level-triggered: they may still be ready).  A full
+ * scan runs after any epoll_ctl, after a keyless notification, when the
+ * last wait filled maxevents, every 64th wait, and whenever more than one
+ * thread waits on the set.  wineserver rescanned all ~200 of its pipes on
+ * every wake (linux_probe_ipclat I3). */
+#define LE_RECENT 32
+static uint8_t le_kbit[LE_MAX][LE_FDS];
+static uint64_t le_interest[LE_MAX];   /* filter of the entries' keys */
+static uint64_t le_pend[LE_MAX];       /* keys notified since the last take */
+static uint8_t le_full[LE_MAX];        /* the next wait must scan everything */
+static uint8_t le_has_other[LE_MAX];   /* entries with key 64/65 exist */
+static int le_waiters[LE_MAX];
+static uint32_t le_waits[LE_MAX];
+static uint16_t le_recent[LE_MAX][LE_RECENT];
+static int le_nrecent[LE_MAX];         /* -1: overflowed (full next time) */
+static uint64_t le_scans_full, le_scans_part, le_scan_entries;
+static int le_wait_on[MAX_PROCESSES]; /* slot+1 the thread is counted on */
+
+void lt_epoll_pend_bits(uint64_t bits) {
+  for (int i = 0; i < LE_MAX; i++) {
+    if (!__atomic_load_n(&le[i].used, __ATOMIC_RELAXED)) continue;
+    if (bits == ~0ull) {
+      __atomic_store_n(&le_full[i], 1, __ATOMIC_SEQ_CST);
+      continue;
+    }
+    if (__atomic_load_n(&le_interest[i], __ATOMIC_RELAXED) & bits)
+      __atomic_fetch_or(&le_pend[i], bits, __ATOMIC_SEQ_CST);
+  }
+}
+static spinlock_t le_lock; /* C1-k5: slot claim (zero-init = unlocked) */
+/* C1-k4: the deadline belongs to the WAITER (several threads may wait on one
+   epoll instance), not to the instance; 0 = none. */
+static uint64_t le_deadline[MAX_PROCESSES]; /* C1-k6: timer_get_us */
 
 int lt_epoll_new(void) {
   struct process *grp = process_group(current_process());
   if (!grp) return -EINVAL;
   for (int i = 0; i < LE_MAX; i++)
     if (!le[i].used) {
+      uint64_t fl = spinlock_acquire_irqsave(&le_lock);
+      if (le[i].used) {
+        spinlock_release_irqrestore(&le_lock, fl);
+        continue;
+      }
       le[i].used = 1;
+      spinlock_release_irqrestore(&le_lock, fl);
+      if (!le[i].e) {
+        uint64_t pa = frame_alloc_contig(LE_ENT_PAGES);
+        if (!pa) {
+          le[i].used = 0;
+          return -ENOMEM;
+        }
+        le[i].e = (struct le_ent *)phys_to_virt(pa);
+      }
       le[i].pid = grp->pid;
       le[i].n = 0;
-      le[i].deadline = 0;
+      le_full[i] = 1; /* C1-k6 round 2: a fresh set scans everything */
+      le_pend[i] = 0;
+      le_interest[i] = 0;
+      le_nrecent[i] = 0;
+      le_waits[i] = 0;
+      le[i].rot = 0;
+      le[i].hw = 0;
+      le[i].busy = 0;
+      le[i].spin_rows = 0;
       return i;
     }
   return -ENOMEM;
@@ -563,6 +722,7 @@ static int l_tmr_epoll_ctl(struct process *p, struct trap_frame *tf) {
   int slot = lt_epoll_of(p, epfd);
   if (slot < 0) return l_ret(tf, -EINVAL);
   struct l_epoll *e = &le[slot];
+  __atomic_store_n(&le_full[slot], 1, __ATOMIC_SEQ_CST); /* C1-k6 round 2 */
   if (op == L_EPOLL_DEL) {
     for (int i = 0; i < e->n; i++)
       if (e->e[i].fd == fd) {
@@ -583,79 +743,248 @@ static int l_tmr_epoll_ctl(struct process *p, struct trap_frame *tf) {
     if (e->e[i].fd == fd) break;
   if (i == e->n) {
     if (op == L_EPOLL_MOD) return l_ret(tf, -ENOENT);
-    if (e->n >= LE_FDS) return l_ret(tf, -ENOSPC);
+    if (e->n >= LE_FDS) {
+      /* Loud: a silent ENOSPC here is how a server loses a client. */
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[EPOLLFULL] pid=");
+      kl_i(&kl, p->pid);
+      kl_s(&kl, " n=");
+      kl_i(&kl, e->n);
+      kl_s(&kl, " fd=");
+      kl_i(&kl, fd);
+      kl_c(&kl, '\n');
+      kl_emit(&kl);
+      return l_ret(tf, -ENOSPC);
+    }
     e->n++;
+    if (e->n > e->hw) {
+      e->hw = e->n;
+      if (e->hw >= 16 && (e->hw & (e->hw - 1)) == 0) {
+        struct kline kl;
+        kl_init(&kl);
+        kl_s(&kl, "[EPOLLHW] pid=");
+        kl_i(&kl, p->pid);
+        kl_s(&kl, " n=");
+        kl_i(&kl, e->hw);
+        kl_c(&kl, '\n');
+        kl_emit(&kl);
+      }
+    }
   }
   e->e[i].fd = fd;
   e->e[i].events = ev.events;
   e->e[i].data = ev.data;
+  /* C1-k6 round 2: a waiter parked on the old filter rescans */
+  if (__atomic_load_n(&le_waiters[slot], __ATOMIC_RELAXED)) poll_notify();
   return l_ret(tf, 0);
 }
 
-static int lt_epoll_park(struct process *p, struct trap_frame *tf) {
-  if (linux_compat_sig_deliverable(p)) return l_ret(tf, -EINTR);
-#if defined(__x86_64__)
-  if ((tf->cs & 3) == 3) tf->elr -= 2; /* rewind the x64 2-byte syscall */
-#endif
-  save_context(p, tf);
-  schedule(tf, 0);
-  return 1;
-}
-
-static int l_tmr_epoll_wait(struct process *p, struct trap_frame *tf) {
+/* C1-k6: timeout_us: -1 forever, 0 poll, else microseconds (epoll_wait's
+   int ms * 1000, or epoll_pwait2's timespec).  The deadline is remembered
+   per thread across the rewound restarts, in timer_get_us microseconds. */
+static int l_tmr_epoll_wait_common(struct process *p, struct trap_frame *tf,
+                                   int64_t timeout_us) {
+  extern int file_poll_fd(struct process *p, int fd, short events);
+  extern int file_fd_notifies(struct process *p, int fd);
   int epfd = (int)l_argi(tf, 0);
   uint64_t uev = l_arg(tf, 1);
   int maxev = (int)l_argi(tf, 2);
-  int timeout = (int)l_argi(tf, 3);
   extern uint64_t timer_get_ms(void);
+  extern uint64_t timer_get_us(void);
   int slot = lt_epoll_of(p, epfd);
   if (slot < 0) return l_ret(tf, -EINVAL);
   if (maxev <= 0) return l_ret(tf, -EINVAL);
   struct l_epoll *e = &le[slot];
-  struct k_pollfd pf[LE_FDS];
-  int n = e->n;
-  for (int i = 0; i < n; i++) {
-    pf[i].fd = e->e[i].fd;
-    pf[i].revents = 0;
-    pf[i].events = 0;
-    if (e->e[i].events & 0x1) pf[i].events |= 0x1; /* EPOLLIN  -> POLLIN  */
-    if (e->e[i].events & 0x4) pf[i].events |= 0x4; /* EPOLLOUT -> POLLOUT */
+  int me = (p->pid > 0 && p->pid < MAX_PROCESSES) ? p->pid : 0;
+  extern int file_poll_keybit(struct process *p, int fd);
+  poll_unpark(p);
+  /* a waiter counts once across its rewound restarts (le_wait_on) */
+  if (le_wait_on[me] != slot + 1) {
+    if (le_wait_on[me] > 0)
+      __atomic_fetch_sub(&le_waiters[le_wait_on[me] - 1], 1, __ATOMIC_SEQ_CST);
+    le_wait_on[me] = slot + 1;
+    __atomic_fetch_add(&le_waiters[slot], 1, __ATOMIC_SEQ_CST);
   }
-  int ready = n ? file_poll(p, pf, n, 0) : 0;
-  if (ready > 0) {
+#define LE_DONE()                                                          \
+  do {                                                                     \
+    if (le_wait_on[me] == slot + 1) {                                      \
+      le_wait_on[me] = 0;                                                  \
+      __atomic_fetch_sub(&le_waiters[slot], 1, __ATOMIC_SEQ_CST);          \
+    }                                                                      \
+  } while (0)
+  for (;;) {
+    uint64_t seen = poll_seq_snapshot(); /* C1-k4: before the scan */
+    extern void fs_poll_cap_reset(void);
+    extern uint64_t fs_poll_cap_get(void);
+    fs_poll_cap_reset(); /* C1-k6: an armed timerfd caps the park */
+    int all_notify = 1;
+    int n = e->n;
     int out = 0;
-    for (int i = 0; i < n && out < maxev; i++) {
-      if (!pf[i].revents) continue;
+    int start = (n > 0) ? (e->rot % n) : 0;
+    /* C1-k6 round 2: full or partial (see le_kbit above) */
+    int full = __atomic_exchange_n(&le_full[slot], 0, __ATOMIC_SEQ_CST) ||
+               (le_waits[slot]++ & 63) == 0 || le_nrecent[slot] < 0 ||
+               __atomic_load_n(&le_waiters[slot], __ATOMIC_RELAXED) > 1;
+    uint64_t pend = __atomic_exchange_n(&le_pend[slot], 0, __ATOMIC_SEQ_CST);
+    int nrec = full ? 0 : le_nrecent[slot];
+    if (full) {
+      le_scans_full++;
+      uint64_t interest = 0;
+      int other = 0;
+      for (int k = 0; k < n; k++) {
+        int kb = file_poll_keybit(p, e->e[k].fd);
+        le_kbit[slot][k] = (uint8_t)kb;
+        if (kb < 63) interest |= 1ull << kb;
+        else { interest |= POLL_KEYLESS_BIT; other = 1; }
+      }
+      __atomic_store_n(&le_interest[slot], interest, __ATOMIC_SEQ_CST);
+      le_has_other[slot] = (uint8_t)other;
+    } else {
+      le_scans_part++;
+    }
+    int nrecent_new = 0;
+    for (int k = 0; k < n && out < maxev; k++) {
+      int i = (start + k) % n;
+      if (!full) {
+        int kb = le_kbit[slot][i];
+        int look = kb >= 63 || ((pend >> kb) & 1);
+        for (int r = 0; !look && r < nrec; r++)
+          if (le_recent[slot][r] == i) look = 1;
+        if (!look) {
+          if (all_notify && kb == 65) all_notify = 0;
+          continue;
+        }
+      }
+      le_scan_entries++;
+      short want = 0;
+      if (e->e[i].events & 0x1) want |= 0x1; /* EPOLLIN  -> POLLIN  */
+      if (e->e[i].events & 0x4) want |= 0x4; /* EPOLLOUT -> POLLOUT */
+      int rv = file_poll_fd(p, e->e[i].fd, want);
+      if (rv & 0x20) continue; /* POLLNVAL: epoll never reports a dead fd */
+      if (all_notify && !file_fd_notifies(p, e->e[i].fd)) all_notify = 0;
+      if (!rv) continue;
+      if (nrecent_new < LE_RECENT) le_recent[slot][nrecent_new++] = (uint16_t)i;
+      else nrecent_new = LE_RECENT + 1;
       struct {
         uint32_t events;
         uint64_t data;
       } __attribute__((packed)) ev;
       ev.events = 0;
-      if (pf[i].revents & 0x1) ev.events |= 0x1;
-      if (pf[i].revents & 0x4) ev.events |= 0x4;
-      if (pf[i].revents & 0x8) ev.events |= 0x8;  /* POLLERR  -> EPOLLERR  */
-      if (pf[i].revents & 0x10) ev.events |= 0x10; /* POLLHUP -> EPOLLHUP  */
+      if (rv & 0x1) ev.events |= 0x1;
+      if (rv & 0x4) ev.events |= 0x4;
+      if (rv & 0x8) ev.events |= 0x8;   /* POLLERR  -> EPOLLERR  */
+      if (rv & 0x10) ev.events |= 0x10; /* POLLHUP -> EPOLLHUP  */
       ev.data = e->e[i].data;
-      if (l_copy_to_user(p, uev + (uint64_t)out * sizeof ev, &ev, sizeof ev) != 0)
+      if (l_copy_to_user(p, uev + (uint64_t)out * sizeof ev, &ev, sizeof ev) != 0) {
+        LE_DONE();
         return l_ret(tf, -EFAULT);
+      }
       out++;
+      e->rot = i + 1;
     }
-    e->deadline = 0;
-    return l_ret(tf, out);
-  }
-  uint64_t now = timer_get_ms();
-  if (timeout == 0) { e->deadline = 0; return l_ret(tf, 0); }
-  if (e->deadline == 0 && timeout > 0) e->deadline = now + (uint64_t)timeout;
-  if (e->deadline && now >= e->deadline) { e->deadline = 0; return l_ret(tf, 0); }
-  uint64_t wake = now + 10;
-  if (e->deadline && e->deadline < wake) wake = e->deadline;
-  {
+    /* C1-k6 round 2: what the next partial wait must recheck */
+    le_nrecent[slot] = (out >= maxev || nrecent_new > LE_RECENT) ? -1 : nrecent_new;
+    if (out > 0) {
+      le_deadline[me] = 0;
+      /* C1-k4: a level-triggered set that answers every wait at once for
+         seconds is an event loop that is not consuming what it is told
+         (P2: wineserver st=RUNNING for minutes while every client waits).
+         Name the ready entries, at most 6 rows per instance. */
+      uint64_t tnow = timer_get_ms();
+      if (e->busy++ == 0) e->busy_t0 = tnow;
+      if (e->busy >= 20000 && e->spin_rows < 6) {
+        e->spin_rows++;
+        for (int k = 0; k < n; k++) {
+          short want = 0;
+          if (e->e[k].events & 0x1) want |= 0x1;
+          if (e->e[k].events & 0x4) want |= 0x4;
+          int rv = file_poll_fd(p, e->e[k].fd, want);
+          if (!rv || (rv & 0x20)) continue;
+          struct kline kl;
+          kl_init(&kl);
+          kl_s(&kl, "[EPOLLSPIN] pid=");
+          kl_i(&kl, p->pid);
+          kl_s(&kl, " waits=");
+          kl_i(&kl, (long)e->busy);
+          kl_s(&kl, " ms=");
+          kl_i(&kl, (long)(tnow - e->busy_t0));
+          kl_s(&kl, " fd=");
+          kl_i(&kl, e->e[k].fd);
+          kl_s(&kl, " ev=0x");
+          kl_hex(&kl, e->e[k].events);
+          kl_s(&kl, " rv=0x");
+          kl_hex(&kl, (unsigned long)rv);
+          kl_s(&kl, " data=0x");
+          kl_hex(&kl, (unsigned long)e->e[k].data);
+          kl_c(&kl, '\n');
+          kl_emit(&kl);
+        }
+        e->busy = 0;
+      }
+      LE_DONE();
+      return l_ret(tf, out);
+    }
+    e->busy = 0;
+    uint64_t now = timer_get_us();
+    if (timeout_us == 0) { le_deadline[me] = 0; LE_DONE(); return l_ret(tf, 0); }
+    if (le_deadline[me] == 0 && timeout_us > 0) le_deadline[me] = now + (uint64_t)timeout_us;
+    if (le_deadline[me] && now >= le_deadline[me]) { le_deadline[me] = 0; LE_DONE(); return l_ret(tf, 0); }
+    uint64_t wake = now + (all_notify ? 250000 : 10000);
+    if (le_deadline[me] && le_deadline[me] < wake) wake = le_deadline[me];
+    {
+      uint64_t cap = fs_poll_cap_get();
+      if (cap && cap < wake) wake = cap > now ? cap : now + 1;
+    }
     uint64_t flags = spinlock_acquire_irqsave(&proc_lock);
-    p->wake_ms = wake;
-    p->state = PROC_STATE_BLOCKED;
+    /* C1-k4: the signal check comes BEFORE the park commits; it used to run
+       after BLOCKED was set, so an EINTR return left the thread BLOCKED while
+       it ran on in user space. */
+    if (linux_compat_sig_deliverable(p)) {
+      spinlock_release_irqrestore(&proc_lock, flags);
+      le_deadline[me] = 0;
+      LE_DONE();
+      return l_ret(tf, -EINTR);
+    }
+    if (process_park_ok_locked(p)) { /* C1-k4: never re-park the dead */
+      /* C1-k6 round 2: woken by the keys of this set's entries (and every
+         keyless notification, via POLL_KEYLESS_BIT when it has such fds) */
+      if (poll_park_bloom_locked(p, seen,
+                                 __atomic_load_n(&le_interest[slot], __ATOMIC_RELAXED))) {
+        spinlock_release_irqrestore(&proc_lock, flags);
+        continue; /* an event raced the scan */
+      }
+      proc_set_deadline_us(p, wake); /* C1-k6: met by the one-shot */
+      p->state = PROC_STATE_BLOCKED;
+    }
     spinlock_release_irqrestore(&proc_lock, flags);
+#if defined(__x86_64__)
+    if ((tf->cs & 3) == 3) tf->elr -= 2; /* rewind the x64 2-byte syscall */
+#endif
+    save_context(p, tf);
+    schedule(tf, 0);
+    return 1;
   }
-  return lt_epoll_park(p, tf);
+#undef LE_DONE
+}
+
+static int l_tmr_epoll_wait(struct process *p, struct trap_frame *tf) {
+  int timeout = (int)l_argi(tf, 3); /* ms; negative = forever */
+  return l_tmr_epoll_wait_common(p, tf, timeout < 0 ? -1 : (int64_t)timeout * 1000);
+}
+
+/* C1-k6: epoll_pwait2(epfd, events, maxevents, const struct timespec *tmo,
+   sigmask, sigsetsize): the nanosecond-timeout form (NULL = forever).  The
+   sigmask is not applied, as for epoll_pwait. */
+static int l_tmr_epoll_pwait2(struct process *p, struct trap_frame *tf) {
+  uint64_t uts = l_arg(tf, 3);
+  int64_t us = -1;
+  if (uts) {
+    int r = l_timespec_to_us(p, uts, &us);
+    if (r != 0) return l_ret(tf, r);
+    if (us > 100000000000LL) us = 100000000000LL;
+  }
+  return l_tmr_epoll_wait_common(p, tf, us);
 }
 
 /* ---- timerfd syscalls --------------------------------------------------- */
@@ -718,6 +1047,7 @@ const struct l_sysent l_tab_tmr[] = {
   {L_SYS_epoll_ctl, l_tmr_epoll_ctl, "epoll_ctl"},
   {L_SYS_epoll_wait, l_tmr_epoll_wait, "epoll_wait"},
   {L_SYS_epoll_pwait, l_tmr_epoll_wait, "epoll_pwait"},
+  {441, l_tmr_epoll_pwait2, "epoll_pwait2"},
   {L_SYS_timerfd_create, l_tmr_tfd_create, "timerfd_create"},
   {L_SYS_timerfd_settime, l_tmr_tfd_settime, "timerfd_settime"},
   {L_SYS_timerfd_gettime, l_tmr_tfd_gettime, "timerfd_gettime"},

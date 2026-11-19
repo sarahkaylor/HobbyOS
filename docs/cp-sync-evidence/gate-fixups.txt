@@ -1,0 +1,17 @@
+# Full gate batch, strix KVM: lane = ~/cp/lanes/sync (cp-sync, script = ~/cp/base5-gates.sh with the tree paths changed), base = ~/cp/base5-gates.txt
+# batch ran at 3e575ee5 (= 8f23a155 after a message-only rebase); gates 5 and 6 were red there and are re-run below on the final tree (f2a83672 + docs)
+## after f2a83672 (final tree)
+  FAIL  tools/board/sync_gaming_md_test.py  (FileNotFoundError: [Errno 2] No such file or directory: 'gaming.md')
+  FAIL  tools/t5/roadmap_doc_test.py  (FileNotFoundError: [Errno 2] No such file or directory: 'gaming.md')
+[host-tests] done: 38/40 passed
+castscan: 365 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+panic_sink_allowlist: PASS — every reference is accounted for
+## before f2a83672 (the batch's rows)
+castscan: 365 int<->pointer sites outside kmem.h; 5 not in the allowlist; 5 allowlisted rows no longer present
+--- NEW sites (convert to phys_to_virt/virt_to_phys/kimg_pa, or review + --update):
+src/kernel/arch/x64/locks.c	P2I	lock_audit_site_override((uint64_t)__builtin_return_address(0));
+src/kernel/arch/x64/trap.c	P2I	badvec_should_arm((uint64_t)tf, tf->cs, tf->vector, badvec_pid(),
+src/kernel/arch/x64/trap.c	P2I	int ret = file_read_user(caller, fd, (uint64_t)buf, size, tf);
+src/kernel/fs.c	I2P	int r = file_read(cur, fd, (void *)(uintptr_t)(ubuf + (uint64_t)done), chunk, tf);
+src/kernel/fs.c	I2P	r = file_write(pg, fd, (const void *)(uintptr_t)ubuf, (int)n, tf);
+  FAIL  tools/gate/panic_sink_allowlist_test.py  (panic_sink_allowlist: FAIL)

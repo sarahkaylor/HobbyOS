@@ -19,11 +19,11 @@
  * WRITE/CREATE/REMOVE: NFS directories are presented read-only and the
  * kernel returns failure for mutations, exactly like a read-only mount.
  *
- * Every request and reply is kept under a 1500-byte Ethernet frame: the
- * network stack does not reassemble IP fragments, so the client must never
- * provoke one.  READ uses a 1344-byte rsize (1472-byte datagram minus the
- * READ reply's 128 bytes of RPC/NFS overhead) and READDIRPLUS a 1200-byte
- * maxcount hint.
+ * Every REQUEST is kept under one 1500-byte Ethernet frame (the stack never
+ * emits a fragment).  Replies may span many: cp/nfs added IPv4 receive-side
+ * reassembly (net.c), so READ uses the size the server's FSINFO offers, up to
+ * NFS_READ_RSIZE_MAX (32 KiB), with the single-frame 1344-byte rsize as the
+ * fallback.  READDIRPLUS keeps its 1200-byte maxcount hint.
  */
 
 /* ---- sizes ----------------------------------------------------------- */
@@ -55,11 +55,22 @@
  * returns fewer bytes than asked for on a non-EOF read, read_size becomes
  * that count, so a server with a smaller rsize is honoured instead of
  * retried forever. */
-#define NFS_READ_RSIZE      1344   /* READ rsize actually requested */
+#define NFS_READ_RSIZE      1344   /* single-frame READ: the fallback size */
+/* cp/nfs: since the stack reassembles IP fragments (net.c ipr_*), a mount
+ * asks the server (FSINFO) and reads min(rtpref, rtmax, NFS_READ_RSIZE_MAX)
+ * per RPC; the reply then arrives as ~23 fragments that are reassembled
+ * before UDP demux.  If large READs keep timing out (a path that drops
+ * fragments) the mount falls back to NFS_READ_RSIZE and says so. */
+#define NFS_READ_RSIZE_MAX  32768
+#define NFS_RPC_RBIG        (NFS_READ_RSIZE_MAX + 1024) /* a READ reply datagram */
 #define NFS_READ_DEPTH      16     /* READs kept outstanding per read() */
 #define NFS_READDIR_DCOUNT  512    /* READDIRPLUS dircount hint */
 #define NFS_READDIR_MAXC    1200   /* READDIRPLUS maxcount hint */
-#define NFS_DIR_CACHE_MAX   256    /* entries cached per directory listing
+/* cp/wine2: 256 -> 4096.  Wine's builtin dir lib/wine/x86_64-windows has
+   757 entries; at 256 readdir silently ended there and wineboot's fake-DLL
+   install skipped kernel32/ntdll/start/cmd (a prefix that cannot start a
+   process: "could not load kernel32.dll, status c0000135").  ~280 KiB bss. */
+#define NFS_DIR_CACHE_MAX   4096   /* entries cached per directory listing
                                     * (RimWorldLinux_Data/Managed has 102;
                                     * at 64 the listing silently stopped at
                                     * 64 because read_dir(index) reports
@@ -97,8 +108,10 @@
 #define NFS_PROC_GETATTR    1
 #define NFS_PROC_LOOKUP     3
 #define NFS_PROC_READ       6
+#define NFS_PROC_READLINK   5
 #define NFS_PROC_READDIRPLUS 17
 #define NFS_PROC_FSSTAT     18
+#define NFS_PROC_FSINFO     19 /* cp/nfs: rtmax/rtpref for the READ size */
 
 /* ftype3 */
 #define NF3REG              1
@@ -119,7 +132,9 @@ struct nfs_attr {
   uint32_t type;      /* ftype3 */
   uint32_t mode;
   uint64_t size;
-  uint32_t mtime;
+  uint32_t mtime;     /* seconds (nfstime3) */
+  uint32_t atime;     /* cp/nfs2: fstat/stat report all three */
+  uint32_t ctime;
 };
 
 struct nfs_fh {
@@ -146,6 +161,18 @@ struct nfs_mount {
    * sharing it: the loser of the CAS gets a temporary socket instead. */
   struct socket_pcb *rd_sock;
   volatile int rd_busy;
+  /* cp/nfs2b: a small POOL of long-lived sockets for every RPC on the mount
+   * (READ pipelines, the serial READ, LOOKUP/GETATTR/READLINK/READDIRPLUS).
+   * A fresh socket per RPC is a fresh guest port, and QEMU's slirp keeps a
+   * host UDP socket (a host ephemeral port) for every guest port for 240 s:
+   * Wine's thousands of LOOKUPs held ~6-8k host ports per guest, four
+   * guests exhaust the host's 28232-port range, and from then on every NEW
+   * socket's requests are dropped on the host while old sockets still work
+   * -- a LOOKUP unanswered for 180 s while READs flow (C5-vk2 run 5).
+   * rd_sock/rd_busy are slot 0. */
+#define NFS_SOCK_POOL 6
+  struct socket_pcb *pool[NFS_SOCK_POOL];
+  volatile int pool_busy[NFS_SOCK_POOL];
   /* Adapt-down bookkeeping: a server whose rsize is smaller than ours
    * answers short; honour it only when the SAME short count is seen twice
    * in a row and it is a sane rsize (>= 512).  A one-off short reply must
@@ -211,8 +238,23 @@ int nfs_parse_lookup_reply(const uint8_t *body, int len, struct nfs_fh *fh,
                            struct nfs_attr *a, int *attr_ok);
 int nfs_parse_read_reply(const uint8_t *body, int len, uint8_t *data,
                          int data_cap, uint32_t *count, int *eof);
+/* READLINK3: fills *out (NUL-terminated) with the link target; returns the
+ * length, -2 on a server status error, -1 on a transport/parse failure. */
+int nfs_parse_readlink_reply(const uint8_t *body, int len, char *out, int cap);
+/* cp/exec: join a symlink target against the link path `base` into `out`
+ * (mount-relative, canonical).  Absolute target replaces the path; relative
+ * resolves against base's parent; "."/".." folded; ".." above root dropped.
+ * 0 / -1 (does not fit). */
+int nfs_symlink_join(const char *base, const char *target, char *out, int cap);
 int nfs_parse_fsstat_reply(const uint8_t *body, int len, uint64_t *total,
                            uint64_t *avail);
+/* cp/nfs: FSINFO3resok's rtmax/rtpref (RFC 1813 3.3.19).  0 / -2 status / -1. */
+int nfs_parse_fsinfo_reply(const uint8_t *body, int len, uint32_t *rtmax,
+                           uint32_t *rtpref);
+/* cp/nfs: the READ size a mount uses for a server's FSINFO answer:
+ * min(rtpref (or rtmax when rtpref is 0), rtmax, NFS_READ_RSIZE_MAX), rounded
+ * down to 4 KiB, never below NFS_READ_RSIZE; NFS_READ_RSIZE when unknown. */
+uint32_t nfs_pick_rsize(uint32_t rtmax, uint32_t rtpref);
 /* 0 ok; -2 when the server refused (status != 0); *auth_unix_ok reports
  * whether AUTH_UNIX is among the flavors the server offered. */
 int nfs_parse_mount_reply(const uint8_t *body, int len, struct nfs_fh *fh,
@@ -252,12 +294,43 @@ int  nfs_lookup(const struct nfs_mount *m, const char *rel,
                 struct nfs_fh *fh, struct nfs_attr *a);
 int  nfs_getattr(const struct nfs_mount *m, const struct nfs_fh *fh,
                  struct nfs_attr *a);
+/* cp/nfs2: `offset` is 64-bit (files > 4 GiB); `len` may be anything up to
+ * INT_MAX (one read() of the game's 172 MB shader cache streams straight into
+ * the caller's buffer).  Returns bytes read (short only at end of file), or
+ * -1 when nothing could be read. */
 int  nfs_read_file(const struct nfs_mount *m, const struct nfs_fh *fh,
-                   uint32_t offset, void *buf, uint32_t len);
+                   uint64_t offset, void *buf, uint32_t len);
+/* cp/nfs2: the attributes for an open file handle (fstat): the ones the last
+ * LOOKUP or GETATTR returned if younger than 3 s, else a GETATTR.  0 / -1. */
+int  nfs_getattr_cached(const struct nfs_mount *m, const struct nfs_fh *fh,
+                        struct nfs_attr *a);
+/* cp/nfs2: give the buffers of up to `n` (<= 32) idle readahead windows (64
+ * KiB each) back to the frame pool; returns frames freed.  The window table
+ * calls it itself on a miss while less than 1/8 of the pool is free; a
+ * frame-pool reclaim path may call it too.  No lock may be held. */
+int  nfs_ra_shrink(int n);
+/* cp/exec: READLINK3 on a symlink handle; fills *out (NUL-terminated), returns
+ * the length or < 0.  nfs_lookup follows symlinks itself, so callers rarely
+ * need this directly. */
+int  nfs_readlink(const struct nfs_mount *m, const struct nfs_fh *fh,
+                  char *out, int cap);
+/* The directory-listing cache is ONE directory shared by every lister.  The
+ * two calls below take nfs_dir_lock themselves, so each answer comes from one
+ * consistent fill of `rel` (H2-early: unlocked, a getdents of the game's
+ * engine/config/base returned Wine's fonts directory while conhost listed it,
+ * and the game quit; docs/cp-early.md).  A caller that needs the count and
+ * the entries from the SAME fill (getdents64) holds nfs_dir_lock() across
+ * the _locked variants instead.  Process context only (it is a ylock held
+ * across READDIRPLUS RPCs); never take it with a spinlock held. */
 int  nfs_list_dir(const struct nfs_mount *m, const char *rel, int index,
                   char *name, int name_cap, uint8_t *attr_out, uint32_t *size_out);
 /* L54: entry count for a cached directory listing (fills the cache). */
 int  nfs_dir_entries(const struct nfs_mount *m, const char *rel);
+void nfs_dir_lock(void);
+void nfs_dir_unlock(void);
+int  nfs_list_dir_locked(const struct nfs_mount *m, const char *rel, int index,
+                         char *name, int name_cap, uint8_t *attr_out, uint32_t *size_out);
+int  nfs_dir_entries_locked(const struct nfs_mount *m, const char *rel);
 int  nfs_statfs(const struct nfs_mount *m, const char *rel,
                 uint64_t *total, uint64_t *avail);
 int  nfs_is_dir(const struct nfs_mount *m, const char *rel);
