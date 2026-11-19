@@ -50,13 +50,12 @@ key spc
 wait 5
 phase menu2
 expect menu2 60 LOAD\s*GAME
-# h3-c02: a seek started 1 s after this menu appeared saw no focus for 8 taps
-# (H1-12's look); settle 10 s, then the pointer wiggle that H1 found restores it
+# h3-c02 / h3-c03: with a relative-mouse wiggle (H1-12's workaround) right
+# before it, the seek saw no focus for 8 Down taps (2/2, settled 1 s and 10 s);
+# drive.py's seeks with no mouse move found it after 1 tap (5/5, h3-churn4).
+# So: settle, no pointer move (cp-hunt H6-04)
 wait 10
 shot menu2-settled
-look 60 0 1 16
-look -60 0 1 16
-wait 1
 seek menu-quit main down 8 QUIT GAME
 phase quit
 exit_ok

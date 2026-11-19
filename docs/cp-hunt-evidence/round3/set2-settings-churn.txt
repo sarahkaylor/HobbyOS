@@ -1,0 +1,27 @@
+# cp-hunt round 3, item 4: settings churn in the world, boot h3-set2 (strix, integ21, P9 12 GiB Venus,
+# P9_XSCREEN=1920x1080 so the game offers 1920x1080; ManualSave-86 loaded first).  drive.py settings: pause ->
+# SETTINGS -> VIDEO tab, Enter on the row until the value OCRs, Esc -> 'Are you sure you want to apply these
+# changes?' -> CONFIRM, then ~10 s in the world.  '=== restarted' = the driver restarted on the same boot after a
+# driver fix (the game kept running).
+[DRV] 17:22:23 settings: Resolution never showed /1920\s*x\s*1080/ (values seen: ['|4() ss eoxrzo— ss / (4) azo sD) // ', '[4@) _ tase DD)” / [4@) _ —
+[DRV] === restarted 17:24:04: values read with the focus moved off the row, binarised WxH OCR, recover() first
+[DRV] === restarted 17:24:12 with P9_XSCREEN=1920x1080
+[DRV] 17:25:45 SET Resolution -> /1920\s*x\s*1080/ applied
+[DRV] 17:29:14 SET Resolution -> /1280\s*x\s*720/ applied
+[DRV] 17:31:06 SET Windowed Mode -> /\bFullscreen\b/ applied
+[DRV] 17:36:43 settings: Windowed Mode never showed /Windowed\s+Borderless/ (values seen: ['', '', '', '', '', '', '', '', '', '', '| / <j Fullscreen 
+[DRV] === restarted 17:38:57: fit rows for Fullscreen; the rest of the cycle
+[DRV] === restarted 17:39:14: view = Fullscreen (1920x1080 picture)
+[DRV] 17:40:34 SET Windowed Mode -> /Windowed\s+Borderless/ applied
+[DRV] 17:42:12 SET Windowed Mode -> /\bWindowed\b(?!\s+Borderless)/ applied
+[DRV] 17:44:03 SET Windowed Mode -> /Windowed\s+Borderless/ applied
+[DRV] 17:45:59 SET Resolution -> /1920\s*x\s*1080/ applied
+[DRV] 17:48:01 SET Windowed Mode -> /\bFullscreen\b/ applied
+[DRV] 17:49:49 SET Windowed Mode -> /Windowed\s+Borderless/ applied
+[DRV] 17:53:16 SET Resolution -> /1280\s*x\s*720/ applied
+[DRV] === restarted 17:55:28: presets only (view 1280x720 borderless)
+--- h3-set2.class.txt:
+-- kernel faults: 0 rows, 0 signatures
+-- kernel stalls / lost wakes / timeouts: 0 rows, 0 signatures
+   clean exit: yes (game status=0, wineserver -k 228 ms, left after -k: none + exited-unreaped vkcube.exe/17:s4, sync yes, [P8] done yes)
+fps rows: 1744

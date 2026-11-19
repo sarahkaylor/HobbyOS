@@ -48,7 +48,15 @@ import boot_p9 as B9  # noqa: E402  (focus_in / canon_image / MENUS: what boot_p
 VIEW = {"xscreen": os.environ.get("P9_XSCREEN", "1280x720") or "1920x1080",
         "game_res": os.environ.get("DRIVE_VIEW_RES", "1280x720"), "res": "1280x720", "windowed": False}
 
-SAVE_RX = re.compile(r"\b((?:Quick|Auto|Manual|Point\w*|End\w*)\s*S[ao]ve-\d+)", re.I)
+# OCR spellings seen: Quicksove-1, ManuolSave-88, MonualSave-87 (h3-churn4)
+SAVE_RX = re.compile(r"\b(Qu\w{1,3}k|Au\w{0,2}o|M\w{1,2}nu\w{1,2}l|Point\w*|End\w*)\s*S\w{0,2}ve-(\d+)", re.I)
+
+
+def save_name(m):
+    k = m.group(1).lower()
+    kind = "QuickSave" if k.startswith("qu") else "AutoSave" if k.startswith("au") else \
+        "ManualSave" if k.startswith("m") else m.group(1) + "Save"
+    return f"{kind}-{m.group(2)}"
 # the HUD after a load: the tracked quest + its objective (h3-ctl1..3 OCR), or
 # the prologue's tutorial popup.  The save list itself says "The Ripperdoc" /
 # "The Streetkid", so a screen that still shows the list or a dialog never counts.
@@ -256,30 +264,39 @@ def list_focus(path):
     return ys[0], ys[-1]
 
 
+# the saves this lane's boots can have on their data disk: the user's two,
+# QuickSave-0..4 (F5 rotates over five slots), ManualSave-87.. from SAVE GAME
+KNOWN_SAVES = {"AutoSave-16", "ManualSave-86"} | {f"QuickSave-{i}" for i in range(5)} | \
+    {f"ManualSave-{i}" for i in range(87, 100)}
+
+
 def list_name(path, fr):
     """the save name inside the focused frame (or None for a group header):
-    plain OCR, then the green channel contrast-stretched (h3-churn1: it read
-    "ManualSave-86" where the plain pass did not)"""
+    tesseract over three versions of the frame band (plain; green channel
+    contrast-stretched; binarised at 4x), and a name from KNOWN_SAVES wins
+    (h3-churn4: one entry read "ManualSave-67" plain and "ManualSave-87"
+    binarised; "Quicksove-1", "MonualSave-88")"""
     from PIL import ImageOps
     im = Image.open(path).convert("RGB")
     W, H = im.size
     y0, y1 = fr
     box = (int(W * 0.15), max(0, y0 - 6), int(W * 0.85), min(H, y1 + 6))
-    t = ocr(path, box=box, scale=3, psm=6)
-    m = SAVE_RX.search(t)
-    if not m:
-        g = ImageOps.autocontrast(im.crop(box).getchannel("G"))
-        g = g.resize((g.size[0] * 3, g.size[1] * 3))
+    texts = [ocr(path, box=box, scale=3, psm=6)]
+    g = ImageOps.autocontrast(im.crop(box).getchannel("G"))
+    l4 = ImageOps.autocontrast(im.crop(box).convert("L"))
+    l4 = ImageOps.invert(l4.resize((l4.size[0] * 4, l4.size[1] * 4), Image.LANCZOS).point(lambda v: 255 if v > 140 else 0))
+    for x in (g.resize((g.size[0] * 3, g.size[1] * 3)), l4):
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
-            g.save(tf.name)
+            x.save(tf.name)
         try:
-            t2 = " ".join(subprocess.run(["tesseract", tf.name, "-", "--psm", "6"], capture_output=True,
-                                         text=True, timeout=60).stdout.split())
+            texts.append(" ".join(subprocess.run(["tesseract", tf.name, "-", "--psm", "6"], capture_output=True,
+                                                 text=True, timeout=60).stdout.split()))
         finally:
             os.unlink(tf.name)
-        t += " | " + t2
-        m = SAVE_RX.search(t2)
-    return (re.sub(r"\s+", "", m.group(1)).replace("Sove", "Save") if m else None), t
+    names = [save_name(m) for t in texts for m in SAVE_RX.finditer(t)]
+    known = [n for n in names if n in KNOWN_SAVES]
+    nm = known[0] if known else (names[0] if names else None)
+    return nm, " | ".join(texts)
 
 
 # VIDEO tab rows: label (x, top y) in a 1280x720 game picture at the origin (h3-ctl3)
@@ -433,15 +450,22 @@ def seek(b, labels, want, limit=10, name="sk"):
     return False
 
 
+PAUSE_RX = (r"RESUME|EXIT\s+TO\s+MAIN|"
+            # the pause menu's bottom bar: after the prologue save the rows
+            # themselves did not OCR over that scene (h3-churn3: 5 loads lost)
+            # (not "CD PROJEKT RED ACCOUNT": the main menu has that too)
+            r"u\w{0,2}cks\w{0,2}ve\s+\S{0,3}\s*select")
+
+
 def pause_open(b):
     p = b.shot("po", "key esc", "wait 4")
-    if re.search(r"RESUME|EXIT\s+TO\s+MAIN", boot_ocr(p), re.I):
+    if re.search(PAUSE_RX, boot_ocr(p), re.I):
         return True
     p = b.shot("po2", "wait 2")          # once more: a popup may have eaten the Esc
-    if re.search(r"RESUME|EXIT\s+TO\s+MAIN", boot_ocr(p), re.I):
+    if re.search(PAUSE_RX, boot_ocr(p), re.I):
         return True
     p = b.shot("po3", "key esc", "wait 4")
-    return bool(re.search(r"RESUME|EXIT\s+TO\s+MAIN", boot_ocr(p), re.I))
+    return bool(re.search(PAUSE_RX, boot_ocr(p), re.I))
 
 
 def in_world(b, name, timeout):
@@ -472,16 +496,24 @@ def list_pick(b, avoid, prefer=None, steps=24):
     """walk the list down from the top; return the first focused save whose
     name is not in AVOID (or is PREFER), with Enter not yet pressed"""
     seen = []
-    for i in range(steps):
-        p = b.shot(f"ls{i}", "key down", "wait 1.2")
-        fr = list_focus(p)
-        if not fr:
-            continue
-        nm, _ = list_name(p, fr)
-        seen.append(nm)
-        if nm and ((prefer and nm == prefer) or (not prefer and nm not in avoid)):
-            log(f"list: focus on {nm} (frame rows {fr[0]}..{fr[1]}) after {i + 1} taps")
-            return nm
+    # Down first, then Up: the list opens on the current save, and Down wraps
+    # from the last entry back to the first entry of the CURRENT group -- the
+    # newer group above it (in-session manual saves) is reached only with Up
+    # (h3-churn4: 40 Downs cycled QuickSave-4..AutoSave-16 and never met
+    # ManualSave-87..92, which the list's own first screen showed)
+    for d, n in (("down", steps), ("up", steps)):
+        for i in range(n):
+            p = b.shot(f"ls{d[0]}{i}", f"key {d}", "wait 1.2")
+            fr = list_focus(p)
+            if not fr:
+                continue
+            nm, _ = list_name(p, fr)
+            seen.append(nm)
+            if nm and ((prefer and nm == prefer) or (not prefer and nm not in avoid)):
+                log(f"list: focus on {nm} (frame rows {fr[0]}..{fr[1]}) after {i + 1} x {d}")
+                return nm
+            if d == "down" and nm and seen.count(nm) >= 2:
+                break          # Down has come round once: try Up
     log(f"list: no pick (seen {seen})")
     return None
 
@@ -524,7 +556,7 @@ def manual_save(b, k):
 
 
 def load_in_world(b, avoid, k):
-    if not pause_open(b):
+    if not pause_open(b) and not (recover(b, f"rc{k}_") and pause_open(b)):
         log(f"load {k}: the pause menu did not open")
         return None
     if not seek(b, PAUSE, "LOAD GAME", name=f"pl{k}_"):
@@ -548,7 +580,8 @@ def load_in_world(b, avoid, k):
 
 
 def exit_to_main(b, k):
-    if not pause_open(b) or not seek(b, PAUSE, "EXIT TO MAIN MENU", name=f"xm{k}_"):
+    if not (pause_open(b) or (recover(b, f"rx{k}_") and pause_open(b))) or \
+            not seek(b, PAUSE, "EXIT TO MAIN MENU", name=f"xm{k}_"):
         return False
     t0 = time.time()
     p, _ = b.until(f"xc{k}", r"sure.{0,20}quit", 15, "key ret", "wait 2")
@@ -587,7 +620,7 @@ def quit_game(b, frm):
         if not seek(b, MAIN, "QUIT GAME", name="mq"):
             return False
     else:
-        if not pause_open(b) or not seek(b, PAUSE, "QUIT GAME", name="pq"):
+        if not (pause_open(b) or (recover(b, "rq") and pause_open(b))) or not seek(b, PAUSE, "QUIT GAME", name="pq"):
             return False
     p, _ = b.until("qc", r"sure.{0,20}quit", 15, "exit_ok", "key ret", "wait 2")
     if not p:
@@ -782,8 +815,20 @@ def graphics_preset(b, name):
     # (h3-set2: its band +8.4 over the others before any key; a Down scrolls
     # the list and the table no longer fits), so Enter without moving
     before = row_value(p, "Quick Preset", GRAPHICS_ROWS, GRAPHICS_TABLE)
+    # h3-set3: Enter right after the tab switch changed nothing 3/3 (the focus is
+    # hidden until the first key); one Down shows it on the first row (h3-set2:
+    # the band still on Quick Preset after it), then Enter
+    # h3-set4: the first Down lands on the "Quick Preset" SECTION title, whose
+    # Enter asks "Do you want to restore default settings for this section?"
+    # (cancelled with Esc, 3/3); the row is the second Down
+    p = b.shot(name + "gd", "key down", "wait 1.2", "key down", "wait 1.2")
     p = b.shot(name + "ge", "key ret", "wait 2")
-    after = row_value(p, "Quick Preset", GRAPHICS_ROWS, GRAPHICS_TABLE)
+    if re.search(r"restore\s+def", boot_ocr(p), re.I):
+        log("settings: Enter opened the section's restore-defaults prompt: CANCEL")
+        b.shot(name + "gx", "key esc", "wait 2")
+        return None
+    after = row_value(p, "Quick Preset", GRAPHICS_ROWS, GRAPHICS_TABLE) + " // " + " ".join(
+        re.findall(r"Quick\s+Preset\W{0,6}(\w[\w ]{2,30})", boot_ocr(p)))
     pa, _ = b.until(name + "ga", r"apply\s+these\s+changes", 10, "key esc", "wait 2")
     if pa:
         b.shot(name + "gc", "key ret", "wait 5")

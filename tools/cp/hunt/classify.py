@@ -108,7 +108,8 @@ KFAULT = [
     ("oom", re.compile(r".*\b(out of memory|frame allocation failed|OOM)\b.*", re.I)),
 ]
 KSTALL = [
-    ("venus", re.compile(r"\[VENUS\] (stall|fence error|fence_wait2 timeout|posted submit error|submit2 host error|blob_create: cmd submit failed).*")),
+    ("venus", re.compile(r"\[VENUS\] (stall|fence error|fence_wait2 timeout|posted submit error|submit2 host error|"
+                         r"submit2: no fence slot|blob_create: cmd submit failed).*")),
     ("nfspipe", re.compile(r"\[NFSPIPE\] stall.*")),
     ("blkq", re.compile(r"\[BLKQ\] (stall|admin timeout|wedge|reinit failed|reset).*")),
     ("stallbreak", re.compile(r"\[STALLBREAK\].*")),
@@ -182,7 +183,10 @@ QUIESCE_RX = re.compile(r"\[P8\] quiesce after (\S+): extra=(\d+)(?: left:(.*))?
 THRS_FULL_RX = re.compile(r"\[THRS\] pid=(\d+) live=(\d+) gt=(\d+) hw=(\d+) slots=(\d+)/(\d+) regs=(\d+) anon=(\d+) "
                           r"anon_mib=(\d+) .*?res_mib=(\d+) .*? (\S+)\s*$")
 THRS_CAP = 4000          # process.c rw_thr_sample(): `rows < 4000` for the whole boot
-DEVLOST_RX = re.compile(r"DEVICE_LOST|device[ _-]lost|DEVICE_REMOVED|DEVICE_HUNG|0x887a000[5-7]", re.I)
+# + vkd3d-proton's "Failed to submit queue(s), vr -4" (VK_ERROR_DEVICE_LOST = -4) and the
+# kernel's own give-up row before it (cp-hunt H6-07: h3-c06)
+DEVLOST_RX = re.compile(r"DEVICE_LOST|device[ _-]lost|DEVICE_REMOVED|DEVICE_HUNG|0x887a000[5-7]|\bvr -4\b|"
+                        r"submit2: no fence slot", re.I)
 EMFILE_RX = re.compile(r"Too many open files|\bEMFILE\b|grab_object|ENFILE", re.I)
 AWAY_RX = re.compile(r"^\[AWAY(-Z)?\] ")
 SNDZ_RX = re.compile(r"^\[SND\] zeros")
