@@ -1550,6 +1550,54 @@ quit from the pause menu. Game status was 0, `wineserver -k` took 226 ms, nothin
   - H6-04: no keyboard focus on the main menu after EXIT TO MAIN MENU when the pointer moved (game UI);
   - H6-06: one 2.6 s frame during an exit to the main menu (Venus/host).
 
+#### Wave 9 H7 round 3 (integ25)
+
+integ25 = integ24 + cp-fault round 3 (388c7abd) + cfeb10ba. Batch `strix:~/cp/integ-gates25.txt`:
+- all 82 probes (round 3 adds `census`, `conslat`, `cputime` and `consstall`), `sigmask-gate`, the file-system and
+  NFS gates;
+- unit 464/0, host 40/42, castscan, ARM;
+- P2, P4, P5 ×3, P6, P7, k5probes;
+- thrstorm ×3 (1231, 1166 and 1184 rounds, 0 faults);
+- P8 lavapipe ×2 and Venus at the menu (232 s, 219 s and 176 s);
+- a P9 cold boot (`cold-m86-pq.p9`): ManualSave-86 into the world and a pause-menu quit; status 0,
+  `wineserver -k` 216 ms, quiesce `extra=0`;
+- a P9 720p fps boot: world median 29.8 fps, the profiled stretch 37.0 fps.
+
+`vmhold` failed once in the batch, with 3 faults waiting 2.0–3.0 ms for `vm_lock`. Every timing in that run was 2–5×
+slower: munmap's max was 21 ms against 4 ms in integ24. Three serial reruns on the same tree (`~/cp/integ25-vmhold.txt`)
+passed, with munmap max 2.5–3.6 ms. It goes with the host-load flakes in §7.2h.
+
+- **H6-07 (Venus DEVICE_LOST after a host stall):** a GPU submit no longer fails after 5 s. It spins 1 ms, then parks
+  until a fence retires. It fails only when nothing has retired anywhere for 30 s (`GPU3D_HANG_MS`). Holding the GPU
+  for 7 s (`vn_probe_fencehold`) used to fail; now all 40 submits succeed, 6/6 runs.
+- **H7-14 (the 8th CPU):** the ext2 flusher and vmzero now nap off the run queue, so the game gets all 8 vCPUs. The
+  fps did not change: the game is bound by the GPU or the host.
+- **H7-17 (thrstorm −20 %):** an idle vmzero stayed READY, and every CPU's idle scan found it. It now naps for 5 ms
+  (`process_nap_ms`).
+- **H7-08 and H6-02 (census):** the 5 s census prints from vmzero instead of the PIT IRQ (time in the IRQ went from
+  11 ms to 0). There is a per-sample row bound instead of the 4000-row cap.
+- **H7-11/12 (console):** a short line behind a large write now waits about 0.8 ms p50 and 3 ms worst, down from
+  64 ms p50. Per-line wire hold. NFS statistics and `[PFX]` detail rows are off by default in game kernels.
+- **H7-15 (clocks):** `clock_gettime` on the CPU-time clocks (2, 3 and the dynamic negative ids) returns
+  `process_rusage` time instead of an error.
+- **H6-09 (an unacked shootdown behind a console stall):** after 1 ms, a shootdown leaves the flush owed to a laggard
+  that is inside `cons_hw_tx`, and records the root it is owed for. The laggard flushes before it leaves the console
+  code, and it touches no user mapping until then.
+  - The first version (a1fe2051) reloaded whatever CR3 held. A CPU still on a dead process's freed root re-walked it
+    and took a kernel #PF in `lapic_send_eoi` (H7-18).
+  - de8df5e1 reloads only the owed root.
+- **cfeb10ba (integrator):**
+  - `x64_in_console` is one 64-byte record per CPU (`struct x64_cons_mark`, `console.h`) instead of a packed byte
+    array (the C1-k7 invariant).
+  - `x64_tlb_service` writes `x64_tlb_owed_root[me]` only when it is set, not on every IPI.
+- **Open:**
+  - A CPU can still sit on an exited process's freed page-table root; H7-18 exposed it. It predates round 3.
+  - vmzero at idle priority (not merged).
+  - `[PFE]` rows are not in the pf class.
+  - virtio_blk's test stress task.
+  - `vn_probe_transport`'s check is stale.
+  - H6-04 and H6-06 (above).
+
 ### 7.3 Frozen interfaces (binding)
 
 | # | Interface | Owner (sole writer) | Change protocol |
