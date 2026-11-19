@@ -181,10 +181,12 @@ static inline void vm_zs_irqrestore(uint64_t f) {
  * VM_ZP_N zeroed frames (64 MiB) topped up -- recently freed frames first
  * (the warm LIFO), so mostly cheap zeroes -- and the stash takes from the
  * pool before zeroing inline.  The task is not part of any address space,
- * so no shootdown ever waits for it; it naps when the pool is full and
- * exits like the ext2 flusher once nothing else is alive.  Pool frames
+ * so no shootdown ever waits for it; it gives the CPU back after every
+ * batch (and, when the pool is full, after every interrupt) and exits like
+ * the ext2 flusher once nothing else is alive.  Pool frames
  * count as free (frame_parked). */
 #define VM_ZP_N 16384
+#define VM_ZP_BATCH 32 /* frames per turn: a few host faults, then yield */
 static uint64_t vm_zp[VM_ZP_N];
 static volatile int vm_zp_n;
 static volatile int vm_zp_lk;      /* a byte lock taken with interrupts off */
@@ -224,10 +226,13 @@ static void vm_zeroer_task(void *arg) {
   struct process *me = current_process();
   int self = me ? me->pid : -1, seen_other = 0;
   for (;;) {
-    for (int k = 0; k < 256 && vm_zp_n < VM_ZP_N; k++) {
+    int idle = 0;
+    for (int k = 0; k < VM_ZP_BATCH && vm_zp_n < VM_ZP_N; k++) {
       uint64_t fr = frame_alloc_zeroed();
-      if (!fr)
+      if (!fr) {
+        idle = 1; /* no free frame: wait, do not spin */
         break;
+      }
       if (!vm_zp_push(fr)) {
         frame_free(fr);
         break;
@@ -243,13 +248,16 @@ static void vm_zeroer_task(void *arg) {
       kernel_exit();
       return;
     }
-    if (vm_zp_n >= VM_ZP_N) {
-      uint64_t t0 = timer_get_ms();
-      while (timer_get_ms() - t0 < 2 && vm_zp_n >= VM_ZP_N / 2)
-        safe_wfi();
-    } else {
-      arch_yield(); /* a batch made: let everyone else run */
-    }
+    /* Never keep the CPU.  A kernel task is not preempted (trap.c: the
+       timer paths preempt user mode only), and a thread whose timer expires
+       on this CPU is this CPU's next pick: a halt loop here held every such
+       thread until another CPU's 10 ms tick took it (linux_probe_hrtimer
+       L1-L3 under 8 burners: 1 ms sleeps took 10 ms).  Full (or no free
+       frame): halt until the next interrupt, then give the CPU back; else
+       back after each batch. */
+    if (idle || vm_zp_n >= VM_ZP_N)
+      safe_wfi();
+    arch_yield();
   }
 }
 /* Syscall context (vm_mmap): start vmzero once per run. */
