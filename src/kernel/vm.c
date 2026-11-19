@@ -5692,6 +5692,23 @@ static int vm_prot_set_span(struct addr_space *as, uint64_t addr, uint64_t len,
 
 static int mpr_diag_rows;
 #define VM_MPROT_CHUNK 512 /* resident pages per vm_lock hold (H7-10) */
+/* Drop vm_lock between two chunks of a long call and take it back.  The lock
+   is test-and-set: re-taken at once, it is re-taken by this CPU before a
+   spinning waiter sees it free (linux_probe_vmhold: a faulter waited 2-3 ms
+   across a whole chunked mprotect).  When a CPU is spinning for it, wait
+   (bounded) until someone else has taken it. */
+static void vm_lock_gap(uint64_t *fl) {
+  vm_lock_rel(*fl);
+#if defined(__x86_64__)
+  extern volatile uint64_t lock_wait_addr[MAX_CPUS];
+  int waiting = 0;
+  for (int c = 0; c < MAX_CPUS && !waiting; c++)
+    waiting = lock_wait_addr[c] == (uint64_t)&vm_lock;
+  for (int i = 0; waiting && i < 4096 && !__atomic_load_n(&vm_lock.locked, __ATOMIC_ACQUIRE); i++)
+    __builtin_ia32_pause();
+#endif
+  *fl = vm_lock_acq(__LINE__);
+}
 
 int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot) {
   if (!grp || !grp->as)
@@ -5757,8 +5774,7 @@ int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot)
     if ((mprot_n & 63) == 63)
       vm_arch_tlb_poll(); /* H7-07: interrupts are off under vm_lock */
     if (++mprot_n % VM_MPROT_CHUNK == 0) {
-      vm_lock_rel(fl);
-      fl = vm_lock_acq(__LINE__);
+      vm_lock_gap(&fl);
       mr_lo = mr_hi = 0; /* the region list may have changed in the gap */
       if (as->ver != AS_V2)
         break;
