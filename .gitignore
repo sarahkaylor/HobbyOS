@@ -195,6 +195,12 @@ third_party/llvm-21.1.8/dist-staging/
 # staging copy of the game tree served over NFS.
 /third_party/rw-runtime/
 /third_party/rw-mono/
+
+# JDK lane runtime (tools/jdk): the pinned Temurin tree lives in a scratch cache
+# and third_party/jdk-27 is a symlink to it, recreated by
+# tools/jdk/fetch-jdk.sh.  Never commit the link -- it holds a machine-specific
+# path, and a stale one silently pins whatever it last pointed at.
+/third_party/jdk-27
 /rimworld/
 /nfs-export/
 

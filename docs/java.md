@@ -1,9 +1,13 @@
 # java.md — proving out the OpenJDK port, surface by surface
 
-OpenJDK 27 (Adoptium 27.0.1.0.2+1, linux/x64 hotspot) runs on the x86_64
+OpenJDK 27 (Adoptium 27.0.1.1+4, linux/x64 hotspot) runs on the x86_64
 Linux-ABI layer: it starts, compiles with `javac`, runs what it compiled, and
 passes `tools/jdk/tests/Verify.java` 18/18 with class-data sharing on and off.
 Gate: `tools/jdk/sdktest.sh` (version / javac / run / suite), 4 boots.
+
+The runtime is **27.0.1.1+4** because of CVE-2026-114938 (see
+[the pin is a security decision](#the-pin-is-a-security-decision-cve-2026-114938));
+`tools/jdk/fetch-jdk.sh` reproduces it from the pinned tarball and checksum.
 
 That is a **proven subset**, not "Java fully works". This plan exists to replace
 the word "believe" with evidence, one workstream at a time. Every workstream
@@ -47,6 +51,56 @@ runs real programs in the guest and records the console as the witness.
    neither two wave lines nor two threads in one JVM can produce contention. Any claim about blocking,
    cross-process locking or parallel writers is untestable until fork exists --
    say "unverified", not "fixed".
+
+## The pin is a security decision: CVE-2026-114938
+
+"Java4Shell", disclosed 2026-11-17: a heap out-of-bounds write in HotSpot's
+x86-64 AVX-512 VBMI Base64 decode stub.  For a tail shorter than one complete
+4-character group that ends in `=`, the stub computes `output_size = (len/4)*3`
+= 0, the padding branch decrements it to -1, `BZHI` leaves the store mask all
+ones, and the final `evmovdqub` writes 64 bytes from a destination with room for
+2 -- 62 bytes past the decoded array -- and *then* Java throws
+`IllegalArgumentException`.  Reachable wherever an application decodes
+attacker-controlled Base64 (auth headers, SAML, uploads), on x86-64 CPUs
+reporting `avx512f+avx512bw+avx512vbmi+bmi2`; **not** reachable on ARM64 or
+without AVX-512 VBMI.
+
+This lane used to pin **27.0.1.0.2+1**, which the OpenJDK advisory of
+2026-11-17 lists as affected ("27.0.1.0.3 and earlier").  It now pins
+**27.0.1.1+4**, the fixed release.  Four separate facts, each with a file
+behind it:
+
+| claim | how it was measured | result |
+|---|---|---|
+| the old pin is in the affected range | OpenJDK advisory 2026-11-17, CVE-2026-114938 row (17/21/25/27) | 27.0.1.0.2+1 < 27.0.1.1 |
+| the new binary contains the fix | disassembled `StubGenerator::generate_base64_decodeBlock` in both builds' `lib/server/libjvm.so` and diffed the calls it makes | OLD 279 calls, NEW 281: exactly `+Assembler::cmpl(Register,int)` and `+Assembler::jcc(Condition,Label&,bool)`, nothing removed -- the two emissions upstream commit `5177a70b385c` (JDK-8393212) adds (`__ cmpl(length, 4); __ jcc(Assembler::less, L_bruteForce);`) |
+| malformed tails are still rejected, and decoding still works | `tools/jdk/tests/Base64Probe.java`, one boot | `B64 SUMMARY pass=13 fail=0` (`obj/jdk/base64.log`) |
+| the new runtime did not regress the port | `tools/jdk/sdktest.sh --no-build` | version / javac / run / suite all PASS, `SUMMARY pass=18 fail=0` (`obj/jdk/sdktest-cve.log`) |
+
+**Reachability in this guest, stated so nobody overreads the patch:** measured,
+not assumed.  `java -XX:+PrintFlagsFinal -version` in the guest prints
+`UseAVX = 0` and `UseBASE64Intrinsics = false` (`obj/jdk/flags.log`), because
+`boot.sh` boots q35's default CPU model under TCG, which exposes no AVX at all --
+so the vulnerable stub was never generated here even on the old pin.  The guest
+also has no TCP stack (loopback only, `net.c`), so there is no remote path in.
+The pin was moved anyway: the runtime is what any future networked or
+AVX-512-capable guest would run, and leaving a known heap overflow in the image
+turns "we are not reachable" into a claim that has to keep being true.
+
+Reproduce: `tools/jdk/fetch-jdk.sh --glibc` (verifies the tarball's published
+SHA-256 `005e57ee...86d107` before unpacking), then `sdktest.sh` and the probe
+boot:
+
+```bash
+tools/jdk/stage.sh --dir obj/jdk/classes:/C --wave "JDK/bin/java -cp /C Base64Probe"
+tools/jdk/boot.sh --timeout 420 --log obj/jdk/base64.log
+```
+
+If a future pin has to sit in the affected range for some reason, the interim
+mitigation is `-XX:-UseBASE64Intrinsics` (preferred) or `-XX:UseAVX=2` on x86-64
+only -- and it belongs in the launch line, not in a document.  Do not use
+`-XX:DisableIntrinsic=_base64_decodeBlock` on its own: it stops the JVM from
+starting.
 
 ## Workstreams
 
