@@ -115,6 +115,16 @@ static int away_is_clock(const void *obj) {
   return 0;
 }
 
+/* ms since c's window began.  The table is unlocked, so another CPU may
+   have stamped win_ms after this CPU read `now`: a window that starts
+   "later" than now has 0 ms elapsed (without the clamp, now - win_ms + 1
+   wrapped to 0 and the rate division faulted in the kernel: thrstorm on
+   integ23, #DE in away_clock_set). */
+static uint64_t away_elapsed(uint64_t now, const struct away_clock *c) {
+  uint64_t w = *(const volatile uint64_t *)&c->win_ms;
+  return now > w ? now - w : 0;
+}
+
 /* Called for every NTSYNC EVENT_SET / PULSE (racy counters: a diagnostic). */
 void away_clock_set(const void *obj) {
   uint64_t now = timer_get_ms();
@@ -135,7 +145,7 @@ void away_clock_set(const void *obj) {
     /* the eviction candidate: the lowest set rate so far in its window (an
        entry evicted for being young -- its count restarts with every 1 s
        window -- would never become a clock while the game churns events) */
-    uint64_t rate = (uint64_t)c->sets * 1000u / (now - c->win_ms + 1);
+    uint64_t rate = (uint64_t)c->sets * 1000u / (away_elapsed(now, c) + 1);
     if (rate < vrate) {
       vrate = rate;
       victim = i;
@@ -157,7 +167,7 @@ void away_clock_set(const void *obj) {
     struct process *cur = current_process();
     if (cur && cur->pid == away_pcm_writer) c->audio = 1;
   }
-  if (now - c->win_ms >= 1000) {
+  if (away_elapsed(now, c) >= 1000) {
     if (c->sets >= 50 && c->sets <= 200)
       c->is_clock = 1;
     c->win_ms = now;
