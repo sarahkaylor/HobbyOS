@@ -1214,6 +1214,7 @@ void vm_arch_reload_cr3(struct addr_space *as) {
  * could not take the IPI. */
 static volatile uint64_t x64_tlb_root;
 static volatile uint32_t x64_tlb_pending[MAX_CPUS];
+uint32_t x64_tlb_console_owed; /* H6-09: flushes left owed to a console writer */
 
 /* H7-fault round 2 (H7-07): KVM's paravirtual TLB flush.
  *
@@ -1328,11 +1329,13 @@ static void x64_tlb_service(void) {
   uint32_t me = get_cpuid();
   if (me >= MAX_CPUS || !__atomic_load_n(&x64_tlb_pending[me], __ATOMIC_ACQUIRE))
     return;
-  uint64_t root = __atomic_load_n(&x64_tlb_root, __ATOMIC_ACQUIRE);
+  /* H7-fault round 3 (H6-09): reload whatever CR3 holds.  A flush left owed
+     to a console writer can be settled after the next shootdown changed
+     x64_tlb_root, so the root no longer says which flush this is; a reload
+     of another AS's CR3 only drops entries that a switch dropped anyway. */
   uint64_t cr3;
   __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
-  if (root && (cr3 & X64_OA_MASK) == root)
-    __asm__ volatile("mov %0, %%cr3" ::"r"(cr3) : "memory");
+  __asm__ volatile("mov %0, %%cr3" ::"r"(cr3) : "memory");
   __atomic_store_n(&x64_tlb_pending[me], 0, __ATOMIC_RELEASE);
 }
 
@@ -1414,14 +1417,31 @@ void vm_arch_shootdown(struct addr_space *as) {
   uint64_t tsc_ms = timer_tsc_per_ms();
   if (!tsc_ms)
     tsc_ms = 3000000ULL;
+  uint32_t owed = 0; /* H6-09: left to settle their flush in cons_hw_tx */
+  extern volatile uint8_t x64_in_console[MAX_CPUS];
   for (;;) {
     uint32_t left = 0;
     for (uint32_t c = 0; c < ncpu; c++)
-      if ((targets & (1u << c)) &&
+      if ((targets & ~owed & (1u << c)) &&
           __atomic_load_n(&x64_tlb_pending[c], __ATOMIC_ACQUIRE))
         left |= 1u << c;
     if (!left)
       break;
+    /* H7-fault round 3 (cp-hunt H6-09): a laggard inside a console write
+       (a port exit the host may hold for seconds) flushes before it leaves
+       cons_hw_tx -- its pending word stays set -- and touches no user
+       mapping until then: stop waiting for it after 1 ms. */
+    if (x64_rdtsc() - t0 > tsc_ms) {
+      __atomic_thread_fence(__ATOMIC_SEQ_CST);
+      for (uint32_t c = 0; c < ncpu; c++)
+        if ((left & (1u << c)) && __atomic_load_n(&x64_in_console[c], __ATOMIC_SEQ_CST)) {
+          owed |= 1u << c;
+          left &= ~(1u << c);
+          x64_tlb_console_owed++;
+        }
+      if (!left)
+        break;
+    }
     if (!slowmask && x64_rdtsc() - t0 > tsc_ms) {
       slowmask = left; /* who is late, and was its thread inside a fault? */
       extern int current_pid_of_cpu(uint32_t cpu);
