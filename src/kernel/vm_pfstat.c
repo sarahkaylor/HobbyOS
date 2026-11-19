@@ -84,6 +84,8 @@ struct pf_cpu {
   uint64_t ss_tsc[PFS_N];
   uint64_t ss_mx[PFS_N];
   uint32_t slow_cpu[MAX_CPUS]; /* slow acks by target CPU */
+  uint32_t tg_n[PFR_N];         /* round 2: timer-interrupt segments */
+  uint64_t tg_tsc[PFR_N], tg_mx[PFR_N];
   /* interval maxima (the emitter zeroes them) */
   uint64_t mx[PFK_N];
   uint64_t lw_mx, lh_mx, glw_mx, glh_mx, z_mx, sh_mx;
@@ -288,6 +290,14 @@ void pfstat_zeroed(uint64_t phys, uint64_t tsc) {
   }
 }
 
+void pfstat_tseg(int seg, uint64_t tsc) {
+  if (seg < 0 || seg >= PFR_N) return;
+  struct pf_cpu *c = pf_me();
+  c->tg_n[seg]++;
+  c->tg_tsc[seg] += tsc;
+  if (tsc > c->tg_mx[seg]) c->tg_mx[seg] = tsc;
+}
+
 void pfstat_shoot_site(int site) {
   if (site > 0 && site < PFS_N) pf_me()->sh_site = site;
 }
@@ -348,6 +358,8 @@ static struct {
   uint32_t ss_n[PFS_N], ss_tg[PFS_N], ss_run[PFS_N], ss_slow[PFS_N];
   uint64_t ss_tsc[PFS_N];
   uint32_t slow_cpu[MAX_CPUS];
+  uint32_t tg_n[PFR_N];
+  uint64_t tg_tsc[PFR_N];
 } pf_prev, pf_sum;
 static uint64_t pf_thr_prev[MAX_PROCESSES], pf_thr_prev_irq[MAX_PROCESSES];
 
@@ -360,6 +372,7 @@ static void pf_emit(uint64_t now_ms) {
   uint64_t mx[PFK_N] = {0}, lw_mx = 0, lh_mx = 0, glw_mx = 0, glh_mx = 0, z_mx = 0, sh_mx = 0;
   uint64_t tr_mx[PFT_N] = {0};
   uint64_t ss_mx[PFS_N] = {0};
+  uint64_t tg_mx[PFR_N] = {0};
   int glw_site = 0, glh_site = 0;
   for (int ci = 0; ci < MAX_CPUS; ci++) {
     struct pf_cpu *c = &pf_pc[ci];
@@ -399,6 +412,12 @@ static void pf_emit(uint64_t now_ms) {
       c->ss_mx[t] = 0;
     }
     for (int k = 0; k < MAX_CPUS; k++) pf_sum.slow_cpu[k] += c->slow_cpu[k];
+    for (int t = 0; t < PFR_N; t++) {
+      pf_sum.tg_n[t] += c->tg_n[t];
+      pf_sum.tg_tsc[t] += c->tg_tsc[t];
+      if (c->tg_mx[t] > tg_mx[t]) tg_mx[t] = c->tg_mx[t];
+      c->tg_mx[t] = 0;
+    }
     for (int t = 0; t < PFT_N; t++) {
       pf_sum.tr_n[t] += c->tr_n[t];
       pf_sum.tr_tsc[t] += c->tr_tsc[t];
@@ -581,6 +600,28 @@ static void pf_emit(uint64_t now_ms) {
       kl_c(&kl, '\n');
       kl_emit(&kl);
     }
+  }
+  /* [PFR] timer-interrupt segments (every trap, user or kernel mode):
+     seg=n/us/max_us */
+  {
+    static const char *const gn[PFR_N] = {"hrt_flush", "hrt_fire", "hrt_ltimer", "hrt_sched",
+                                          "t32_cons", "t32_sample", "t32_rest", "t32_census"};
+    kl_init(&kl);
+    kl_s(&kl, "[PFR] t=");
+    kl_u(&kl, now_ms);
+    for (int t = 0; t < PFR_N; t++) {
+      if (!D(tg_n[t])) continue;
+      kl_c(&kl, ' ');
+      kl_s(&kl, gn[t]);
+      kl_c(&kl, '=');
+      kl_u(&kl, D(tg_n[t]));
+      kl_c(&kl, '/');
+      kl_us(&kl, D(tg_tsc[t]));
+      kl_c(&kl, '/');
+      kl_us(&kl, tg_mx[t]);
+    }
+    kl_c(&kl, '\n');
+    kl_emit(&kl);
   }
 #undef D
   pf_prev = pf_sum;

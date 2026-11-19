@@ -5136,6 +5136,7 @@ static void general_interrupt_inner(struct trap_frame *tf) {
 
   if (tf->vector == 32) {
     // PIT/LAPIC timer interrupt
+    uint64_t ts0 = pf_tsc(); /* H7-fault round 2 (H7-08): [PFR] segments */
     uint32_t intid = gic_acknowledge_interrupt();
     {
       /* C0-console: push this CPU's stale partial console lines out
@@ -5143,6 +5144,8 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       extern void cons_tick(uint32_t cpu);
       cons_tick(cpu);
     }
+    uint64_t ts1 = pf_tsc();
+    pfstat_tseg(PFR_T32_CONS, ts1 - ts0);
 
     if (cpu == 0) {
       // The PIT is the global time base and is wired to the boot core only.
@@ -5160,9 +5163,12 @@ static void general_interrupt_inner(struct trap_frame *tf) {
           extern void cp_wait_sample(int emit);
           extern volatile int cpw_tick_user;
           cpw_tick_user = (tf->cs & 3) == 3;
+          uint64_t tw0 = pf_tsc();
           cp_wait_sample(thr_ticks + 1 >= 500);
+          pfstat_tseg(PFR_T32_SAMPLE, pf_tsc() - tw0);
         }
         if (++thr_ticks >= 500) {
+          uint64_t tc0 = pf_tsc();
           thr_ticks = 0;
           rw_thr_sample();
           /* M6/L72: the display mode is the kernel's, and a lost mode is
@@ -5174,6 +5180,7 @@ static void general_interrupt_inner(struct trap_frame *tf) {
             if (virtio_gpu_health_tick)
               virtio_gpu_health_tick();
           }
+          pfstat_tseg(PFR_T32_CENSUS, pf_tsc() - tc0);
         }
       }
 
@@ -5209,6 +5216,7 @@ static void general_interrupt_inner(struct trap_frame *tf) {
         gic_end_interrupt(intid);
       }
       schedule(tf, 0);
+      pfstat_tseg(PFR_T32_REST, pf_tsc() - ts1);
       /* P5 S3 (D8.4a): schedule() returns only when this process kept the
          CPU; a switch resumes via enter_user_space's own boundary. */
       process_signal_trap_exit(tf);
@@ -5217,6 +5225,7 @@ static void general_interrupt_inner(struct trap_frame *tf) {
     if (cpu == 0) {
       gic_end_interrupt(intid);
     }
+    pfstat_tseg(PFR_T32_REST, pf_tsc() - ts1);
   } else if (tf->vector == 33 || tf->vector == 44) {
     uint32_t intid = gic_acknowledge_interrupt();
     extern void virtio_input_handle_irq(int irq);
@@ -5280,18 +5289,25 @@ static void general_interrupt_inner(struct trap_frame *tf) {
        CPU: this one if it is idle, otherwise idle CPUs by IPI, otherwise
        preempt this CPU's user-mode thread (never a kernel-mode window: the
        0x81 rule above).  The woken slot is this CPU's next pick. */
+    uint64_t hs0 = pf_tsc(); /* H7-fault round 2 (H7-08): [PFR] segments */
     lapic_send_eoi();
     extern int sched_hrt_fire(void);
     extern int sched_kick_idle_cpus(int n);
     extern void sched_sync_flush_ex(int now_ipi);
     sched_sync_flush_ex(0); /* C1-k6 round 2: a sync-wake window that ended */
+    uint64_t hs1 = pf_tsc();
+    pfstat_tseg(PFR_HRT_FLUSH, hs1 - hs0);
     int woke = sched_hrt_fire();
+    uint64_t hs2 = pf_tsc();
+    pfstat_tseg(PFR_HRT_FIRE, hs2 - hs1);
     {
       /* A Linux timer due now raises its signal / counts its expiry here,
          not at the next 10 ms tick (re-checked under lt_lock). */
       extern void linux_compat_timer_tick(uint64_t now);
       linux_compat_timer_tick(timer_get_us());
     }
+    uint64_t hs3 = pf_tsc();
+    pfstat_tseg(PFR_HRT_LTIMER, hs3 - hs2);
     if (woke > 0) {
       struct process *hcur = current_process();
       if (!hcur) {
@@ -5303,9 +5319,11 @@ static void general_interrupt_inner(struct trap_frame *tf) {
       if (kicked < woke && !hcur->is_kernel_process && (tf->cs & 3) == 3 &&
           kernel_preempt_count() == 0) {
         schedule(tf, 0);
+        pfstat_tseg(PFR_HRT_SCHED, pf_tsc() - hs3);
         process_signal_trap_exit(tf);
         return;
       }
+      pfstat_tseg(PFR_HRT_SCHED, pf_tsc() - hs3);
     }
   } else if (tf->vector == 0x82) {
     // P2.2 (S2/OQ5) TLB shootdown IPI: LAPIC-delivered, so EOI first.
