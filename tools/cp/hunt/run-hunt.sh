@@ -24,11 +24,17 @@
 #   soak      P9 tools/cp/hunt/soak.p9 (~28 min in the world)
 #   settings  P9 tools/cp/hunt/settings.p9 (Settings menu: change + apply a graphics option)
 #   script    P9 with HUNT_SCRIPT=<path>
+#   drive     P9 interactive boot (settings.p9's `ctl`) driven from the host by
+#             tools/cp/hunt/drive.py $HUNT_DRIVE (commas for spaces: "churn,--loads,10",
+#             "settings,--cycles,2") once the main menu is up -> RUN.drive.txt;
+#             if drive.py returns with the boot still up, `done` ends the script
+#             (round 3, H6-hunt3)
 #
 # Env: HUNT_AUDIO=1, HUNT_FROM (P9 run under obj/cp-p9 to start from),
 #      HUNT_BOOT (P9: another boot script in place of tools/cp/p9/boot_p9.py),
-#      HUNT_LOGS (default ~/cp/lanes/hunt-logs), HUNT_EXPORT (export name
-#      prefix, default /srv/nfs/cp-hunt: -p8 / -p9 are appended; another
+#      HUNT_LOGS (default TREE/obj/hunt-logs), HUNT_WAVDIR (default
+#      ~/cp/lanes/<tree>-wav), HUNT_EXPORT (export name
+#      prefix, default /srv/nfs/cp-<tree>: -p8 / -p9 are appended; another
 #      lane's own name, H5-audio2), anything run-p8/run-p9 take.
 # One boot of this tree at a time (flock /tmp/cp-hunt-lane.<tree>.lock); the QEMU
 # slot and the big-guest lock are taken inside the harnesses, for the boot only.
@@ -36,13 +42,14 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT" || exit 2
 KIND="${1:?kind}"; RUN="${2:?run name}"
-LOGS="${HUNT_LOGS:-$HOME/cp/lanes/hunt-logs}"; mkdir -p "$LOGS"
+# round 3 (H6-hunt3): the evidence stays under the tree (obj/ is never rsync'ed over)
+LOGS="${HUNT_LOGS:-$ROOT/obj/hunt-logs}"; mkdir -p "$LOGS"
 L="$LOGS/$RUN.log"; H="$LOGS/$RUN.host.txt"
 export PATH="$HOME/.local/bin:$PATH" MAKEFLAGS=-j16 TOOLS_SKIP=1
 # wave 8b: the patched Wine stage (cp-winefix) is the default
 export CP_WINE_STAGE="${CP_WINE_STAGE:-$HOME/cp/wine-cp2/stage/CP/WINE}" WINE_BUILD="${WINE_BUILD:-$HOME/cp/wine-cp2}"
 export VENUS_BUILD="${VENUS_BUILD:-$HOME/cp/lanes/hunt-venus}" VENUS_VNC=1
-EXP="${HUNT_EXPORT:-/srv/nfs/cp-hunt}"
+EXP="${HUNT_EXPORT:-/srv/nfs/cp-$(basename "$ROOT")}"   # a name of this lane's own
 # one boot per TREE (a lane), not per host: other lanes copy this script into
 # their trees, and a shared /tmp/cp-hunt-lane.lock made their boots and this
 # lane's wait for each other (round 2, 2026-11-18).  HUNT_LOCK overrides.
@@ -52,7 +59,9 @@ flock 196
 
 WAV=""
 if [ "${HUNT_AUDIO:-0}" = 1 ]; then
-  mkdir -p "$HOME/cp/lanes/hunt-wav"; WAV="$HOME/cp/lanes/hunt-wav/$RUN.wav"; rm -f "$WAV"
+  # wave 8: CP_AUDIO_WAV=$HOME/cp/lanes/<lane>-wav/<run>.wav (QEMU's wav backend only)
+  WD="${HUNT_WAVDIR:-$HOME/cp/lanes/$(basename "$ROOT")-wav}"
+  mkdir -p "$WD"; WAV="$WD/$RUN.wav"; rm -f "$WAV"
   export CP_AUDIO_WAV="$WAV"
 fi
 
@@ -85,7 +94,7 @@ case "$KIND" in
         [ -f "$IMG" ] || bash tools/cp/hunt/prep-settings.sh "$ROOT/obj/cp-p8/pfx-seeded.img" "$IMG" WindowMode=Windowed:0 >&2 || exit 2
         set -- env P8_GPU=venus P8_RUN="$RUN" P8_EXPORT="$EXP-p8" P8_CPDATA_FROM="$IMG" TIMEOUT_S="${TIMEOUT_S:-3600}" \
           P8_STALL_S="${P8_STALL_S:-600}" P8_GAME_S="${P8_GAME_S:-3000}" bash tools/cp/p8/run-p8.sh ;;
-  fp720|fp1080|play|reload|reload2|soak|settings|script)
+  fp720|fp1080|play|reload|reload2|soak|settings|script|drive)
         P9=1
         case "$KIND" in
           fp720) S=tools/cp/p9/fpsprobe.p9 ;;
@@ -96,7 +105,7 @@ case "$KIND" in
           play) S=tools/cp/p9/play.p9 ;;
           reload) S=tools/cp/p9/reload.p9 ;;
           soak) S=tools/cp/hunt/soak.p9 ;;
-          settings) S=tools/cp/hunt/settings.p9 ;;
+          settings|drive) S=tools/cp/hunt/settings.p9 ;;
           script) S="${HUNT_SCRIPT:?HUNT_SCRIPT}" ;;
         esac
         X=(P9_SCRIPT="$S" P9_RUN="$RUN" P8_EXPORT="$EXP-p9")
@@ -125,13 +134,32 @@ case "$KIND" in
   *) echo "run-hunt: unknown kind $KIND" >&2; exit 2 ;;
 esac
 
+[ "$KIND" = drive ] && [ -z "${HUNT_DRIVE:-}" ] && { echo "run-hunt: drive needs HUNT_DRIVE" >&2; exit 2; }
 if [ "$P9" = 1 ]; then OUT="$ROOT/obj/cp-p9/$RUN"; else OUT="$ROOT/obj/cp-p8/$RUN"; fi
 echo "== run-hunt kind=$KIND run=$RUN audio=${WAV:-off} venus=$VENUS_BUILD wine=$CP_WINE_STAGE start=$(date -Is)" > "$L"
 "$@" >> "$L" 2>&1 &
 BP=$!
 sampler "$BP" "$OUT" > "$H" 2>&1 &
 SP=$!
+if [ "$KIND" = drive ]; then
+  # the host-side driver: wait for boot_p9's ctl prompt, drive, then end the script
+  (
+    D="$LOGS/$RUN.drive.txt"; : > "$D"
+    until grep -aq "interactive: append" "$L" 2>/dev/null; do
+      kill -0 "$BP" 2>/dev/null || exit 0; sleep 3
+    done
+    # shellcheck disable=SC2086
+    python3 -I tools/cp/hunt/drive.py ${HUNT_DRIVE//,/ } "$RUN" >> "$D" 2>&1
+    drc=$?
+    echo "drive.py rc=$drc $(date +%T)" >> "$D"
+    # a driver killed by hand (rc >= 128) is being restarted on the same boot:
+    # leave the boot up (h3-churn2 lost its session to this `done`)
+    [ "$drc" -lt 128 ] && kill -0 "$BP" 2>/dev/null && echo done >> "$OUT/ctl.txt"
+  ) &
+  DP=$!
+fi
 wait "$BP"; rc=$?
+[ -n "${DP:-}" ] && { kill "$DP" 2>/dev/null; wait "$DP" 2>/dev/null; }
 kill "$SP" 2>/dev/null; wait "$SP" 2>/dev/null
 echo "rc=$rc $(date +%T)" >> "$L"
 [ -n "${GEN:-}" ] && rm -f "$GEN"

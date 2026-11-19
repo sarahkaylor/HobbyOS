@@ -8,6 +8,7 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 Q="${1:?queue file}"; D="$Q.done"; touch "$D"
+mkdir -p "${HUNT_LOGS:-$ROOT/obj/hunt-logs}"
 while :; do
   next=""
   while read -r line; do
@@ -22,7 +23,7 @@ while :; do
   set -- $next
   kind="$1"; run="$2"; shift 2
   echo "batch: start $kind $run $* $(date +%T)" >&2
-  env "$@" bash "$ROOT/tools/cp/hunt/run-hunt.sh" "$kind" "$run" > "${HUNT_LOGS:-$HOME/cp/lanes/hunt-logs}/$run.out" 2>&1
+  env "$@" bash "$ROOT/tools/cp/hunt/run-hunt.sh" "$kind" "$run" > "${HUNT_LOGS:-$ROOT/obj/hunt-logs}/$run.out" 2>&1
   rc=$?
-  echo "$run rc=$rc $(tail -1 "${HUNT_LOGS:-$HOME/cp/lanes/hunt-logs}/$run.out" | sed 's/^run-hunt: [^ ]* //') $(date +%T)" >> "$D"
+  echo "$run rc=$rc $(tail -1 "${HUNT_LOGS:-$ROOT/obj/hunt-logs}/$run.out" | sed 's/^run-hunt: [^ ]* //') $(date +%T)" >> "$D"
 done

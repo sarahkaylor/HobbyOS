@@ -1,0 +1,14 @@
+# cp-hunt H6-02: the kernel's [THRS] thread/memory census stops for good after 4000 rows per boot (~41 min of a game boot)
+# strix, integ21, boot h3-churn1 (P9 12 GiB Venus, drive.py churn, a 43.5-minute game session), serial.txt
+first [THRS] row: L1040
+rows: 4000
+32250:[THRS] pid=50 live=6 gt=6 hw=6 slots=100/511 regs=261 anon=192 anon_mib=363 big_mib=63 stk=1 res_mib=16 pk_mib=16 winedevice.exe
+--- the census after it (no [THRS] row from here to the end, L32250..L32921; the launcher census goes on):
+32429:[P8] census game t=2527s procs: vkcube.exe/17:s5 wineserver/19:s5 services.exe/25:s5 winedevice.exe/28:s5 plugplay
+32562:[P8] census game t=2557s procs: vkcube.exe/17:s5 wineserver/19:s5 services.exe/25:s5 winedevice.exe/28:s5 plugplay
+32675:[P8] census game t=2587s procs: vkcube.exe/17:s5 wineserver/19:s5 services.exe/25:s5 winedevice.exe/28:s5 plugplay
+32799:[P8] end game status=0 ms=2609568
+# src/kernel/process.c rw_thr_sample(): 'for (int i = 1; i < MAX_PROCESSES && rows < 4000; i++)' with 'static int rows'
+# for the whole boot; one row per Linux-ABI group with >= 2 threads every 5 s = 7-8 Wine/game groups here,
+# so the budget lasts ~41 min (Cyberpunk2077.e: 496 rows = 41.3 min).  A 60-minute soak has no thread, region
+# or resident-memory sample for its last ~20 minutes (the W3 TEB-leak watch is blind there).

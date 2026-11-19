@@ -1,0 +1,12 @@
+# cp-hunt H6-01: boot_p9's first-run guard stops the boot on the in-game Settings GAMEPLAY tab
+# strix, integ21 (tree ~/cp/lanes/hunt3), boot h3-ctl2 (P9 32 GiB Venus, settings.p9 ctl), 2026-11-18
+# h3-ctl2.log: pause -> SETTINGS (opens on SOUND), key 3 x2 = CONTROLS -> GAMEPLAY
+[P9W] +   634.4 s  15:21:40  ctl: key 3
+[P9W] +   639.9 s  15:21:45  ctl: key 3
+[P9W] +   639.9 s  15:21:45  ctl: shot tb2
+[P9W] +   643.8 s  15:21:49  FIRST-RUN SCREEN 'telemetry' at s114-t000619-tb2: stopping without answering it
+[P9W] +   645.8 s  15:21:51  verdict: first-run:telemetry; QEMU stopped, slot released; guests on the host now: 0
+--- boot_p9 OCR of s114-t000619-tb2 (the in-game Settings, GAMEPLAY tab), the matching line:
+25:‘Share game telemetry
+# boot_p8.FIRST_RUN 'telemetry' = /telemetry|CONSENT\s+TO\s+ALL|REJECT\s+ALL/ matched the row label
+# 'Share game telemetry' of the game's own Settings menu (no first-run screen was shown or answered).

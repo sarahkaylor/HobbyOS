@@ -1,0 +1,38 @@
+# cp-hunt round 3, item 3: h3-churn4 (strix, integ21, P9 12 GiB Venus, drive.py churn), the driver log lines for each load
+# (=== restarted = the driver restarted on the same running game after a driver fix; the game session is one)
+[DRV] 18:58:53 MAIN LOAD 0 (main menu -> ManualSave-86): world RIPPERDOC after 89 s
+[DRV] 19:00:06 quick save 5/5: OCR 'Pid » Vv 40) THE RIPPERDOC: Tok to Jackie. Lo Oraw Weapon [x'
+[DRV] 19:05:47 manual saves: 6/6
+[DRV] 19:07:44 LOAD 1 (pause menu -> QuickSave-3): world RIPPERDOC after 73 s
+[DRV] 19:10:11 LOAD 2 (pause menu -> QuickSave-2): world STREETKID after 85 s
+[DRV] 19:12:35 LOAD 3 (pause menu -> ManualSave-86): world RIPPERDOC after 73 s
+[DRV] 19:14:52 LOAD 4 (pause menu -> QuickSave-1): world STREETKID after 74 s
+[DRV] 19:17:11 LOAD 5 (pause menu -> QuickSave-0): world RIPPERDOC after 73 s
+[DRV] 19:20:00 LOAD 6 (pause menu -> AutoSave-16): world STREETKID after 91 s
+[DRV] 19:22:43 LOAD 7 (pause menu -> QuickSave-4): world RIPPERDOC after 76 s
+[DRV] === restarted 19:28:51: Up walk for the manual-save group (7 loads done)
+[DRV] 19:30:54 LOAD 1 (pause menu -> Quicksove-1): world RIPPERDOC after 72 s
+[DRV] === restarted 19:32:38: save-name OCR spellings (load 8 = QuickSave-1 again, read as Quicksove-1)
+[DRV] 19:35:29 LOAD 1 (pause menu -> ManualSave-87): world RIPPERDOC after 69 s
+[DRV] 19:38:23 LOAD 2 (pause menu -> ManualSave-67): world RIPPERDOC after 74 s
+[DRV] 19:41:22 LOAD 3 (pause menu -> ManualSave-88): world RIPPERDOC after 72 s
+[DRV] 19:44:28 LOAD 4 (pause menu -> ManualSave-63): world RIPPERDOC after 77 s
+[DRV] 19:44:38 CHURN pause-menu loads: 4/4 reached the world, 11 different saves: ['QuickSave-3', 'QuickSave-2', 'ManualSave-86', 'QuickSave-1', 'QuickSave-0', 'AutoSave-
+[DRV] 19:46:36 EXIT TO MAIN MENU 1: title after 88 s
+[DRV] 19:49:21 MAIN LOAD 1 (main menu -> AutoSave-16): world STREETKID after 91 s
+[DRV] 19:51:02 EXIT TO MAIN MENU 2: title after 70 s
+[DRV] 19:53:32 MAIN LOAD 2 (main menu -> ManualSave-86): world RIPPERDOC after 85 s
+[DRV] 19:54:31 EXIT TO MAIN MENU 3: title after 31 s
+[DRV] 19:57:27 MAIN LOAD 3 (main menu -> AutoSave-16): world STREETKID after 94 s
+[DRV] 19:58:26 EXIT TO MAIN MENU 4: title after 30 s
+[DRV] 20:01:07 MAIN LOAD 4 (main menu -> ManualSave-86): world RIPPERDOC after 80 s
+[DRV] 20:02:00 EXIT TO MAIN MENU 5: title after 25 s
+[DRV] 20:06:32 MAIN LOAD 5 (main menu -> ManualSave-92): world RIPPERDOC after 72 s
+[DRV] 20:06:32 CHURN exit-to-main-menu -> load: 5/5
+[DRV] 20:07:09 QUIT GAME confirmed; waiting for the game to exit
+--- h3-churn4.class.txt:
+   game_end: [P8] end game status=0 ms=4369736
+-- kernel faults: 0 rows, 0 signatures
+   clean exit: yes (game status=0, wineserver -k 275 ms, left after -k: none + exited-unreaped vkcube.exe/17:s4, sync yes, [P8] done yes)
+-- [THRS] trend: 4000 rows = the kernel cap (4000): the census STOPPED at serial L40883; per name: rows, threads / regions / anon MiB / res MiB at 0, 25, 50, 75, 100 %
+   Cyberpunk2077.e      496  thr [15, 47, 47, 47, 47]  regs [666, 1387, 1396, 1417, 1422]  anon [135451, 141078, 141078, 141094, 141094]  res [502, 4545, 4588, 4608, 4615]  (max thr 62, regs 1423, slo

@@ -108,7 +108,8 @@ KFAULT = [
     ("oom", re.compile(r".*\b(out of memory|frame allocation failed|OOM)\b.*", re.I)),
 ]
 KSTALL = [
-    ("venus", re.compile(r"\[VENUS\] (stall|fence error|fence_wait2 timeout|posted submit error|submit2 host error|blob_create: cmd submit failed).*")),
+    ("venus", re.compile(r"\[VENUS\] (stall|fence error|fence_wait2 timeout|posted submit error|submit2 host error|"
+                         r"submit2: no fence slot|blob_create: cmd submit failed).*")),
     ("nfspipe", re.compile(r"\[NFSPIPE\] stall.*")),
     ("blkq", re.compile(r"\[BLKQ\] (stall|admin timeout|wedge|reinit failed|reset).*")),
     ("stallbreak", re.compile(r"\[STALLBREAK\].*")),
@@ -170,6 +171,193 @@ BENIGN_RX = [(re.compile(p), why) for p, why in BENIGN]
 RED_LOAD_RX = re.compile(r"Loaded L\"[^\"]*REDEngineErrorReporter\.exe\"")
 FPS_RX = re.compile(r"trace:fps:\S+ \S+ @ approx ([0-9.]+)fps")
 THRS_RX = re.compile(r"\[THRS\] pid=(\d+) live=(\d+) .*?anon_mib=(\d+) .*?res_mib=(\d+) .*? (\S+)\s*$")
+
+
+# --- round 3 (H6-hunt3): the session record: launcher census, exit, long-run trends ---
+CENSUS_RX = re.compile(r"\[P8\] census (\S+) t=(\d+)s procs:(.*?)\(n=(\d+)\)")
+P8FD_RX = re.compile(r"\[P8FD\] cap=(\d+) opened=(\d+) first_errno=(\d+)")
+P8MEM_RX2 = re.compile(r"\[P8MEM\] frames_free=(\d+) free_mib=(\d+)")
+P8END_RX = re.compile(r"\[P8\] end (\S+) status=(\S+?)(?: ms=(\d+))?\s*$")
+P8TIMEOUT_RX = re.compile(r"\[P8\] timeout (\S+) after")
+QUIESCE_RX = re.compile(r"\[P8\] quiesce after (\S+): extra=(\d+)(?: left:(.*))?")
+THRS_FULL_RX = re.compile(r"\[THRS\] pid=(\d+) live=(\d+) gt=(\d+) hw=(\d+) slots=(\d+)/(\d+) regs=(\d+) anon=(\d+) "
+                          r"anon_mib=(\d+) .*?res_mib=(\d+) .*? (\S+)\s*$")
+THRS_CAP = 4000          # process.c rw_thr_sample(): `rows < 4000` for the whole boot
+# + vkd3d-proton's "Failed to submit queue(s), vr -4" (VK_ERROR_DEVICE_LOST = -4) and the
+# kernel's own give-up row before it (cp-hunt H6-07: h3-c06)
+DEVLOST_RX = re.compile(r"DEVICE_LOST|device[ _-]lost|DEVICE_REMOVED|DEVICE_HUNG|0x887a000[5-7]|\bvr -4\b|"
+                        r"submit2: no fence slot", re.I)
+EMFILE_RX = re.compile(r"Too many open files|\bEMFILE\b|grab_object|ENFILE", re.I)
+AWAY_RX = re.compile(r"^\[AWAY(-Z)?\] ")
+SNDZ_RX = re.compile(r"^\[SND\] zeros")
+
+
+def classify_session(text):
+    """the launcher's 30 s census ([P8] census + [P8FD] + [P8MEM]), the game's
+    end and the teardown after it (wineserver -k, quiesce), [THRS] trends per
+    process name, device-lost / EMFILE rows and the [AWAY] / [SND] zeros counts"""
+    s = {"census": [], "ends": {}, "timeouts": [], "quiesce": [], "thrs_rows": 0, "thrs_last_line": None,
+         "thrs": {}, "devlost": [], "emfile": [], "away": 0, "away_z": 0, "snd_zeros": 0,
+         "done": False, "sync": False}
+    cur = None
+    for ln, raw in enumerate(text.split("\n"), 1):
+        line = raw.rstrip()
+        if not line:
+            continue
+        m = CENSUS_RX.search(line)
+        if m:
+            cur = {"tag": m.group(1), "t": int(m.group(2)), "n": int(m.group(4)),
+                   "procs": [p.split("/")[0] for p in m.group(3).split()], "line": ln}
+            s["census"].append(cur)
+            continue
+        m = P8FD_RX.search(line)
+        if m and cur is not None and "fd_cap" not in cur:
+            cur["fd_cap"], cur["fd_opened"], cur["fd_errno"] = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            continue
+        m = P8MEM_RX2.search(line)
+        if m and cur is not None and "free_mib" not in cur:
+            cur["free_mib"] = int(m.group(2))
+            continue
+        m = P8END_RX.search(line)
+        if m:
+            s["ends"][m.group(1)] = {"status": m.group(2), "ms": int(m.group(3)) if m.group(3) else None, "line": ln}
+            continue
+        m = P8TIMEOUT_RX.search(line)
+        if m:
+            s["timeouts"].append((m.group(1), ln))
+            continue
+        m = QUIESCE_RX.search(line)
+        if m:
+            s["quiesce"].append({"after": m.group(1), "extra": int(m.group(2)),
+                                 "left": (m.group(3) or "").split(), "line": ln})
+            continue
+        if "[P8] done" in line:
+            s["done"] = True
+        if "[P8] sync done" in line:
+            s["sync"] = True
+        m = THRS_FULL_RX.search(line)
+        if m:
+            s["thrs_rows"] += 1
+            s["thrs_last_line"] = ln
+            e = s["thrs"].setdefault(m.group(11), [])
+            e.append({"pid": int(m.group(1)), "live": int(m.group(2)), "gt": int(m.group(3)), "slots": int(m.group(5)),
+                      "regs": int(m.group(7)), "anon_mib": int(m.group(9)), "res_mib": int(m.group(10)), "line": ln})
+            continue
+        if AWAY_RX.match(line):
+            s["away_z" if line.startswith("[AWAY-Z]") else "away"] += 1
+            continue
+        if SNDZ_RX.match(line):
+            s["snd_zeros"] += 1
+            continue
+        x = strip_x(line)
+        if DEVLOST_RX.search(x) and len(s["devlost"]) < 20:
+            s["devlost"].append((ln, x[:160]))
+        elif EMFILE_RX.search(x) and len(s["emfile"]) < 20:
+            s["emfile"].append((ln, x[:160]))
+    return s
+
+
+def thrs_trend(rows):
+    """first / quarter points / last of a process's [THRS] series (one row per 5 s
+    while the group lives; the pid can change, e.g. a relaunched wineserver)"""
+    if not rows:
+        return None
+    pts = [rows[0], rows[len(rows) // 4], rows[len(rows) // 2], rows[3 * len(rows) // 4], rows[-1]]
+    return {"rows": len(rows), "pids": sorted({r["pid"] for r in rows}),
+            "threads": [r["gt"] for r in pts], "regs": [r["regs"] for r in pts],
+            "anon_mib": [r["anon_mib"] for r in pts], "res_mib": [r["res_mib"] for r in pts],
+            "threads_max": max(r["gt"] for r in rows), "regs_max": max(r["regs"] for r in rows),
+            "slots_max": max(r["slots"] for r in rows)}
+
+
+def runlog_session(path):
+    """load / world counts from the boot_p9 timeline (expect rows)"""
+    r = {"loaded": 0, "inworld": 0, "expect_failed": [], "seek_failed": [], "expect_ok": {}}
+    if not path or not os.path.exists(path):
+        return r
+    for ln in open(path, errors="replace"):
+        if not ln.startswith("[P9W]"):        # the run log reprints the timeline at the end
+            continue
+        m = re.search(r"expect (\S+): matched", ln)
+        if m:
+            tag = m.group(1)
+            r["expect_ok"][tag] = r["expect_ok"].get(tag, 0) + 1
+            if tag.startswith("loaded"):
+                r["loaded"] += 1
+            if tag.startswith("inworld"):
+                r["inworld"] += 1
+        m = re.search(r"(EXPECT FAILED \S+|SEEK FAILED \S+|LISTSEEK FAILED \S+)", ln)
+        if m:
+            (r["expect_failed"] if m.group(1).startswith("EXPECT") else r["seek_failed"]).append(m.group(1))
+    return r
+
+
+def zombies(q):
+    """quiesce's leftovers in state 4 (PROC_STATE_EXITED: gone, not yet reaped).
+    p8launch never waits for its keepalive (`vkcube.exe --idle`, keep_pid), so
+    every game boot ends with `vkcube.exe/N:s4` there (cp-hunt H6-03)"""
+    return [p for p in q["left"] if p.endswith(":s4")]
+
+
+def left_live(q):
+    return [p for p in q["left"] if not p.endswith(":s4")]
+
+
+def print_session(ses, rs):
+    """printed only for boots that have these rows (the golden mini serial has none)"""
+    c = ses["census"]
+    if c:
+        fd = [x for x in c if "fd_opened" in x]
+        low = [x for x in fd if x["fd_opened"] < x["fd_cap"]]
+        mem = [x["free_mib"] for x in c if "free_mib" in x]
+        print(f"-- launcher census: {len(c)} rows (t {c[0]['t']}..{c[-1]['t']} s), procs n {c[0]['n']} -> "
+              f"max {max(x['n'] for x in c)} -> {c[-1]['n']}; fd probe below its cap in {len(low)}/{len(fd)}"
+              + (f" (first t={low[0]['t']} opened={low[0]['fd_opened']}/{low[0]['fd_cap']} errno={low[0]['fd_errno']})" if low else "")
+              + (f"; free MiB {mem[0]} -> min {min(mem)} -> {mem[-1]}" if mem else ""))
+        ag = [x for x in c if x["tag"] == "after-game"]
+        if ag:
+            print(f"   after the game: {ag[-1]['n']} procs: {' '.join(ag[-1]['procs'])[:240]}")
+    e = ses["ends"]
+    if e:
+        print("-- launcher steps ended: " + ", ".join(f"{k} status={v['status']}" + (f" ms={v['ms']}" if v["ms"] is not None else "")
+                                                for k, v in e.items()))
+    for q in ses["quiesce"]:
+        print(f"   quiesce after {q['after']}: extra={q['extra']}" + (f" left: {' '.join(q['left'])[:200]}" if q["left"] else ""))
+    for t, ln in ses["timeouts"]:
+        print(f"   TIMEOUT {t} (L{ln})")
+    if e or ses["quiesce"]:
+        g = e.get("game")
+        k = e.get("kill")
+        q = [x for x in ses["quiesce"] if x["after"] == "kill"]
+        live = left_live(q[-1]) if q else None
+        clean = bool(g and g["status"] == "0" and k and k["status"] == "0" and q and not live and ses["done"])
+        print(f"   clean exit: {'yes' if clean else 'NO'} (game status={g['status'] if g else '-'}, wineserver -k "
+              f"{(str(k['ms']) + ' ms') if k and k['ms'] is not None else '-'}, left after -k: "
+              f"{(' '.join(live) or 'none') if q else '-'}{' + exited-unreaped ' + ' '.join(zombies(q[-1])) if q and zombies(q[-1]) else ''}, "
+              f"sync {'yes' if ses['sync'] else 'no'}, [P8] done {'yes' if ses['done'] else 'no'})")
+    if ses["thrs_rows"] >= 10:
+        cap = ses["thrs_rows"] >= THRS_CAP
+        print(f"-- [THRS] trend: {ses['thrs_rows']} rows{' = the kernel cap (' + str(THRS_CAP) + '): the census STOPPED at serial L' + str(ses['thrs_last_line']) if cap else ''}"
+              "; per name: rows, threads / regions / anon MiB / res MiB at 0, 25, 50, 75, 100 %")
+        for n, rows in sorted(ses["thrs"].items(), key=lambda kv: -len(kv[1])):
+            t = thrs_trend(rows)
+            if t["rows"] < 3:
+                continue
+            print(f"   {n:<18} {t['rows']:5d}  thr {t['threads']}  regs {t['regs']}  anon {t['anon_mib']}  res {t['res_mib']}"
+                  f"  (max thr {t['threads_max']}, regs {t['regs_max']}, slots {t['slots_max']})")
+    if ses["away"] or ses["away_z"] or ses["snd_zeros"]:
+        print(f"-- [AWAY] rows {ses['away']}, [AWAY-Z] rows {ses['away_z']}, [SND] zeros rows {ses['snd_zeros']}")
+    if ses["devlost"]:
+        print(f"-- DEVICE LOST rows: {len(ses['devlost'])}")
+        for ln, x in ses["devlost"][:5]:
+            print(f"   L{ln} {x}")
+    if ses["emfile"]:
+        print(f"-- EMFILE / grab_object rows: {len(ses['emfile'])}")
+        for ln, x in ses["emfile"][:5]:
+            print(f"   L{ln} {x}")
+    if rs and (rs["loaded"] or rs["expect_failed"] or rs["seek_failed"]):
+        print(f"-- script: loads reached (expect loaded*) {rs['loaded']}, in world (expect inworld*) {rs['inworld']}"
+              + (f"; FAILED: {' '.join(rs['expect_failed'] + rs['seek_failed'])}" if rs["expect_failed"] or rs["seek_failed"] else ""))
 
 
 def benign(sig):
@@ -426,7 +614,11 @@ def report(args):
     gaps = fps_gaps(args.serial, ex.get("fps_ts"), ex.get("fps"))
     mem = mem_growth(ex["thrs"])
     rid = args.run or os.path.basename(os.path.dirname(os.path.abspath(args.serial)))
-    res = {"run": rid, "serial": args.serial, "serial_lines": raw.count("\n"),
+    ses = classify_session(raw)
+    rs = runlog_session(args.log)
+    res = {"run": rid, "session": {**{k: v for k, v in ses.items() if k != "thrs"},
+                                   "thrs": {n: thrs_trend(r) for n, r in ses["thrs"].items()}},
+           "script": rs, "serial": args.serial, "serial_lines": raw.count("\n"),
            "sha": hashlib.sha256(raw.encode()).hexdigest()[:16], "runlog": rl, "host": host,
            "fps_gaps": gaps, "mem": mem, "fps_rows": ex["fps_rows"],
            "classes": {c: {s: v for s, v in d.items()} for c, d in cls.items()}}
@@ -465,6 +657,7 @@ def report(args):
         for n, m in sorted(mem.items(), key=lambda kv: -kv[1]["max"]):
             print(f"   {n:<18} {m['rows']:5d} {m['first']:7d} {m['max']:7d} {m['last']:7d}"
                   f"   {m['res_first']:6d} {m['res_max']:6d} {m['res_last']:6d}  {m['threads_max']:4d}")
+    print_session(ses, rs)
     if host:
         print(f"-- host: 9070 XT busy % whole boot {host.get('gpu_busy_all')}, world {host.get('gpu_busy_world')}")
         print(f"   other guests seen: {len(host.get('guests', []))} {' '.join(host.get('guests', []))[:300]}")

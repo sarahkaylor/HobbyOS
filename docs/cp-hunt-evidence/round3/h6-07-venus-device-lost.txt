@@ -1,0 +1,28 @@
+# cp-hunt H6-07: Venus fences stop retiring for 5 s during a host stall; the kernel's submit2 gives up -> VK_ERROR_DEVICE_LOST -> the game crashes
+# strix, integ21, boot h3-c06 (P9 12 GiB Venus, cold-a16-mq.p9, AutoSave-16 world, ~70 s in), serial.txt + run log + host sampler
+[CONS!] [VENUS] stall pid=92 tid=121 waits_ms=2001 ctx=11 ring=1 seqno=0x0000000100049C69
+[VENUS] submit2: no fence slot for 5 s
+[VENUS] stall ctx=11 inflight=16 rings(issued/done): r0=1556/1556 r1=302201/302185 r2=300247/300247 r3=302199/302175 r4=300606/300606
+[X] 299.152:013c:01b0:err:vkd3d-proton:d3d12_command_queue_execute: Failed to submit queue(s), vr -4.
+[VENUS] stall slots: [ctx 11 r1 s302186 age_ms 5076] [ctx 11 r1 s302187 age_ms 5075] [ctx 11 r1 s302188 age_ms 5075] [ctx 11 r3 s302189 age_ms 5075] [ctx 11 r1 
+[X] wine: Unhandled exception 0x80000003 in thread 150 at address 0000000142FAA013 (thread 0150), starting debugger...
+[KERNEL] pid=193 (Cyberpunk2077.e) memory fault VA=0x00006FFFFF37712C PC=0x00006FFFFF37712C rw=rx in=HOLE region=NONE near=0x00006FFFFF3A0000+0x0000000000001000 below=0x0000000000028ED4 nkind=3 nprot=
+[P8] end game status=768 ms=288057
+--- the boot_p9 timeline:
+[P9W] +   301.3 s  20:33:04  phase exitmain
+[P9W] +   311.7 s  20:33:15  game process ended: [P8] end game status=768 ms=288057
+[P9W] +   345.9 s  20:33:49  verdict: game-exited; QEMU stopped, slot released; guests on the host now: 1
+--- the host sampler (S time gpu_busy loadavg serial_bytes dirty_kB writeback_kB io_full10): no row 20:32:59..20:33:02
+S 20:32:56 59 12.93 989149 680684 16384  io_full10=2.60
+S 20:32:57 57 12.93 989249 674128 14752  io_full10=3.40
+S 20:32:58 37 12.62 989249 672528 16388  io_full10=3.40
+S 20:33:03 37 13.05 1009644 664988 11300  io_full10=24.57
+S 20:33:04 92 13.05 1042597 658876 17444  io_full10=24.83
+S 20:33:05 38 13.05 1103034 658952 9260  io_full10=24.83
+G 20:32:49 975105 /home/sarah/cp/lanes/fault-base -m 32768M virtio-gpu-gl-pci 
+G 20:32:49 1004319 /home/sarah/cp/lanes/hunt3 -m 12288M virtio-gpu-gl-pci 
+G 20:32:49 1036017 /home/sarah/cp/lanes/fault-dev -m 12288M 
+# src/kernel/virtio_gpu_3d.c ~2124: with all VGPU_ASYNC_SLOTS fence slots in flight, submit2 spins ('pause') and
+# returns -EIO after 5000 ms ('no fence slot for 5 s'); the guest Venus driver reports it as -4 = VK_ERROR_DEVICE_LOST to
+# vkd3d-proton, and the game's crash path starts (CrashReporter.exe, which cannot run without mscoree, then int3 0x80000003).
+# The host sampler missed 4 seconds and the host's PSI io 'full' avg10 rose 3.4 -> 24.6 % at the same moment: the host stalled.

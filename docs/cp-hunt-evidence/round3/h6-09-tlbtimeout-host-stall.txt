@@ -1,0 +1,18 @@
+# cp-hunt H6-09: an unacked TLB shootdown while the target CPU held the console during a host stall (recovered)
+# strix, integ22 (010e9fd2), boot h3-d05 (P9 12 GiB Venus, cold-m86-pq.p9), during the launch (guest Wine time ~38.7 s), serial.txt L3195..3206
+[CONS!] [X]  38.755:013c:01a8:info:vkd3d-proton:vkd3d_pipeline_library_disk_thread_main: Flushing disk cache (wakeup counter since last flush = 190). It seems like application has stopped creating new
+[TLBTIMEOUT] shootdown root=0x00000002154A2000 unacked cpus=0x0000000000000008
+
+[CONS!] PUBS] n=536576 exec=11334 xzero=93 file_xzero=93 anon_xzero=3 xunv=0 idc=8725 idf=0 | fault_anon xzero=3 xunv=0 | img xzero=72 xunv=0 | img_pf xzero=21 xunv=0
+[CONS] takeover cpu=6 holder=3 why=bound watched_us=2000003 wall_us=2000003 gaps=0 maxgap_us=0
+[PFX] F tid=92 at=44881 us=6368643 kind=anon va=0x7FE80370A000 io=0 lw=0 lh=0 zero=0 shoot=0 rpc=0 km=0
+[PFK] t=44883 dt=11742 n=278854 us=9014174 kmode=0 rep=35 anon=274572/8434030/6368643 shobj=2/2/1 nfs=1080/20925/1887/io=12622/rpc=7 ext2=1439/536299/4013/io=503353/rpc=0 fat=54/4386/702/io=4021/rpc=0
+[PFH] t=44883 all=35025,3753,304,45046,191873,1427,375,139,182,225,281,212,11,0,0,0,1 file=4,161,68,322,461,421,259,109,128,217,269,146,8,0,0,0,0
+[PFL] t=44883 lw=83235/1550 lh=144531/1371 vml=738429/w=109173/1983@2609/h=209708/2975@5174 zero=297013/1655864/367 fresh=384/3424 shoot=633/2836396/2505741/cpus=721 warm=108390
+[PFI] t=44883 pf=278854/9176286/6370534 tmr=13868/178630/2715 ipi=694/3190/30 oth=0/0/0
+--- host sampler (time io_full10), gaps = missed seconds:
+00:55:05 io_full10=15.21 00:55:06 io_full10=15.21 00:55:07 io_full10=21.69 00:55:08 io_full10=21.69 00:55:09 io_full10=25.91 00:55:16 io_full10=54.49 00:55:17 io_full10=54.49 00:55:18 io_full10=54.58 00:55:19 io_full10=54.58 00:55:20 io_full10=55.56 00:55:21 io_full10=55.56 00:55:28 io_full10=64.47 00:55:29 io_full10=64.47 
+G 00:54:34 2380220 /home/sarah/cp/integ -m 12288M 
+G 00:54:34 2456482 /home/sarah/cp/lanes/fault-dev -m 12288M 
+G 00:55:51 2380220 /home/sarah/cp/integ -m 12288M 
+G 00:55:53 2460795 /home/sarah/cp/lanes/hunt3 -m 12288M virtio-gpu-gl-pci 

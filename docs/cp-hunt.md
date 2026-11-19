@@ -1,4 +1,4 @@
-# cp-hunt — the wave-8 crash and glitch hunt (lane H1-hunt)
+# cp-hunt — the crash and glitch hunt (wave 8: lane H1-hunt; wave 9 round 3: lane H6-hunt3)
 
 Plan: `docs/cyberpunk.md` §6 P8/P9, wave 8.  Branch `cp-hunt` from integ15 =
 a23bfbeb (no kernel or product code changed by this lane).  Evidence:
@@ -13,6 +13,324 @@ seeded prefix a copy of integ's `obj/cp-p8/pfx-seeded.img` (sha256
 `b56d5231…`).  P8 boots: 12 GiB; P9 boots: 32 GiB under
 `/tmp/cp-bigguest.lock`.  Other lanes' guests ran beside every boot (H2-early,
 H3-winefix, H4-kglitch, the integ16 gate batch); the host sampler lists them.
+
+## Round 3 (integ21 = 5f8c4b76, then integ22 = 010e9fd2; lane H6-hunt3)
+
+Branch `cp-hunt3` (from `cyberpunk` = integ21; no kernel, Wine, Mesa or
+grader code changed); strix tree `~/cp/lanes/hunt3`, raw evidence under its
+`obj/hunt-logs/` (run logs, serial copies, classifier output, drive logs);
+short excerpts in `docs/cp-hunt-evidence/round3/`.  Wine `~/cp/wine-cp2`
+(read-only), Venus ICD a copy of H1's `hunt-venus` (`~/cp/lanes/hunt3-venus`;
+`tools/mesa/venus` has no diff since integ15), seeded prefix from this tree's
+own `obj/cp-p8/pfx-seeded.img` (made with wine-cp2, 07:55; no wineboot
+update on any boot).  Every boot: `tools/cp/qemu-slot.sh` (one slot, one game
+boot of this lane at a time), `-smp 8`, Venus on renderD129 through
+`tools/cp/host-venus.sh`, the game copy only through run-p8.sh's refcounted
+export, saves only from `~/cp/game-profile/` (ManualSave-86, AutoSave-16).
+**Memory:** the cold boots, the load-churn and the settings boots ran at
+`P9_MEM=12288` (12 GiB, no big-guest lock: H7-fault held
+`/tmp/cp-bigguest.lock` with its own 32 GiB P9 boots for most of the
+afternoon; the game peaks at 4.6 GiB resident and the guest's frame pool
+never fell below 6.8 GiB free); the two soaks ran at 32 GiB under the lock.
+Other lanes' guests ran beside most boots (`fault`, `fault-base`, `fault-dev`;
+the host sampler lists them).
+
+**Boots:** 44 game boots, 2026-11-18 14:55 – 2026-11-19 01:34.  On integ21:
+20 scripted cold boots (h3-c01..c20, 12 GiB), 2 one-hour soaks (h3-soakA/B,
+32 GiB), 9 interactive boots driven from the host by `tools/cp/hunt/drive.py`
+(load churn h3-churn1..4, settings h3-set1..5, 12 GiB) and 3 hand-driven
+exploration boots (h3-ctl1..3) that found the menus, the in-world load, the
+exit to the main menu and the Settings layout.  On **integ22** (010e9fd2,
+H7-fault's fault/NFS round, merged into `cp-hunt3` at 8878b04a and rebuilt; the
+integrator asked for the clean-exit and every-save counts there): 10 more
+cold boots h3-d01..d10 (5 quitting from the pause menu, 5 from the main menu,
+5 per save).  Every count below names its kernel.
+
+**Headline.**
+* **One crash, a new one:** H6-07, a Venus device loss in h3-c06 (1 of
+  44 game boots).  The host stalled for ~5 s, the Venus fences stopped retiring,
+  and the kernel's submit2 gave up after its 5 s bound; vkd3d-proton got
+  `VK_ERROR_DEVICE_LOST` and the game exited with code 3.  The kernel fix is
+  H7-fault's.  Device-lost rate: integ21 1/34 boots, integ22 0/10 (not
+  enough boots to call a change; the trigger is the host, see H6-09's stall).
+* **Cold boots (item 1):** 20 of 20 at 12 GiB reached the world from a save
+  (10 × ManualSave-86, 10 × AutoSave-16), and 10 of 10 more on integ22.  0 early exits, 0 hangs, no kernel
+  fault row except h3-c06's crash path and one recovered `[TLBTIMEOUT]` on
+  integ22 (h3-d05, H6-09, for H7-fault), 0 grader-misclassified boots among
+  them; QEMU start → main menu median 121 s, LOAD GAME → PRESS … TO CONTINUE
+  median 82 s (71–98).  None of the 44 boots hit the integ23 `away_clock_set`
+  #DE (H6-08).
+* **Long sessions (item 2):** two ≥ 60-minute soaks, 62.4 and 67.3 minutes in the world, both quit cleanly.  No thread
+  growth, no fd or EMFILE trouble, the guest's free memory flat after the
+  first half hour.  The kernel's `[THRS]` census stops at 41 minutes in every
+  boot that long (H6-02).
+* **Load churn (item 3):** one 72.8-minute session with **12 loads of 10
+  different saves** through the pause menu, then **5 × EXIT TO MAIN MENU →
+  LOAD GAME**.  Every one of the 27 pause-menu loads in this lane's boots and
+  every menu load reached the world.  In-world loads take 66–91 s (median 73).
+* **Settings churn (item 4):** **10 applied resolution / window-mode changes**
+  in one session (720p ↔ 1080p twice, Borderless ↔ Fullscreen twice, Borderless
+  ↔ Windowed once).  No crash, hang, device-lost row, black or torn frame.  The
+  Quick Preset was not changed (the driver could not reach its row; H1 round 2
+  has 1/1).
+* **Clean exit (item 5):** QUIT GAME from the pause menu 23/23 (18 on integ21, 5 on integ22), from the main menu
+  11/11 (6 on integ21, 5 on integ22; 3 more never got to it: H6-04).  Every one: the game's status 0 within 2–4 s of the Enter, `wineserver
+  -k` in 144–297 ms, no process left alive.  But p8launch's own keepalive
+  stays an unreaped zombie and holds every boot's teardown for 30 s (H6-03;
+  it also trips the console watchdog in 12 of 30 cold boots).
+* **Every save loads (item 6):** ManualSave-86 33/33 loads reached the world (28 on integ21, 5 on integ22), AutoSave-16 21/21 (16 on integ21, 5 on integ22) (the
+  profile holds only these two).
+* **Harness / grader:** H6-01 (the first-run guard fires on the in-game
+  Settings GAMEPLAY tab), H6-04 (the main menu after EXIT TO MAIN MENU hides
+  its keyboard focus: 2/2 after a pointer wiggle, 1/7 without), H6-05
+  (`script-done` while the game still runs), all with diffs or workarounds.
+
+### Coverage (the brief's items, in order)
+
+| item | asked | ran | result |
+|---|---|---|---|
+| 1. rare-failure rate | ≥ 20 cold boots to an in-world load from a save, mostly Venus | 30 cold boots h3-c01..c20 (Venus, 12 GiB; `r3/cold-*.p9`), plus 13 interactive boots that also loaded a save cold (h3-ctl1..3, h3-churn1..4, h3-set1..5) | **30/30 reached the world** (integ21 20/20, integ22 10/10; 15 × ManualSave-86, 15 × AutoSave-16).  Early exits 0/30, hangs 0/30, **crash 1/30** (h3-c06, integ21: H6-07, a Venus device loss); kernel rows: h3-c06's crash path, one recovered `[TLBTIMEOUT]` in h3-d05 (integ22, H6-09); grader-misclassified 0/30 (the 3 `seek-failed:menu-quit` boots are harness failures, graded as such: H6-04); visual: no corrupt frame (shotcheck flagged only loading-screen fades, the desktop after the quit, and one `garbage?` candidate in 6216 shots: h3-churn3 s270, a bright frame between the prologue's load screen and its tutorial popup, not seen at the other 20 AutoSave-16 loads).  QEMU start → main menu median 121 s (105–176), LOAD GAME → PRESS … TO CONTINUE median 82 s (71–98), world fps median 29–43 (12 GiB guests) |
+| 2. long sessions | 2 × ≥ 60 min in the world (P9, ≤ 32 GiB) | h3-soakA (62.4 min in the world, audio) and h3-soakB (67.3 min, the map once per phase), both P9 32 GiB, integ21 | 2/2 ran their hour and quit cleanly; 0 kernel fault, EMFILE, `grab_object` or device-lost rows; game threads flat (48 / 47); guest free memory −332 / −272 MiB, flat over the last half; no monotonic fps drift (phase medians 22–44 fps, a trough in phases 7–10 of both: the walk's route), 1 + 4 hitches, all host-side (a 2 s present flip; two 2–3 s Venus fence stalls during host I/O pressure); audio: 5 WAV dropouts, all in the load and the first 10 s of the world, none in the following 62 min; `[THRS]` gone after 41 min (H6-02) |
+| 3. load churn | ≥ 10 different saves back to back through pause → LOAD GAME → world; ≥ 5 × quit-to-main-menu → load | h3-churn4: **12 pause-menu loads, 10 different saves** (QuickSave-3, -2, ManualSave-86, QuickSave-1, -0, AutoSave-16, QuickSave-4, ManualSave-87, -88, -89; QuickSave-1 and ManualSave-87 twice) in one 72.8-minute session, then **5/5** EXIT TO MAIN MENU → title → LOAD GAME → world (ManualSave-86 / AutoSave-16 alternately, then ManualSave-92), then QUIT GAME: clean.  Before it, h3-churn1..3 (5 + 6 + 4 pause-menu loads) ended on driver bugs, never on the game | 27/27 pause-menu loads and 5/5 menu loads reached the world; in-world load (confirm → HUD) 66–90 s (median 73 s); EXIT TO MAIN MENU → title 25–88 s; 0 kernel fault rows, 0 device-lost rows; game threads flat at 47 (peaks 60–62 inside loads), regions 1387 → 1422 over 12 loads, resident 4.5–4.6 GiB, the guest's free memory back to 10.9 GiB at the end (from 10.3 at the start); the `[THRS]` census stopped at 41 min (H6-02) |
+| 4. settings churn | 720p ↔ 1080p, fullscreen ↔ windowed, quality preset, in the world | h3-set2 (X screen 1920x1080 so the game offers 1920x1080): **10 applied changes** in one session: Resolution 1280x720 → 1920x1080 → 1280x720 twice, Windowed Mode Borderless → Fullscreen → Borderless twice and Borderless → Windowed → Borderless once (the game's own "Are you sure you want to apply these changes?" CONFIRMed each time), ~10 s in the world after each; then QUIT GAME, clean | 10/10 applied without a crash, hang, device-lost row or kernel row; 0 of 639 screendumps flagged (no black, torn or garbage frame); the presentation path followed each change (zero-copy scanout at 1080p borderless/fullscreen, put_image for the 720p window on the 1080p screen).  **Quick Preset: not changed** (h3-set3..5, 9 tries): Enter right after the tab switch does nothing, one Down lands on the section title whose Enter asks "restore default settings for this section?" (cancelled), and the driver could not place the row after the list scrolls; H1's round-2 h2-ctl1 has the only preset change (1/1, Custom → Ray Tracing Overdrive) |
+| 5. clean exit | QUIT GAME from the main menu ≥ 5 and from the in-world pause menu ≥ 5; the game exits, wineserver ends, nothing left | pause menu: 10 cold (h3-c01, c04, c05, c08, c09, c12, c13, c16, c17, c20), 6 drive boots, 2 soaks on integ21; 5 cold on integ22 (h3-d01, d03, d05, d07, d09).  Main menu (after EXIT TO MAIN MENU → title → main menu): 9 cold on integ21 (6 got to QUIT GAME), 5 on integ22 (h3-d02, d04, d06, d08, d10) | **pause menu 23/23, main menu 11/11 clean**: `[P8] end game status=0` 2.0–4.3 s after the Enter (main menu: no confirmation dialog, 1.8–3.0 s), `wineserver -k` status 0 in 144–297 ms, quiesce: no live process left; sync and `[P8] done` every time.  The one leftover is p8launch's own keepalive, exited but never reaped (H6-03: 34/34 boots that reached the teardown), which costs every boot 30 s and trips the console watchdog in 12 of the 30 cold boots |
+| 6. every save loads | each save in `~/cp/game-profile/` at least once (k/n) | ManualSave-86 and AutoSave-16 (the only two) | **ManualSave-86 33/33** loads reached the world (integ21 28: 10 cold, 9 drive-boot starts, 2 soaks, 7 from the pause or main menu in sessions; integ22 5); **AutoSave-16 21/21** (integ21 16, integ22 5).  Every AutoSave-16 load opens the game's tutorial popup ("WELCOME TO CYBERPUNK 2077! … [E] continue"); Esc closes it |
+
+### The 60-minute soaks (item 2)
+
+P9, 32 GiB under `/tmp/cp-bigguest.lock`, ManualSave-86, `r3/soak60.p9`
+(h3-soakA, with audio to the `wav` backend) and `r3/soak60-map.p9`
+(h3-soakB, the map opened and closed once per phase, no audio); both with
+`-DP8_FD_CAP=4096` so the launcher's 30 s fd probe tries 4096 opens.
+World = phases `soak01..soak14` (~4.45 min each), then QUIT GAME from the pause
+menu.
+
+| | h3-soakA | h3-soakB |
+|---|---|---|
+| time in the world | 62.4 min (14 phases) | 67.3 min (14 phases; soak11's loops ran in the hub menu: `M` opened the hub and one Esc cleared the map words, so its 85 fps median is a menu's) |
+| verdict / exit | script-done; QUIT GAME → `end game status=0` after 66.3 min of game process; `wineserver -k` 236 ms; clean | script-done; QUIT GAME → `end game status=0` after 71.0 min of game process; `wineserver -k` 218 ms; clean |
+| world fps median per phase | 38.0, 43.2, 34.6, 33.6, 41.9, 43.5, 31.9, 27.2, 23.6, 23.4, 26.9, 34.6, 38.9, 41.0 | 42.6, 43.0, 34.9, 36.4, 36.9, 43.0, 27.4, 28.2, 22.8, 22.4, (85.0 hub), 24.3, 30.9, 38.3 |
+| world p10 per phase (min) | 19.2–39.9 (6.2) | 18.2–37.5 (0.3) |
+| hitches (guest-time fps-row gap > 2.5 s) | 1 (soak09, 3.07 s: one present `flip` of 2.05 s, `[HBP] … flip=148827/2045504`; no kernel row) | 4, all in soak13 (gaps up to 4.94 s): two `[VENUS] stall` rows (ring-1 fences unretired 2.0 s and 3.0 s) while the host sampler skipped 3–4 s at a time and the host's PSI io "full" was 51–58 %: H6-07's trigger, below its 5 s bound |
+| 9070 XT busy, world | median 37 %, per phase 33–40 % | median 37 % |
+| `[THRS]` (game) | threads 15 → 48 at load, **48 flat**; regions 1382 → 1474 (+2.2/min) and resident 4564 → 4668 MiB in the 41 min it lasted; **stopped at serial L27196** (H6-02) | threads 18 → 47, **47 flat**; regions 1374 → 1466, resident 4577 → 4678 MiB; **stopped at serial L27257** (H6-02) |
+| guest free memory (launcher census, 30 s) | 27734 MiB at soak01 → 27402 at soak14 (−332 MiB, flat from soak08 on: 27411 → 27402) | 27683 MiB at soak01 → 27411 at soak14 (−272 MiB, flat from soak06 on) |
+| fd probe (4096 opens / 30 s) | 1021 opened, errno 24, in **134/134** censuses: the probe's own per-process limit, constant; the system table never ran short | 1021 in **143/143** |
+| processes (census) | 12 throughout → 9 after the game | 12 throughout → 9 after the game |
+| EMFILE / `grab_object` / device-lost rows | 0 / 0 / 0 | 0 / 0 / 0 |
+| kernel rows | 0 fault; 5 `[NFSPIPE] stall` (151–172 ms) | 0 fault; 8 `[NFSPIPE] stall`; 2 `[VENUS] stall` (above) |
+| audio (WAV, `wavgaps.py`) | 3966.6 s of audio, **5 dropouts (500 ms in all), every one in the save's loading or the first 10 s of the world (game s 155–241), 0 in the following 62 min**; 0 gaps ≥ 500 ms, 0 edge clicks; WAV / wall 0.988 | (no audio) |
+| `[SND]` / `[AWAY]` | 6 `[SND] xrun` rows (5 within 0.3 s of the stream's start, 1 at 43 min with a 742 ms write gap: the soak09 flip); 6 `[SND] zeros`; 27 `[AWAY-Z]`; `[AWAY]` capped at 400 | (no audio) `[AWAY]` capped at 400 |
+
+**W3 / W2 watch.**  No thread growth (48 game threads for the 41 minutes the
+census lasted, and the process count flat at 12 for the whole hour) and no
+EMFILE or `grab_object` row in either soak or in any of this lane's
+44 game boots.  The last ~20 minutes of each soak have no
+thread count (H6-02).
+
+### Round 3 findings
+
+| ID | symptom | rate | first-seen evidence | signature | layer | severity | status |
+|---|---|---|---|---|---|---|---|
+| **H6-07** | **crash**: in the prologue world (AutoSave-16), the Venus fences stopped retiring for ~5 s while the host stalled; the kernel's submit2 found all 16 fence slots in flight for 5 s and returned -EIO, the Venus driver reported `VK_ERROR_DEVICE_LOST` to vkd3d-proton, and the game went down its crash path (CrashReporter.exe, then its own int3) and exited with status 768 (exit code 3) | 1/44 game boots of this lane (h3-c06, integ21; integ22 0/10); 0 in H1's 40 (no `submit2: no fence slot` row in hunt-logs / hunt2-logs); near misses: h3-soakB's two 2–3 s fence stalls in the same host conditions (PSI io full 51–58 %, sampler gaps), recovered | `cp-hunt-evidence/round3/h6-07-venus-device-lost.txt` | `[VENUS] submit2: no fence slot for 5 s` → `err:vkd3d-proton:d3d12_command_queue_execute: Failed to submit queue(s), vr -4.` → `wine: Unhandled exception 0x80000003 … at address 0000000142FAA013` → `[P8] end game status=768` | host stall (QEMU's main loop not running: sampler gap, PSI io full 24.6 %) × kernel policy (`src/kernel/virtio_gpu_3d.c` submit2's 5 s fence-slot bound) | **crash** | open: H7-fault owns the kernel fix (integrator, wave 9) |
+| **H6-01** | boot_p9's first-run guard stops a boot on the game's own Settings → GAMEPLAY tab: its row "Share game telemetry" matches `boot_p8.FIRST_RUN`'s `telemetry` pattern.  No first-run screen was shown or answered; the stop is the safe direction, but no P9 script can visit that tab | 1/1 boots that showed the tab (h3-ctl2) | `cp-hunt-evidence/round3/h6-01-first-run-guard-settings.txt` | `FIRST-RUN SCREEN 'telemetry' at s114-t000619-tb2: stopping without answering it` | harness (P9 grader, `tools/cp/p9/boot_p9.py` `shoot()` + `boot_p8.FIRST_RUN`) | harness | open: worked around (drive.py never enters GAMEPLAY: SOUND → 5 × left, GRAPHICS → right); optional diff below for the integrator |
+| **H6-02** | the kernel's `[THRS]` census (threads, regions, anon / resident MiB per Linux-ABI group, every 5 s) stops for good after 4000 rows per boot: with the game's 7–8 Wine groups that is ~41 minutes, so a 60-minute soak has no thread / memory sample for its last ~20 minutes (the W3 TEB-leak watch goes blind) | every boot longer than ~41 min: 2/2 drive sessions over 41 min (h3-churn1 at serial L32250, h3-churn4 at L40883); both soaks (h3-soakA at L27196, h3-soakB at L27257): 4/4 | `cp-hunt-evidence/round3/h6-02-thrs-cap.txt` | `-- [THRS] trend: 4000 rows = the kernel cap (4000): the census STOPPED at serial L32250` (classify.py) | kernel instrument (`src/kernel/process.c` `rw_thr_sample()`, `rows < 4000`) | cosmetic (blinds a leak detector) | open: H7-fault owns the kernel fix |
+| **H6-03** | p8launch never reaps its keepalive (`wine vkcube.exe --idle`): after `wineserver -k` every game boot's quiesce lists `vkcube.exe/17:s4` (PROC_STATE_EXITED, waiting for its parent's waitpid) and waits out its whole 30 s bound before the sync | every game boot that reached the launcher's teardown: 34/34 (integ21 24, integ22 10); the 30 s silent wait also trips the console watchdog (`[WATCHDOG] console silent for more than 20s` between `end kill` and `quiesce after kill`) in 12/30 cold boots (integ21 8/20, integ22 4/10) | `cp-hunt-evidence/round3/h6-03-keepalive-unreaped.txt` | `[P8] quiesce after kill: extra=1 left: vkcube.exe/17:s4` | harness (`tools/cp/p8/p8launch.c` `quiesce()`; only `sweep()` reaps `keep_pid`) | perf (30 s per boot) + a false "process left behind" | open: diff below; classify.py counts `:s4` as exited-unreaped, not left behind |
+| **H6-04** | after EXIT TO MAIN MENU the main menu shows no keyboard focus for 8 Down taps when a relative-mouse move (H1-12's workaround) came just before the taps; with no pointer move the first tap shows it | with the wiggle 2/2 (h3-c02, h3-c03, integ21); without it 1/12 (h3-c18; found in 4 taps in h3-c07, c10, c11, c14, c15, c19 on integ21 and 5/5 on integ22); drive.py, no pointer move: 0/5 (h3-churn4) | h3-c02 / h3-c03 run logs (`focus s0NN-…-menu-quitK: no highlighted row` × 9) vs h3-churn4 drive log (`seek LOAD GAME: tap 1 focus SETTINGS`) | `SEEK FAILED menu-quit: main menu row 'QUIT GAME' not focused after 8 x down` | game UI (a pointer move switches the menu to pointer mode) × harness | harness | open (H1-12's class): the wiggle is gone from `r3/cold-*-mq.p9` (from h3-c06 on); `seek` has no recovery when the focus stays hidden |
+| **H6-05** | a P9 boot whose interactive script ends with `done` (or a play script that ends while the game still runs) gets the pass verdict `script-done`, and QEMU is then stopped under the running game: the verdict does not say whether the game exited.  3 of this lane's drive boots ended that way after a driver failure; the classifier's "clean exit" column caught them | 3/3 such boots (h3-set1, h3-churn2, h3-churn3) | r3table.py (`verdict script-done`, `clean no`, `agree NO`) | `verdict: script-done; QEMU stopped, slot released` with no `[P8] end game` row | harness (P9 grader, `boot_p9.py` end of phase 2) | harness (grader) | open: diff below |
+| **H6-06** | one 2.6 s frame (a Venus ring-1 fence waiting 2 s) while EXIT TO MAIN MENU unloads the world | 1 of 20 exit-to-main transitions (h3-churn4 #5); 0 in-world | h3-churn4 `serial.txt` L60525 | `[VENUS] stall pid=93 tid=122 waits_ms=2000 ctx=11 ring=1` + `[HBP] … n=1 fps=0.4 … sub=2639618` | game / Venus (H1-15's class, host side not sampled) | perf (a menu transition) | open, observation |
+| **H6-08** | the integrator's integ23 #DE (`Vector: 0`) in `away_clock_set` (the `[AWAY]` instrument; two CPUs set one ntsync event, the window divisor wraps to 0) | **0/44** boots of this lane (no `Vector: 0` row in any serial; integ21 34, integ22 10) | integ23 gates (the integrator's) | `[KERNEL] … Vector: 0` with rip in `away_clock_set` | kernel (instrument) | crash | **fixed in cac5d3bd** (integ23) |
+| **H6-09** | a TLB shootdown went unacked while the CPU it waited for held the console for 2 s (`[CONS] takeover … holder=3 … watched_us=2000003`) during a host I/O stall; one game anon fault took 6.4 s; the boot recovered and passed | 1/10 integ22 boots (h3-d05, during the game's launch, before the menu); 0/34 on integ21 | `cp-hunt-evidence/round3/h6-09-tlbtimeout-host-stall.txt` | `[TLBTIMEOUT] shootdown root=0x00000002154A2000 unacked cpus=0x0000000000000008` + `[PFX] F tid=92 … us=6368643 kind=anon` | kernel paging (TLB shootdown × console) under a host stall (sampler gaps of 7 s, PSI io full 54–64 %) | hang (recovers) | open → H7-fault (kernel paging) |
+
+
+### Notes on the round-3 rows
+
+**H6-07 (the crash).**  In h3-c06, ~70 s into the prologue world (AutoSave-16),
+the game's ring-1/ring-3 Venus fences stopped retiring.  Two seconds later
+the kernel's stall instrument printed (`[VENUS] stall … waits_ms=2001`), and
+three seconds after that `virtio_gpu_3d_submit2()` found all 16 fence slots
+still in flight and gave up (`[VENUS] submit2: no fence slot for 5 s`,
+-EIO).  The guest Venus driver turned that into `VK_ERROR_DEVICE_LOST`
+(vkd3d-proton: `Failed to submit queue(s), vr -4`), the game's crash path
+started CrashReporter.exe (which cannot run without mscoree, as in every
+earlier crash census), hit its own `int3` (`Unhandled exception 0x80000003 …
+at 0000000142FAA013`), and the game exited with status 768 (exit code 3) 10 s
+later.  The kernel had nothing to do with the fault itself: the only kernel
+row after it is the dying process's jump into an unmapped hole.  The host was
+the trigger: run-hunt.sh's 1 Hz sampler missed four seconds (20:32:59–20:33:02)
+and the host's PSI io "full" avg10 rose from 3.4 % to 24.6 % at that moment,
+with H7-fault's 32 GiB Venus guest and a 12 GiB guest beside this one; the
+guest's console waited 2 s on its UART at the same time (`[CONS] takeover …
+watched_us=2000005`), i.e. QEMU's main loop, which retires the fences and
+drains the serial port, was not running.  This is H1-15's class (round 1: a
+7.7 s fence stall that recovered); this time the kernel's 5 s bound made it
+fatal.  Linux's virtgpu EXECBUFFER has no such bound; the kernel fix (a longer bound in
+`src/kernel/virtio_gpu_3d.c` submit2) is H7-fault's (integrator, wave 9).
+A check for whoever takes it: stall QEMU's main loop for 6 s during a Venus
+world phase (H4's console test injects host stalls the same way); before the
+diff the game should lose its device, after it the frame should recover.  Not
+run here (it means stopping a game boot's QEMU from the host, outside this
+lane's brief).
+
+**Host stalls (H6-07, H6-09, the soaks' hitches).**  Every severe event in
+this round came with strix itself stalling: run-hunt.sh's 1 Hz sampler
+missing 3–7 s at a time while `/proc/pressure/io` "full" avg10 stood at
+25–64 % (h3-c06 20:33, h3-soakB 00:19, h3-d05 00:55).  At 00:19 the sampler saw
+no other guest at all (00:55: the integrator's and fault-dev's 12 GiB guests),
+so the pressure is not only other lanes' boots.  What the guest sees is QEMU's main loop not running: Venus fences
+unretired (H6-07 fatal at 5 s, soakB 2–3 s recovered), the console waiting on
+its UART (`[CONS] takeover … watched_us≈2000000`), and in h3-d05 a TLB
+shootdown that the CPU stuck in that console wait could not ack in time
+(H6-09, recovered; for H7-fault, kernel paging).  The host side is not this
+lane's to change; the sampler's `io_full10` column is the thing to watch.
+
+**H6-04 (the main-menu focus after EXIT TO MAIN MENU).**  cold-*-mq.p9 first
+did what H1 recommended for H1-12, a relative-mouse wiggle (`look 60 0`, `look
+-60 0`) before the main-menu seek; both boots that did (h3-c02 one second
+after the menu appeared, h3-c03 after a 10 s settle) saw no highlighted row
+for 8 Down taps.  drive.py's seeks after the same exit never moved the
+pointer and found the focus after one tap, 5/5 (h3-churn4).  With the wiggle
+removed from the scripts (from h3-c06 on): 11 of 12 found it in 4 taps (h3-c07, c10, c11, c14, c15, c19 on integ21; h3-d02, d04, d06, d08, d10 on integ22), and h3-c18 again saw no highlighted row for 8 taps.  So in this state the
+pointer move is what hides the keyboard focus (the menu switches to pointer
+mode with the cursor off every row), the opposite of what H1 saw after the
+Settings sub-menu.  `seek` has no fallback once the focus is hidden.
+
+**H6-05 (script-done with the game still running).**  `boot_p9` grades the
+play script, not the game: a script that ends (`done`, `stop`) leaves the game
+running and the boot stops QEMU under it.  That is by design for fpsprobe /
+soak (`stop`), but the verdict text is the same whether the game quit
+cleanly or was cut off.  h3-set1, h3-churn2 and h3-churn3 were cut off after a
+driver failure and still read `script-done`.  r3table.py flags them
+(`clean no`, `agree NO`).  Proposed (`tools/cp/p9/boot_p9.py`, after `mark(f"play
+script ended: {verdict}")`):
+
+```diff
++            if verdict in ("script-done", "script-stop") and "[P8] end game " not in seen:
++                # cp-hunt H6-05: the script ended with the game still up; QEMU is stopped under it
++                why = (why + "; " if why else "") + "the game was still running (no QUIT GAME)"
++                mark(f"verdict detail: {why}")
+```
+
+**H6-01 (the first-run guard on the in-game Settings).**  boot_p9 checks
+every screendump's OCR against `boot_p8.FIRST_RUN` and stops the boot on a
+match.  The game's Settings → GAMEPLAY tab lists "Share game telemetry", so a
+boot that shows that tab stops (h3-ctl2).  The stop is the safe direction and
+nothing was answered; it only means no script can visit that tab.  drive.py
+steers around it (Settings reopen on the tab they were closed on: from SOUND
+five times left, from GRAPHICS once right).  If the integrator wants scripts
+to pass that tab, one way (`tools/cp/p9/boot_p9.py` `shoot()`), with the tab
+bar as the proof of an in-game menu:
+
+```diff
+             flat = " ".join(text.split())
+             log(f"shot {name}: OCR {flat[:200]!r}")
++            # cp-hunt H6-01: the game's own Settings (its tab bar) list "Share game telemetry"
++            in_settings = re.search(r"SOUND\s+CONTROLS\s+GAMEPLAY\s+GRAPHICS", flat, re.I)
+             for fr_name, rx in P8.FIRST_RUN:
+-                if rx.search(flat):
++                if rx.search(flat) and not (fr_name == "telemetry" and in_settings):
+                     raise FirstRun(fr_name, name)
+```
+
+**H6-02 (`[THRS]` stops at 4000 rows).**  `rw_thr_sample()` keeps one
+boot-wide `rows < 4000` budget; with the game's 7–8 Wine groups printing a row
+each every 5 s it runs out ~41 minutes into a game boot, and every soak loses
+its thread and region census for the rest.  The kernel change is H7-fault's
+(integrator, wave 9); classify.py reports where the census stopped.
+
+**H6-03 (the unreaped keepalive).**  Proposed (`tools/cp/p8/p8launch.c`
+`quiesce()`); every game boot's shutdown gets 30 s shorter and the leftover
+list empty:
+
+```diff
+ static __attribute__((unused)) void quiesce(const char *tag, int secs) {
+   int extra = 0;
+   for (int t = 0; t < secs * 4; t++) {
++    /* cp-hunt H6-03: reap this launcher's own exited children first (the
++       keepalive from session_up() is one); an exited, unreaped child counts
++       as "extra" (vkcube.exe/N:s4) and holds the quiesce for its whole bound */
++    int rs;
++    while (waitpid(-1, &rs, 1 /* WNOHANG */) > 0) { }
+     extra = extra_procs(0);
+```
+
+### Round 3 boots (r3table.py)
+
+`menu` = QEMU start → main menu (s); `load` = LOAD GAME → PRESS … TO CONTINUE (s); `exit2t` = EXIT TO MAIN MENU's confirm → the title (s); `quit` = the quit's Enter → `[P8] end game` (s); `clean` = game status 0, `-k` 0, nothing alive after, sync, done; `shots` = shotcheck flags / shots; `agree` = the verdict agrees with the boot (NO = H6-05).  h3-c*/ctl/churn/set/soak: integ21; h3-d*: integ22.  The interactive boots' loads are in their drive logs (`load` and `world` columns cover scripted `expect`s only).
+
+| run | verdict | menu | load | world | exit2t | quit | clean | kill_ms | left | faults | stalls | hitch | wmed | shots | devlost | agree |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| h3-ctl1 | expect-failed:loaded2 | 105.7 | 72.9 | no | - | - | no | - | - | 0 | 4 | 0 | - | blackx1/165 | 0 | yes |
+| h3-ctl2 | first-run:telemetry | 137.0 | - | no | - | - | no | - | - | 0 | 0 | 0 | 225.1 | 0/115 | 0 | yes |
+| h3-ctl3 | seek-failed:sto | 121.5 | - | no | - | - | no | - | - | 0 | 0 | 0 | 129.9 | 0/95 | 0 | yes |
+| h3-c01 | script-done | 153.9 | 82.8 | yes | - | 4.2 | yes | 238 | 0 | 0 | 0 | 0 | 31.9 | 0/63 | 0 | yes |
+| h3-c02 | seek-failed:menu-quit | 152.5 | 76.0 | yes | 21.2 | - | no | - | - | 0 | 0 | 0 | 33.6 | 0/74 | 0 | yes |
+| h3-c03 | seek-failed:menu-quit | 152.4 | 97.7 | yes | 21.0 | - | no | - | - | 0 | 0 | 0 | 31.2 | 0/79 | 0 | yes |
+| h3-c04 | script-done | 136.9 | 85.8 | yes | - | 3.5 | yes | 239 | 0 | 0 | 2 | 0 | 37.1 | blackx1/60 | 0 | yes |
+| h3-c05 | script-done | 107.5 | 76.7 | yes | - | 3.3 | yes | 228 | 0 | 0 | 0 | 0 | 33.7 | 0/55 | 0 | yes |
+| h3-c06 | game-exited | 106.7 | 89.5 | yes | - | - | no | 188 | 0 | 8 | 6 | 0 | 32.6 | 0/54 | 2 | yes |
+| h3-c07 | script-done | 122.1 | 87.6 | yes | 21.4 | 3.0 | yes | 230 | 0 | 0 | 0 | 0 | 33.8 | 0/75 | 0 | yes |
+| h3-c08 | script-done | 106.6 | 97.4 | yes | - | 3.8 | yes | 219 | 0 | 0 | 2 | 0 | 37.5 | 0/61 | 0 | yes |
+| h3-c09 | script-done | 106.4 | 77.7 | yes | - | 3.5 | yes | 225 | 0 | 0 | 1 | 0 | 34.8 | 0/56 | 0 | yes |
+| h3-c10 | script-done | 152.9 | 97.7 | yes | 20.9 | 2.3 | yes | 219 | 0 | 0 | 1 | 0 | 33.2 | 0/79 | 0 | yes |
+| h3-c11 | script-done | 166.4 | 88.4 | yes | 20.5 | 2.5 | yes | 228 | 0 | 0 | 0 | 0 | 33.5 | 0/77 | 0 | yes |
+| h3-c12 | script-done | 168.0 | 96.2 | yes | - | 3.2 | yes | 144 | 0 | 0 | 0 | 0 | 37.6 | 0/65 | 0 | yes |
+| h3-c13 | script-done | 121.5 | 77.1 | yes | - | 4.0 | yes | 222 | 0 | 0 | 1 | 0 | 34.6 | 0/56 | 0 | yes |
+| h3-c14 | script-done | 106.1 | 80.7 | yes | 20.5 | 2.5 | yes | 220 | 0 | 0 | 1 | 0 | 43.2 | 0/74 | 0 | yes |
+| h3-c15 | script-done | 105.7 | 82.3 | yes | 20.8 | 2.0 | yes | 224 | 0 | 0 | 0 | 0 | 37.1 | 0/73 | 0 | yes |
+| h3-c16 | script-done | 121.4 | 70.9 | yes | - | 3.7 | yes | 230 | 0 | 0 | 0 | 0 | 34.2 | 0/59 | 0 | yes |
+| h3-c17 | script-done | 121.4 | 81.7 | yes | - | 3.7 | yes | 238 | 0 | 0 | 0 | 0 | 38.0 | 0/60 | 0 | yes |
+| h3-c18 | seek-failed:menu-quit | 107.0 | 85.8 | yes | 20.8 | - | no | - | - | 0 | 0 | 0 | 39.1 | 0/75 | 0 | yes |
+| h3-c19 | script-done | 121.2 | 71.4 | yes | 20.7 | 1.8 | yes | 226 | 0 | 0 | 0 | 0 | 40.5 | 0/71 | 0 | yes |
+| h3-c20 | script-done | 105.4 | 75.7 | yes | - | 3.5 | yes | 221 | 0 | 0 | 0 | 0 | 41.3 | 0/56 | 0 | yes |
+| h3-churn1 | script-done | 121.9 | - | no | - | - | yes | 297 | 0 | 0 | 0 | 0 | - | 0/637 | 0 | yes |
+| h3-churn2 | script-done | 106.4 | - | no | - | - | no | - | - | 0 | 0 | 0 | - | blackx1/436 | 0 | NO |
+| h3-churn3 | script-done | 167.9 | - | no | - | - | no | - | - | 0 | 8 | 0 | - | blackx1,garbage?x1/322 | 0 | NO |
+| h3-churn4 | script-done | 122.3 | - | no | - | - | yes | 275 | 0 | 0 | 10 | 0 | - | blackx1/999 | 0 | yes |
+| h3-set1 | script-done | 136.3 | - | no | - | - | no | - | - | 0 | 0 | 0 | - | 0/57 | 0 | NO |
+| h3-set2 | script-done | 151.3 | - | no | - | - | yes | 228 | 0 | 0 | 0 | 0 | - | 0/639 | 0 | yes |
+| h3-set3 | script-done | 119.9 | - | no | - | - | yes | 226 | 0 | 0 | 0 | 0 | - | 0/112 | 0 | yes |
+| h3-set4 | script-done | 122.9 | - | no | - | - | yes | 229 | 0 | 0 | 1 | 0 | - | 0/112 | 0 | yes |
+| h3-set5 | script-done | 150.1 | - | no | - | - | yes | 219 | 0 | 0 | 0 | 0 | - | 0/107 | 0 | yes |
+| h3-soakA | script-done | 121.9 | 87.3 | yes | - | 4.0 | yes | 236 | 0 | 0 | 5 | 0 | - | 0/189 | 0 | yes |
+| h3-soakB | script-done | 120.8 | 76.5 | yes | - | 3.9 | yes | 218 | 0 | 0 | 14 | 0 | - | 0/252 | 0 | yes |
+| h3-d01 | script-done | 136.6 | 83.2 | yes | - | 4.0 | yes | 264 | 0 | 0 | 2 | 0 | 31.5 | 0/58 | 0 | yes |
+| h3-d02 | script-done | 151.7 | 75.7 | yes | 21.0 | 2.5 | yes | 225 | 0 | 0 | 0 | 0 | 36.5 | blackx1,partial-blackx1,same-as-prevx1/76 | 0 | yes |
+| h3-d03 | script-done | 106.9 | 77.2 | yes | - | 2.8 | yes | 224 | 0 | 0 | 1 | 0 | 29.8 | 0/56 | 0 | yes |
+| h3-d04 | script-done | 105.7 | 82.1 | yes | 20.8 | 2.0 | yes | 239 | 0 | 0 | 0 | 0 | 37.7 | 0/73 | 0 | yes |
+| h3-d05 | script-done | 175.9 | 72.1 | yes | - | 3.5 | yes | 224 | 0 | 1 | 7 | 0 | 36.8 | 0/57 | 0 | yes |
+| h3-d06 | script-done | 106.1 | 71.1 | yes | 21.1 | 2.5 | yes | 251 | 0 | 0 | 1 | 0 | 35.3 | 0/75 | 0 | yes |
+| h3-d07 | script-done | 166.9 | 81.4 | yes | - | 3.5 | yes | 230 | 0 | 0 | 0 | 0 | 38.2 | 0/61 | 0 | yes |
+| h3-d08 | script-done | 106.6 | 82.5 | yes | 21.4 | 2.5 | yes | 219 | 0 | 0 | 0 | 0 | 29.1 | 0/71 | 0 | yes |
+| h3-d09 | script-done | 108.2 | 72.4 | yes | - | 4.3 | yes | 241 | 0 | 0 | 3 | 0 | 30.4 | 0/54 | 0 | yes |
+| h3-d10 | script-done | 122.4 | 87.6 | yes | 21.1 | 2.2 | yes | 224 | 0 | 0 | 0 | 0 | 33.5 | 0/76 | 0 | yes |
+
+world reached: 32/44 (h3-c01 h3-c02 h3-c03 h3-c04 h3-c05 h3-c06 h3-c07 h3-c08 h3-c09 h3-c10 h3-c11 h3-c12 h3-c13 h3-c14 h3-c15 h3-c16 h3-c17 h3-c18 h3-c19 h3-c20 h3-soakA h3-soakB h3-d01 h3-d02 h3-d03 h3-d04 h3-d05 h3-d06 h3-d07 h3-d08 h3-d09 h3-d10)
+clean exit: 34/44 (h3-c01 h3-c04 h3-c05 h3-c07 h3-c08 h3-c09 h3-c10 h3-c11 h3-c12 h3-c13 h3-c14 h3-c15 h3-c16 h3-c17 h3-c19 h3-c20 h3-churn1 h3-churn4 h3-set2 h3-set3 h3-set4 h3-set5 h3-soakA h3-soakB h3-d01 h3-d02 h3-d03 h3-d04 h3-d05 h3-d06 h3-d07 h3-d08 h3-d09 h3-d10)
+early exits: 0/44
+kernel fault rows: 2/44 (h3-c06 h3-d05)
+device-lost rows: 1/44 (h3-c06); EMFILE/grab_object rows: 0/44
+hitches in the world: 0/44
+verdict disagrees with the boot: 3/44 (h3-churn2 h3-churn3 h3-set1)
+menu: median 121.9 (n=44, 105.4..175.9)
+load: median 81.7 (n=33, 70.9..97.7)
+exit2t: median 21.0 (n=14, 20.5..21.4)
+quit: median 3.5 (n=28, 1.8..4.3)
+kill_ms: median 226 (n=35, 144..297)
+
+### Round 3 harness (`tools/cp/hunt/`, lane H6-hunt3)
+
+| file | what |
+|---|---|
+| `r3/cold-{m86,a16}-{pq,mq}.p9` | one cold boot: main menu → LOAD GAME → ManualSave-86 (list row 509) or AutoSave-16 (row 380) → loading → ~90 s in the world → QUIT GAME from the pause menu (`pq`) or EXIT TO MAIN MENU → title → QUIT GAME from the main menu (`mq`).  AutoSave-16 opens the game's tutorial popup ("WELCOME TO CYBERPUNK 2077! … [E] continue"): Esc closes it (E does not), and `unwind` presses Esc only while it shows |
+| `r3/soak60.p9`, `r3/soak60-map.p9` | ≥ 60 minutes in the world on ManualSave-86: 14 phases `soak01..soak14` of soak.p9's loop (the second with the map opened and closed once per phase), then QUIT GAME |
+| `drive.py` | the host-side driver for interactive boots (`run-hunt.sh drive`, `HUNT_DRIVE=churn,…` / `settings,…`): sends only boot_p9 input / wait / shot lines through `ctl.txt` and reads each result itself (boot_p9's `seek` / `expect` end the boot when they fail).  Readings: boot_p9's own `focus_in()` for the main / pause menus while the game picture is where its tables expect it, else the yellow pixels next to each label tesseract found; the save list's cyan frame and the save name OCR'd inside it; the Settings rows' focus tint (the row band's g − r against thin strips above and below it, placed from the OCR'd labels with a fitted scale and offset); waits = OCR until a regex matches, never fatal.  `churn` = F5 quick saves, then N loads of different saves through pause → LOAD GAME, then M × (EXIT TO MAIN MENU → title → LOAD GAME); `settings` = VIDEO tab Resolution 720p ↔ 1080p, Windowed Mode cycled, GRAPHICS Quick Preset; `menuloads`, `quit` |
+| `r3table.py` | the per-boot round-3 table: the boot's verdict next to this lane's own reading (load time, world, exit-to-title time, quit time, clean exit, `wineserver -k` ms, kernel rows, hitches, shotcheck flags) and the k/n lines; "agree" = verdict and reading agree |
+| `r3post.sh` | per boot: classify.py again, shotcheck.py `--json`, then r3table.py + `classify.py --aggregate` over the set; `--purge` deletes the screendumps after |
+| `classify.py` (extended) | the session record: the launcher's 30 s census (procs, fd probe, free MiB), the game's end and the teardown (`wineserver -k` status / ms, quiesce leftovers, sync, `[P8] done` → "clean exit"; an exited-unreaped `:s4` leftover is the keepalive, H6-03), `[THRS]` trends per process (threads / regions / anon / res at 0-25-50-75-100 %, and whether the 4000-row kernel cap stopped the census, H6-02), device-lost and EMFILE / `grab_object` rows, `[AWAY]` / `[AWAY-Z]` / `[SND] zeros` counts, and the script's load / world counts from the run log |
+| `ctl.sh` (extended) | `CTL_UNTIL=REGEX`: shots 4 s apart until the OCR matches (a wait that cannot end the boot); the save-list frame reading |
+| `run-hunt.sh` (extended) | evidence under the tree (`obj/hunt-logs`), WAVs under `~/cp/lanes/<tree>-wav`, export `/srv/nfs/cp-<tree>-p8/-p9`; KIND `drive` |
+
 
 ## Round 2 (integ17 = bdf39e33)
 
