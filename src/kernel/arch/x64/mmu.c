@@ -1867,8 +1867,14 @@ void vm_arch_teardown(uint64_t root_phys, uint16_t asid) {
   uint32_t found = x64_root_users(root_phys) & ~(me < MAX_CPUS ? 1u << me : 0);
   if (!found) {
     x64_free_tables(root_phys, asid);
+#ifdef KERNEL_MODE_TEST
+    /* The running totals, for the probe checks.  Test kernels only: this
+       path can run under proc_lock with interrupts off, and uart_puts may
+       spin on uart_lock for a stalled host.  Every kernel keeps the final
+       row and the [FREERACE] / [ROOTSW0] assertion rows. */
     if ((x64_rf.teardowns & 63) == 1)
-      x64_rootfree_row("every64"); /* the running totals, for the checks */
+      x64_rootfree_row("every64");
+#endif
     return;
   }
   __atomic_add_fetch(&x64_rf.onroot, 1, __ATOMIC_RELAXED);
@@ -1897,6 +1903,9 @@ void vm_arch_teardown(uint64_t root_phys, uint16_t asid) {
     __atomic_add_fetch(&x64_rf.deferred, 1, __ATOMIC_RELAXED);
   else
     __atomic_add_fetch(&x64_rf.leaked, 1, __ATOMIC_RELAXED);
+#ifdef KERNEL_MODE_TEST
+  /* Test kernels only (see the every64 row above); the counters run in
+     every kernel and reach the final row. */
   static volatile uint32_t rows;
   if (__atomic_fetch_add(&rows, 1, __ATOMIC_RELAXED) < 40) {
     struct kline k;
@@ -1911,4 +1920,7 @@ void vm_arch_teardown(uint64_t root_phys, uint16_t asid) {
     kl_emit(&k);
     x64_rootfree_row("park");
   }
+#else
+  (void)first_cls;
+#endif
 }
