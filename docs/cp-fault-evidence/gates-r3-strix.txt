@@ -1,0 +1,366 @@
+# H7-fault round 3 gates and probes, strix 2026-11-19
+
+## fault-gates/final4.txt
+tree  start 03:40:08
+build rc=0 03:40:16
+avx rc=0 [LP] done rc=0
+away rc=0 [LP] done rc=0
+badelr rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+census rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+conslat rc=0 [LP] done rc=0
+console rc=0 [LP] done rc=0lp_check_console: kernel rows intact 29850/29850, user rows intact 6857/6857, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+consstall rc=0 [LP] done rc=0
+conswait rc=0 [LP] done rc=0
+cow rc=0 [LP] done rc=0
+cpus rc=0 [LP] done rc=0
+cputime rc=0 [LP] done rc=0
+e2churn rc=0 [LP] done rc=0
+e2fault rc=0 [LP] done rc=0
+e2stress rc=0 [LP] done rc=0
+epserver rc=0 [LP] done rc=0
+errnomap rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+execthr rc=0 [LP] done rc=0
+exitgroup rc=0 [LP] done rc=0
+exitrace rc=0 [LP] done rc=0
+ext2w rc=0 [LP] done rc=0
+fatcoh rc=0 [LP] done rc=0
+fatren rc=0 [LP] done rc=0
+fattrunc rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fdrace rc=0 [LP] done rc=0
+fdscale rc=0 [LP] done rc=0
+forkcow rc=0 [LP] done rc=0
+forkva rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+hrtimer rc=0 [LP] done rc=0
+ipclat rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+killgrp rc=0 [LP] done rc=0
+kstack rc=0 [LP] done rc=0
+loaccept rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+manythr rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+netlink rc=0 [LP] done rc=0
+ntsync rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0
+pfpar rc=0 [LP] done rc=0
+pfstat rc=0 [LP] done rc=0
+pfx rc=0 [LP] done rc=0
+pipestorm rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+rusage rc=0 [LP] done rc=0
+shm rc=0 [LP] done rc=0
+shootwait rc=0 [LP] done rc=0
+sigfd rc=0 [LP] done rc=0
+siginfo rc=0 [LP] done rc=0
+sigint rc=0 [LP] done rc=0
+sigmask rc=0 [LP] done rc=0
+sigret rc=0 [LP] done rc=0
+snd rc=0 [LP] done rc=0
+sysc rc=0 [LP] done rc=0
+tcpconn rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tlb rc=0 [LP] done rc=0
+tlbstale rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+vmhold rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wfibound rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+probes end 04:00:33
+sigmask_gate rc=0 sigmask-gate: PASS (8/8)
+unit rc=0 Tests run:    464 Tests failed: 0   reass=1
+exitgroup#1 rc=0 [LP] done rc=0
+exitgroup#2 rc=0 [LP] done rc=0
+exitgroup#3 rc=0 [LP] done rc=0
+infra end 04:01:54
+gate_p2#1 rc=0 G1 wine cmd /c echo hello prints hello : PASS ([P2] end echo|G2 winprobe.exe every marker + exit 0 : PASS ([P2] end winpr|G3 wineserver -k leaves no processes : PASS ([P2] end kill s| 04:02:24
+gate_p4#1 rc=0 [P4G] qemu: qemu-system-x86_64 -M q35,vmport=on -enable-kvm -cpu host -smp 8 -m 12288M -drive if=pflash,format=raw,readonly=on,file=/home/sarah/cp/lanes/fault-dev/obj/p4/f4-1/ovmf.fd -display none -serial file:/home/sarah/cp/lanes/fault-dev/obj/p4/f4-1/serial.log -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=/home/sarah/cp/lanes/fault-dev/obj/p4/f4-1/disk.img,format
+gate_p5#1 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 275 s; lock released serial=259774 04:10:25
+gate_p5#2 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 275 s; lock released serial=259701 04:15:09
+gate_p5#3 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 271 s; lock released serial=258798 04:19:54
+gate_p5#4 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 271 s; lock released serial=258498 04:24:42
+gate_p6_venus#1 rc=0 [P5W] vkcube vkcube-t20s.ppm: clear=244324 saturated=63416 bbox=(44, 70, 682, 548) hash=7b5ba50f87ca6c79 [P5W] vkcube vkcube-t50s.ppm: clear=240832 saturated=66892 bbox=(44, 70, 682, 548) hash=1afe46e5e2ae0324 [P5W] vkcube: PASS [P5W] d3d11 d3d11-t20s.ppm: clear=237260 saturated=48236 bbox=(724, 70, 1362, 548) hash=9161224591b4e27b [P5W] d3d11 d3d11-t50s.ppm: clear=237256 satu
+k5probes rc=0 [P8ENV] E1 execve env: 40/40 entries intact -> PASS [P8ENV] E2 malformed entries: 0 -> PASS [P8ENV] E3 spawn_ex env: 40/40 entries intact -> PASS [P8ENV] E4 malformed entries: 0 -> PASS [K5P] E5 spawn_ex env > HO_ENV_LEN: rc=-1 errno=7 -> PASS [P8SCM] S1 recvmsg ret=4 errno=0 -> PASS [P8SCM] S2 MSG_CTRUNC=1 fd_delivered=-1 -> PASS [P8SCM] S3 second recvmsg ret=-1 errno=11 -> PASS PAS
+gate_p7_fullscreen rc=0 [P5W] vkcube vkcube-t20s.ppm: clear=1766176 saturated=307424 bbox=(0, 0, 1918, 1078) hash=7631379ea5e39cd3 [P5W] vkcube vkcube-t50s.ppm: clear=1751388 saturated=322212 bbox=(0, 0, 1918, 1078) hash=5cb49d51fe2ee5c3 [P5W] vkcube: PASS [P5W] d3d12 d3d12-t20s.ppm: clear=1601856 saturated=310028 bbox=(0, 0, 1918, 1078) hash=c882636c5936f7bb [P5W] d3d12 d3d12-t50s.ppm: clear=1601
+thrstorm integ22 #1 rc=0 [TS] PASS T2 storm (rounds=1236 ms=60048) S-pass=4/4 load=3.25 04:33:49
+thrstorm tip #1 rc=0 [TS] PASS T2 storm (rounds=1203 ms=60058) S-pass=4/4 load=3.33 04:35:21
+thrstorm integ22 #2 rc=0 [TS] PASS T2 storm (rounds=1270 ms=60069) S-pass=4/4 load=3.26 04:36:45
+thrstorm tip #2 rc=0 [TS] PASS T2 storm (rounds=1232 ms=60075) S-pass=4/4 load=2.98 04:38:16
+thrstorm integ22 #3 rc=0 [TS] PASS T2 storm (rounds=1276 ms=60034) S-pass=4/4 load=2.83 04:39:48
+thrstorm tip #3 rc=0 [TS] PASS T2 storm (rounds=1236 ms=60070) S-pass=4/4 load=2.56 04:41:18
+vn_probe_fencehold rc=1 [LP] ok   H1 40 fenced submits through a 7 s fence hold: failed=0 first_failed=#-1 rc=0 at 0 ms; #32 at 6999 m|[LP] FAIL H2 8 busy threads beside the waiting submitter: cpus_used=7.49 of 8|[LP] ok   H3 the last fence retires after the hold rc=0|
+consstall rc=0 [LP] S1 730 mprotect pairs beside a 1500 ms console stall: max_pair_us=1301 -> PASS
+consstall rc=0 [LP] S1 887 mprotect pairs beside a 1500 ms console stall: max_pair_us=198 -> PASS
+castscan rc=0 castscan: 374 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+FINALA 04:41:59
+
+## fault-gates/final3.txt
+tree  start 02:42:19
+build rc=0 02:42:33
+avx rc=0 [LP] done rc=0
+away rc=0 [LP] done rc=0
+badelr rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+census rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+conslat rc=0 [LP] done rc=0
+console rc=0 [LP] done rc=0lp_check_console: kernel rows intact 29880/29880, user rows intact 6760/6760, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+consstall rc=0 [LP] done rc=0
+conswait rc=0 [LP] done rc=0
+cow rc=0 [LP] done rc=0
+cpus rc=0 [LP] done rc=0
+cputime rc=0 [LP] done rc=0
+e2churn rc=0 [LP] done rc=0
+e2fault rc=0 [LP] done rc=0
+e2stress rc=0 [LP] done rc=0
+epserver rc=0 [LP] done rc=0
+errnomap rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+execthr rc=0 [LP] done rc=0
+exitgroup rc=0 [LP] done rc=0
+exitrace rc=0 [LP] done rc=0
+ext2w rc=0 [LP] done rc=0
+fatcoh rc=0 [LP] done rc=0
+fatren rc=0 [LP] done rc=0
+fattrunc rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fdrace rc=0 [LP] done rc=0
+fdscale rc=0 [LP] done rc=0
+forkcow rc=0 [LP] done rc=0
+forkva rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+hrtimer rc=0 [LP] done rc=0
+ipclat rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+killgrp rc=0 [LP] done rc=0
+kstack rc=0 [LP] done rc=0
+loaccept rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+manythr rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+netlink rc=0 [LP] done rc=0
+ntsync rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0
+pfpar rc=0 [LP] done rc=0
+pfstat rc=0 [LP] done rc=0
+pfx rc=0 [LP] done rc=0
+pipestorm rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+rusage rc=0 [LP] done rc=0
+shm rc=0 [LP] done rc=0
+shootwait rc=0 [LP] done rc=0
+sigfd rc=0 [LP] done rc=0
+siginfo rc=0 [LP] done rc=0
+sigint rc=0 [LP] done rc=0
+sigmask rc=0 [LP] done rc=0
+sigret rc=0 [LP] done rc=0
+snd rc=0 [LP] done rc=0
+sysc rc=0 [LP] done rc=0
+tcpconn rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tlb rc=0 [LP] done rc=0
+tlbstale rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+vmhold rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wfibound rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+probes end 03:06:30
+sigmask_gate rc=0 sigmask-gate: PASS (8/8)
+ext2_gate rc=0 ext2_gate: PASS
+exec_gate rc=0 exec_gate: PASS
+rsize_guard rc=0 rsize_guard: PASS (/home/sarah/cp/lanes/fault-dev)
+unit rc=0 Tests run:    464 Tests failed: 0   reass=1
+nfs_proto_test rc=0 ALL NFS PROTO TESTS PASSED
+host [host-tests] done: 40/42 passed kconsole=kconsole_test: PASS (0 failures)
+castscan rc=0 castscan: 374 int<->pointer sites outside kmem.h; 0 not in the allowlist; 0 allowlisted rows no longer present
+arm rc=0
+rsize_scan rc=0 rsize_scan: PASS (32 KiB NFS READ paths intact)
+panic_sink_allowlist rc=0 panic_sink_allowlist: PASS — every reference is accounted for
+pfx_gate rc=0 pfx_gate: PASS
+ext2w_gate rc=0 ext2w_gate: PASS
+reg_gate rc=0 == removed /srv/nfs/cp-fault3-reg
+ext2_test_host rc=0 ext2_test: PASS
+exitgroup#1 rc=0 [LP] done rc=0
+exitgroup#2 rc=0 [LP] done rc=0
+exitgroup#3 rc=0 [LP] done rc=0
+infra end 03:17:53
+gate_p2#1 rc=0 G1 wine cmd /c echo hello prints hello : PASS ([P2] end echo|G2 winprobe.exe every marker + exit 0 : PASS ([P2] end winpr|G3 wineserver -k leaves no processes : PASS ([P2] end kill s| 03:18:30
+gate_p4#1 rc=0 [P4G] qemu: qemu-system-x86_64 -M q35,vmport=on -enable-kvm -cpu host -smp 8 -m 12288M -drive if=pflash,format=raw,readonly=on,file=/home/sarah/cp/lanes/fault-dev/obj/p4/f3-1/ovmf.fd -display none -serial file:/home/sarah/cp/lanes/fault-dev/obj/p4/f3-1/serial.log -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=/home/sarah/cp/lanes/fault-dev/obj/p4/f3-1/disk.img,format
+gate_p5#1 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 274 s; lock released serial=259477 03:26:29
+gate_p5#2 rc=0 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] PASS: vkcube, d3d11, d3d12 each ran >= 60 s under Wine with two distinct, recognisable screendumps  [P5W] boot finished after 272 s; lock released serial=258481 03:31:06
+gate_p5#3 rc=1 [P5W] vkcube: PASS [P5W] d3d11: PASS [P5W] d3d12: PASS [P5W] fullscr: PASS [P5W] FAIL: 7 fault line(s): [KERNEL] FATAL: Exception in Kernel Mode! Vector: 14 Error Code: 0x0000000000000002  [P5W] boot finished after 292 s; lock released serial=367131 03:36:06
+
+## fault-gates/final4b.txt
+integ24 ALLDONE seen 03:40:08
+f4-final-fp1 rc=0 verdict=script-stop
+the game was still running (no QUIT GAME) tlbtimeout=0 de=0 03:45:28
+f4-final-fp2 rc=0 verdict=script-stop
+the game was still running (no QUIT GAME) tlbtimeout=0 de=0 03:51:13
+f4-final-fp3 rc=0 verdict=script-stop
+the game was still running (no QUIT GAME) tlbtimeout=0 de=0 03:57:22
+f4-final-fp4 rc=0 verdict=script-stop
+the game was still running (no QUIT GAME) tlbtimeout=0 de=0 04:03:33
+gate_p8_venus rc=0    +   153.5 s  04:06:11  main menu OCR at s010-t000130: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   159.1 s  04:06:17  main menu OCR at s011-t000135: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   161.0 s  04:06:19  verdict: main-menu; QEMU stopped, sl 04:06:19
+ALLDONE 04:06:19
+
+## fault-gates/fl3.txt
+tree fault-dev 00:20:20
+build rc=0
+ext2_gate rc=0 ext2_gate: PASS 00:21:08
+ext2w_gate rc=0 ext2w_gate: PASS 00:24:09
+reg_gate rc=0 == removed /srv/nfs/cp-fault3-reg 00:25:08
+ext2_test_host rc=0 ext2_test: PASS
+FL3DONE
+
+## fault-logs/fnap.txt
+cpus disk #1 cpus_used=7.90 of 8 PASS
+cpus disk #2 cpus_used=7.88 of 8 PASS
+cpus disk #3 cpus_used=7.69 of 8 PASS
+ext2_gate rc=0 ext2_gate: PASS
+ext2w_gate rc=0 ext2w_gate: PASS
+reg_gate rc=0 reg_gate: PASS
+FNAPDONE
+
+## fault-logs/chain8.txt
+fault-chk #1 cpus_used=7.65 of 8 PASS
+fault-dev #1 cpus_used=6.86 of 8 FAIL
+fault-chk #2 cpus_used=7.70 of 8 PASS
+fault-dev #2 cpus_used=6.84 of 8 FAIL
+fault-chk #3 cpus_used=7.60 of 8 PASS
+fault-dev #3 cpus_used=6.75 of 8 FAIL
+fault-chk #4 cpus_used=7.74 of 8 PASS
+fault-dev #4 cpus_used=6.94 of 8 FAIL
+fault-chk #5 cpus_used=7.62 of 8 PASS
+fault-dev #5 cpus_used=6.84 of 8 FAIL
+fault-chk #6 cpus_used=7.61 of 8 PASS
+fault-dev #6 cpus_used=6.84 of 8 FAIL
+CHAIN8DONE
+
+## fault-logs/bisect.txt
+V1 1 V2 1 02:06:51
+V1-novmzero #1 rc=0 [TS] PASS T2 storm (rounds=1088 ms=60039) S3 wineserver -k, nothing left        : PASS   ([K5] end kil 02:08:40
+V2-nounhook #1 rc=0 [TS] PASS T2 storm (rounds=828 ms=60096) S3 wineserver -k, nothing left        : PASS   ([K5] end kil 02:10:29
+T-tip #1 rc=0 [TS] PASS T2 storm (rounds=797 ms=60059) S3 wineserver -k, nothing left        : PASS   ([K5] end kil 02:12:14
+V1-novmzero #2 rc=0 [TS] PASS T2 storm (rounds=1000 ms=60055) S3 wineserver -k, nothing left        : PASS   ([K5] end kil 02:13:51
+V2-nounhook #2 rc=0 [TS] PASS T2 storm (rounds=801 ms=60073) S3 wineserver -k, nothing left        : PASS   ([K5] end kil 02:15:24
+T-tip #2 rc=0 [TS] PASS T2 storm (rounds=892 ms=60067) S3 wineserver -k, nothing left        : PASS   ([K5] end kil 02:16:56
+BISECTDONE
+
+## fault-logs/v6.txt
+v6 thrstorm #1 rc=0 [TS] PASS T2 storm (rounds=608 ms=60056)  PASS   ([K5] end kill status=0
+v6 thrstorm #2 rc=0 [TS] PASS T2 storm (rounds=632 ms=60051)  PASS   ([K5] end kill status=0
+v6 thrstorm #3 rc=0 [TS] PASS T2 storm (rounds=641 ms=60103)  PASS   ([K5] end kill status=0
+v6 stopped (worse): V6DONE
+
+## fault-logs/v7.txt
+v7 thrstorm #1 rc=0 [TS] PASS T2 storm (rounds=583 ms=60081)  PASS   ([K5] end kill status=0
+v7 thrstorm #2 rc=0 [TS] PASS T2 storm (rounds=600 ms=60100)  PASS   ([K5] end kill status=0
+v7 thrstorm #3 rc=0 [TS] PASS T2 storm (rounds=637 ms=60037)  PASS   ([K5] end kill status=0
+
+## fault-logs/v8.txt
+v8-ts1 rc=0 [TS] PASS T2 storm (rounds=1121 ms=60090) 4/4 S 02:31:51 load=7.49
+tip-ts1 rc=0 [TS] PASS T2 storm (rounds=1020 ms=60081) 4/4 S 02:33:32 load=5.76
+v8-ts2 rc=0 [TS] PASS T2 storm (rounds=1169 ms=60025) 4/4 S 02:35:02 load=5.72
+tip-ts2 rc=0 [TS] PASS T2 storm (rounds=989 ms=60068) 4/4 S 02:36:29 load=6.49
+v8-ts3 rc=0 [TS] PASS T2 storm (rounds=1157 ms=60031) 4/4 S 02:37:54 load=7.05
+tip-ts3 rc=0 [TS] PASS T2 storm (rounds=1032 ms=60078) 4/4 S 02:39:24 load=4.70
+v8 hrtimer rc=0 max=176 max=312 max=1973  
+v8 hrtimer rc=0 max=92 max=2950 max=105  
+v8 cpus rc=0  [LP] U1 1 thread 126841 blocks/s (before 126447, after 127236); 8 threads 996796 blocks/s: cpus_used=7.86 of 8
+v8 ntsync rc=0  [LP] W8 monotonic 100 ms timeout                       err=ETIMEDOUT elapsed=100004us -> PASS
+v8 census rc=0  lp_check_census: PASS -- 16 probe [THRS] rows, 1 [PFR] rows, t32_census max 0 us
+v8 vmhold rc=0  lp_check_vmhold: PASS -- 0 long fault row(s), 0 with lw >= 1000 us (max lw 0 us)
+v8 pfpar rc=0  lp_check_pfpar: PASS -- 0 long fault row(s), 0 with lw >= 1000 us (max lw 0 us)
+v8 exitgroup rc=0  
+V8DONE
+
+## fault-logs/csrun2.txt
+before #1 [LP] S1 301 mprotect pairs beside a 1500 ms console stall: max_pair_us=379866 -> FAIL 0 tlbtimeouts
+before #2 [LP] S1 315 mprotect pairs beside a 1500 ms console stall: max_pair_us=492197 -> FAIL 0 tlbtimeouts
+after #1 [LP] S1 754 mprotect pairs beside a 1500 ms console stall: max_pair_us=1223 -> PASS 0 tlbtimeouts
+after #2 [LP] S1 754 mprotect pairs beside a 1500 ms console stall: max_pair_us=1282 -> PASS 0 tlbtimeouts
+after tlbstale t3_linux_probe: PASS — tlbstale reached its done marker
+after conswait t3_linux_probe: PASS — conswait reached its done marker
+after shootwait t3_linux_probe: PASS — shootwait reached its done marker
+after console t3_linux_probe: PASS — console reached its done marker
+CS2DONE
+
+## fault-gates/r3ab.txt
+tree  start 01:34:26
+thrstorm#2 (r3rest, tip): [TS] PASS T2 storm (rounds=818 ms=60092)
+thrstorm integ22 #1 rc=0 [TS] PASS T2 storm (rounds=1156 ms=60521) S1 thrstorm done rc=0, exit 0        : PASS   ([K5] end thrstorm status=0 ms=61507 peak_processes=9) S2 storm >= 60s, rounds > 0          : PASS   (rounds/ms: 1156 60521) S3 wineserver -k, nothing left        : PASS   ([K5] end kill status=0 ms=161; [K5] ps- 01:36:01
+thrstorm tip #1 rc=0 [TS] PASS T2 storm (rounds=899 ms=60063) S1 thrstorm done rc=0, exit 0        : PASS   ([K5] end thrstorm status=0 ms=61307 peak_processes=10) S2 storm >= 60s, rounds > 0          : PASS   (rounds/ms: 899 60063) S3 wineserver -k, nothing left        : PASS   ([K5] end kill status=0 ms=162; [K5] ps-e 01:37:32
+thrstorm integ22 #2 rc=0 [TS] PASS T2 storm (rounds=1080 ms=60069) S1 thrstorm done rc=0, exit 0        : PASS   ([K5] end thrstorm status=0 ms=61165 peak_processes=9) S2 storm >= 60s, rounds > 0          : PASS   (rounds/ms: 1080 60069) S3 wineserver -k, nothing left        : PASS   ([K5] end kill status=0 ms=160; [K5] ps- 01:38:57
+thrstorm tip #2 rc=0 [TS] PASS T2 storm (rounds=961 ms=60056) S1 thrstorm done rc=0, exit 0        : PASS   ([K5] end thrstorm status=0 ms=61351 peak_processes=10) S2 storm >= 60s, rounds > 0          : PASS   (rounds/ms: 961 60056) S3 wineserver -k, nothing left        : PASS   ([K5] end kill status=0 ms=159; [K5] ps-e 01:40:23
+thrstorm integ22 #3 rc=0 [TS] PASS T2 storm (rounds=1157 ms=60032) S1 thrstorm done rc=0, exit 0        : PASS   ([K5] end thrstorm status=0 ms=61024 peak_processes=9) S2 storm >= 60s, rounds > 0          : PASS   (rounds/ms: 1157 60032) S3 wineserver -k, nothing left        : PASS   ([K5] end kill status=0 ms=163; [K5] ps- 01:41:45
+thrstorm tip #3 rc=0 [TS] PASS T2 storm (rounds=949 ms=60063) S1 thrstorm done rc=0, exit 0        : PASS   ([K5] end thrstorm status=0 ms=61195 peak_processes=10) S2 storm >= 60s, rounds > 0          : PASS   (rounds/ms: 949 60063) S3 wineserver -k, nothing left        : PASS   ([K5] end kill status=0 ms=160; [K5] ps-e 01:43:18
+AB done 01:43:18
+k5probes rc=0 [P8ENV] E1 execve env: 40/40 entries intact -> PASS [P8ENV] E2 malformed entries: 0 -> PASS [P8ENV] E3 spawn_ex env: 40/40 entries intact -> PASS [P8ENV] E4 malformed entries: 0 -> PASS [K5P] E5 spawn_ex env > HO_ENV_LEN: rc=-1 errno=7 -> PASS [P8SCM] S1 recvmsg ret=4 errno=0 -> PASS [P8SCM] S2 MSG_CTRUNC=1 fd_delivered=-1 -> PASS [P8SCM] S3 second recvmsg ret=-1 errno=11 -> PASS PAS
+gate_p7_fullscreen rc=0 [P5W] vkcube vkcube-t20s.ppm: clear=1729804 saturated=343796 bbox=(0, 0, 1918, 1078) hash=1480cefafde959c6 [P5W] vkcube vkcube-t50s.ppm: clear=1737740 saturated=335860 bbox=(0, 0, 1918, 1078) hash=d44ce21769677e43 [P5W] vkcube: PASS [P5W] d3d12 d3d12-t20s.ppm: clear=1601848 saturated=310044 bbox=(0, 0, 1918, 1078) hash=b8695e2ecaade819 [P5W] d3d12 d3d12-t50s.ppm: clear=1602
+vn_probe_fencehold rc=0 [LP] ok   H1 40 fenced submits through a 7 s fence hold: failed=0 first_failed=#-1 rc=0 at 0 ms; #32 at 7007 ms, #39 at |[LP] ok   H2 8 busy threads beside the waiting submitter: cpus_used=7.56 of 8|[LP] ok   H3 the last fence retires after the hold rc=0|
+p8_pfx rc=0 == exports.sh: remove /srv/nfs/cp-fault3-p8 ok (non-cp lines unchanged) == removed /srv/nfs/cp-fault3-p8  02:07:54
+gate_p8_lavapipe#1 rc=0    +   230.4 s  02:11:58  main menu OCR at s012-t000206: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   235.9 s  02:12:03  main menu OCR at s013-t000211: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   238.2 s  02:12:05  verdict: main-menu; QEMU stopped, sl 02:12:06
+gate_p8_lavapipe#2 rc=0    +   198.7 s  02:15:29  main menu OCR at s011-t000175: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   204.2 s  02:15:35  main menu OCR at s012-t000180: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   206.2 s  02:15:37  verdict: main-menu; QEMU stopped, sl 02:15:37
+gate_p8_venus rc=0    +   155.2 s  02:18:17  main menu OCR at s010-t000130: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   160.8 s  02:18:23  main menu OCR at s011-t000136: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   162.8 s  02:18:25  verdict: main-menu; QEMU stopped, sl 02:18:25
+ALLDONE 02:18:25
+
+## fencehold reruns on the final tip
+[LP] ok   H1 40 fenced submits through a 7 s fence hold: failed=0 first_failed=#-1 rc=0 at 0 ms; #32 at 7008 ms, #39 at 7008 ms
+[LP] ok   H2 8 busy threads beside the waiting submitter: cpus_used=7.83 of 8
+[LP] ok   H3 the last fence retires after the hold rc=0
+[LP] ok   H1 40 fenced submits through a 7 s fence hold: failed=0 first_failed=#-1 rc=0 at 0 ms; #32 at 7005 ms, #39 at 7005 ms
+[LP] ok   H2 8 busy threads beside the waiting submitter: cpus_used=7.84 of 8
+[LP] ok   H3 the last fence retires after the hold rc=0
+[LP] ok   H1 40 fenced submits through a 7 s fence hold: failed=0 first_failed=#-1 rc=0 at 0 ms; #32 at 7007 ms, #39 at 7007 ms
+[LP] ok   H2 8 busy threads beside the waiting submitter: cpus_used=7.83 of 8
+[LP] ok   H3 the last fence retires after the hold rc=0
+
+## pre-fix probe rows
+-- fault-logs/fh-before.1.log
+[LP] FAIL H1 40 fenced submits through a 7 s fence hold: failed=1 first_failed=#32 rc=-5 at 5043 ms; #32 at 5043 ms, #39 at 7059 ms
+[LP] FAIL H2 8 busy threads beside the waiting submitter: cpus_used=0.98 of 8
+[LP] ok   H3 the last fence retires after the hold rc=0
+-- fault-logs/cs-fault-dev.gate
+[LP] C1 8 children x 3 threads alive 13 s: failed=0 (graded by lp_check_census.py)
+--- host-side check: lp_check_census.py (console kept: /home/sarah/cp/lanes/fault-dev/obj/linux_probe_census.console.log) ---
+lp_check_census: FAIL -- 16 probe [THRS] rows, 1 [PFR] rows, t32_census max 11354 us
+t3_linux_probe: FAIL — census reached its done marker but lp_check_census.py failed
+-- fault-logs/cl-before.1.gate
+[LP] W1 200 one-line writes beside an 8 KiB writer over 15853 ms: p50_us=66273 p99_us=76242 max_us=544683 -> FAIL
+-- fault-logs/cl-before.2.gate
+[LP] W1 200 one-line writes beside an 8 KiB writer over 15645 ms: p50_us=64210 p99_us=366724 max_us=532932 -> FAIL
+-- fault-logs/ct-before.gate
+[LP] K1 clock_gettime PROCESS err=22 THREAD err=22 getcpuclockid=0 its clock err=22 -> FAIL
+[LP] K2 8 spinning threads: process cpu_ms=0 wall_ms=2004 (0.00 x wall) -> FAIL
+[LP] K3 thread clocks: 8 of 8 below 0.5 x wall (min 0 ms) -> FAIL

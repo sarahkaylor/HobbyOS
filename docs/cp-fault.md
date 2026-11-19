@@ -1004,3 +1004,376 @@ python3 -I tools/cp/fault/pfsum.py <serial.txt> --phases <phases.txt>   # [PFS]/
 - **The CPU-time clocks.** `CLOCK_PROCESS_CPUTIME_ID` read 65 s over 2 s of 8
   busy threads (4× wall time per thread), and `CLOCK_THREAD_CPUTIME_ID` read 0 in
   a thread that had been running. Not investigated: `linux_compat` clocks.
+
+# Round 3 (base integ23 = 6d0f3c0f; rebased on integ24 = 654ce1ca)
+
+**Round-3 summary.**
+- **H6-07: fixed.** A host stall no longer loses the Venus device.
+  - SUBMIT2 parks for a fence slot and fails only after 30 s with no fence
+    retired anywhere.
+  - Repro `vn_probe_fencehold`: FAIL (-EIO at 5043 ms; other threads got
+    0.98 of 8 CPUs) → PASS (§20).
+- **H7-14 / H7-17: kernel tasks no longer hold or crowd CPUs.**
+  - The ext2 flusher gave every P9 game boot only 7 of its 8 vCPUs:
+    6.75–6.94 → 7.69–7.90 of 8.
+  - vmzero, idle but READY, was picked first on every wake. That was the
+    real cause of integ23b's thrstorm drop: 899–961 → parity with integ22
+    (1203–1236 vs 1236–1276).
+  - Both now nap BLOCKED. hrtimer's 9–10 ms outliers are gone (§21, §28).
+- **H7-08 / H6-02: the census is out of the timer interrupt** (11 ms → 0 µs
+  in the IRQ). Its row caps are now per sample, so long soaks keep their
+  rows (§22).
+- **H7-11 / H7-12: console cost.**
+  - One wire hold per line: a one-line write beside an 8 KiB writer went
+    from p50 66 ms / max 545 ms to 0.8 / 2.9 ms.
+  - NFS periodic set every 64 MiB.
+  - `[PF*]` detail rows behind the class `pf` (§23).
+- **Clocks: fixed.** PROCESS / THREAD / dynamic CPU clocks used to return
+  EINVAL (§24).
+- **H6-09: fixed.** A shootdown no longer waits out a console write the host
+  holds: consstall 380–492 ms → 1.2 ms (§27).
+  - The first version (a1fe2051) introduced a kernel #PF, which Gate P5
+    caught; fixed in de8df5e1.
+- **fps.** The flusher A/B showed no fps gain (§25). Stability on the final
+  tip: 4/4 Venus fp720 boots clean, world 31.1 / 26.0, prof-fp 35.7 / 32.5.
+
+For this round the lane also owns:
+- the ext2 flusher;
+- the census (`rw_thr_sample`, `virtio_gpu_health_tick`'s emission);
+- the console write path;
+- the NFS periodic rows;
+- `virtio_gpu_3d.c`'s submit2 fence-slot wait;
+- the CPU-time clocks.
+
+## 20. H6-07: a host stall must not lose the Venus device (a460c182, e2f3e17b)
+
+**What happened.** In boot h3-c06 (1 in 20 of H6's cold boots), a ~4 s host
+stall kept Venus fences from retiring.
+- With all 32 fence slots in flight, `virtio_gpu_3d_submit2` spun with
+  `pause` and returned -EIO after 5 s ("no fence slot for 5 s").
+- vkd3d reported `vr -4` (DEVICE_LOST), and the game crashed with status 768.
+
+**Repro (a460c182).**
+- MODE=test kernels treat an unfenced 8-byte SUBMIT2 `{0x4A4E4937 "7INJ", ms}`
+  as a fence hold: for that long every retired fence stays in flight.
+- `vn_probe_fencehold` (run under `tools/cp/venus/run_probe.sh`) holds 7 s,
+  then makes 40 fenced submits while one busy thread per CPU counts work.
+
+| vn_probe_fencehold (strix) | H1: 40 submits through a 7 s hold | H2: CPUs left to 8 busy threads | H3: last fence retires |
+|---|---|---|---|
+| before (a460c182) | **FAIL**: #32 → -EIO at 5043 ms, "no fence slot for 5 s" | **FAIL**: 0.98 of 8 | ok |
+| e2f3e17b, run 1 | PASS: #32 at 7008 ms | PASS: 7.70 | ok |
+| e2f3e17b, run 2 | PASS: #32 at 7007 ms | PASS: 7.69 | ok |
+
+**The fix (e2f3e17b).**
+- The wait spins for 1 ms, then parks the thread (`GPU_ABI_PARKED`, the
+  FENCE_WAIT2 mechanism). The fence interrupt's wake or a 10 ms re-check
+  wakes it, and the ioctl restarts.
+- It fails only when no fence has retired anywhere for 30 s with every slot
+  in flight (Linux allows about 10 s before a GPU reset; here the host owns
+  the GPU).
+- At 5 s it prints one "every fence slot in flight for 5 s; waiting" row.
+- A long stream already sent ahead of its fence cannot be restarted. That
+  case halts (`safe_wfi`) instead of spinning.
+- The old spin left the other threads only 0.98 of 8 CPUs: during a host
+  stall the whole guest stopped, not just the submitter.
+- `vn_probe_transport`: the 100-fence burst passes. Its one FAIL,
+  "scanout_blob reserved -> ENOSYS", is a stale check: P7 (6705c360)
+  implemented SCANOUT_BLOB.
+
+## 21. H7-14: the ext2 flusher's vCPU (22d555f6)
+
+**The fix.** The patch proposed in round 2: the flusher's 50 ms wait halts
+only while no other thread is READY, and it yields after every wake.
+
+**k/n.** `linux_probe_cpus` with an ext2 data disk, alternating, same tree
+with and without the commit:
+
+| side | runs | cpus_used (of 8) | PASS |
+|---|---|---|---|
+| without 22d555f6 | 6 | 6.75–6.94 | **0/6** |
+| 22d555f6 | 6 | 7.60–7.74 | **6/6** |
+
+**The 1-in-5 run that read 6.91.** It did not recur in these 6 runs, or in 5
+more of the patch alone (§19 had 4/5). The suspected cause:
+- vmzero refilling its pool while the probe measured. That run's
+  single-thread rate moved 4 % between its "before" and "after" samples, so
+  the host was loaded.
+- vmzero is READY between turns and competes with user threads like any
+  other runnable entity.
+
+I tried "zero only when no thread is READY" (idle priority). With no failing
+run to show it against, I left it out of the branch (§26).
+
+**1ff5236e, the flusher naps.** The flusher still stayed READY through its
+50 ms wait: the same always-READY kernel task that cost thrstorm 20 %
+through vmzero (§28). It now naps the 50 ms BLOCKED with a deadline
+(`process_nap_ms`).
+- linux_probe_cpus with the data disk: PASS 3/3, 7.69–7.90 of 8 (the
+  yielding version gave 7.60–7.74).
+- ext2_gate, ext2w_gate and reg_gate PASS.
+- The fp720 A/B above used the yielding version (22d555f6). The 4
+  stability boots (§25) run the final tip.
+
+## 22. H7-08 / H6-02: the census leaves the timer interrupt (ee1c77fe)
+
+- **What moved.** The 5 s census used to print from CPU 0's PIT interrupt:
+  `[THRS]` rows (`rw_thr_sample`), `virtio_gpu_health_tick`, and the
+  `[THRW*]` rows of the wait sampler. That was 13–99 ms with interrupts off
+  per census, once 371 ms.
+  - While vmzero runs, the interrupt now only sets `census_due` and snapshots
+    the wait window. vmzero runs exactly while a Linux-ABI process is alive,
+    and those are the only groups the census covers.
+  - vmzero prints both, and yields to any READY thread between rows.
+  - Without vmzero (boot, native-only waves) the interrupt prints as before.
+- **Why not a separate task.** I first tried a dedicated census task, always
+  READY. hrtimer's L rows then got 9–10 ms outliers in 8 of 9 rows; head has
+  them in 2 of 9. With the census inside vmzero: 2 of 9.
+- **H6-02, the row caps.** The per-boot caps (`[THRS]` 4000 rows, `[THRW]`
+  3000) are now per-sample bounds: 32 groups and CPW_GROUPS groups per 5 s. A
+  long soak keeps its rows to the end.
+
+| linux_probe_census (8 children × 3 threads, 13 s) | probe `[THRS]` rows | t32_census max | verdict |
+|---|---|---|---|
+| before (e2f3e17b) | 16 | **11 354 µs** | FAIL |
+| ee1c77fe (3 runs) | 16 | **0 µs** | PASS 3/3 |
+
+## 23. H7-11 / H7-12: console cost (c54abdf6, 0486f3a7, 5c5e343c)
+
+- **c54abdf6: one wire hold per line.** `cons_user_write` used to hold the
+  wire, with interrupts off, for a whole `write()` window (up to 8 KiB). It
+  now splits the window at newlines and sends each line under its own hold.
+  Lines stay whole; another writer's line may land between two of ours.
+
+  | linux_probe_conslat (8 KiB writer beside 200 one-line writes) | p50 | max | verdict |
+  |---|---|---|---|
+  | before | 64–66 ms | 533–545 ms | FAIL 2/2 |
+  | c54abdf6 | 0.75–0.84 ms | 1.3–2.9 ms | PASS 2/2 |
+
+  `lp_check_console` still PASSes: rows intact, 0 interleaved, 0 torn.
+  conswait PASSes too.
+- **0486f3a7: the NFS periodic set every 64 MiB** of READ, instead of every
+  8 MiB. That set was 41 % of the console.
+- **5c5e343c: the verbosity recommendation, adopted.**
+  - New console class `pf` (`CONS_D_PF`), checked at the source.
+  - With it: 10 s row sets with `[PFH]`/`[PFI]`/`[PFS]`/`[PFR]`/`[PFT]` and
+    the `[PFX]` long-fault rows.
+  - Without it: a `[PFK]` + `[PFL]` summary every 60 s.
+  - MODE=test kernels default to `pf`, because the probes' console checks
+    read these rows. Game kernels default to off.
+  - `tools/cp/fault/fp.sh` sets `CP_DIAG=pf`. pfx_gate and the probes run on
+    test kernels, so they get it by default.
+  - pfstat, pfpar, vmhold, shootwait and conswait checks PASS.
+
+## 24. The CPU-time clocks (91bc10b6)
+
+- **The bug.** `clock_gettime` returned -EINVAL for PROCESS_CPUTIME_ID,
+  THREAD_CPUTIME_ID and the dynamic CPU clocks. Round 2's "65 s / 0" readings
+  were the probe's own unwritten stack.
+- **The fix.** They now return the group's or the thread's user + system
+  time from the rusage totals, including the running slice.
+
+| linux_probe_cputime (8 spinning threads, 2 s) | K1 (calls return 0) | K2 process / wall | K3 thread clocks |
+|---|---|---|---|
+| before | FAIL (EINVAL ×3) | 0 | 0 of 8 > 0.5 × wall |
+| 91bc10b6 (2 runs) | PASS | 7.87–7.90 (≤ 8) | 8 of 8, min 1959 of 2004 ms |
+
+## 25. A/B and stability (round 3)
+
+**Flusher A/B (H7-14).**
+- base = the tip without 22d555f6 (`~/cp/lanes/fault-base`); lane = the tip
+  (`~/cp/lanes/fault`).
+- fp720 with audio, alternating, 4 each, on strix after integ23. My gate
+  batch ran beside some of them: r3-lane-fp1 overlapped the tip's thrstorm
+  runs.
+
+| run | world fps med / p10 | prof-fp med / p10 | drop | zeros | fault ms | anon µs | lw ms | vmlw ms | shoot ms | `[PFX]` lw ≥ 1 ms | stalls |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| base-fp1 | 22.4 / 19.8 | 29.4 / 28.5 | 3 | 4 | 5720 | 2.4 | 174 | 1346 | 1259 | 4 | 0 |
+| base-fp2 | 29.2 / 25.2 | 31.0 / 30.3 | 2 | 3 | 5706 | 2.3 | 182 | 1392 | 1067 | 0 | 0 |
+| base-fp3 | 30.5 / 26.6 | 35.8 / 30.4 | 3 | 5 | 5359 | 2.2 | 144 | 1310 | 1121 | 8 | 0 |
+| base-fp4 | 27.7 / 23.9 | 29.7 / 24.5 | 2 | 4 | 5133 | 2.0 | 156 | 1327 | 854 | 0 | 1 |
+| lane-fp1 | 16.6 / 15.0 | 24.4 / 19.7 | 3 | 4 | 5099 | 2.0 | 173 | 1128 | 860 | 5 | 0 |
+| lane-fp2 | 23.6 / 21.7 | 28.5 / 27.7 | 3 | 4 | 4687 | 1.8 | 151 | 1092 | 750 | 11 | 1 |
+| lane-fp3 | 26.7 / 24.9 | 32.8 / 31.4 | 3 | 4 | 4903 | 1.9 | 176 | 1207 | 719 | 16 | 0 |
+| lane-fp4 | 29.9 / 22.7 | 32.9 / 31.6 | 2 | 3 | 5005 | 1.9 | 176 | 1138 | 726 | 18 | 1 |
+| **mean base** | 27.4 / 23.9 | 31.5 / 28.4 | 2.5 | 4.0 | 5480 | 2.2 | 164 | 1344 | 1075 | 3.0 | 0.25 |
+| **mean lane** | 24.2 / 21.1 | 29.6 / 27.6 | 2.8 | 3.8 | 4924 | 1.9 | 169 | 1141 | 764 | 12.5 | 0.5 |
+
+- **fps did not improve with the vCPU back.** The lane mean is lower, but
+  that comes from lane-fp1 (16.6). It ran beside my thrstorm batch; without
+  it the lane averages 26.7 / 23.1, against base 27.4 / 23.9. Within the
+  noise of this host: no gain shown.
+- Fault time (−10 %), all-site vm_lock wait (−15 %) and shootdown time
+  (−29 %) are lower.
+- Faults that waited 1 ms or more for vm_lock went up: 3 → 12.5 per boot.
+  With 8 vCPUs instead of 7 the game has more concurrency.
+- One plausible reason fps did not move: the 8th vCPU was halted before, and
+  that left a host core to QEMU's render threads. On this host (load 6–14)
+  the game is GPU- or host-bound, not guest-CPU-bound.
+**Stability on the final tip (de8df5e1).** 4 Venus fp720 boots on an idle
+host (integ24 done), then one P8 Venus boot:
+
+| run | world fps med / p10 | prof-fp med / p10 | drop | zeros | fault ms | anon µs | vmlw ms | shoot ms | stalls | `[TLBTIMEOUT]` | #DE |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| final-fp1 | 34.4 / 27.3 | 37.5 / 34.9 | 2 | 3 | 5303 | 2.1 | 1150 | 813 | 0 | 0 | 0 |
+| final-fp2 | 30.0 / 27.9 | 36.3 / 34.8 | 3 | 4 | 5204 | 2.0 | 1352 | 826 | 0 | 0 | 0 |
+| final-fp3 | 32.1 / 25.2 | 33.6 / 26.2 | 2 | 4 | 5964 | 2.3 | 1470 | 841 | 0 | 0 | 0 |
+| final-fp4 | 27.9 / 23.7 | 35.3 / 34.3 | 2 | 4 | 5277 | 2.1 | 1533 | 797 | 1 | 0 | 0 |
+| **mean** | **31.1 / 26.0** | **35.7 / 32.5** | 2.2 | 3.8 | 5437 | 2.1 | 1376 | 819 | 0.25 | 0 | 0 |
+
+- All 4 finished (script-stop) with no crash. P8 Venus reached the main menu
+  at t=130 s.
+- An earlier set of 4 on a1fe2051 (before the de8df5e1 fix) was also clean:
+  27.6 / 24.7.
+- These ran on a quieter host than the A/B, so they are not an A/B arm.
+  Still, they are the best fp720 numbers in this lane (round-2 lane 26.4 /
+  23.3 world).
+
+
+## 26. Findings, gates and what is left (round 3)
+
+| ID | finding | rate (k/n) | status |
+|---|---|---|---|
+| H6-07 | a host stall of 5 s or more (fences not retiring) made submit2 fail with EIO → DEVICE_LOST → game crash; the wait spun, taking the guest's CPUs | 1/20 H6 cold boots; repro 1/1 FAIL (fencehold) | fixed e2f3e17b (fencehold PASS 2/2) |
+| H7-14 | the ext2 flusher held one of the 8 vCPUs in every P9 game boot | cpus with the data disk 0/6 PASS | fixed 22d555f6 (6/6 PASS) |
+| H7-08 | the 5 s census printed from CPU 0's PIT interrupt (11–371 ms with interrupts off) | census probe 1/1 FAIL | fixed ee1c77fe (PASS 3/3, 0 µs in the interrupt) |
+| H6-02 | per-boot caps on `[THRS]` (4000) and `[THRW]` (3000) rows: a long soak lost its last 20 min | every soak over ~40 min | fixed ee1c77fe (per-sample bounds) |
+| H7-11 | a user write() held the console wire, with interrupts off, for its whole window | conslat 2/2 FAIL | fixed c54abdf6 (PASS 2/2) |
+| H7-12 | NFS periodic rows 41 % of the console; `[PF*]` detail rows on by default | every boot | fixed 0486f3a7 (64 MiB), 5c5e343c (class `pf`) |
+| H7-15 | CPU-time clocks returned EINVAL, so callers read garbage | cputime 1/1 FAIL | fixed 91bc10b6 (PASS 2/2) |
+| H7-16 | an always-READY kernel task slows wake-ups of threads whose timer fires on its CPU: hrtimer L rows get 9–10 ms outliers | 8/9 rows with a separate census task, 2/9 on head | fixed cb15c820 (vmzero naps off the run queue; 0/6 rows) |
+| H7-17 | thrstorm T2 rounds −20 % since round 2 (integ23b 785–909): an idle-but-READY vmzero was picked first on every wake | paired 3/3 (integ22 1080–1157 vs tip 899–961); bisect: vmzero | fixed cb15c820 (1121–1169 vs 989–1032) |
+| H6-09 | a shootdown waited out a console write the host held for seconds ([TLBTIMEOUT], a 6.4 s fault) | 1/10 integ22 boots; consstall FAIL 2/2 | fixed a1fe2051 + de8df5e1 (PASS) |
+| H7-18 | a1fe2051's unconditional CR3 reload re-walked a dead process's freed root: kernel #PF in lapic_send_eoi | Gate P5 1/3 on a1fe2051 | fixed de8df5e1 (P5 4/4 PASS) |
+
+**Gates (round 3).** Raw rows: `gates-r3-strix.txt`. All of these run on
+the final code (de8df5e1) unless the row names another commit:
+
+| gate | result |
+|---|---|
+| build / unit | PASS / 464/0 |
+| probes | **80/80**: round 2's 76 + census, conslat, cputime, consstall, each with its check. exitgroup ×3 PASS |
+| console probes | lp_check_console PASS (rows intact, 0 interleaved, 0 torn); conswait, conslat, consstall ×2 PASS |
+| sigmask-gate | 8/8 |
+| Gate P2 / P4 / P5 | PASS / PASS / **4/4** (on a1fe2051: 1/3 FAIL, the kernel #PF fixed by de8df5e1) |
+| P6 Venus / P7 fullscreen / k5probes | PASS / PASS / PASS |
+| thrstorm | ×3 interleaved with integ22, S1–S4 PASS (§28) |
+| vn_probe_fencehold | H1 4/4 (#32 at 6999–7008 ms); H2 3/4 (7.83, 7.84, 7.83; the gate run read 7.49, under the 7.5 bound) |
+| castscan / ARM | 0 new sites / PASS |
+| Venus fp720 ×4 + P8 Venus | 4/4 clean, 0 `[TLBTIMEOUT]`, 0 #DE; menu at t=130 s (§25) |
+| ext2_gate, ext2w_gate, reg_gate, cpus with the data disk | PASS on 1ff5236e (the flusher nap) |
+| exec_gate, rsize_guard (G12), nfs_proto, host_tests 40/42 + kconsole, rsize_scan, panic allowlist, pfx_gate, ext2_test_host | PASS on cb15c820 (de8df5e1 and 1ff5236e touch none of their code paths) |
+| P8 lavapipe ×2 | menu at t=221 / 175 s (on a1fe2051, beside the stability boots) |
+
+
+**What is left.**
+- **Kernel tasks that wait.** vmzero and the ext2 flusher now nap BLOCKED
+  with a deadline (`process_nap_ms`). Any other kernel task that halts or
+  yields in a loop has the same two costs: it holds a CPU, or it is picked
+  first. virtio_blk's stress probe, a test-only task, still halts.
+- **vmzero idle priority.** Zeroing only while no thread is READY is written
+  but not merged: no failing run to show it against.
+- **The stale `vn_probe_transport` check** (`scanout_blob reserved -> ENOSYS`).
+  The probe belongs to the Venus lane.
+- `[PFE]` (vm.c fault-exit rows) is not in the `pf` class yet.
+
+## 27. H6-09: a shootdown waited out a host-stalled console write (91c135c1, a1fe2051)
+
+- **What happened.** h3-d05 (integ22, 1 of 10 boots) hit a host I/O stall.
+  - CPU 3 held the console wire for 2 s (`[CONS] takeover holder=3
+    watched_us=2000003`).
+  - A shootdown to CPU 3 went unacked (`[TLBTIMEOUT] … unacked cpus=0x8`),
+    and one anon fault took 6.4 s.
+- **Round 2 did not cover it.** 1dbad3fe polls for owed flushes between
+  bytes, but a vCPU stuck inside one port exit (QEMU's serial write blocked
+  on the host) runs nothing at all.
+  - PV flush does not catch it either: a vCPU stuck in a user-space exit is
+    not "preempted" in the steal-time record.
+- **Repro (91c135c1).**
+  - `cons_hw_tx` marks, per CPU, that it is inside a console write.
+  - MODE=test kernels treat a user line `[LPSTALL] <ms>` as a stall inside
+    that window, with interrupts off and no poll.
+  - `linux_probe_consstall` prints `[LPSTALL] 1500` from one thread and
+    mprotects from another.
+- **The fix (a1fe2051).**
+  - After 1 ms the shooter stops waiting for a laggard that is inside
+    `cons_hw_tx`. Its pending word stays set.
+  - `cons_hw_tx` drops its mark before its last poll, so the CPU flushes
+    before it leaves. Nothing in there touches a user mapping.
+  - `x64_tlb_service` now reloads whatever CR3 holds, because an owed flush
+    can be settled after the next shootdown has changed `x64_tlb_root`.
+
+| linux_probe_consstall | pairs in 2 s | max mprotect pair | verdict |
+|---|---|---|---|
+| before (91c135c1) | 301, 315 | 380 ms, 492 ms | FAIL 2/2 |
+| a1fe2051 | 754, 754 | 1.2 ms, 1.3 ms | PASS 2/2 |
+
+tlbstale, conswait, shootwait and the console probe PASS. In a whole-host
+stall the stalled CPU itself still waits for the host, but the rest of the
+guest no longer waits with it.
+
+**A mistake in a1fe2051, caught by the final gates (de8df5e1).**
+- So that an owed flush would still be done after the next shootdown
+  replaced `x64_tlb_root`, a1fe2051 made `x64_tlb_service` reload whatever
+  CR3 held.
+- Gate P5 run 3 of 3 then took a kernel #PF (vector 14, error 2, CPU 5) in
+  `lapic_send_eoi`, right after `x64_tlb_service`. services.exe and
+  winedevice.exe were exiting: a CPU still sitting on a dead process's freed
+  root re-walked it on the reload, and the next LAPIC EOI write found no
+  mapping.
+- Fix: the shooter records the root together with the flush it leaves owed
+  (`x64_tlb_owed_root`, taken back if the target flushed meanwhile).
+  `x64_tlb_service` reloads only when CR3 is that root, or for an ordinary
+  pending flush `x64_tlb_root`, as before.
+- Every round-3 gate after this point ran on de8df5e1 (§26).
+
+## 28. thrstorm T2 rounds (integ23b 785–909 vs integ19–22 1062–1250): vmzero (cb15c820)
+
+**Confirmed.** Paired runs, interleaved, under equal load, one slot.
+
+| run (strix) | rounds | | |
+|---|---|---|---|
+| integ22 (010e9fd2) | 1156 | 1080 | 1157 |
+| tip before cb15c820 | 899 | 961 | 949 |
+
+vm_lock is not the bottleneck: per 10 s the wait is about 30 ms and the
+hold about 130–140 ms on both sides. The tip simply takes fewer lock
+operations (0.83–0.93 M vs 1.1 M per 10 s), because it does less work.
+
+**Bisect on the tip.**
+
+| variant | rounds |
+|---|---|
+| without vmzero | 1088, 1000 |
+| without the page-table unhook | 828, 801 |
+| tip | 797, 892 |
+
+So it is vmzero.
+- With nothing to do (pool full) vmzero stayed READY, and halted only while
+  no thread was READY.
+- An idle CPU's pick scan starts low, and vmzero has a low pid, so it found
+  vmzero first on every wake and paid a switch through it.
+- A vCPU halted in vmzero was never kicked for a woken thread. The same
+  mechanism gave hrtimer its 9–10 ms L outliers.
+- Two attempts made it worse and were dropped:
+  - kicking a vCPU halted in vmzero as if idle: 608, 632;
+  - plus picking vmzero last: 583, 600.
+
+**The fix (cb15c820).** With nothing to do, vmzero naps 5 ms BLOCKED with a
+deadline (`process_nap_ms`). schedule() covers the deadline with a one-shot
+timer, and `process_check_sleeping` ends the nap.
+
+| run (interleaved, one slot) | rounds | | |
+|---|---|---|---|
+| cb15c820 | 1121 | 1169 | 1157 |
+| tip before it | 1020 | 989 | 1032 |
+
+- Back at integ22's level.
+- hrtimer L rows: max 3.0 ms, with no 9–10 ms outliers (head had them in 2 of
+  9 rows).
+- ntsync W8: 100 004 µs. cpus: 7.86 of 8.
+- census, vmhold, pfpar and exitgroup PASS.
+- **On the final tip (de8df5e1), interleaved with integ22, idle host (load
+  2.6–3.3).** integ22 1236 / 1270 / 1276; tip 1203 / 1232 / 1236 (−3 %),
+  S1–S4 PASS on all six.
