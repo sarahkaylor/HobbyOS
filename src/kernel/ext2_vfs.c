@@ -304,14 +304,6 @@ static void flusher_guard_check(volatile uint64_t *g) {
                       (unsigned long)g_flusher_pid);
 }
 
-static int flusher_others_ready(void) {
-  for (int i = 1; i < MAX_PROCESSES; i++) {
-    struct process *q = i != g_flusher_pid ? process_get_pcb(i) : 0;
-    if (q && q->state == PROC_STATE_READY)
-      return 1;
-  }
-  return 0;
-}
 
 static void flusher_task(void *arg) {
   (void)arg;
@@ -356,12 +348,11 @@ static void flusher_task(void *arg) {
        CPUs from every user thread for as long as the volume was mounted
        (linux_probe_cpus with an ext2 data disk: 6.85 of 8 CPUs).  Halt
        only while no thread is READY, then give the CPU back. */
-    uint64_t t0 = timer_get_ms();
-    while (timer_get_ms() - t0 < 50) {
-      if (!flusher_others_ready())
-        safe_wfi();
-      arch_yield();
-    }
+    /* H7-fault round 3 (H7-17): and off the run queue -- a READY flusher is
+       what an idle CPU's pick scan finds first (thrstorm, vmzero: ac0e1fc8):
+       nap the 50 ms BLOCKED with a deadline. */
+    extern void process_nap_ms(uint32_t ms);
+    process_nap_ms(50);
     flusher_guard_check(guard);
     __atomic_fetch_sub(&g_fl_inside, 1, __ATOMIC_SEQ_CST);
   }
