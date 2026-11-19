@@ -759,13 +759,39 @@ def read_value(b, name, row, labels=None, table=None):
     return t
 
 
+# round 4: what a menu / hub / dialog screen reads (any of these: not the world)
+MENU_SCREEN_RX = (r"RESUME|EXIT\s+TO\s+MAIN|QUIT\s*GAME|SAVE\s+GAME|SKIP\s+TIME|DATABASE|STREET\s+CRED|"
+                  r"Track\s+waypoint|BACKPACK|apply\s+these|LOAD\s*GAME|Quicks\w{1,2}ve|SETTINGS|"
+                  r"Windowed\s+Mode|Quick\s+Preset|VSync|Master\s+Volume|Texture\s+Quality|Zoom\s*out|"
+                  r"UPPER\s+BODY|restore\s+def|sure\s+you\s+want")
+
+
+def is_world(p, t=None):
+    """round 4 (h4-p02): the HUD phrases of WORLD_RX are missed by tesseract on
+    some street views, and recover() then toggled the pause menu with Esc
+    (journal 2/3 "back NO").  World = WORLD_RX, or the hint bar reading
+    Crouch / Draw Weapon, or no menu words at all, in both OCR passes"""
+    t = boot_ocr(p) if t is None else t
+    if re.search(NOT_WORLD_RX + r"|RESUME|apply", t, re.I | re.S) or re.search(MENU_SCREEN_RX, t, re.I):
+        return False
+    if re.search(WORLD_RX, t, re.I | re.S):
+        return True
+    h = region_ocr(p, ("hints",))
+    if re.search(r"Crouch|[DO]raw\s*Weapon|Weapon\s*\[", h, re.I):
+        return True
+    return not re.search(MENU_SCREEN_RX, ocr(p, scale=2), re.I)
+
+
 def recover(b, name="rc"):
     """back to the world from whatever menu or dialog is up: Esc (which also
     cancels an apply prompt) until the HUD's input hints show"""
+    # its own drive state: the Esc it presses opens / closes the pause menu, whose
+    # static frames are not world hitches (h4-p02's two "walk" gaps were this)
+    b.state("recover")
     for i in range(6):
         p = b.shot(f"{name}{i}", "wait 1")
         t = boot_ocr(p)
-        if re.search(WORLD_RX, t, re.I | re.S) and not re.search(NOT_WORLD_RX + r"|RESUME|apply", t, re.I | re.S):
+        if is_world(p, t):
             log(f"recover: in the world after {i} steps")
             return True
         if re.search(r"apply\s+these\s+changes", t, re.I):
@@ -1069,7 +1095,7 @@ def walk_seg(b, k, prev, tally):
         # stuck against something: turn about 90-180 degrees and try again
         p = b.shot(f"pt{k}", f"look {700 + 300 * (k % 3)} 0 30 16", "down shift", "hold w 2500", "up shift")
         tally.add("unstuck", motion(prev, p) >= 6)
-    in_w = bool(re.search(WORLD_RX, boot_ocr(p), re.I | re.S))
+    in_w = is_world(p)
     if k % 5 == 0:
         log(f"PLAY walk {k}: motion {m:.1f} world-hud {'yes' if in_w else 'no'}")
     return p
@@ -1214,15 +1240,28 @@ def exit_settings(b, tally, a):
         g = graphics_preset(b, "pqs")
         t0 = time.time() if g else None
         log(f"PLAY exit settings: Quick Preset -> {g}")
+    elif a.exit_setting == "vsync":
+        # a setting that does not move the picture: after a Resolution apply the
+        # pause menu's rows are read at the wrong place (h4-p03: 1024x768 in the
+        # 1280x720 X screen, the seek "found" QUIT GAME on the world)
+        if settings_open(b, "pqs"):
+            cur = read_value(b, "pqsv", "VSync")
+            want = r"\bOff\b" if re.search(r"\bOn\b", cur) else r"\bOn\b"
+            t0 = video_set(b, "VSync", want, "pqsr")
+            log(f"PLAY exit settings: VSync {cur[:30]!r} -> /{want}/ ({'applied' if t0 else 'NOT applied'})")
     else:
         if settings_open(b, "pqs"):
             cur = read_value(b, "pqsv", "Resolution")
             want = r"1280\s*x\s*720" if not re.search(r"1280\s*x\s*720", cur) else r"1024\s*x\s*768"
             t0 = video_set(b, "Resolution", want, "pqsr")
             log(f"PLAY exit settings: Resolution {cur[:30]!r} -> /{want}/ ({'applied' if t0 else 'NOT applied'})")
-    b.shot("pqsz", "key esc", "wait 2")
+    p = b.shot("pqsz", "key esc", "wait 2")
     b.state("quit:settings")
     # the Settings screen closes back onto the pause menu: QUIT GAME from there
+    # (unless the Esc went on to the world)
+    if is_world(p) or not re.search(PAUSE_RX, boot_ocr(p), re.I):
+        log("PLAY exit settings: not on the pause menu after the Esc; QUIT through pause_open")
+        return quit_now(b, "settings")
     if not seek(b, PAUSE, "QUIT GAME", name="pqsq"):
         return quit_now(b, "settings-fallback")
     p, _ = b.until("pqsc", r"sure.{0,20}quit", 15, "exit_ok", "key ret", "wait 2")
@@ -1280,12 +1319,15 @@ def play(b, a):
     b.state("world")
     t0 = time.time()
     prev = b.shot("p0", "wait 1")
-    k = drive_s = 0
+    k = drive_s = mk = 0
     while time.time() - t0 < a.minutes * 60:
         if not b.ended() and a.vehicle_every and k % a.vehicle_every == a.vehicle_every - 1:
             drive_s += vehicle_seg(b, k, tally, a.drive_s)
         elif k % 3 == 2:
-            menu_seg(b, k, tally)
+            # its own counter: with 3 menus, k % 3 == 2 picked the journal every
+            # time (h4-p02: journal 13, map 0, inventory 0)
+            menu_seg(b, mk, tally)
+            mk += 1
         else:
             prev = walk_seg(b, k, prev, tally)
         k += 1
@@ -1326,7 +1368,7 @@ def main():
     ap.add_argument("--drive-s", type=float, default=60, help="play: seconds per drive")
     ap.add_argument("--exit", default="pause", choices=["pause", "vehicle", "load", "settings", "none"])
     ap.add_argument("--no-wiggle", action="store_true", help="seek: never move the pointer (cp-hunt H6-04)")
-    ap.add_argument("--exit-setting", default="resolution", choices=["resolution", "preset"])
+    ap.add_argument("--exit-setting", default="resolution", choices=["resolution", "preset", "vsync"])
     a = ap.parse_args()
     b = Boot(a.run, max_s=a.max_s)
     LIST_STEPS[0] = a.list_steps
