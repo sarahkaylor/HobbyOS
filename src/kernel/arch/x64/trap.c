@@ -5170,6 +5170,16 @@ static void general_interrupt_inner(struct trap_frame *tf) {
         if (++thr_ticks >= 500) {
           uint64_t tc0 = pf_tsc();
           thr_ticks = 0;
+          /* H7-fault round 3 (H7-08): while the census task runs (a
+             Linux-ABI process is alive) it prints the census; the IRQ only
+             asks.  Otherwise (boot, native-only waves) as before. */
+          extern int census_task_running(void);
+          extern void census_kick(void);
+          if (census_task_running()) {
+            census_kick();
+            pfstat_tseg(PFR_T32_CENSUS, pf_tsc() - tc0);
+            goto census_done;
+          }
           rw_thr_sample();
           /* M6/L72: the display mode is the kernel's, and a lost mode is
              silent from inside the guest (presents still "work").  Read the
@@ -5181,6 +5191,7 @@ static void general_interrupt_inner(struct trap_frame *tf) {
               virtio_gpu_health_tick();
           }
           pfstat_tseg(PFR_T32_CENSUS, pf_tsc() - tc0);
+        census_done:;
         }
       }
 

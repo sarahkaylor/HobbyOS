@@ -5079,15 +5079,22 @@ void process_signal_resume_deliver(struct process *p, struct trap_frame *tf) {
  * and `hw` is the high-water mark since boot.  This is read-only; vm_as_census
  * copies its numbers out under vm_lock so the scan cannot race a munmap.
  */
+#ifdef __x86_64__
+static void census_yield_point(void); /* the census task (below) */
+#else
+static inline void census_yield_point(void) {}
+#endif
 void rw_thr_sample(void) {
   static int hw[MAX_PROCESSES];
-  static int rows;
+  /* H6-02: was a 4000-row cap per boot, which a 60-minute soak spent by
+     minute 40.  Now a bound per sample (5 s): at most 32 groups' rows. */
+  int rows = 0;
   int slots_used = 0;
   for (int i = 1; i < MAX_PROCESSES; i++) {
     if (proc_table[i].state != PROC_STATE_FREE)
       slots_used++;
   }
-  for (int i = 1; i < MAX_PROCESSES && rows < 4000; i++) {
+  for (int i = 1; i < MAX_PROCESSES && rows < 32; i++) {
     struct process *g = &proc_table[i];
     if (g->is_thread || g->state == PROC_STATE_FREE ||
         g->state == PROC_STATE_THREAD_DONE)
@@ -5149,6 +5156,7 @@ void rw_thr_sample(void) {
     kl_s(&kl, g->name);
     kl_c(&kl, '\n');
     kl_emit(&kl);
+    census_yield_point(); /* H7-08: the task gives the CPU to a waiting thread */
   }
   /* L67: one device-state row per sample (not per process), so the block
      layer's state has the same 5 s timeline as the process census. */
@@ -5186,13 +5194,27 @@ struct cpw_group {
   struct { int nr; uint32_t n; } ks[CPW_NR];
   uint32_t kern, ktrap; /* ktrap: in the kernel but not in a syscall (fault, IRQ) */
 };
-static struct cpw_group cpw_g[CPW_GROUPS];
-static uint16_t cpw_run[MAX_PROCESSES], cpw_ready[MAX_PROCESSES], cpw_kern[MAX_PROCESSES],
-    cpw_ktrap[MAX_PROCESSES];
 /* per thread: its in-kernel ticks by last syscall, top 4 */
 #define CPW_TKS 6
-static struct { int16_t nr; uint16_t n; } cpw_tks[MAX_PROCESSES][CPW_TKS];
-static uint32_t cpw_ticks;
+/* H7-fault round 3 (H7-08): the sampler's window, live (written every tick
+ * by the PIT IRQ) and a snapshot taken at the 5 s boundary, which the census
+ * task prints outside the interrupt (census_task below). */
+struct cpw_state {
+  struct cpw_group g[CPW_GROUPS];
+  uint16_t run[MAX_PROCESSES], ready[MAX_PROCESSES], kern[MAX_PROCESSES], ktrap[MAX_PROCESSES];
+  struct { int16_t nr; uint16_t n; } tks[MAX_PROCESSES][CPW_TKS];
+  uint32_t ticks;
+};
+static struct cpw_state cpw_live, cpw_snap;
+static volatile int cpw_snap_ready;
+static uint32_t cpw_snap_lost;
+#define cpw_g cpw_live.g
+#define cpw_run cpw_live.run
+#define cpw_ready cpw_live.ready
+#define cpw_kern cpw_live.kern
+#define cpw_ktrap cpw_live.ktrap
+#define cpw_tks cpw_live.tks
+#define cpw_ticks cpw_live.ticks
 
 static struct cpw_group *cpw_find(int tgid) {
   for (int i = 0; i < CPW_GROUPS; i++)
@@ -5224,6 +5246,10 @@ static void cpw_pct(struct kline *kl, uint32_t n, uint32_t ticks) {
 }
 
 volatile int cpw_tick_user; /* C1-k7: trap.c sets it: the tick came from user mode */
+struct cpw_state;
+static void cpw_emit(struct cpw_state *S);
+static void cpw_reset(void);
+static volatile int census_task_on; /* a task prints the census (census_attach) */
 void cp_wait_sample(int emit) {
   cpw_ticks++;
   for (int i = 1; i < MAX_PROCESSES; i++) {
@@ -5342,13 +5368,42 @@ void cp_wait_sample(int emit) {
     }
   }
   if (!emit) return;
-  static int rows;
-  for (int gi = 0; gi < CPW_GROUPS && rows < 3000; gi++) {
+  if (census_task_on) {
+    /* The census task prints it (no console output in the PIT IRQ). */
+    if (!cpw_snap_ready) {
+      __builtin_memcpy(&cpw_snap, &cpw_live, sizeof cpw_snap);
+      __atomic_store_n(&cpw_snap_ready, 1, __ATOMIC_RELEASE);
+    } else {
+      cpw_snap_lost++; /* the task has not printed the last one yet */
+    }
+  } else {
+    cpw_emit(&cpw_live);
+  }
+  cpw_reset();
+}
+
+/* Print one window's rows (H6-02: a per-window bound, not a per-boot cap: at
+ * most CPW_GROUPS groups, every 5 s, for as long as the session runs). */
+static void cpw_emit(struct cpw_state *S) {
+#undef cpw_g
+#undef cpw_run
+#undef cpw_ready
+#undef cpw_kern
+#undef cpw_ktrap
+#undef cpw_tks
+#undef cpw_ticks
+#define cpw_g S->g
+#define cpw_run S->run
+#define cpw_ready S->ready
+#define cpw_kern S->kern
+#define cpw_ktrap S->ktrap
+#define cpw_tks S->tks
+#define cpw_ticks S->ticks
+  for (int gi = 0; gi < CPW_GROUPS; gi++) {
     struct cpw_group *g = &cpw_g[gi];
     if (!g->tgid) continue;
     /* only groups that did something: >= 0.05 threads running or ready */
     if ((g->run + g->ready) * 20u >= cpw_ticks) {
-      rows++;
       struct process *lead = (g->tgid > 0 && g->tgid < MAX_PROCESSES) ? &proc_table[g->tgid] : 0;
       struct kline kl;
       kl_init(&kl);
@@ -5425,8 +5480,27 @@ void cp_wait_sample(int emit) {
         }
       }
       cpw_end(&kl);
+      census_yield_point();
     }
   }
+#undef cpw_g
+#undef cpw_run
+#undef cpw_ready
+#undef cpw_kern
+#undef cpw_ktrap
+#undef cpw_tks
+#undef cpw_ticks
+#define cpw_g cpw_live.g
+#define cpw_run cpw_live.run
+#define cpw_ready cpw_live.ready
+#define cpw_kern cpw_live.kern
+#define cpw_ktrap cpw_live.ktrap
+#define cpw_tks cpw_live.tks
+#define cpw_ticks cpw_live.ticks
+}
+
+/* Start the next window (PIT IRQ): keep the groups whose leader lives. */
+static void cpw_reset(void) {
   for (int gi = 0; gi < CPW_GROUPS; gi++) {
     struct cpw_group *g = &cpw_g[gi];
     int tg = g->tgid;
@@ -5441,6 +5515,64 @@ void cp_wait_sample(int emit) {
     for (int k = 0; k < CPW_TKS; k++) cpw_tks[i][k].n = 0, cpw_tks[i][k].nr = 0;
   }
   cpw_ticks = 0;
+}
+
+/* ---- H7-fault round 3 (H7-08): the census task ---------------------------
+ * The 5 s census (rw_thr_sample's [THRS] rows, virtio_gpu_health_tick, the
+ * [THRW*] rows of cp_wait_sample's window) printed from CPU 0's PIT IRQ:
+ * 13-99 ms with interrupts off every 5 s, once 371 ms, nearly all of it
+ * console output (a byte is a 16550 port exit, 9-55 us).  The PIT tick still
+ * samples; it now only sets census_due (and snapshots the wait window), and
+ * a kernel task -- vmzero, see census_attach -- prints, yielding between rows
+ * to any READY thread. */
+static volatile int census_due;
+uint32_t census_task_runs; /* censuses printed outside the IRQ */
+static volatile int census_pid = -1;
+void census_kick(void) { census_due = 1; }
+int census_task_running(void) { return census_task_on; }
+static int census_others_ready(int self) {
+  for (int i = 1; i < MAX_PROCESSES; i++)
+    if (i != self && proc_table[i].state == PROC_STATE_READY) return 1;
+  return 0;
+}
+/* Between census rows, on the census task only: a row is 1-7 ms of console
+   output and the task is not preempted, so let a READY thread in first. */
+static void census_yield_point(void) {
+  struct process *me = current_process();
+  if (!census_task_on || !me || me->pid != census_pid) return;
+  if (census_others_ready(census_pid)) arch_yield();
+}
+/* The task that prints the census is vmzero (vm.c): it already runs exactly
+   while a Linux-ABI process is alive (the only groups the census covers) and
+   exits after the last one.  A second always-READY kernel task cost
+   linux_probe_hrtimer's L rows 9-10 ms outliers (8 of 9 rows vs 2 of 9). */
+void census_attach(int pid) {
+  census_pid = pid;
+  __atomic_store_n(&census_task_on, 1, __ATOMIC_SEQ_CST);
+}
+int census_pending(void) {
+  return census_due || __atomic_load_n(&cpw_snap_ready, __ATOMIC_ACQUIRE);
+}
+void census_service(void) {
+  if (!census_task_on) return;
+  if (__atomic_exchange_n(&census_due, 0, __ATOMIC_ACQ_REL)) {
+    rw_thr_sample();
+    extern void virtio_gpu_health_tick(void);
+    if (virtio_gpu_health_tick) virtio_gpu_health_tick();
+    census_task_runs++;
+  }
+  if (__atomic_load_n(&cpw_snap_ready, __ATOMIC_ACQUIRE)) {
+    cpw_emit(&cpw_snap);
+    __atomic_store_n(&cpw_snap_ready, 0, __ATOMIC_RELEASE);
+  }
+}
+void census_detach(void) {
+  __atomic_store_n(&census_task_on, 0, __ATOMIC_SEQ_CST);
+  if (__atomic_load_n(&cpw_snap_ready, __ATOMIC_ACQUIRE)) {
+    cpw_emit(&cpw_snap);
+    cpw_snap_ready = 0;
+  }
+  census_pid = -1;
 }
 #endif /* __x86_64__ */
 

@@ -256,7 +256,11 @@ static void vm_zeroer_task(void *arg) {
   (void)arg;
   struct process *me = current_process();
   int self = me ? me->pid : -1, seen_other = 0;
+  extern void census_attach(int pid), census_service(void), census_detach(void);
+  extern int census_pending(void);
+  census_attach(self); /* H7-08: vmzero prints the 5 s census (process.c) */
   for (;;) {
+    census_service();
     int idle = 0;
     uint64_t t0 = timer_get_us();
     for (int k = 0; k < VM_ZP_BATCH && vm_zp_n < VM_ZP_N; k++) {
@@ -279,6 +283,7 @@ static void vm_zeroer_task(void *arg) {
     if (others)
       seen_other = 1;
     if (seen_other && !others) {
+      census_detach();
       __atomic_store_n(&vm_zp_task, 0, __ATOMIC_SEQ_CST);
       kernel_exit();
       return;
@@ -290,7 +295,7 @@ static void vm_zeroer_task(void *arg) {
        L1-L3 under 8 burners: 1 ms sleeps took 10 ms).  Full (or no free
        frame): halt until the next interrupt, then give the CPU back; else
        back after each batch. */
-    if ((idle || vm_zp_n >= VM_ZP_N) && !vm_zp_others_ready(self))
+    if ((idle || vm_zp_n >= VM_ZP_N) && !census_pending() && !vm_zp_others_ready(self))
       safe_wfi();
     arch_yield();
   }
