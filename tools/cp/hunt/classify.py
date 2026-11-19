@@ -568,7 +568,7 @@ def parse_host(path, phases=None):
     if phases:
         for i, (_, t, name) in enumerate(phases):
             end = phases[i + 1][1] if i + 1 < len(phases) else None
-            if name == "world" or name.startswith("soak"):
+            if name == "world" or name.startswith(("soak", "walk", "drive")):   # round 4: drive.py's play states
                 spans.append((hms(t), hms(end) if end else 10 ** 9))
     for ln in open(path, errors="replace"):
         p = ln.split()

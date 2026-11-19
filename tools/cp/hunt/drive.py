@@ -100,6 +100,10 @@ class Boot:
         if name != self.cur_state:
             with open(self.states, "a") as f:
                 f.write(f"{time.time():.3f} {name}\n")
+            # and boot_p9's own phase, so fps.csv / classify's per-phase rows
+            # follow the drive (h4-p01's whole session read as "menu")
+            with open(self.ctl, "a") as f:
+                f.write(f"phase {name}\n")
             self.cur_state = name
 
     def ended(self):
@@ -1021,9 +1025,11 @@ PLAY_MENUS = [
     ("map", "m", r"Track\s+waypoint|Zoom\s*out|FILTER|Jump\s+to|PRIMARY\s+GANGS"),
     ("inventory", "i", r"BACKPACK|UPPER\s+BODY|QUICK\s+ACCESS|LOWER\s+BODY|OUTFIT"),
     ("journal", "j", r"TALK\s+TO\s+JACKIE|BEAT\s+ON\s+THE\s+BRAT|OPEN\s+MAP|Go\s+to\s+the\s+fight"),
-    ("character", "p", r"REFLEXES|TECHNICAL\s+ABILITY|INTELLIGENCE|SKILL\s+PROGRESSION|ATTRIBUTE"),
-    # the phone: a tap of T showed nothing in h4-x01; held here (its screen not seen yet)
-    ("phone", "hold t 700", r"CONTACTS|MESSAGES|Jackie\s+Welles|Viktor\s+Vektor|Misty|Mama\s+Welles|CALL"),
+    # not the character screen (P): it opens on a "your Perks have been reset"
+    # popup whose Esc leaves the pause menu up, and recover() could not close it
+    # (h4-p01: 2/2)
+    # not the phone: neither a tap of T (h4-x01) nor a 700 ms hold (h4-p01, 0/3)
+    # opened anything in ManualSave-86, and the Esc after it opens the pause menu
 ]
 # walk segments: (lines) -- sprint, walk, strafe, jump, crouch, turn and look up/down
 WALKS = [
@@ -1051,6 +1057,10 @@ class Tally:
 
 def walk_seg(b, k, prev, tally):
     b.state("walk")
+    if prev and re.search(PAUSE_RX, boot_ocr(prev), re.I):
+        # a menu step left the pause menu up (h4-p01): back to the world first
+        tally.add("recover-before-walk", recover(b, f"pwr{k}_"))
+        b.state("walk")
     p = b.shot(f"pw{k}", *WALKS[k % len(WALKS)])
     m = motion(prev, p)
     moved = m >= 6
@@ -1133,21 +1143,38 @@ def quit_now(b, how):
     game must exit); HOW only labels it"""
     b.state("quit:" + how)
     ok = quit_game(b, "pause")
+    if not ok:
+        # once more from the world (a held key or a popup can hide the pause
+        # menu's focus: h4-p01)
+        b.shot("pqu", "up w", "up shift", "key esc", "wait 3")
+        recover(b, "pqur")
+        ok = quit_game(b, "pause")
     log(f"PLAY QUIT ({how}): {'confirmed' if ok else 'FAILED to reach QUIT GAME'}")
     return ok
 
 
 def exit_vehicle(b, tally):
     """QUIT GAME in the middle of a drive: the throttle held, Esc, QUIT"""
-    for k in range(3):
+    for k in range(1):
         if vehicle_seg(b, 900 + k, tally, 20):
             break
     else:
         log("PLAY exit vehicle: never in a vehicle; quitting while sprinting instead")
-        b.shot("pqs", "down shift", "down w", "wait 2")
-        return quit_now(b, "sprint")
+        # Esc in mid-sprint; the keys are let go once the pause menu is up (held,
+        # W and Shift hid the menu's focus for 10 taps: h4-p01)
+        b.state("quit:sprint")
+        b.shot("pqs", "down shift", "down w", "wait 3", "key esc", "wait 2", "up w", "up shift", "wait 2")
+        if not seek(b, PAUSE, "QUIT GAME", name="pqss"):
+            return quit_now(b, "sprint-retry")
+        p, _ = b.until("pqsc", r"sure.{0,20}quit", 15, "exit_ok", "key ret", "wait 2")
+        if not p:
+            return quit_now(b, "sprint-retry")
+        log("PLAY QUIT (sprint): confirmed; waiting for the game to exit")
+        with open(b.ctl, "a") as f:
+            f.write("key ret\nwait_exit 180\n")
+        return True
     b.state("drive")
-    b.shot("pqd", "down w", "wait 3")          # boot_p9 releases held keys at the script's end
+    b.shot("pqd", "down w", "wait 3", "key esc", "wait 2", "up w", "wait 2")
     return quit_now(b, "vehicle")
 
 

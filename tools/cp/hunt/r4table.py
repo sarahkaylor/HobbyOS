@@ -63,6 +63,13 @@ def row(logs, run):
     r["menus"] = p.get("menus")
     r["exit"] = p.get("exit")
     r["ghitch"], r["gmax"] = glass(os.path.join(logs, run + ".glass-report.txt"))
+    # fps rows: the world-like phases (drive.py's states are boot_p9 phases from h4-p03 on)
+    gaps = j.get("fps_gaps") or {}
+    wl = {p: v for p, v in gaps.items() if p in ("world", "walk", "drive") or p.startswith("soak")}
+    if wl:
+        r["hitch"] = sum(v.get("hitches", 0) or 0 for v in wl.values())
+        rows_ = sum(v["rows"] for v in wl.values())
+        r["wmed"] = round(sum(v["median"] * v["rows"] for v in wl.values()) / max(1, rows_), 1)
     w = os.path.join(logs, run + ".wav.txt")
     r["wdrop"] = None
     if os.path.exists(w):
