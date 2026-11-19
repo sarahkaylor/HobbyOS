@@ -581,7 +581,27 @@ static struct cons_upend *upend_new(uint32_t cpu, uint64_t who) {
   return o;
 }
 
+static void cons_user_write1(uint64_t who, const char *s, int n);
+/* H7-fault round 3 (H7-11): one wire hold -- and one interrupts-off
+ * stretch -- per LINE, not per write() window.  The wire sends every byte as
+ * a port exit (9-55 us under load), and a whole 8 KiB window held it, with
+ * interrupts off, for 80-500 ms: every other writer (kernel rows, other
+ * threads' lines) waited the whole time (linux_probe_conslat: a one-line
+ * write() beside an 8 KiB writer, p50 66 ms, max 545 ms).  Lines stay whole;
+ * another writer's line may now land between two of ours. */
 void cons_user_write(uint64_t who, const char *s, int n) {
+  int off = 0;
+  while (off < n) {
+    int end = off;
+    while (end < n && s[end] != '\n')
+      end++;
+    int seg = end < n ? end - off + 1 : n - off; /* through its newline */
+    cons_user_write1(who, s + off, seg);
+    off += seg;
+  }
+}
+
+static void cons_user_write1(uint64_t who, const char *s, int n) {
   if (n <= 0)
     return;
   uint64_t fl = cons_hw_irqsave();
