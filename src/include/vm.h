@@ -787,6 +787,10 @@ void vm_arch_restore_kernel(void);
 /* H8-root: the end-of-run [ROOTFREE] row: teardowns, and how many found
    another CPU still on the root being freed (docs/cp-root.md). */
 void vm_arch_root_report(void);
+/* H8-root: free the parked roots (vm_arch_teardown parks a root that another
+   CPU may still translate through) that no CPU is on any more.  Never waits;
+   called from the idle loop and from vm_arch_teardown. */
+void vm_arch_reap_roots(void);
 /* H8-root: tag this CPU's next vm_arch_teardown with its caller (rows). */
 void vm_arch_teardown_site(const void *pc);
 void vm_arch_flush_va(struct addr_space *as, uint64_t va);

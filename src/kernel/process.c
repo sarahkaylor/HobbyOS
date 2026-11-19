@@ -6903,6 +6903,8 @@ void start_scheduler(void) {
     /* P2.2 (S2): this core no longer runs any process; do not keep a
        (possibly torn-down) AS as its translation. */
     vm_arch_restore_kernel();
+    /* H8-root: free the roots parked because a CPU was still on them. */
+    vm_arch_reap_roots();
 
     /* Liveness heartbeat: this CPU is alive and idling. */
     cpu_heartbeat_ms[get_cpuid()] = timer_get_ms();
