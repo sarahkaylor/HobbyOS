@@ -321,9 +321,14 @@ static void test_frame_image_reserved(void) {
   uart_puts("\n");
   EXPECT_EQ(inside, 0);
   /* The walk must reach the border of the free region: the reserved
-     image edge when the image is inside the pool, else the pool top. */
+     image edge when the image is inside the pool, else the pool top.
+     "Reach" means no further run fits: the walk's runs start wherever the
+     hint was, so the last one can end up to one run short of the border.
+     (Measured on the ARM unit tier: high=0x23F100000 with the 7 MiB above it
+     free, frontier 0x240000000 -- the old ">= frontier" demanded an exact
+     landing and failed although the walk was complete.) */
   uint64_t frontier = rsv_lo < POOL_FRONTIER_CAP ? rsv_lo : POOL_FRONTIER_CAP;
-  EXPECT_EQ((seen_high + RUN * FRAME_SIZE >= frontier), 1);
+  EXPECT_EQ((seen_high + 2 * (uint64_t)RUN * FRAME_SIZE > frontier), 1);
   EXPECT_EQ(wrapped, 1);
   EXPECT_EQ(singles_ok, 1);
   EXPECT_EQ(frame_free_count(), frame_total_count() - used0);
