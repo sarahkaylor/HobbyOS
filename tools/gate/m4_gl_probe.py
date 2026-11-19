@@ -66,6 +66,11 @@ DPIN = os.environ.get("GLIBC231_DEV", "/tmp/glibc231-dev")
 BOOT_TIMEOUT = int(os.environ.get("M4_BOOT_TIMEOUT", "240"))
 RUN_TIMEOUT = int(os.environ.get("M4_RUN_TIMEOUT", "120"))
 SKIP_BUILD = os.environ.get("M4_SKIP_BUILD", "0") == "1"
+# A GL virgl device cannot use two -display options: this runner's -display
+# none would override Makefile's GL backend before the guest ever boots.
+# EGL-headless still creates virgl's host renderer and does not open a window;
+# GLPROBE.PPM remains the visual proof (EGL screendumps have no scanout).
+VIRGL = os.environ.get("M4_VIRGL", "0") == "1"
 
 
 def host_caps():
@@ -298,6 +303,12 @@ def stage(probe):
         mc(os.path.join(ldir, src), f"::/LIB64/{dst}")
     mc(os.path.join(ldir, "ld-2.31.so"), "::/lib64/ld-linux-x86-64.so.2")
     mc(probe, "::GLPROBE.BIN")
+    # The runtime switch is a file, not a host environment variable.  Without
+    # this a QEMU GL device silently tested the softpipe fallback instead.
+    glm = os.path.join(BUILD, "glmode")
+    with open(glm, "w") as f:
+        f.write(("virgl" if VIRGL else "softpipe") + "\n")
+    mc(glm, "::/GLMODE")
     out = run(["mdir", "-i", IMG, "::/LIB64"], capture_output=True, text=True).stdout
     log("m4: ::/LIB64\n" + out.rstrip())
 
@@ -393,9 +404,15 @@ def main():
     time.sleep(2)
     accel = f"{QEMU_ACCEL} " if QEMU_ACCEL else ""
     log(f"m4: host accel={HOST_ACCEL or 'default'}")
-    qemu_args = f"-display none {accel}-qmp unix:{QMP_SOCK},server,nowait"
+    qemu_args = f"{'' if VIRGL else '-display none '}{accel}-qmp unix:{QMP_SOCK},server,nowait"
     env = dict(os.environ)
     env["HOME"] = os.environ.get("HOME", "/home/sarah")
+    if VIRGL:
+        env["QEMU_GPU"] = "gl"
+        # egl-headless needs a usable DRM render node.  On a software-only
+        # Linux builder, the caller can select gtk through an explicit
+        # M4_QEMU_DISPLAY (and DISPLAY), including a disposable Xvfb over TCP.
+        env["QEMU_DISPLAY"] = os.environ.get("M4_QEMU_DISPLAY", "egl-headless")
     logf = open(LOG, "w")
     proc = subprocess.Popen(
         ["make", "-C", ROOT, "-o", "disk.img", f"ARCH={ARCH}", "MODE=desktop",
@@ -475,7 +492,7 @@ def main():
         mdiff = next((l for l in rows if "[GL] pixel diff:" in l), "")
         mtorn = next((l for l in rows if "[GL] teardown: clean" in l), "")
         ok = ("3.3" in mver and "Core Profile" in mver
-              and "softpipe" in mren
+              and ("virgl" in mren if VIRGL else "softpipe" in mren)
               and "fnv1a64=0x" in msum
               and mswap and "fnv1a64=0x" in mfb and mdiff and mtorn
               and "done rc=0" in mdone)

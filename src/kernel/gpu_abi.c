@@ -253,7 +253,18 @@ int gpu_abi_transfer_ok(const struct gpu_transfer* t) {
   if (t->to_host > 1) return 0;
   if (t->level > 31) return 0;
   if (t->box.w == 0 || t->box.h == 0 || t->box.d == 0) return 0;
-  if (t->box.w > GPU_ABI_MAX_DIM || t->box.h > GPU_ABI_MAX_DIM) return 0;
+  /* For a PIPE_BUFFER, TRANSFER's box.width is a BYTE COUNT, not a texture
+   * dimension.  Applying the 16384-pixel texture ceiling here silently drops
+   * every ordinary mesh/index-buffer upload above 16 KiB.  RimWorld's HUD uses
+   * small buffers and survives, while its 4096x4096 / 8192x4096 map passes lose
+   * exactly the large transfers (`[VGL] TRANSFER failed: Invalid argument`) --
+   * tile-shaped holes in an otherwise correct frame.  A buffer transfer can be
+   * as wide as its attached backing, whose whole-resource cap is already
+   * GPU_ABI_MAX_BYTES.  Texture-height and mip/offset validation stays bounded;
+   * the host still owns exact per-resource box validation. */
+  if ((uint64_t)t->box.w > GPU_ABI_MAX_BYTES ||
+      (uint64_t)t->box.h > GPU_ABI_MAX_DIM)
+    return 0;
   if (t->offset > GPU_ABI_MAX_BYTES) return 0;
   return 1;
 }

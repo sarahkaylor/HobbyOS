@@ -45,10 +45,17 @@ class Grabber:
     def __call__(self, tag):
         self.n += 1
         p = os.path.join(self.out, "%03d_%s.ppm" % (self.n, tag))
-        raw = p + ".raw"
+        # QEMU's pmemsave cannot write into /dev/shm on the linuxci host (HMP
+        # returns "writing memory failed" and leaves a zero-byte file, while a
+        # /tmp target works).  Dump raw memory to /tmp, then write the PPM/PNG
+        # from this process into the evidence directory.
+        raw = "/tmp/l86-live-%d-%03d.raw" % (os.getpid(), self.n)
         self.q.pmem(self.fb, self.w * self.h * 4, raw)
         time.sleep(0.3)
         from rw_desktop_drive import bgra_to_ppm
+        if not os.path.exists(raw) or os.path.getsize(raw) != self.w * self.h * 4:
+            print("[live] pmem failed for %s" % tag, flush=True)
+            return None
         if not bgra_to_ppm(raw, self.w, self.h, p):
             print("shot failed")
             return None

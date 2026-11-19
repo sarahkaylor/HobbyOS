@@ -156,7 +156,7 @@ def norm(s):
 
 
 # ---------------------------------------------------------------- liveness
-def liveness_quiet(now, last_present_at, last_open_at):
+def liveness_quiet(now, last_present_at, last_open_at, last_transfer_at=None):
     """Seconds since the front end last showed progress.
 
     L87: a frozen present counter is NOT a stall while the def loader is still
@@ -164,8 +164,17 @@ def liveness_quiet(now, last_present_at, last_open_at):
     all (L78 M2: n=280 at t=322 s, n=290 at t=537 s) while [XO] rows keep
     arriving; the menu shows up at n~600 after ~650 s.  A present and a loader
     open are both progress, so the quiet clock is the later of the two.
+
+    L91: a front-end load can also spend many minutes issuing [VIRGL3D]
+    transfer_to_host rows for thousands of mip levels with no present and no
+    new [XO] open.  Those transfers are progress: without counting them the
+    driver declares a stall at 900 s while the GPU worker is still uploading
+    the menu atlas (measured on a fresh 1.6.4871 boot).
     """
-    return now - max(last_present_at, last_open_at)
+    stamps = [last_present_at, last_open_at]
+    if last_transfer_at is not None:
+        stamps.append(last_transfer_at)
+    return now - max(stamps)
 
 
 def is_stalled(quiet_s, stall_s):
@@ -549,6 +558,8 @@ class L86:
         return words
 
     def text_of(self, words):
+        if isinstance(words, str):
+            return words
         return " ".join(w["t"] for w in words)
 
     def find(self, words, want, fuzzy=0):
@@ -674,7 +685,7 @@ class L86:
         still on its banner, and the modal turned up ~5 min later).  So the
         modal is handled here, in the loop that is already waiting."""
         if timeout is None:
-            timeout = int(os.environ.get("RW_L86_MENU_TIMEOUT", "1500"))
+            timeout = int(os.environ.get("RW_L86_MENU_TIMEOUT", "3000"))
         end = time.time() + timeout
         t_start = time.time()
         png = None
@@ -682,6 +693,7 @@ class L86:
         dismissed = 0
         last_n, last_n_at = None, time.time()
         last_opens, last_opens_at = None, time.time()
+        last_transfer, last_transfer_at = None, time.time()
         last_report = 0.0
         while time.time() < end:
             # establish_geometry() runs at boot, when the only window on screen
@@ -769,22 +781,27 @@ class L86:
             # control to the harness, and the harness killed QEMU -- which read
             # as a guest freeze in L86.  Liveness is presents OR loader opens,
             # and the quiet threshold is above the measured plateau.
-            x = parse_xsw(self.serial())
+            ser = self.serial()
+            x = parse_xsw(ser)
             n = x["n"] if x else None
-            opens = len(re.findall(r"^\[XO\] ", self.serial(), re.M))
+            opens = len(re.findall(r"^\[XO\] ", ser, re.M))
+            transfers = len(re.findall(r"\[VIRGL3D\] transfer_to_host", ser))
             now = time.time()
             if n is not None and n != last_n:
                 last_n, last_n_at = n, now
             if opens != last_opens:
                 last_opens, last_opens_at = opens, now
-            quiet = liveness_quiet(now, last_n_at, last_opens_at)
+            if transfers != last_transfer:
+                last_transfer, last_transfer_at = transfers, now
+            quiet = liveness_quiet(now, last_n_at, last_opens_at,
+                                   last_transfer_at)
             if now - last_report >= 60:
                 last_report = now
                 self.emit({"ev": "loading", "stage": "menu", "n": n,
                            "opens": opens, "quiet": int(quiet)})
                 print("[L86] loading: n=%s opens=%d quiet=%ds"
                       % (n, opens, int(quiet)), flush=True)
-            stall_s = int(os.environ.get("RW_L86_STALL_SECS", "900"))
+            stall_s = int(os.environ.get("RW_L86_STALL_SECS", "1800"))
             if n is not None and is_stalled(quiet, stall_s):
                 self.emit({"ev": "stalled", "stage": "menu", "n": n,
                            "opens": opens, "quiet": int(quiet),
@@ -817,8 +834,12 @@ class L86:
         for i, box in enumerate((half, band)):
             words = self.ocr(png, tag="%s_%d" % (tag, i), psm=6,
                              upscale=upscale, box=box)
-            hits = self.find(words, label) if label else []
-            if not hits:
+            # A footer label is often a one-letter OCR miss (`Next` -> `Nqxt`);
+            # fuzzy matching keeps it in the footer instead of falling through
+            # to an unrelated word such as `Select` in `Select random site`
+            # (run97 clicked screen x=973 for Next).
+            hits = self.find(words, label, fuzzy=1) if label else []
+            if not hits and label is None:
                 cands = []
                 for w in self.FOOTER_WORDS:
                     for hh in self.find(words, w):
@@ -852,20 +873,38 @@ class L86:
                        "Select random site": ("random", "Select random"),
                        "Generate": ("Generale", "Generate>")}
         if label:
+            # Footer labels must be searched in the footer band first.  A
+            # page-wide OCR of the scenario page reads "Start with 3 people"
+            # from the body at y~250 and this method used to click that text
+            # instead of the footer's Next, stalling the whole setup chain
+            # before the site page (run96).
+            footer_label = label in self.FOOTER_WORDS
+            if footer_label:
+                f = self.find_footer(png, label, tag="footer_%s" % label)
+                if f:
+                    return f
             hits = self.find(words, label)
             for alias in OCR_ALIASES.get(label, ()):
                 if hits:
                     break
                 hits = self.find(words, alias)
-            if hits:
+            if hits and not footer_label:
                 h = hits[-1] if len(hits) > 1 else hits[0]
                 # the bottom-most/right-most occurrence is the footer button
                 h = sorted(hits, key=lambda k: (-k["y"], -k["x"]))[0]
                 return (h["x"] + h["w"] // 2, h["y"] + h["h"] // 2, "ocr:" + h["t"])
+            if footer_label:
+                gx, gy, gw, gh = (self.geom or (98, 40, 1280, 736))
+                hit = self.find(words, "Back")
+                fy = (hit[0]["y"] + hit[0]["h"] // 2) if hit else (gy + gh - 20)
+                return (gx + gw - 224, fy, "right-footer")
             f = self.find_footer(png, label, tag="footer_%s" % label)
             if f:
                 return f
             return (None, None, "none")
+        f = self.find_footer(png, None, tag="footer_any")
+        if f:
+            return f
         cands = []
         for w in self.FOOTER_WORDS:
             for h in self.find(words, w):
@@ -1297,20 +1336,29 @@ class L86:
             # page, click the *rightmost* footer band geometrically -- Start is
             # right-aligned, Back is not -- instead of trusting the text.
             if self.find(words, "Create characters"):
-                bb = brown_buttons(png, self.crop_box) if png else []
-                if bb:
-                    bx = max(bb, key=lambda b: b[0])
-                    self.emit({"ev": "chars_start", "stage": "chars",
-                               "how": "rightmost-brown-band",
-                               "screen": [bx[0], bx[1]], "pressed": pressed,
-                               "text": self.text_of(words)[:200]})
-                    print("[L86] chars: Start via rightmost footer band at (%d,%d)"
-                          % (bx[0], bx[1]), flush=True)
-                    _, png, words = self.click(
-                        "Start", bx[0], bx[1], "chars%d" % pressed,
-                        hold=0.2, settle=8.0)
-                    pressed += 1
-                    continue
+                # The affirmative is the right-aligned footer control.  Do not
+                # use brown_buttons() here: it returns crop-relative centres and
+                # on this page its only band is the centre "Xenotype editor"
+                # button, so the old (bx[0],bx[1]) click landed at screen x~1056
+                # and never pressed Start (run95).  Derive both coordinates from
+                # the parsed client rect; take the row y from `Back` when OCR
+                # provides it.
+                gx, gy, gw, gh = (self.geom or (98, 40, 1280, 736))
+                hit = self.find(words, "Back")
+                fy = (hit[0]["y"] + hit[0]["h"] // 2) if hit else (gy + gh - 20)
+                bx = (gx + gw - 224, fy)
+                self.emit({"ev": "chars_start", "stage": "chars",
+                           "how": "right-aligned-footer",
+                           "screen": [bx[0], bx[1]], "pressed": pressed,
+                           "text": self.text_of(words)[:200]})
+                print("[L86] chars: Start via right-aligned footer at (%d,%d)"
+                      % (bx[0], bx[1]), flush=True)
+                _, png, _txt = self.click(
+                    "Start", bx[0], bx[1], "chars%d" % pressed,
+                    hold=0.2, settle=8.0)
+                words = self.ocr(png, tag="chars%d_start" % pressed) if png else words
+                pressed += 1
+                continue
             lbl = ("Start" if self.find(words, "Create characters") else "Next")
             ok, png2, w2 = self.advance(
                 "chars%d" % pressed, lbl,
@@ -1399,35 +1447,13 @@ class L86:
                     return png, words, True
                 if "select starting site" not in txt:
                     continue
-            bb = brown_buttons(png, self.crop_box) if png else []
-            if bb:
-                bx = max(bb, key=lambda b: b[0])
-            else:
-                # Run33 emitted ten setup_wait rows and zero presses: the site
-                # page's footer buttons are not brown, so the band detector
-                # found nothing and the run sat on `Select starting site`.
-                # These pages all use the same footer geometry, and the game
-                # window is placed identically every boot, so fall back to the
-                # measured footer point (OCR found `Next` at 1210,726 on this
-                # same page in run20).
-                # Measured on the Create characters footer: Back at
-                # (537,736), Xenotype editor at (922,739) -- so the footer row
-                # is y~737, not 726, and Start is the button at the right end,
-                # near x=1330.  Take the row's y from the frame itself when the
-                # word is readable, so a re-laid-out page does not need a new
-                # constant.
-                # NEVER a bare screen constant: the game window is not always
-                # at the same origin.  This boot placed it at client=(332,24)
-                # 1280x736 (serial: `[HB] geometry client=332,24,1280x736`),
-                # so every fixed (1210,726)-style point was ~350 px into empty
-                # desktop -- which is why ten presses changed nothing.  Derive
-                # the footer from the client rect the driver already parsed,
-                # and take the row's y from "Back" when it is readable.
-                gx, gy, gw, gh = (self.geom or (98, 40, 1280, 736))
-                hit = self.find(words, "Back")
-                fy = hit[0][1] if hit else (gy + gh - 22)
-                bx = [(gx + gw - 48, fy), (gx + gw - 80, fy),
-                      (gx + gw - 24, fy)][min(i, 2)]
+            # Footer affirmatives are right-aligned.  brown_buttons() returns
+            # crop-relative centres and on setup pages picks the centre button,
+            # not the affirmative, so use the parsed client rect directly.
+            gx, gy, gw, gh = (self.geom or (98, 40, 1280, 736))
+            hit = self.find(words, "Back")
+            fy = (hit[0]["y"] + hit[0]["h"] // 2) if hit else (gy + gh - 20)
+            bx = (gx + gw - 224, fy)
             self.emit({"ev": "setup_press", "stage": "setup", "n": i,
                        "screen": [bx[0], bx[1]], "text": txt[:220]})
             print("[L86] setup: press rightmost footer band at (%d,%d) [%s]"
@@ -1509,11 +1535,22 @@ def run(q, grab, log_path, args, shots):
 
     # 1. the Steam modal arrives with the menu, so main_menu() below owns it.
     # 2. menu -> scenario -> storyteller -> worldopts, every click OCR-located
-    png, words, txt = d.main_menu()
-    d.measure(int(os.environ.get("RW_L86_MENU_MEASURE", "20")), "menu")
-    ok, png, words = d.advance("menu", "New colony",
-                               ["Choose scenario", "Crashlanded",
-                                "Rich explorer", "Scenario"], 120)
+    start_stage = os.environ.get("RW_L86_START_STAGE", "")
+    if start_stage == "scenario":
+        # A live run can be resumed after its menu click: the front end is
+        # already on the scenario page, so waiting for the menu again would
+        # burn the whole menu budget and end with reached_colony=False.
+        png = d.shot("resume_scenario")
+        words = d.ocr(png, tag="resume_scenario") if png else []
+        txt = d.text_of(words)
+        print("[L86] resume at scenario: %r" % txt[:120], flush=True)
+        ok = True
+    else:
+        png, words, txt = d.main_menu()
+        d.measure(int(os.environ.get("RW_L86_MENU_MEASURE", "20")), "menu")
+        ok, png, words = d.advance("menu", "New colony",
+                                   ["Choose scenario", "Crashlanded",
+                                    "Rich explorer", "Scenario"], 120)
     if ok:
         # Crashlanded is a card: clicking it only changes the selection
         d.advance("scenario", "Crashlanded",
