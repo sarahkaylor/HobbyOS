@@ -381,3 +381,5 @@ src/kernel/virtio_blk.c	P2I	uint64_t site = (uint64_t)(uintptr_t)__builtin_retur
 # futex bucket hash of the address-space pointer -- both values, never dereferenced.
 src/kernel/linux_compat_thr.c	P2I	ev.as = (uint64_t)(uintptr_t)as;
 src/kernel/linux_compat_thr.c	P2I	uint64_t h = (uaddr >> 2) ^ ((uint64_t)(uintptr_t)as >> 4);
+# H7-fault round 2 (H7-10): vm_lock_gap compares this lock's address with the spinners' wait words (never dereferenced), like locks.c above.
+src/kernel/vm.c	P2I	waiting = lock_wait_addr[c] == (uint64_t)&vm_lock;

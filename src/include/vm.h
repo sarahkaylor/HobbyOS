@@ -716,6 +716,22 @@ void vm_arch_unmap(struct addr_space *as, uint64_t va);
  * back (0 for an absent or SHARED-marked leaf) instead of freeing it: the
  * caller frees it after vm_arch_shootdown(). */
 uint64_t vm_arch_unmap_keep(struct addr_space *as, uint64_t va);
+/* H7-fault round 2 (x86_64): vm_arch_unmap_keep over [va, end), one table at a
+   time: each present leaf is cleared and rel(ctx, frame-or-0) called (0 for a
+   shared or still-COW-shared frame, as unmap_keep returns).  This CPU's TLB is
+   flushed (invlpg, or one CR3 reload past 32 leaves); other CPUs are the
+   caller's (shootdown).  Returns the leaves cleared.
+   pt (may be 0): a page table wholly inside [va, end) is offered to
+   pt(ctx, table) instead; when it returns 1 the table is unhooked from its
+   PD entry and not walked (its leaves are not counted).  The caller then
+   drains it with vm_arch_pt_drain, without vm_lock, and frees the table
+   frame after the shootdown. */
+int vm_arch_zap_range(struct addr_space *as, uint64_t va, uint64_t end,
+                      void (*rel)(void *ctx, uint64_t fr), void *ctx,
+                      int (*pt)(void *ctx, uint64_t pt_phys));
+/* Each present leaf of a table vm_arch_zap_range unhooked: rel(ctx, frame-or-0)
+   by the same rule; the table itself is left as it is.  Returns the leaves. */
+int vm_arch_pt_drain(uint64_t pt_phys, void (*rel)(void *ctx, uint64_t fr), void *ctx);
 /* C1-k4: munmap/mremap cores with the cross-CPU flush (vm.c). */
 void vm_zap_span(struct addr_space *as, uint64_t base, uint64_t len);
 int vm_unmap_span(struct addr_space *as, uint64_t base, uint64_t len);
@@ -775,6 +791,11 @@ void vm_arch_flush_va(struct addr_space *as, uint64_t va);
  * CPU is only guaranteed to be seen after a CR3 reload on every
  * implementation; the retry path uses this once the cheap flush has failed. */
 void vm_arch_reload_cr3(struct addr_space *as);
+/* H7-fault round 2 (H7-07): settle this CPU's owed TLB shootdown now, if one
+   is pending.  For waits that spin with interrupts off (a spinlock, an NFS
+   reply inside a page fault), which cannot take the 0x82 IPI: the sender
+   would otherwise wait for the whole spin.  Safe in any context. */
+void vm_arch_tlb_poll(void);
 void vm_arch_shootdown(struct addr_space *as);
 /* C1-fork (x86_64): copy-on-write sharing of private frames across fork.
    vm_arch_cow_mark makes a present private leaf read-only + COW (local

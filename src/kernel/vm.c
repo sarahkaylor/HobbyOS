@@ -168,6 +168,154 @@ static inline uint64_t vm_zs_irqoff(void) {
 static inline void vm_zs_irqrestore(uint64_t f) {
   __asm__ volatile("push %0\n\tpopfq" : : "r"(f) : "memory", "cc");
 }
+/* H7-fault round 2 (H7-07, H7-01's rest): THE FIRST TOUCH HAPPENS OFF THE
+ * FAULTING THREAD.
+ *
+ * The stash moved the zero out of vm_lock, but a fault still zeroed its
+ * frame itself, and in a P9 guest that store is a host page fault: 7 us on
+ * average, 2-200 ms when the host is short of memory (linux_probe_pfpar).
+ * A #PF runs with interrupts off, so for that long the CPU also cannot take
+ * a TLB-shootdown IPI: linux_probe_shootwait's late targets were inside a
+ * fault (slow_infault=69 of 56 slow acks), and every other CPU's munmap /
+ * mprotect / COW waited for them.  A kernel task, vmzero, keeps a pool of
+ * VM_ZP_N zeroed frames (64 MiB) topped up -- recently freed frames first
+ * (the warm LIFO), so mostly cheap zeroes -- and the stash takes from the
+ * pool before zeroing inline.  The task is not part of any address space,
+ * so no shootdown ever waits for it; it gives the CPU back after every
+ * batch (and, when the pool is full, after every interrupt) and exits like
+ * the ext2 flusher once nothing else is alive.  Pool frames
+ * count as free (frame_parked). */
+#define VM_ZP_N 16384
+#define VM_ZP_BATCH 32    /* frames per turn: a few host faults, then yield */
+#define VM_ZP_TURN_US 200 /* ... or this long, whichever comes first */
+static uint64_t vm_zp[VM_ZP_N];
+static volatile int vm_zp_n;
+static volatile int vm_zp_lk;      /* a byte lock taken with interrupts off */
+static volatile int vm_zp_task;    /* 1 while the task runs (or starts) */
+volatile uint32_t vm_zp_hits, vm_zp_misses, vm_zp_made;
+static uint64_t vm_zp_pop(void) {
+  uint64_t f = vm_zs_irqoff(), fr = 0;
+  while (__atomic_exchange_n(&vm_zp_lk, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+  if (vm_zp_n > 0)
+    fr = vm_zp[--vm_zp_n];
+  __atomic_store_n(&vm_zp_lk, 0, __ATOMIC_RELEASE);
+  vm_zs_irqrestore(f);
+  if (fr) {
+    frame_parked_add(-1);
+    vm_zp_hits++;
+  } else {
+    vm_zp_misses++;
+  }
+  return fr;
+}
+static int vm_zp_push(uint64_t fr) {
+  uint64_t f = vm_zs_irqoff();
+  int ok = 0;
+  while (__atomic_exchange_n(&vm_zp_lk, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+  if (vm_zp_n < VM_ZP_N) {
+    vm_zp[vm_zp_n++] = fr;
+    ok = 1;
+  }
+  __atomic_store_n(&vm_zp_lk, 0, __ATOMIC_RELEASE);
+  vm_zs_irqrestore(f);
+  if (ok)
+    frame_parked_add(1);
+  return ok;
+}
+extern uint64_t timer_get_us(void);
+/* Is any other thread waiting for a CPU?  Then vmzero must not halt: a CPU
+   kicked for a new or woken thread can pick vmzero first, and a halt there
+   holds that thread until the next interrupt (linux_probe_ntsync W8: a
+   waiter thread started 2.5-4.5 ms late, its 100 ms timeout measured
+   95.5-97.5 ms; 3/3 PASS with vmzero off). */
+static int vm_zp_others_ready(int self) {
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    struct process *q = i != self ? process_get_pcb(i) : 0;
+    if (q && q->state == PROC_STATE_READY)
+      return 1;
+  }
+  return 0;
+}
+/* Is a Linux-ABI process (the pool's only users) still alive?  vmzero exits
+   when the last one has, so a harness that kills its Wine processes finds
+   nothing of theirs left (run-thrstorm S3, the P2/P4/P5 leftover censuses:
+   "[K5] leftover pid=5 name=vmzero"); the next compat mmap starts it again,
+   and the pool's frames stay parked for it. */
+static int vm_zp_users_alive(int self) {
+  for (int i = 1; i < MAX_PROCESSES; i++) {
+    struct process *q = i != self ? process_get_pcb(i) : 0;
+    if (!q || !(q->abi_flags & PROC_FLAG_LINUX_ABI))
+      continue;
+    int st = __atomic_load_n(&q->state, __ATOMIC_RELAXED);
+    if (st != PROC_STATE_FREE && st != PROC_STATE_EXITED && st != PROC_STATE_THREAD_DONE)
+      return 1;
+  }
+  return 0;
+}
+static void vm_zeroer_task(void *arg) {
+  (void)arg;
+  struct process *me = current_process();
+  int self = me ? me->pid : -1, seen_other = 0;
+  for (;;) {
+    int idle = 0;
+    uint64_t t0 = timer_get_us();
+    for (int k = 0; k < VM_ZP_BATCH && vm_zp_n < VM_ZP_N; k++) {
+      /* Bounded in time too: each zero can be a host page fault, 2-7 ms
+         under host memory pressure, and nothing preempts this task. */
+      if (k && timer_get_us() - t0 >= VM_ZP_TURN_US)
+        break;
+      uint64_t fr = frame_alloc_zeroed();
+      if (!fr) {
+        idle = 1; /* no free frame: wait, do not spin */
+        break;
+      }
+      if (!vm_zp_push(fr)) {
+        frame_free(fr);
+        break;
+      }
+      vm_zp_made++;
+    }
+    int others = vm_zp_users_alive(self);
+    if (others)
+      seen_other = 1;
+    if (seen_other && !others) {
+      __atomic_store_n(&vm_zp_task, 0, __ATOMIC_SEQ_CST);
+      kernel_exit();
+      return;
+    }
+    /* Never keep the CPU.  A kernel task is not preempted (trap.c: the
+       timer paths preempt user mode only), and a thread whose timer expires
+       on this CPU is this CPU's next pick: a halt loop here held every such
+       thread until another CPU's 10 ms tick took it (linux_probe_hrtimer
+       L1-L3 under 8 burners: 1 ms sleeps took 10 ms).  Full (or no free
+       frame): halt until the next interrupt, then give the CPU back; else
+       back after each batch. */
+    if ((idle || vm_zp_n >= VM_ZP_N) && !vm_zp_others_ready(self))
+      safe_wfi();
+    arch_yield();
+  }
+}
+/* Syscall context (vm_mmap): start vmzero once per run. */
+static void vm_zeroer_start(void) {
+  if (__atomic_load_n(&vm_zp_task, __ATOMIC_ACQUIRE))
+    return;
+  int z = 0;
+  if (!__atomic_compare_exchange_n(&vm_zp_task, &z, 1, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
+    return;
+  int pid = process_create_kernel_nowait(vm_zeroer_task, 0);
+  if (pid <= 0) {
+    __atomic_store_n(&vm_zp_task, 0, __ATOMIC_SEQ_CST);
+    return;
+  }
+  struct process *zp = process_get_pcb(pid);
+  if (zp) {
+    const char *nm = "vmzero";
+    int i = 0;
+    for (; nm[i] && i < 31; i++) zp->name[i] = nm[i];
+    zp->name[i] = 0;
+  }
+}
+
 /* No lock held: fill this CPU's stash (bounded: VM_ZSTASH frames). */
 static void vm_zstash_fill(void) {
   for (int k = 0; k < VM_ZSTASH; k++) {
@@ -177,7 +325,9 @@ static void vm_zstash_fill(void) {
     vm_zs_irqrestore(f);
     if (full)
       return;
-    uint64_t fr = frame_alloc_zeroed();
+    uint64_t fr = vm_zp_pop(); /* zeroed by vmzero, or zero it here */
+    if (!fr)
+      fr = frame_alloc_zeroed();
     if (!fr)
       return;
     f = vm_zs_irqoff();
@@ -206,6 +356,14 @@ static uint64_t vm_zframe(void) {
     frame_parked_add(-1);
   return fr ? fr : frame_alloc_zeroed();
 }
+/* H7-fault round 2 (H7-10): a page-table frame, taken under vm_lock by the
+   x86 walk (x64_next_table): from vmzero's pool when it has one, so the
+   table's first touch -- a host page fault in a P9 guest, milliseconds under
+   host memory pressure -- is not paid while every other fault waits. */
+uint64_t vm_table_frame(void) {
+  uint64_t fr = vm_zp_pop();
+  return fr ? fr : frame_alloc_zeroed();
+}
 uint32_t vm_zstash_frames(void) { /* unit tests: frames parked in stashes */
   uint32_t n = 0;
   for (int c = 0; c < MAX_CPUS; c++)
@@ -213,6 +371,7 @@ uint32_t vm_zstash_frames(void) { /* unit tests: frames parked in stashes */
   return n;
 }
 #else
+static inline void vm_zeroer_start(void) {}
 static inline void vm_zstash_fill(void) {}
 static inline uint64_t vm_zframe(void) { return frame_alloc_zeroed(); }
 uint32_t vm_zstash_frames(void) { return 0; }
@@ -877,7 +1036,7 @@ int vm_object_truncate(struct vm_object *o, uint64_t size) {
   if (zapped) {
     for (int t = 0; t < MAX_PROCESSES; t++)
       if (touched[t / 64] & (1ULL << (t % 64)))
-        vm_arch_shootdown(&vm_as_pool[t]);
+        pfstat_shoot_site(PFS_TRUNC), vm_arch_shootdown(&vm_as_pool[t]);
   }
   flags = vm_lock_acq(__LINE__);
   for (int i = nnf; i < old_nf; i++) {
@@ -1101,12 +1260,15 @@ struct vm_tlb_batch {
   struct vm_object *obj[VTB_OBJS];
   int nobj;
   int flush;           /* a leaf changed: a shootdown is owed */
+  uint64_t ptchain;    /* H7-10: unhooked page tables, pages like `chain` */
+  int ptchain_n;
 };
 
 static void vtb_init(struct vm_tlb_batch *b);
 static void vtb_hold_objects_locked(struct vm_tlb_batch *b, struct addr_space *as,
                                     uint64_t base, uint64_t len);
-static void vtb_finish(struct vm_tlb_batch *b, struct addr_space *as);
+static void vtb_finish_site(struct vm_tlb_batch *b, struct addr_space *as, int site);
+#define vtb_finish(b, as) vtb_finish_site((b), (as), PFS_OTHER)
 static void vm_zap_range_defer(struct addr_space *as, uint64_t base, uint64_t len,
                                struct vm_tlb_batch *b);
 
@@ -1138,7 +1300,7 @@ int vm_region_install_fixed(struct addr_space *as, uint64_t base,
                                    obj_off) != 0)
     rc = -ENOMEM;
   vm_lock_rel(fl);
-  vtb_finish(&tb, as);
+  vtb_finish_site(&tb, as, PFS_FIXED);
   return rc;
 }
 
@@ -2561,6 +2723,7 @@ static int vm_cow_share_break_locked(struct addr_space *as, struct vm_region *r,
 static uint32_t pe_cow_n, pe_cow_peer_n;
 static void vm_cow_shootdown(struct addr_space *as, int pid, uint64_t va, int okind,
                              uint64_t off, int kernel_write) {
+  pfstat_shoot_site(PFS_COW);
   vm_arch_shootdown(as);
   uint32_t n = __atomic_add_fetch(&pe_cow_n, 1u, __ATOMIC_RELAXED);
 #ifdef __x86_64__
@@ -2719,8 +2882,10 @@ int vm_touch(struct process *p, uint64_t va, uint64_t len, int write) {
       vm_lock_rel(fl);
       if (brc < 0)
         return -2;
-      if (brc > 0)
+      if (brc > 0) {
+        pfstat_shoot_site(PFS_COWSHARE);
         vm_arch_shootdown(as);
+      }
       retouch = 0;
       continue;
     } else if (write && r->obj && (r->flags & VM_MAP_PRIVATE) &&
@@ -3553,8 +3718,10 @@ static int vm_handle_fault_body(struct process *grp, uint64_t va, int write,
       pfstat_kind(PFK_COW);
       vm_lock_rel(fl);
       vm_arch_flush_va(as, a);
-      if (brc > 0)
+      if (brc > 0) {
+        pfstat_shoot_site(PFS_COWSHARE);
         vm_arch_shootdown(as); /* C1-pe: readers of the shared frame */
+      }
       return 0;
     }
   }
@@ -3739,6 +3906,7 @@ static int vm_handle_fault_body(struct process *grp, uint64_t va, int write,
                       VM_PW_VMFIX);
           vm_lock_rel(fl);
           vm_arch_flush_va(as, a);
+          pfstat_shoot_site(PFS_RETRY);
           vm_arch_shootdown(as);
           if (oldfr)
             frame_free(oldfr);
@@ -3758,8 +3926,10 @@ static int vm_handle_fault_body(struct process *grp, uint64_t va, int write,
        reload is the architecturally complete flush.  Only worth it once the
        first retry has already failed, so the common one-fault case keeps the
        cheap invlpg. */
-    if (rc_now >= 1)
+    if (rc_now >= 1) {
+      pfstat_shoot_site(PFS_RETRY);
       vm_arch_shootdown(as);
+    }
     vm_arch_flush_va(as, a);
     if (rc_now >= 1)
       vm_arch_reload_cr3(as);
@@ -4864,6 +5034,8 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
     return -EINVAL;
   if ((flags & VM_MAP_SHARED) && (flags & VM_MAP_PRIVATE))
     return -EINVAL;
+  if (as->layout == VM_LAYOUT_COMPAT)
+    vm_zeroer_start(); /* H7-fault round 2: the pre-zero pool (above) */
   len = (len + 0xFFF) & ~0xFFFULL;
   uint16_t p = mmap_prot_sanitize(prot);
   uint32_t fl2 = flags & (VM_MAP_SHARED | VM_MAP_PRIVATE | VM_MAP_FIXED |
@@ -5288,7 +5460,7 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
   }
   vm_lock_rel(fl);
   /* ---- end of the critical section ------------------------------------ */
-  vtb_finish(&tb, as); /* C1-pe: shoot down, then release the old frames */
+  vtb_finish_site(&tb, as, PFS_MMAP); /* C1-pe: shoot down, then release the old frames */
 
   if (rc == 0)
     mr_sel(base, len, mr_w); /* L56 probe: one row per chosen base */
@@ -5317,6 +5489,8 @@ static void vtb_init(struct vm_tlb_batch *b) {
   b->chain_n = 0;
   b->nobj = 0;
   b->flush = 0;
+  b->ptchain = 0;
+  b->ptchain_n = 0;
 }
 
 /* Park a frame for release after the shootdown.  Caller holds vm_lock. */
@@ -5368,9 +5542,47 @@ static void vtb_hold_objects_locked(struct vm_tlb_batch *b,
 }
 
 /* Shoot down, then release.  Caller holds NO spinlock. */
-static void vtb_finish(struct vm_tlb_batch *b, struct addr_space *as) {
-  if (b->flush || b->n || b->chain)
+#if defined(__x86_64__)
+static void vtb_rel_cb(void *ctx, uint64_t fr);
+/* H7-fault round 2 (H7-10): the page tables vm_arch_zap_range unhooked under
+   vm_lock.  Nothing can walk to them now, so their leaves are released here,
+   without the lock (each frame parked like any other, the table frame too),
+   and the counters are settled under one short hold.  Called before the
+   shootdown: until it, other CPUs may still translate through a table (and
+   set its A/D bits), and nothing is freed before it. */
+static void vtb_drain_tables(struct vm_tlb_batch *b, struct addr_space *as) {
+  int64_t leaves = 0, tables = 0;
+  int cnt = b->ptchain_n;
+  while (b->ptchain) {
+    uint64_t *w = (uint64_t *)phys_to_virt(b->ptchain);
+    uint64_t next = w[0];
+    for (int i = 0; i < cnt; i++) {
+      leaves += vm_arch_pt_drain(w[1 + i], vtb_rel_cb, b);
+      vtb_add(b, w[1 + i]);
+      tables++;
+    }
+    frame_free(b->ptchain); /* the list page itself: ours, never mapped */
+    b->ptchain = next;
+    cnt = VTB_PER_PAGE; /* every older page is full */
+  }
+  b->ptchain_n = 0;
+  b->flush = 1;
+  uint64_t fl = vm_lock_acq(__LINE__);
+  as->resident_frames -= leaves;
+  as->table_frames -= tables;
+  vm_lock_rel(fl);
+}
+#endif
+
+static void vtb_finish_site(struct vm_tlb_batch *b, struct addr_space *as, int site) {
+#if defined(__x86_64__)
+  if (b->ptchain)
+    vtb_drain_tables(b, as);
+#endif
+  if (b->flush || b->n || b->chain) {
+    pfstat_shoot_site(site);
     vm_arch_shootdown(as);
+  }
   for (int i = 0; i < b->n; i++)
     frame_free(b->fr[i]);
   while (b->chain) {
@@ -5388,8 +5600,36 @@ static void vtb_finish(struct vm_tlb_batch *b, struct addr_space *as) {
 }
 
 /* vm_zap_range with the releases parked in `b`.  Caller holds vm_lock. */
+#if defined(__x86_64__)
+static void vtb_rel_cb(void *ctx, uint64_t fr) { vtb_add((struct vm_tlb_batch *)ctx, fr); }
+/* Take an unhooked page table (vm_arch_zap_range): 1, or 0 when no list page
+   could be had (then the table is zapped in place). */
+static int vtb_pt_cb(void *ctx, uint64_t pt) {
+  struct vm_tlb_batch *b = (struct vm_tlb_batch *)ctx;
+  if (!b->ptchain || b->ptchain_n >= VTB_PER_PAGE) {
+    uint64_t pg = frame_alloc();
+    if (!pg)
+      return 0;
+    uint64_t *w = (uint64_t *)phys_to_virt(pg);
+    w[0] = b->ptchain;
+    b->ptchain = pg;
+    b->ptchain_n = 0;
+  }
+  ((uint64_t *)phys_to_virt(b->ptchain))[1 + b->ptchain_n++] = pt;
+  b->flush = 1;
+  return 1;
+}
+#endif
 static void vm_zap_range_defer(struct addr_space *as, uint64_t base,
                                uint64_t len, struct vm_tlb_batch *b) {
+#if defined(__x86_64__)
+  /* H7-fault round 2 (H7-10): one table walk per 2 MiB (mmu.c), and a whole
+     2 MiB table is unhooked with one store and drained after vm_lock
+     (vtb_drain_tables), so the hold no longer grows with the resident pages
+     of the span. */
+  as->resident_frames -= vm_arch_zap_range(as, base, base + len, vtb_rel_cb, b, vtb_pt_cb);
+  return;
+#endif
   for (uint64_t a = base; a < base + len; a += FRAME_SIZE) {
     uint64_t nx = vm_arch_skip_absent(as, a); /* P1: skip absent tables */
     if (nx != a) {
@@ -5414,7 +5654,7 @@ void vm_zap_span(struct addr_space *as, uint64_t base, uint64_t len) {
   vtb_hold_objects_locked(&b, as, base, len);
   vm_zap_range_defer(as, base, len, &b);
   vm_lock_rel(fl);
-  vtb_finish(&b, as);
+  vtb_finish_site(&b, as, PFS_ZAP);
 }
 
 /* C1-k4: munmap's core -- zap + forget the region span, then shoot down and
@@ -5430,7 +5670,7 @@ static int vm_unmap_span_jit(struct addr_space *as, uint64_t base,
   if (rc == 0 && jit)
     vm_jit_release(as, base, len); /* a freed code chunk is reusable */
   vm_lock_rel(fl);
-  vtb_finish(&b, as);
+  vtb_finish_site(&b, as, jit ? PFS_JIT : PFS_MUNMAP);
   return rc;
 }
 
@@ -5554,6 +5794,24 @@ static int vm_prot_set_span(struct addr_space *as, uint64_t addr, uint64_t len,
 }
 
 static int mpr_diag_rows;
+#define VM_MPROT_CHUNK 512 /* resident pages per vm_lock hold (H7-10) */
+/* Drop vm_lock between two chunks of a long call and take it back.  The lock
+   is test-and-set: re-taken at once, it is re-taken by this CPU before a
+   spinning waiter sees it free (linux_probe_vmhold: a faulter waited 2-3 ms
+   across a whole chunked mprotect).  When a CPU is spinning for it, wait
+   (bounded) until someone else has taken it. */
+static void vm_lock_gap(uint64_t *fl) {
+  vm_lock_rel(*fl);
+#if defined(__x86_64__)
+  extern volatile uint64_t lock_wait_addr[MAX_CPUS];
+  int waiting = 0;
+  for (int c = 0; c < MAX_CPUS && !waiting; c++)
+    waiting = lock_wait_addr[c] == (uint64_t)&vm_lock;
+  for (int i = 0; waiting && i < 4096 && !__atomic_load_n(&vm_lock.locked, __ATOMIC_ACQUIRE); i++)
+    __builtin_ia32_pause();
+#endif
+  *fl = vm_lock_acq(__LINE__);
+}
 
 int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot) {
   if (!grp || !grp->as)
@@ -5596,7 +5854,18 @@ int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot)
   }
   /* Resident pages: re-encode in place, or ZAP for PROT_NONE (design
      section 4.4: documented divergence from Linux).  P1: absent tables are
-     skipped whole. */
+     skipped whole.
+     H7-fault round 2 (H7-10): the walk drops vm_lock every
+     VM_MPROT_CHUNK resident pages.  An mprotect of 256 MiB resident held the
+     lock 3-4.5 ms in one stretch and a concurrent fault waited up to 5.3 ms
+     (linux_probe_vmhold).  Safe because the region records are already
+     final (vm_prot_set_span above): a fault in the gap maps a new page with
+     the new protection, an old leaf keeps its old rights only until this
+     loop or the shootdown at the end reaches it (Linux: until its flush),
+     and a page whose region changed under us in the gap (another thread's
+     mprotect / mmap / munmap) is left to that call. */
+  int mprot_n = 0, mr_ok = 0;
+  uint64_t mr_lo = 0, mr_hi = 0; /* the region last looked up, while held */
   for (uint64_t a = addr; a < addr + len; a += FRAME_SIZE) {
     uint64_t nx = vm_arch_skip_absent(as, a);
     if (nx != a) {
@@ -5605,6 +5874,24 @@ int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot)
     }
     if (vm_arch_walk(as, a, 0) != 0)
       continue;
+    if ((mprot_n & 63) == 63)
+      vm_arch_tlb_poll(); /* H7-07: interrupts are off under vm_lock */
+    if (++mprot_n % VM_MPROT_CHUNK == 0) {
+      vm_lock_gap(&fl);
+      mr_lo = mr_hi = 0; /* the region list may have changed in the gap */
+      if (as->ver != AS_V2)
+        break;
+      if (vm_arch_walk(as, a, 0) != 0)
+        continue;
+    }
+    if (a < mr_lo || a >= mr_hi) {
+      struct vm_region *cr = vm_region_find(as, a);
+      mr_ok = cr && cr->prot == p;
+      mr_lo = cr ? cr->base : a;
+      mr_hi = cr ? cr->base + cr->len : a + FRAME_SIZE;
+    }
+    if (!mr_ok)
+      continue; /* changed in a gap: another call's page now */
     if (p == 0) {
       vtb_add(&tb, vm_arch_unmap_keep(as, a));
       as->resident_frames--;
@@ -5630,26 +5917,30 @@ int vm_mprotect(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot)
   if (mpr_diag_rows < 40) {
     struct vm_region *dr = vm_region_find(as, addr);
     if (dr && dr->obj && (dr->flags & VM_MAP_PRIVATE)) {
+      /* H7-fault: one kline, printed after the release (vm_row) */
       mpr_diag_rows++;
-      uart_puts("[MPROT] a=");
-      uart_print_hex(addr);
-      uart_puts(" len=");
-      uart_print_hex(len);
-      uart_puts(" prot=");
-      print_int((int)p);
-      uart_puts(" rc=");
-      print_int(rc);
-      uart_puts(" r=");
-      uart_print_hex(dr->base);
-      uart_puts("+");
-      uart_print_hex(dr->len);
-      uart_puts(" rprot=");
-      print_int((int)dr->prot);
-      uart_puts("\n");
+      struct kline kl;
+      kl_init(&kl);
+      kl_s(&kl, "[MPROT] a=");
+      kl_hex(&kl, (unsigned long)addr);
+      kl_s(&kl, " len=");
+      kl_hex(&kl, (unsigned long)len);
+      kl_s(&kl, " prot=");
+      kl_i(&kl, (int)p);
+      kl_s(&kl, " rc=");
+      kl_i(&kl, rc);
+      kl_s(&kl, " r=");
+      kl_hex(&kl, (unsigned long)dr->base);
+      kl_c(&kl, '+');
+      kl_hex(&kl, (unsigned long)dr->len);
+      kl_s(&kl, " rprot=");
+      kl_i(&kl, (int)dr->prot);
+      kl_c(&kl, '\n');
+      vm_row(&kl);
     }
   }
   vm_lock_rel(fl);
-  vtb_finish(&tb, as);
+  vtb_finish_site(&tb, as, PFS_MPROT);
   return rc == 0 ? 0 : -ENOMEM;
 }
 
@@ -6015,14 +6306,18 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst) {
   /* C1-fork: the parent's shared leaves went read-only (local invlpg each);
      other threads of the parent may still hold writable translations, and a
      store through one after the child started would reach the child. */
-  if (src_marked)
+  if (src_marked) {
+    pfstat_shoot_site(PFS_FORK);
     vm_arch_shootdown(src);
+  }
   return 0;
 
 fail:
   /* The caller tears `dst` down (it may be a process PCB's AS). */
-  if (src_marked)
+  if (src_marked) {
+    pfstat_shoot_site(PFS_FORK);
     vm_arch_shootdown(src);
+  }
   ASCLONE("fail", i, 0);
   #undef ASCLONE
   return -1;

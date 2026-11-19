@@ -158,6 +158,37 @@ def main():
                     g["tr." + c + ".us"] += int(m.group(2))
                     g["tr." + c + ".max"] = max(g["tr." + c + ".max"], int(m.group(3)))
             continue
+        r = tail_of(ln, "[PFS] t=")
+        if r:
+            t = int(re.search(r" t=(\d+)", r).group(1))
+            g = agg[phase_of(ph, t / 1000.0)]
+            for m in re.finditer(r" ([a-z]+)=(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)", r):
+                k = "ss." + m.group(1)
+                v = [int(x) for x in m.groups()[1:]]
+                g[k + ".n"] += v[0]
+                g[k + ".us"] += v[1]
+                g[k + ".max"] = max(g[k + ".max"], v[2])
+                g[k + ".tg"] += v[3]
+                g[k + ".run"] += v[4]
+                g[k + ".slow"] += v[5]
+            m = re.search(r" slow_infault=(\d+)", r)
+            if m:
+                g["slow_infault"] += int(m.group(1))
+            m = re.search(r" slowcpu=([\d,]+)", r)
+            if m:
+                for i, x in enumerate(m.group(1).split(",")):
+                    g["slowcpu%d" % i] += int(x)
+            continue
+        r = tail_of(ln, "[PFR] t=")
+        if r:
+            t = int(re.search(r" t=(\d+)", r).group(1))
+            g = agg[phase_of(ph, t / 1000.0)]
+            for m in re.finditer(r" ([a-z0-9_]+)=(\d+)/(\d+)/(\d+)", r):
+                k = "tg." + m.group(1)
+                g[k + ".n"] += int(m.group(2))
+                g[k + ".us"] += int(m.group(3))
+                g[k + ".max"] = max(g[k + ".max"], int(m.group(4)))
+            continue
         r = tail_of(ln, "[PFT] t=")
         if r:
             m = re.search(r" t=(\d+) top=(.*)", r)
@@ -211,6 +242,17 @@ def main():
         print("   user traps: " + " ".join(
             f"{c}={int(g['tr.' + c + '.n'])}/{int(g['tr.' + c + '.us'])}us/max{int(g['tr.' + c + '.max'])}"
             for c in ("pf", "tmr", "ipi", "oth")))
+        sites = sorted({k.split(".")[1] for k in g if k.startswith("ss.")})
+        if sites:
+            print("   shootdowns by site (n/us/max/targets/running/slow): " + " ".join(
+                f"{st}={int(g['ss.' + st + '.n'])}/{int(g['ss.' + st + '.us'])}/{int(g['ss.' + st + '.max'])}/"
+                f"{int(g['ss.' + st + '.tg'])}/{int(g['ss.' + st + '.run'])}/{int(g['ss.' + st + '.slow'])}"
+                for st in sites) + f" slow_infault={int(g['slow_infault'])} slowcpu=" + ",".join(str(int(g["slowcpu%d" % i])) for i in range(8)))
+        segs = sorted({k.split(".")[1] for k in g if k.startswith("tg.")})
+        if segs:
+            print("   timer segments (n/us/max): " + " ".join(
+                f"{st}={int(g['tg.' + st + '.n'])}/{int(g['tg.' + st + '.us'])}/{int(g['tg.' + st + '.max'])}"
+                for st in segs))
         if top[p]:
             print("   top threads (tid:pf+irq us:pf us:name): " + ", ".join(
                 f"{t}:{v}:{topf[p][t]}:{names.get(t, '?')}" for t, v in top[p].most_common(6)))

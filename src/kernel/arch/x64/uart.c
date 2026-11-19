@@ -80,8 +80,16 @@ volatile uint64_t uart_last_activity_ms = 0;
 #define COM1_FIFO 16
 static int com1_room;
 
+/* H7-fault round 2 (H7-07/H7-08, docs/cp-fault.md §12): a console write runs
+   with interrupts off, and each byte is a port exit that QEMU serves in user
+   space (10-50 us on a loaded host), so a 2-8 KiB write() keeps this CPU deaf
+   to the 0x82 shootdown IPI for tens to hundreds of milliseconds.  Settle an
+   owed TLB flush every FIFO refill and while waiting for the wire. */
+extern void vm_arch_tlb_poll(void);
+
 static void com1_put(uint8_t c) {
   if (com1_room <= 0) {
+    vm_arch_tlb_poll();
     for (uint32_t spin = 0; !is_transmit_empty() && spin < 10000000u; spin++)
       __asm__ volatile("pause");
     com1_room = COM1_FIFO;
@@ -116,7 +124,10 @@ const void *cons_hw_ctx(uint32_t cpu) {
   return cpu < MAX_CPUS ? (const void *)cpu_locals[cpu].current_proc : 0;
 }
 
-void cons_hw_relax(void) { __asm__ volatile("pause"); }
+void cons_hw_relax(void) {
+  __asm__ volatile("pause");
+  vm_arch_tlb_poll(); /* H7-07: waiting for the wire with interrupts off */
+}
 
 /* fw_cfg (QEMU, legacy port interface): opt/hobbyos/diag, the boot-time
    diagnostic knob (-fw_cfg name=opt/hobbyos/diag,string=all). */

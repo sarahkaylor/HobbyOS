@@ -1,0 +1,33 @@
+#!/usr/bin/env python3
+"""lp_check_conswait.py <serial.log> -- linux_probe_conswait's console check
+(H7-fault round 2, H7-07/H7-08; docs/cp-fault.md §12).  Over the boot's
+[PFS] rows, the mprot entries (n/us/max_us/targets/running/slow): at most 5 % of the
+mprotect shootdowns may have had a target that acknowledged 1 ms or more
+late, and none may have taken 20 ms or more.  The probe keeps two other CPUs
+writing 2 KiB blocks to the console: each block goes out byte by byte (a port
+exit each) with interrupts off, and a 0x82 IPI waits for the end of it unless
+the writer settles owed flushes while it writes.
+Exit 0 = pass, 1 = fail, 2 = no run."""
+import re
+import sys
+
+text = open(sys.argv[1], "rb").read().decode("latin-1")
+if "[LP] C1 " not in text:
+    print("lp_check_conswait: no '[LP] C1' row (the probe did not run)")
+    sys.exit(2)
+n = us = mx = slow = 0
+for ln in text.splitlines():
+    if "[PFS] t=" not in ln:
+        continue
+    m = re.search(r" mprot=(\d+)/(\d+)/(\d+)/(\d+)/(\d+)/(\d+)", ln)
+    if m:
+        v = [int(x) for x in m.groups()]
+        n += v[0]
+        us += v[1]
+        mx = max(mx, v[2])
+        slow += v[5]
+pct = 100.0 * slow / n if n else 0.0
+ok = n >= 250 and pct <= 5.0 and mx < 20000
+print(f"lp_check_conswait: {'PASS' if ok else 'FAIL'} -- {n} mprotect shootdowns, "
+      f"{slow} slow target acks ({pct:.1f} per 100 shootdowns), total {us} us, max {mx} us")
+sys.exit(0 if ok else 1)

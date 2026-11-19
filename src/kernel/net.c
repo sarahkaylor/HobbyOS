@@ -1561,6 +1561,14 @@ int net_socket_recv_timeout_st(struct socket_pcb* pcb, void* buf, uint32_t len,
       prev_us = now_us;
       st->iters++;
     }
+#if defined(__x86_64__)
+    /* H7-fault round 2 (H7-07): an NFS wait inside a page fault spins with
+       interrupts off; settle any TLB shootdown this CPU owes meanwhile */
+    {
+      extern void vm_arch_tlb_poll(void);
+      vm_arch_tlb_poll();
+    }
+#endif
     if ((int)(timer_get_ms() - start) > timeout_ms) {
       if (st) {
 #if defined(__x86_64__)

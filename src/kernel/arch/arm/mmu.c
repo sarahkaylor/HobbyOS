@@ -670,6 +670,8 @@ void vm_arch_reload_cr3(struct addr_space *as) {
   (void)as;
 }
 
+void vm_arch_tlb_poll(void) {} /* ARM: broadcast TLBI, nothing owed */
+
 void vm_arch_shootdown(struct addr_space *as) {
   (void)as; /* ARM invalidations are already broadcast per VA/ASID */
 }

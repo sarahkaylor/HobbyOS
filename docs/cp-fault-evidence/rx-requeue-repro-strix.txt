@@ -1,0 +1,61 @@
+# H7-05 repro: cpnfsbench rxpress (test kernel rxstall.2000: every 32nd RX frame reader spins 2 ms between re-queuing its descriptor and reading the frame), rsize_guard, strix 1 slot, 2026-11-18 ~17:5x
+
+== r2-rxp-before (7af3bb1e-equivalent, no copy-out)
+rsize_guard: FAIL G1 a bench phase failed (bad byte count or checksum) ([NB] lookstorm stats=6000 failed_procs=0 ms=226 ok [NB] done rc=1 )
+rsize_guard: G9 5/5 injected-loss rows right (inject.blackout.read pages=1024 bad=0 short=0 eio=0 ms=8822)
+rsize_guard: FAIL (/home/sarah/cp/lanes/fault-dev; console /home/sarah/cp/lanes/fault-dev/obj/nfs-bench/console.log)
+[NB] rxpress mark0
+[NB] rxpress.child a=3 pages=8 bad=0 first_bad=- ok
+[NB] rxpress.child a=2 pages=8 bad=0 first_bad=- ok
+[NB] rxpress.child a=5 pages=8 bad=0 first_bad=- ok
+[NB] rxpress.child a=4 pages=8 bad=0 first_bad=- ok
+[NB] rxpress.child a=0 pages=8 bad=1 first_bad=4362448 FAIL
+[NB] rxpress.child a=1 pages=8 bad=0 first_bad=- ok
+[NB] rxpress mark1
+[NB] rxpress readers=6 kib=49152 bad_files=1 err=0 ms=1047 FAIL
+[NFSRS] off=98304 want=32768 age_ms=51 inflight=2 sys_kib=64 resend_ms=1 late_ms=-1 iters=806604 gap_max_us=8 pend=0 rxpk=1 frags+=69 ipr_to+=0 stale=0 stalls=1 ipr=0/0/0 last=0x80006/0x0/40/51 txdrop+=0 txwait+=0 at=4471
+[NFSRS] off=360448 want=32768 age_ms=51 inflight=2 sys_kib=64 resend_ms=1 late_ms=-1 iters=805553 gap_max_us=9 pend=0 rxpk=1 frags+=69 ipr_to+=0 stale=0 stalls=1 ipr=0/0/0 last=0x80006/0x0/40/51 txdrop+=0 txwait+=0 at=4527
+[NFSRS] off=589824 want=32768 age_ms=51 inflight=2 sys_kib=64 resend_ms=1 late_ms=-1 iters=800609 gap_max_us=9 pend=0 rxpk=1 frags+=69 ipr_to+=0 stale=0 stalls=1 ipr=0/0/0 last=0x80006/0x0/40/51 txdrop+=0 txwait+=0 at=4582
+[NFSRS] rows in the boot: 53
+rxq_max=45 rxq_full=0 txq_wait=0 txq_drop=0 txq_wmax_us=0 rxq_reuse=30
+drop_timeout=0 drop_evict=52 drop_full=0 drop_bad=0 nosock=0 dgfull=0 stalls=69
+
+== r2-rxp-before2 (7af3bb1e-equivalent, no copy-out)
+rsize_guard: G9 5/5 injected-loss rows right (inject.blackout.read pages=1024 bad=0 short=0 eio=0 ms=8822)
+rsize_guard: FAIL G12 31 pipeline stalls under stalled RX readers ([NB] rxpress readers=6 kib=49152 bad_files=0 err=0 ms=1281 ok)
+rsize_guard: FAIL (/home/sarah/cp/lanes/fault-dev; console /home/sarah/cp/lanes/fault-dev/obj/nfs-bench/console.log)
+[NB] rxpress mark0
+[NB] rxpress.child a=2 pages=8 bad=0 first_bad=- ok
+[NB] rxpress.child a=4 pages=8 bad=0 first_bad=- ok
+[NB] rxpress.child a=0 pages=8 bad=0 first_bad=- ok
+[NB] rxpress.child a=5 pages=8 bad=0 first_bad=- ok
+[NB] rxpress.child a=3 pages=8 bad=0 first_bad=- ok
+[NB] rxpress.child a=1 pages=8 bad=0 first_bad=- ok
+[NB] rxpress mark1
+[NB] rxpress readers=6 kib=49152 bad_files=0 err=0 ms=1281 ok
+[NFSRS] off=65536 want=32768 age_ms=50 inflight=2 sys_kib=64 resend_ms=1 late_ms=-1 iters=797601 gap_max_us=7 pend=0 rxpk=1 frags+=69 ipr_to+=0 stale=0 stalls=1 ipr=0/0/0 last=0x80006/0x0/40/51 txdrop+=0 txwait+=0 at=4029
+[NFSRS] off=360448 want=32768 age_ms=51 inflight=2 sys_kib=64 resend_ms=1 late_ms=-1 iters=802722 gap_max_us=7 pend=0 rxpk=1 frags+=69 ipr_to+=0 stale=0 stalls=1 ipr=0/0/0 last=0x80006/0x0/40/51 txdrop+=0 txwait+=0 at=4084
+[NFSRS] off=622592 want=32768 age_ms=51 inflight=2 sys_kib=64 resend_ms=1 late_ms=-1 iters=805601 gap_max_us=8 pend=0 rxpk=1 frags+=69 ipr_to+=0 stale=0 stalls=1 ipr=0/0/0 last=0x80006/0x0/40/51 txdrop+=0 txwait+=0 at=4140
+[NFSRS] rows in the boot: 51
+rxq_max=71 rxq_full=0 txq_wait=0 txq_drop=0 txq_wmax_us=0 rxq_reuse=33
+drop_timeout=0 drop_evict=55 drop_full=0 drop_bad=0 nosock=0 dgfull=0 stalls=70
+
+== r2-rxp-after (f83a2dfe, copy-out)
+rsize_guard: G9 5/5 injected-loss rows right (inject.blackout.read pages=1024 bad=0 short=0 eio=0 ms=8826)
+rsize_guard: G12 rxpress readers=6 kib=49152 bad_files=0 err=0 ms=590 ok with 0 stalls
+rsize_guard: PASS (/home/sarah/cp/lanes/fault-dev)
+[NB] rxpress mark0
+[NB] rxpress.child a=5 pages=8 bad=0 first_bad=- ok
+[NB] rxpress.child a=2 pages=8 bad=0 first_bad=- ok
+[NB] rxpress.child a=3 pages=8 bad=0 first_bad=- ok
+[NB] rxpress.child a=0 pages=8 bad=0 first_bad=- ok
+[NB] rxpress.child a=1 pages=8 bad=0 first_bad=- ok
+[NB] rxpress.child a=4 pages=8 bad=0 first_bad=- ok
+[NB] rxpress mark1
+[NB] rxpress readers=6 kib=49152 bad_files=0 err=0 ms=590 ok
+[NFSRS] off=65536 want=32768 age_ms=50 inflight=2 sys_kib=64 resend_ms=1 late_ms=-1 iters=765607 gap_max_us=50 pend=0 rxpk=1 frags+=69 ipr_to+=0 stale=0 stalls=1 ipr=0/0/0 last=0x80006/0x0/40/51 txdrop+=0 txwait+=0 at=7403
+[NFSRS] off=327680 want=32768 age_ms=51 inflight=2 sys_kib=64 resend_ms=1 late_ms=-1 iters=778202 gap_max_us=35 pend=0 rxpk=1 frags+=69 ipr_to+=0 stale=0 stalls=1 ipr=0/0/0 last=0x80006/0x0/40/51 txdrop+=0 txwait+=0 at=7459
+[NFSRS] off=622592 want=32768 age_ms=55 inflight=2 sys_kib=64 resend_ms=1 late_ms=-1 iters=791624 gap_max_us=103 pend=0 rxpk=1 frags+=69 ipr_to+=0 stale=0 stalls=1 ipr=0/0/0 last=0x80006/0x0/40/51 txdrop+=0 txwait+=0 at=7518
+[NFSRS] rows in the boot: 34
+rxq_max=92 rxq_full=0 txq_wait=0 txq_drop=0 txq_wmax_us=0 rxq_reuse=0
+drop_timeout=0 drop_evict=0 drop_full=0 drop_bad=0 nosock=0 dgfull=0 stalls=39

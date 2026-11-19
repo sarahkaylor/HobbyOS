@@ -38,6 +38,13 @@
 #       all 40 listings ("[NB] dirs6" rows): the one-directory NFS listing
 #       cache was shared with no lock and handed a lister the other
 #       directory's names (the game's early exit, docs/cp-early.md)
+#   G12 (H7-fault round 2) RX readers stalled after re-queuing a frame (a test
+#       kernel's rxstall injection, every 32nd frame held 2 ms) while six
+#       processes read six fresh 8 MiB files: every byte right ("[NB] rxpress
+#       ... ok") and at most 2 pipeline stalls between the phase's two
+#       [NFSNET] dumps.  Before virtio_net.c copied a frame out before handing
+#       its descriptor back: one file with wrong bytes, 25-69 stalls with one
+#       fragment missing (docs/cp-fault.md §3).
 #   G5  over all READ RPCs (the last "[NFSRTT] periodic" set): bytes / RPCs
 #       >= 16384.  1344-byte READs give ~1344; 32 KiB READs give ~32768.
 #
@@ -129,6 +136,17 @@ n9=$(grep -c . <<<"$G9"); f9=$(grep -c ' FAIL$' <<<"$G9")
 if [ -z "$G9" ] || [ "$n9" -lt 5 ] || [ "$f9" -ne 0 ]; then
   bad "G9 injected reply loss: $n9 rows, $f9 FAIL: $(grep ' FAIL$' <<<"$G9" | head -3 | tr '\n' ' ')"
 else note "G9 $n9/$n9 injected-loss rows right ($(grep -o 'inject.blackout.read [^ ]* [^ ]* [^ ]* [^ ]* ms=[0-9]*' <<<"$G9"))"; fi
+
+# G12 (H7-fault round 2): RX readers stalled mid-frame
+read -r x0 x1 < <(tr -d '\r' < "$C" | awk '
+  /\[NB\] rxpress mark0/ {m=0} /\[NB\] rxpress mark1/ {m=1}
+  m!="" && /\[NFSNET\]/ && match($0, / stalls=[0-9]+/) && !(m in v) {v[m]=substr($0, RSTART+8, RLENGTH-8)}
+  END {print v[0]+0, v[1]+0}')
+XR="$(tr -d '\r' < "$C" | grep -aoE '\[NB\] rxpress readers=[0-9]+ .*(ok|FAIL)$' | tail -1)"
+if [ -z "$XR" ]; then bad "G12 no rxpress row"
+elif ! grep -q ' ok$' <<<"$XR"; then bad "G12 $XR (stalls +$((x1 - x0)))"
+elif [ $((x1 - x0)) -gt 2 ]; then bad "G12 $((x1 - x0)) pipeline stalls under stalled RX readers ($XR)"
+else note "G12 ${XR#\[NB\] } with $((x1 - x0)) stalls"; fi
 
 # G10 (cp/nfs2b): sockets created by the LOOKUP storm
 read -r s0 s1 < <(tr -d '\r' < "$C" | awk '

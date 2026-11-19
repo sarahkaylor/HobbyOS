@@ -1,0 +1,101 @@
+# H7-07 / H7-10 / vmzero probes, strix, one slot (integ22 batch running beside), 2026-11-18 18:0x-18:4x
+
+## linux_probe_tlbstale (96bef222)
+[LP] M1 mprotect(READ) then write rounds=1000 stale=0 err=0 -> PASS
+[LP] M2 munmap then read rounds=1000 stale=0 err=0 -> PASS
+[LP] M3 MAP_FIXED replace then read rounds=1000 stale=0 err=0 -> PASS
+-- the same probe on a test build whose vm_arch_shootdown returns at once:
+[LP] M1 mprotect(READ) then write rounds=1000 stale=1000 err=0 -> FAIL
+[LP] M2 munmap then read rounds=1000 stale=1000 err=0 -> FAIL
+[LP] M3 MAP_FIXED replace then read rounds=1000 stale=1000 err=0 -> FAIL
+
+## linux_probe_vmhold: before (96bef222) / after (96f11afd)
+[LP] H1 mprotect 256 MiB resident x16: total_us=50253 max_pair_us=8541
+[LP] H2 mmap(MAP_FIXED) over 256 MiB resident x4: total_us=24545 max_us=6605
+[LP] H3 munmap 256 MiB resident x4: total_us=25453 max_us=6619
+lp_check_vmhold: FAIL -- 17 long fault row(s), 17 with lw >= 1000 us (max lw 4429 us)
+[LP] H1 mprotect 256 MiB resident x16: total_us=68667 max_pair_us=9301
+[LP] H2 mmap(MAP_FIXED) over 256 MiB resident x4: total_us=34653 max_us=9198
+[LP] H3 munmap 256 MiB resident x4: total_us=28659 max_us=8764
+lp_check_vmhold: FAIL -- 17 long fault row(s), 17 with lw >= 1000 us (max lw 5273 us)
+--
+[LP] H1 mprotect 256 MiB resident x16: total_us=47557 max_pair_us=7035
+[LP] H2 mmap(MAP_FIXED) over 256 MiB resident x4: total_us=11309 max_us=2939
+[LP] H3 munmap 256 MiB resident x4: total_us=9719 max_us=2608
+lp_check_vmhold: PASS -- 0 long fault row(s), 0 with lw >= 1000 us (max lw 0 us)
+
+## linux_probe_shootwait: under host load (integ22 P5/P6 beside it), PV+poll, no vmzero (23f2d8c9-equivalent)
+[LP] S1 2000 mprotect pairs under load: total_ms=1273 max_pair_us=276061
+--- host-side check: lp_check_shootwait.py (console kept: /home/sarah/cp/lanes/fault-dev/obj/linux_probe_shootwait.console.log) ---
+lp_check_shootwait: PASS -- 2000 mprotect shootdowns, 56 slow target acks (2.8 %), total 808462 us, max 83064 us
+   [PFS] (that boot): mmap=84/545183/276014/247/247/25 mprot=2000/808462/83064/5999/5999/56 pv=0 slow_infault=69 slowcpu=21,2,0,25,0,0,33,0
+   (graded by the final check, max 83064 us >= 20000 -> FAIL)
+-- quieter host, alternating: without vmzero (nozp) / with (zp, d9b29fe0)
+r2-sw-nozp.1: lp_check_shootwait: PASS -- 2000 mprotect shootdowns, 8 slow target acks (0.4 %), total 148226 us, max 2166 us pv=3 slow_infault=5
+r2-sw-zp.1: lp_check_shootwait: PASS -- 2000 mprotect shootdowns, 3 slow target acks (0.1 %), total 117755 us, max 2761 us pv=3 slow_infault=0
+r2-sw-nozp.2: lp_check_shootwait: PASS -- 2000 mprotect shootdowns, 6 slow target acks (0.3 %), total 141410 us, max 1411 us pv=2 slow_infault=5
+r2-sw-zp.2: lp_check_shootwait: PASS -- 2000 mprotect shootdowns, 2 slow target acks (0.1 %), total 95490 us, max 4930 us pv=0 slow_infault=1
+
+## linux_probe_pfpar: without vmzero (nozp) / with (zp), alternating, quiet host
+== r2-pfpar-nozp.1
+[LP] S1 threads=1 pages=16384 ms=17.4 pages_per_ms=944 p50_us=0.69 p99_us=1.0 p999_us=75.9 max_us=706
+[LP] P4 threads=4 pages=65536 ms=23.6 pages_per_ms=2776 p50_us=0.79 p99_us=1.9 p999_us=78.9 max_us=714
+[LP] R1V rounds1-5 ms=43.1 max_us=675
+== r2-pfpar-zp.1
+[LP] S1 threads=1 pages=16384 ms=18.6 pages_per_ms=879 p50_us=0.77 p99_us=1.7 p999_us=8.6 max_us=846
+[LP] P4 threads=4 pages=65536 ms=42.4 pages_per_ms=1545 p50_us=2.00 p99_us=4.4 p999_us=82.6 max_us=861
+[LP] R1V rounds1-5 ms=41.0 max_us=844
+== r2-pfpar-nozp.2
+[LP] S1 threads=1 pages=16384 ms=18.2 pages_per_ms=898 p50_us=0.73 p99_us=1.4 p999_us=78.0 max_us=698
+[LP] P4 threads=4 pages=65536 ms=42.1 pages_per_ms=1555 p50_us=1.93 p99_us=7.0 p999_us=81.6 max_us=926
+[LP] R1V rounds1-5 ms=46.2 max_us=781
+== r2-pfpar-zp.2
+[LP] S1 threads=1 pages=16384 ms=19.3 pages_per_ms=849 p50_us=0.83 p99_us=2.2 p999_us=8.9 max_us=961
+[LP] P4 threads=4 pages=65536 ms=40.2 pages_per_ms=1629 p50_us=1.67 p99_us=4.1 p999_us=113.5 max_us=1833
+[LP] R1V rounds1-5 ms=38.2 max_us=808
+-- the same probe under host load, round 1 (stash+LIFO, no vmzero; pfpar-ab-strix.txt dev-pfpar.r2): P4 ms=1172.6 p999_us=13815 max_us=226611
+-- with vmzero under host load (integ22 beside it, r2-pfpar-zp.gate):
+[LP] P4 threads=4 pages=65536 ms=31.8 pages_per_ms=2064 p50_us=1.15 p99_us=3.5 p999_us=96.3 max_us=898
+
+## linux_probe_conswait: before (d9b29fe0) / after (1dbad3fe), strix, 2026-11-18 19:1x
+== cw-before.1
+[LP] C1 500 mprotect pairs beside 2 console writers: total_ms=17614 max_pair_us=67965
+lp_check_conswait: FAIL -- 500 mprotect shootdowns, 988 slow target acks (197.6 %), total 14725971 us, max 67942 us
+== cw-before.2
+[LP] C1 500 mprotect pairs beside 2 console writers: total_ms=17992 max_pair_us=38801
+lp_check_conswait: FAIL -- 500 mprotect shootdowns, 993 slow target acks (198.6 %), total 15131700 us, max 38780 us
+== cw-after.1
+[LP] C1 500 mprotect pairs beside 2 console writers: total_ms=607 max_pair_us=961
+lp_check_conswait: PASS -- 500 mprotect shootdowns, 0 slow target acks (0.0 per 100 shootdowns), total 43796 us, max 953 us
+== cw-after.2
+[LP] C1 500 mprotect pairs beside 2 console writers: total_ms=1233 max_pair_us=162
+lp_check_conswait: PASS -- 500 mprotect shootdowns, 0 slow target acks (0.0 per 100 shootdowns), total 41794 us, max 157 us
+
+## linux_probe_hrtimer L1-L3 (8 burners): round-2 gate batch on 1dbad3fe (vmzero halting in place) / 9c032122
+-- 1dbad3fe (gate batch; rows copied from that run's hrtimer.gate before the batch was restarted):
+[LP] L1 nanosleep 1000us                   n=200 err_us p50=8992 p90=9008 p99=9250 min=13 max=9864 hist[<50:32 <100:0 <200:0 <500:0 <1m:0 <2m:0 <5m:2 <10m:166 >=10m:0] early=0 badcalls=0 FAIL
+[LP] L2 futex WAIT timeout 1000us          n=200 err_us p50=8997 p90=9010 p99=9827 min=21 max=14834 hist[<50:2 <100:0 <200:0 <500:0 <1m:0 <2m:0 <5m:1 <10m:196 >=10m:1] early=0 badcalls=0 FAIL
+[LP] L3 epoll_wait(empty, 1ms)             n=200 err_us p50=8998 p90=9011 p99=9208 min=16 max=9687 hist[<50:5 <100:0 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:195 >=10m:0] early=0 badcalls=0 FAIL
+-- integ22 (reference): L1 p50=13 max=20, L2 p50=14 max=23, L3 p50=14 max=17, all PASS
+-- 9c032122 (second of two runs; the first: L1 p50=23 max=215, L2 p50=21 max=83, L3 p50=24 max=48):
+[LP] L1 nanosleep 1000us                   n=200 err_us p50=24 p90=37 p99=8872 min=14 max=9896 hist[<50:191 <100:5 <200:2 <500:0 <1m:0 <2m:0 <5m:0 <10m:2 >=10m:0] early=0 badcalls=0 PASS
+[LP] L2 futex WAIT timeout 1000us          n=200 err_us p50=23 p90=33 p99=51 min=9 max=55 hist[<50:197 <100:3 <200:0 <500:0 <1m:0 <2m:0 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+[LP] L3 epoll_wait(empty, 1ms)             n=200 err_us p50=23 p90=31 p99=95 min=5 max=1739 hist[<50:197 <100:2 <200:0 <500:0 <1m:0 <2m:1 <5m:0 <10m:0 >=10m:0] early=0 badcalls=0 PASS
+
+## linux_probe_vmhold variants (check tree ~/cp/lanes/fault-chk; the second run of each pair)
+-- gate batch on 9c032122 (96f11afd's chunking): H1 max_pair_us=8342, H2 max_us=5460, H3 max_us=2619; lp_check_vmhold: FAIL -- 1 long fault row(s), 1 with lw >= 1000 us (max lw 2546 us)
+== chk/vmhold.gate (1f1c88db alone; first run: H2 max_us=317944, FAIL 5 waits max lw 4073 us)
+[LP] H1 mprotect 256 MiB resident x16: total_us=63063 max_pair_us=9126
+[LP] H2 mmap(MAP_FIXED) over 256 MiB resident x4: total_us=28816 max_us=13773
+[LP] H3 munmap 256 MiB resident x4: total_us=18130 max_us=6818
+lp_check_vmhold: FAIL -- 17 long fault row(s), 7 with lw >= 1000 us (max lw 3763 us)
+== chk/vmhold.b.gate (ad97e3f4 + 1f1c88db; first run: FAIL 3 waits max lw 3530 us)
+[LP] H1 mprotect 256 MiB resident x16: total_us=53781 max_pair_us=8645
+[LP] H2 mmap(MAP_FIXED) over 256 MiB resident x4: total_us=17583 max_us=5197
+[LP] H3 munmap 256 MiB resident x4: total_us=13344 max_us=3901
+lp_check_vmhold: FAIL -- 11 long fault row(s), 10 with lw >= 1000 us (max lw 3146 us)
+== chk/vmhold.c.gate (73895932 + ad97e3f4 + 1f1c88db; first run: PASS, 0 long rows, H2 max_us=2975, H3 max_us=2611)
+[LP] H1 mprotect 256 MiB resident x16: total_us=47623 max_pair_us=7441
+[LP] H2 mmap(MAP_FIXED) over 256 MiB resident x4: total_us=12651 max_us=3516
+[LP] H3 munmap 256 MiB resident x4: total_us=13832 max_us=4012
+lp_check_vmhold: PASS -- 1 long fault row(s), 0 with lw >= 1000 us (max lw 0 us)
