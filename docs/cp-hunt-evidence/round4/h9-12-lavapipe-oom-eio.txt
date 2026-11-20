@@ -1,0 +1,43 @@
+H9-12: a lavapipe P9 boot (12 GiB) dies during the save load: the game's own int3,
+then Wine's SIGTRAP handler cannot run because the kernel refuses to page in a Wine
+DSO text page with EIO; the guest was out of frames (strix, integ25, lane H9-hunt4)
+
+h4-l01 (HUNT_GPU=lavapipe, P9_MEM=12288, r4/cold-lvp-m86.p9; boot_p9 timeline):
+  +  20.8 s  phase launch      + 179.1 s  main menu      + 205.0 s  phase loading
+  + 961.9 s  verdict detail: the game ended during the play script (after the menu):
+             game status=7 after 941300 ms; REDEngineErrorReporter ran: yes
+The game's memory while loading on the CPU (lavapipe keeps the GPU's memory in
+guest RAM; the guest has 11 520 MiB):
+  [THRS] pid=127 live=62 gt=62 ... res_mib=10987 ... Cyberpunk2077.e        (the last row)
+  [X] [P8MEM] frames_free=294386 free_mib=1149                              (game s 787, falling)
+serial (h4-l01.serial.txt L11917-L11928):
+  [KERNEL] User process fault! Vector: 3 RIP: 0x1404bcdbc                   (the game's int3)
+  [LCOMPAT] fault sig=5 pid=130 tgid=127 ...
+  [EIO] pid=130 (Cyberpunk2077.e) page-in failed VA=0x0000001080294057 PC=0x0000001080294057 rw=rx
+        region=0x0000001080261000+0x0000000000060000 prot=5 kind=7 ooff=0x000000000000C000 live=62
+        -> SIGBUS (EIO, not a protection fault)
+  [LCOMPAT] fault sig=7 ...   [EIO] ... VA=0x0000001080294130 ... -> SIGBUS
+  [LCOMPAT] fault-in-handler pid=130 sig=7 ipc=0x0x1080294130 ... -> default action
+  [EXITPC] pid=130 last_user_pc=0x108004DE8B code=0x40000007
+No NFS error, resend or drop row before it ([NFSNET] drop_timeout=0 ... stalls=2).
+
+Why EIO: kind=7 is VMK_LIB (DSO text mapped by the interpreter: Wine's code on the
+NFS /CP stage).  vm.c vm_file_obj_materialize() returns -EIO whenever the page source
+returns 0 inside the file, and file_obj.c nfs_obj_page() returns 0 when frame_alloc()
+fails as well as when the read fails; vm_page_io_error() then marks the executable
+region VM_MAP_IOERR for good and the fault becomes SIGBUS.  An out-of-frames page-in
+is reported as a permanent I/O error on Wine's text, so the game's own crash handler
+(and any later fault in that region) dies with it.
+Proposed (vm.c, no owner this wave; H7-fault's area):
+  --- a/src/kernel/vm.c
+  +++ b/src/kernel/vm.c
+  @@ static int vm_file_obj_materialize
+       if (!beyond) {
+         vm_object_unref(o);
+  -      return -EIO;
+  +      /* cp-hunt H9-12: a source that failed for lack of a frame is not an I/O
+  +         error: -EIO marks executable text VM_MAP_IOERR for good (h4-l01) */
+  +      return frame_free_count() == 0 ? -ENOMEM : -EIO;
+       }
+(the exact test belongs in nfs_obj_page / ext2_obj_page / file_obj_page, which know
+whether frame_alloc() or the read failed).

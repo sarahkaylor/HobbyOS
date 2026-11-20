@@ -1,0 +1,39 @@
+Round 4 per-boot table (tools/cp/hunt/r4table.py over obj/hunt-logs on strix; integ25)
+
+| run | verdict | world | act | veh | drv | menus | exit | quit | clean | kill_ms | left | faults | tlb | free | devlost | stalls | ghitch | gmax | wmed | nts | cons | sndz | xrun | wdrop | shots | agree |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| h4-x01 | script-done | yes | - | - | - | - | - | - | no | - | - | 0 | 0 | 0 | 0 | 0 | 0 | 0 | - | 847->923 | 0/0 | 0 | 0 | - | 0/100 | NO |
+| h4-x02 | script-done | yes | - | - | - | - | - | - | no | - | - | 0 | 0 | 0 | 0 | 0 | 0 | 0 | - | 792->911 | 0/0 | 0 | 0 | - | 0/106 | NO |
+| h4-p01 | script-done | yes | 17.1 | 0/10 | 0 | 10/15 | vehicle:FAILED | - | no | - | - | 0 | 0 | 0 | 0 | 0 | 0 | 0 | - | 890->930 | 7/635 | 0 | 0 | - | 0/380 | NO |
+| h4-p02 | script-done | yes | 16.4 | 0/1 | 0 | 7/13 | load | - | yes | 234 | 0 | 0 | 0 | 0 | 0 | 0 | 2 | 453 | 36.6 | 804->936 | 11/1440 | 0 | 0 | - | 0/344 | yes |
+| h4-p03 | script-done | yes | 16.0 | 0/2 | 0 | 22/22 | settings:FAILED | - | no | - | - | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 27.8 | 701->928 | 6/483 | 4 | 2 | 2 | 0/297 | NO |
+| h4-p04 | script-done | yes | 16.0 | 0/3 | 0 | 21/22 | vehicle | - | yes | 231 | 0 | 0 | 0 | 0 | 0 | 2 | 1 | 258 | 29.9 | 793->912 | 14/2303 | 7 | 1 | 4 | blackx1/331 | yes |
+| h4-p05 | script-done | yes | 16.1 | 0/2 | 0 | 21/22 | load | - | yes | 233 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 28.3 | 701->945 | 11/4403 | 7 | 1 | 5 | blackx1/309 | yes |
+| h4-p07 | script-done | yes | 16.0 | 0/3 | 0 | 22/22 | vehicle | - | yes | 233 | 0 | 0 | 0 | 0 | 0 | 8 | 0 | 0 | 27.7 | 797->910 | 32/2001 | 0 | 0 | - | blackx1/319 | yes |
+| h4-p08 | script-done | yes | 16.1 | 0/2 | 0 | 22/22 | load | - | yes | 237 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 276 | 30.0 | 701->921 | 8/658 | 0 | 0 | - | 0/313 | yes |
+| h4-p09 | script-done | yes | 16.0 | 0/2 | 0 | 22/22 | settings:FAILED | - | no | - | - | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 29.7 | 701->882 | 9/456 | 0 | 0 | - | blackx1,tear?x110/470 | NO |
+| h4-p10 | script-done | yes | 16.2 | 0/0 | 0 | 24/24 | pause | - | yes | 221 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 35.1 | 787->842 | 3/247 | 0 | 0 | - | 0/273 | yes |
+| h4-p11 | exit-timeout | yes | 16.1 | 0/2 | 0 | 21/22 | settings | - | no | - | - | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 27.1 | 855->853 | 11/2756 | 0 | 0 | - | 0/325 | yes |
+| h4-p12 | script-done | yes | 16.0 | 0/3 | 0 | 22/22 | vehicle | - | yes | 235 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 29.3 | 849->920 | 5/527 | 0 | 0 | - | 0/290 | yes |
+| h4-p06b | script-done | yes | 16.0 | 0/2 | 0 | 22/22 | settings | - | yes | 221 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 33.0 | 649->908 | 14/3829 | 0 | 0 | - | 0/309 | yes |
+| h4-p13 | script-done | yes | 16.0 | 0/1 | 0 | 23/23 | vehicle | - | yes | 236 | 0 | 1 | 0 | 1 | 0 | 0 | 0 | 0 | 36.1 | 903->927 | 4/258 | 0 | 0 | - | blackx1/290 | yes |
+| h4-p14 | script-done | yes | 16.5 | 0/3 | 0 | 23/24 | settings | - | yes | 223 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 29.4 | 893->938 | 2/136 | 0 | 0 | - | 0/348 | yes |
+| h4-p15 | script-done | yes | 16.0 | 0/2 | 0 | 23/24 | settings | - | yes | 224 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 30.3 | 890->922 | 4/308 | 0 | 0 | - | 0/318 | yes |
+| h4-p16 | script-done | yes | 16.2 | 0/0 | 0 | 26/26 | settings | - | yes | 218 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 34.2 | 890->909 | 1/48 | 0 | 0 | - | 0/315 | yes |
+| h4-p17 | script-done | yes | 16.0 | 0/1 | 0 | 23/23 | vehicle | - | yes | 230 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 37.3 | 870->928 | 4/246 | 0 | 0 | - | 0/311 | yes |
+| h4-soak1 | script-done | yes | 125.1 | 0/0 | 0 | 184/185 | pause | - | yes | 254 | 0 | 0 | 0 | 0 | 0 | 2 | 1 | 303 | 29.9 | 890->919 | 6/486 | 0 | 0 | - | blackx2,tear?x4/1712 | yes |
+| h4-q01 | script-done | yes | - | - | - | - | - | - | yes | 220 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 35.7 | 909->929 | 1/125 | 0 | 0 | - | 0/438 | yes |
+| h4-q02 | script-done | yes | - | - | - | - | - | - | no | - | - | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 30.2 | 895->928 | 6/717 | 0 | 0 | - | 0/87 | NO |
+| h4-m01 | script-done | yes | - | - | - | - | - | - | no | - | - | 0 | 0 | 0 | 0 | 0 | 0 | 0 | - | 897->855 | 9/789 | 0 | 0 | - | 0/254 | NO |
+| h4-m02 | script-done | yes | - | - | - | - | - | - | yes | 217 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 0 | - | 905->908 | 14/897 | 0 | 0 | - | blackx1/280 | yes |
+| h4-l01 | game-exited | no | - | - | - | - | - | - | no | 212 | 0 | 6 | 0 | 0 | 0 | 2 | - | - | - | 811->880 | 87/15070 | 0 | 0 | - | 0/211 | yes |
+| h4-l02 | game-exited | no | - | - | - | - | - | - | no | 208 | 0 | 6 | 0 | 0 | 0 | 0 | - | - | - | 811->897 | 102/15031 | 0 | 0 | - | 0/210 | yes |
+| h4-l03 | script-done | yes | - | - | - | - | - | 5.1 | yes | 216 | 0 | 0 | 0 | 0 | 0 | 0 | - | - | 0.6 | 821->946 | 139/16490 | 0 | 0 | - | blackx1,partial-blackx3,same-as-prevx3/300 | yes |
+
+world reached: 25/27 (h4-x01 h4-x02 h4-p01 h4-p02 h4-p03 h4-p04 h4-p05 h4-p07 h4-p08 h4-p09 h4-p10 h4-p11 h4-p12 h4-p06b h4-p13 h4-p14 h4-p15 h4-p16 h4-p17 h4-soak1 h4-q01 h4-q02 h4-m01 h4-m02 h4-l03)
+clean exit: 17/27 (h4-p02 h4-p04 h4-p05 h4-p07 h4-p08 h4-p10 h4-p12 h4-p06b h4-p13 h4-p14 h4-p15 h4-p16 h4-p17 h4-soak1 h4-q01 h4-m02 h4-l03)
+kernel fault rows: 3/27 (h4-p13 h4-l01 h4-l02); [TLBTIMEOUT]: 0/27; [FREERACE]: 1/27 (h4-p13)
+device-lost rows: 0/27
+glass hitches >= 250 ms in play: 4/27 (h4-p02 h4-p04 h4-p08 h4-soak1); total 5
+verdict disagrees with the boot: 7/27 (h4-x01 h4-x02 h4-p01 h4-p03 h4-p09 h4-q02 h4-m01)
+active play: 18 boots, 399.8 min, >= 15 min in 18

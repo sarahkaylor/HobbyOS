@@ -1,0 +1,9 @@
+H8-01 reproduced on integ25 (strix, h4-p13, Venus, 16 min of play, clean QUIT GAME)
+strix:~/cp/lanes/hunt4/obj/hunt-logs/h4-p13.serial.txt L12172-L12174, after wineserver -k:
+  [PANIC-SINK-VIOLATION] panic_puts from a returning path (suppressed=1)
+  [FREERACE] freeing root=0x000000020E624000 while cpu=0x0000000000000004 still translates through it
+  [KERNEL] Process 20: wineserver exited unexpectedly or gracefully.
+The boot recovered: [P8] end kill status=0 ms=236, quiesce extra=0, sync, [P8] done.
+Rate: 1 of 16 boots that reached the teardown (0 in the other 15; 0 in the 3 lavapipe boots).
+Fixed in main (f2ac6208 / integ26): the root is parked in x64_dying[] and reaped later;
+the row there carries why= and is an assertion (no why= here: the integ25 kernel).
