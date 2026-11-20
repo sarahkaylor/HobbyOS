@@ -2064,6 +2064,15 @@ static int vm_exec_page_verify(struct vm_object *o, uint64_t off, uint64_t dst,
     }
   }
 
+  /* cp-pagein (H9-12): not even the first read's frame could be allocated.
+     Nothing was read, so nothing is known about the page: that is a frame
+     shortage (-ENOMEM, the caller may reclaim and retry), never the gate's
+     -EIO (which marks executable text VM_MAP_IOERR for good).  A later frame
+     that is missing only shortens the agreement ladder; the device re-read
+     below still decides with f[0]. */
+  if (!f[0])
+    return -ENOMEM;
+
   /* All-zero answers: prefer ANY non-zero page over an all-zero one, with
      a short back-off so a transient post-reset state can clear.
      M6/L69: A RETRY MUST NOT ASK THE CACHE THE SAME QUESTION.  The gate's
@@ -2333,8 +2342,8 @@ static uint64_t vm_data_page_rescue(struct vm_object *o, uint64_t off) {
   return fr;
 }
 
-static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
-                                   int cow, int who) {
+static int vm_file_obj_materialize_once(struct addr_space *as, uint64_t a,
+                                        int cow, int who) {
   struct vm_object *o = 0;
   uint64_t off = 0;
   uint64_t fl = vm_lock_acq(__LINE__);
@@ -2354,9 +2363,10 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
   vm_lock_rel(fl);
 
   uint64_t t_io = pf_tsc(); /* H7-fault: the page's source, cache or device */
-  uint64_t src = (o->kind == VM_OBJ_NFS)    ? nfs_obj_page(o, off)
-                 : (o->kind == VM_OBJ_EXT2) ? ext2_obj_page(o, off) /* cp/ext2b */
-                                            : file_obj_page(o, off);
+  int src_err = 0; /* cp-pagein: why a 0 source is 0 (-ENOMEM or -EIO) */
+  uint64_t src = (o->kind == VM_OBJ_NFS)    ? nfs_obj_page(o, off, &src_err)
+                 : (o->kind == VM_OBJ_EXT2) ? ext2_obj_page(o, off, &src_err) /* cp/ext2b */
+                                            : file_obj_page(o, off, &src_err);
   pfstat_io(pf_tsc() - t_io);
   uint64_t priv = 0;
   int beyond_eof = 0;
@@ -2370,7 +2380,12 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
     vm_lock_rel(flz);
     if (!beyond) {
       vm_object_unref(o);
-      return -EIO;
+      /* cp-pagein (H9-12): a source that found no frame read nothing.  It is
+         -ENOMEM (reclaim, retry, then an out-of-memory answer), never -EIO:
+         -EIO marks executable text VM_MAP_IOERR for good and turns every
+         later fault in it into SIGBUS (h4-l01: Wine's text, the game's own
+         int3 handler, dead).  A read that failed is still -EIO. */
+      return src_err == -ENOMEM ? -ENOMEM : -EIO;
     }
     /* C1-k4: a Linux-ABI address space gets Linux's answer for a page wholly
        past EOF -- SIGBUS/BUS_ADRERR (glibc's ld.so replaces such pages with
@@ -2446,7 +2461,7 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
       if (vrc != 0) {
         frame_free(priv);
         vm_object_unref(o);
-        return -EIO;
+        return vrc == -ENOMEM ? -ENOMEM : -EIO; /* cp-pagein: see the gate */
       }
       verified = 1;
       /* tripwire on the page the ladder always dies in (see frame.c) */
@@ -2529,6 +2544,142 @@ static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
   return rc;
 }
 
+
+/* =====================================================================
+ * cp-pagein (H9-12): A PAGE-IN THAT FOUND NO FRAME IS NOT AN I/O ERROR.
+ *
+ * h4-l01/l02 (lavapipe, 12 GiB): the game was ~11 GiB resident, the pool
+ * was empty, and Wine's SIGTRAP handler needed a not-yet-read page of
+ * Wine's text on the NFS /CP stage.  nfs_obj_page() returned 0 because
+ * frame_alloc() did -- the same 0 as a failed read -- the materialize path
+ * made it -EIO, vm_page_io_error() marked the executable region
+ * VM_MAP_IOERR for good, and the handler (and the game) died by SIGBUS.  A
+ * temporary shortage was reported, and made permanent, as an I/O error.
+ *
+ * Now the page sources and the exec gate say -ENOMEM when they could not
+ * get a frame, and this wrapper answers a shortage the way Linux's fault
+ * path does before VM_FAULT_OOM: reclaim, retry, bounded.
+ *   round 1: the zeroed frames parked for faults (this CPU's stash and
+ *            vmzero's pool, up to VM_ZP_N = 64 MiB).  They count as free
+ *            (frame_parked) but frame_alloc() cannot hand them out, so a
+ *            page source starves while they sit there;
+ *   round 2: the clean page cache nobody maps (FAT16 / NFS cache entries
+ *            whose object only the cache holds: file_obj_reclaim_unmapped).
+ * The blk cache needs no round of its own: frame_alloc() already evicts it
+ * to empty before it returns 0.  No lock is held here (the materialize
+ * contract), nothing sleeps, and there are at most VM_PAGEIN_ROUNDS
+ * retries.  What is still -ENOMEM after them goes back to the caller as
+ * -ENOMEM: vm_touch answers ENOMEM to the syscall, the fault path answers
+ * 3 (an out-of-memory kill, VM_FAULT_OOM's shape), and neither marks the
+ * mapping.  A real read error never reaches this loop and keeps M6/L69's
+ * EIO + VM_MAP_IOERR + SIGBUS exactly as before. */
+#define VM_PAGEIN_ROUNDS 2
+volatile uint32_t vm_pagein_nomem_n;         /* page-ins that found no frame */
+volatile uint32_t vm_pagein_nomem_recovered; /* ... and mapped after reclaim */
+volatile uint32_t vm_pagein_nomem_failed;    /* ... and stayed -ENOMEM */
+
+/* Give the parked zeroed frames back to the pool (round 1).  Bounded: one
+   stash, then at most VM_ZP_N pops (vmzero may be refilling meanwhile). */
+static uint64_t vm_pagein_unpark(void) {
+  uint64_t n = 0;
+#if defined(__x86_64__)
+  for (int k = 0; k < VM_ZSTASH; k++) {
+    uint64_t f = vm_zs_irqoff(), fr = 0;
+    uint32_t c = get_cpuid();
+    if (c < MAX_CPUS && vm_zs[c].n > 0)
+      fr = vm_zs[c].fr[--vm_zs[c].n];
+    vm_zs_irqrestore(f);
+    if (!fr)
+      break;
+    frame_parked_add(-1);
+    frame_free(fr);
+    n++;
+  }
+  for (int k = 0; k < VM_ZP_N; k++) {
+    uint64_t f = vm_zs_irqoff(), fr = 0;
+    while (__atomic_exchange_n(&vm_zp_lk, 1, __ATOMIC_ACQUIRE))
+      __asm__ volatile("pause");
+    if (vm_zp_n > 0)
+      fr = vm_zp[--vm_zp_n];
+    __atomic_store_n(&vm_zp_lk, 0, __ATOMIC_RELEASE);
+    vm_zs_irqrestore(f);
+    if (!fr)
+      break;
+    frame_parked_add(-1);
+    frame_free(fr);
+    n++;
+  }
+#endif
+  return n;
+}
+
+static int vm_file_obj_materialize(struct addr_space *as, uint64_t a,
+                                   int cow, int who) {
+  int rc = vm_file_obj_materialize_once(as, a, cow, who);
+  if (rc != -ENOMEM)
+    return rc;
+  uint32_t ev = __atomic_add_fetch(&vm_pagein_nomem_n, 1, __ATOMIC_RELAXED);
+  uint64_t unparked = 0;
+  int dropped = 0, rounds = 0;
+  for (int round = 1; round <= VM_PAGEIN_ROUNDS && rc == -ENOMEM; round++) {
+    if (round == 1)
+      unparked += vm_pagein_unpark();
+    else
+      dropped += file_obj_reclaim_unmapped();
+    rounds = round;
+    rc = vm_file_obj_materialize_once(as, a, cow, who);
+  }
+  if (rc == -ENOMEM)
+    __atomic_add_fetch(&vm_pagein_nomem_failed, 1, __ATOMIC_RELAXED);
+  else if (rc == 0)
+    __atomic_add_fetch(&vm_pagein_nomem_recovered, 1, __ATOMIC_RELAXED);
+  /* One row per event for the first 16, then every 256th: a shortage is
+     rare, but a guest at its wall can take many in a row. */
+  if (ev <= 16 || (ev % 256) == 0) {
+    int okind = -1, prot = 0;
+    uint64_t base = 0, len = 0;
+    uint64_t fl = vm_lock_acq(__LINE__);
+    struct vm_region *r = vm_region_find(as, a);
+    if (r && a >= r->base && a < r->base + r->len) {
+      okind = r->obj ? (int)r->obj->kind : -1;
+      prot = (int)r->prot;
+      base = r->base;
+      len = r->len;
+    }
+    vm_lock_rel(fl);
+    struct process *cp = current_process();
+    struct kline kl;
+    kl_init(&kl);
+    kl_s(&kl, "[PAGEIN-NOMEM] n=");
+    kl_i(&kl, (long)ev);
+    kl_s(&kl, " pid=");
+    kl_i(&kl, cp ? cp->pid : -1);
+    kl_s(&kl, " va=");
+    kl_hex(&kl, (unsigned long)a);
+    kl_s(&kl, " region=");
+    kl_hex(&kl, (unsigned long)base);
+    kl_s(&kl, "+");
+    kl_hex(&kl, (unsigned long)len);
+    kl_s(&kl, " prot=");
+    kl_i(&kl, prot);
+    kl_s(&kl, okind == VM_OBJ_NFS ? " src=nfs" : okind == VM_OBJ_EXT2 ? " src=ext2"
+              : okind == VM_OBJ_FILE ? " src=fat" : " src=?");
+    kl_s(&kl, who == VM_PW_FAULT_OBJ ? " via=fault" : " via=touch");
+    kl_s(&kl, " unparked=");
+    kl_i(&kl, (long)unparked);
+    kl_s(&kl, " cache_dropped=");
+    kl_i(&kl, dropped);
+    kl_s(&kl, " rounds=");
+    kl_i(&kl, rounds);
+    kl_s(&kl, " free=");
+    kl_i(&kl, frame_free_count());
+    kl_s(&kl, rc == 0 ? " -> recovered (page mapped after reclaim)\n"
+              : rc == -ENOMEM ? " -> ENOMEM (no frame: out of memory, NOT an I/O error; mapping not marked)\n"
+                              : " -> retry ended in another error\n");
+    kl_emit(&kl);
+  }
+  return rc;
+}
 
 /* ---------------------------------------------------------------------
  * C1-fork: copy-on-write sharing of private frames across fork (x86_64).
@@ -3637,6 +3788,38 @@ static int vm_page_io_error(struct addr_space *as, uint64_t a,
   return 2;
 }
 
+/* cp-pagein (H9-12): a file-backed page that could not get a frame, after
+ * the bounded reclaim in vm_file_obj_materialize.  Linux's fault path
+ * answers VM_FAULT_OOM here and the OOM killer ends a process with SIGKILL;
+ * it never answers SIGBUS, and it never poisons the mapping.  This kernel has
+ * no OOM killer that picks a victim, so the least invasive honest answer is
+ * the faulting process: the trap layer is told 3, prints a [PAGEIN-NOMEM]
+ * row and kills the group with SIGKILL (no handler can catch it, so a
+ * runtime does not mistake it for an access violation, and a handler that
+ * itself needs the page cannot loop on it).  The region is NOT marked: had
+ * the process survived (vm_touch's ENOMEM), the same page loads as soon as
+ * a frame is free. */
+static int vm_page_nomem(const char **why) {
+  if (why)
+    *why = "NOMEM";
+  return VM_FAULT_NOMEM;
+}
+
+#ifdef KERNEL_MODE_UNIT_TEST
+/* cp-pagein unit hooks (vm_test.c test_vm_exec_page_nomem): empty this CPU's
+   stash and vmzero's pool so a test's exhaustion is total; park a frame in
+   the pool so round 1 of the reclaim has something to give back. */
+uint64_t vm_test_pagein_unpark(void) { return vm_pagein_unpark(); }
+int vm_test_pagein_park(uint64_t fr) {
+#if defined(__x86_64__)
+  return vm_zp_push(fr);
+#else
+  (void)fr;
+  return 0;
+#endif
+}
+#endif
+
 /* M6/L72: the faulting instruction, stashed by the x64 #PF path just before it
    calls vm_handle_fault (see arch/x64/trap.c).  Diagnostic only: it names the
    loop that walks fresh anonymous pages (the [ANONF] row). */
@@ -4043,8 +4226,10 @@ static int vm_handle_fault_body(struct process *grp, uint64_t va, int write,
           *why = "BUS"; /* C1-k4: past EOF -> SIGBUS/BUS_ADRERR */
         return 1;
       }
+      if (mrc == -ENOMEM)
+        return vm_page_nomem(why); /* cp-pagein (H9-12): OOM, not EIO */
       if (why)
-        *why = (mrc == -ENOMEM) ? "OOM" : "PROT";
+        *why = "PROT";
       return 1;
     }
     vm_fault_resolved(as);

@@ -89,8 +89,13 @@ struct vm_object *file_obj_get(uint16_t start_cluster, uint32_t file_size);
  * short tail (the last page of a file whose size is not a multiple of
  * FRAME_SIZE, or a read hitting EOF) is zero-filled, so bytes past EOF
  * read as zeros.  MUST be called with NO lock held (it performs disk I/O).
- * Returns 0 on failure (invalidated object, I/O error, out of frames). */
-uint64_t file_obj_page(struct vm_object *o, uint64_t off);
+ * Returns 0 on failure (invalidated object, I/O error, out of frames).
+ * cp-pagein (H9-12): `*err` (may be NULL) says WHICH failure a 0 is:
+ * -ENOMEM when no frame could be allocated for the page (nothing was read:
+ * a shortage, not a fact about the file), -EIO for everything else (a read
+ * that failed or came back short, a dead object, past the capacity).  It is
+ * 0 when a frame is returned. */
+uint64_t file_obj_page(struct vm_object *o, uint64_t off, int *err);
 
 /* --- L54: the NFS half of the page cache ------------------------------- */
 /* Get-or-create the VM_OBJ_NFS object for (mount_idx, fh) with one reference
@@ -102,9 +107,18 @@ struct vm_object *nfs_obj_get(int mount_idx, const struct nfs_fh *fh,
 
 /* The frame backing byte offset `off` of an NFS object, filled on first
  * touch.  MUST be called with NO lock held (it performs an RPC).  Returns 0
- * on failure.  Read-only: there is no invalidation path because NFS mounts
- * are read-only in this VFS. */
-uint64_t nfs_obj_page(struct vm_object *o, uint64_t off);
+ * on failure, with `*err` as for file_obj_page (-ENOMEM: no frame; -EIO: the
+ * read failed or was short).  Read-only: there is no invalidation path
+ * because NFS mounts are read-only in this VFS. */
+uint64_t nfs_obj_page(struct vm_object *o, uint64_t off, int *err);
+
+/* cp-pagein (H9-12): page-cache reclaim for a page-in that found no frame.
+ * Drops every FAT16 and NFS cache entry whose object only the cache still
+ * references (no mapping: refs == 1), so its frames go back to the pool --
+ * the clean page cache Linux reclaims before it declares OOM.  The next mmap
+ * of such a file re-reads it.  MUST be called with NO lock held.  Returns
+ * the number of cache entries dropped. */
+int file_obj_reclaim_unmapped(void);
 
 /* Invalidation (docs/shared-libs.md section 4 item 4): detach the cached
  * object so the next mmap re-reads the file.  Existing mappings keep the

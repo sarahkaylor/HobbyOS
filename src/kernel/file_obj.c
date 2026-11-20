@@ -178,14 +178,20 @@ void file_obj_invalidate_all(void) {
   spinlock_release_irqrestore(&file_obj_lock, fl);
 }
 
-uint64_t file_obj_page(struct vm_object *o, uint64_t off) {
+uint64_t file_obj_page(struct vm_object *o, uint64_t off, int *err) {
+  int err_sink;
+  if (!err)
+    err = &err_sink;
+  *err = -EIO; /* every 0 below is -EIO unless it says otherwise */
   if (!o || o->kind != VM_OBJ_FILE)
     return 0;
 
   /* Fast path: already materialized (one vm_lock hold, no I/O). */
   uint64_t fr = vm_object_peek(o, off);
-  if (fr)
+  if (fr) {
+    *err = 0;
     return fr;
+  }
 
   /* Miss: recover the source identity.  An object that was invalidated is
    * no longer in the table and must not resume filling — the clusters it
@@ -227,8 +233,13 @@ uint64_t file_obj_page(struct vm_object *o, uint64_t off) {
   for (int gen_try = 0;; gen_try++) {
   uint32_t gen = vm_object_wgen(o);
   uint64_t nf = frame_alloc();
-  if (!nf)
+  if (!nf) {
+    /* cp-pagein (H9-12): no frame is not an I/O error.  Nothing was read,
+       so nothing is known about the file; the caller may reclaim and retry,
+       and must never mark the mapping failed for it. */
+    *err = -ENOMEM;
     return 0;
+  }
   /* L34: one row before and after a file-page fill.  An instruction-fetch
    * fault on a DSO text page arrives here; when the block device wedges, the
    * log's last [PIN] with no [POK] says so without another kernel theory. */
@@ -315,8 +326,11 @@ uint64_t file_obj_page(struct vm_object *o, uint64_t off) {
   int stale = 0;
   uint64_t got = gen_try < 8 ? vm_object_install_page_gen(o, off, nf, gen, &stale)
                              : vm_object_install_page(o, off, nf);
-  if (!stale)
+  if (!stale) {
+    if (got)
+      *err = 0;
     return got;
+  }
   }
 }
 
@@ -543,13 +557,19 @@ struct vm_object *nfs_obj_get(int mount_idx, const struct nfs_fh *fh,
   return o;
 }
 
-uint64_t nfs_obj_page(struct vm_object *o, uint64_t off) {
+uint64_t nfs_obj_page(struct vm_object *o, uint64_t off, int *err) {
+  int err_sink;
+  if (!err)
+    err = &err_sink;
+  *err = -EIO; /* every 0 below is -EIO unless it says otherwise */
   if (!o || o->kind != VM_OBJ_NFS)
     return 0;
 
   uint64_t fr = vm_object_peek(o, off);
-  if (fr)
+  if (fr) {
+    *err = 0;
     return fr;
+  }
 
   /* The source identity lives on the object itself, so this fill still works
      after nfs_obj_get() recycled the object's share-cache slot. */
@@ -571,8 +591,14 @@ uint64_t nfs_obj_page(struct vm_object *o, uint64_t off) {
     return 0;
 
   uint64_t nf = frame_alloc();
-  if (!nf)
+  if (!nf) {
+    /* cp-pagein (H9-12): h4-l01 died here.  The guest was out of frames,
+       this returned the same 0 as a failed read, and the caller made it a
+       permanent EIO on Wine's text (VM_MAP_IOERR, SIGBUS).  No frame is a
+       shortage, not an I/O error: say so. */
+    *err = -ENOMEM;
     return 0;
+  }
   int n = nfs_read_file(m, &fh, (uint32_t)(idx * FRAME_SIZE),
                         phys_to_virt(nf), FRAME_SIZE);
   if (n < 0) {
@@ -597,5 +623,57 @@ uint64_t nfs_obj_page(struct vm_object *o, uint64_t off) {
   for (int i = n; i < (int)FRAME_SIZE; i++)
     p[i] = 0;
   __builtin___clear_cache((char *)phys_to_virt(nf), (char *)phys_to_virt(nf) + FRAME_SIZE);
-  return vm_object_install_page(o, off, nf);
+  uint64_t got = vm_object_install_page(o, off, nf);
+  if (got)
+    *err = 0;
+  return got;
+}
+
+/* cp-pagein (H9-12): see file_obj.h.  Both tables already drop cache-only
+ * entries (file_obj_invalidate for FAT16; nfs_obj_get's recycling when the
+ * NFS table is full).  refs == 1 means no region holds the object, so no leaf
+ * can point at its frames, and a new mapping can only appear through the get
+ * path, which takes the same table lock.  The entries are unhooked under the
+ * table lock and the cache's references dropped after it is released: a big
+ * object's frames are freed with interrupts on (vm_object_unref frees them
+ * outside vm_lock too).  Nothing here sleeps or performs I/O. */
+#define FOBJ_RECLAIM_BATCH 16
+int file_obj_reclaim_unmapped(void) {
+  int dropped = 0;
+  file_obj_init_once();
+  nfs_obj_init_once();
+  for (int table = 0; table < 2; table++) {
+    for (int pass = 0; pass < VM_OBJ_MAX / FOBJ_RECLAIM_BATCH + 1; pass++) {
+      struct vm_object *dead[FOBJ_RECLAIM_BATCH];
+      int n = 0;
+      spinlock_t *lk = table == 0 ? &file_obj_lock : &nfs_obj_lock;
+      uint64_t fl = spinlock_acquire_irqsave(lk);
+      for (int i = 0; i < VM_OBJ_MAX && n < FOBJ_RECLAIM_BATCH; i++) {
+        if (table == 0) {
+          struct file_obj_entry *e = &file_obj_tab[i];
+          if (!e->used || !e->obj || e->obj->refs != 1)
+            continue;
+          dead[n++] = e->obj;
+          e->used = 0;
+          e->obj = 0;
+          e->start_cluster = 0;
+          e->file_size = 0;
+        } else {
+          struct nfs_obj_entry *e = &nfs_obj_tab[i];
+          if (!e->used || !e->obj || e->obj->refs != 1)
+            continue;
+          dead[n++] = e->obj;
+          e->used = 0;
+          e->obj = 0;
+        }
+      }
+      spinlock_release_irqrestore(lk, fl);
+      for (int k = 0; k < n; k++)
+        vm_object_unref(dead[k]); /* the cache's reference: frees the frames */
+      dropped += n;
+      if (n < FOBJ_RECLAIM_BATCH)
+        break;
+    }
+  }
+  return dropped;
 }

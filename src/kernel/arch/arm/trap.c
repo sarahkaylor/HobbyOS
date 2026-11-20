@@ -2404,6 +2404,24 @@ void sync_lower_handler_c(struct trap_frame *tf) {
         process_fault_exit(tf, 7); /* SIGBUS */
         return;
       }
+      /* cp-pagein (H9-12): no frame for a file-backed page, even after the
+         reclaim: out of memory, not an I/O error (see the x64 #PF path). */
+      if (frc == VM_FAULT_NOMEM) {
+        struct kline k;
+        kl_init(&k);
+        kl_s(&k, "[PAGEIN-NOMEM] pid=");
+        kl_i(&k, gcur->pid);
+        kl_s(&k, " (");
+        kl_s(&k, gcur->name);
+        kl_s(&k, ") page-in found no free frame VA=");
+        kl_hex(&k, far);
+        kl_s(&k, " PC=");
+        kl_hex(&k, tf->elr);
+        kl_s(&k, " -> SIGKILL (out of memory, not an I/O error)\n");
+        kl_emit(&k);
+        process_fault_exit(tf, 9); /* SIGKILL: the OOM kill */
+        return;
+      }
       /* GB-082: one record, one lock hold.  This fault line was a sequence of
          uart_puts/print_int calls, so a peer CPU's record could land inside it
          (measured: `[KERNEL] pid=[WAVE-TRY] STAGE4K_T.BIN`).  kline emits the
