@@ -1,0 +1,17 @@
+== base integ27 + only the test commit (vm_test.c): bash tools/cp/qemu-slot.sh env UNIT_TESTS_TIMEOUT=900 bash ./run_unit_tests_intel.sh
+  Running test_vm_exec_page_nomem...
+  [PAGEIN] exhausted held=2932671 free_at=4 fault=2 why=EIO ioerr=1 touch=-1 reclaim_fault=-1 reclaim_bad=-1
+Tests failed!
+EXPECT_EQ FAILED: (frc1 != 2) == 1 at src/kernel/vm_test.c:2377
+Tests run:    465
+Tests failed: 1
+
+== lane cp-pagein: same command
+  Running test_vm_exec_page_nomem...
+[PAGEIN-NOMEM] n=1 pid=-1 va=0x1080000000 region=0x1080000000+0x2000 prot=5 src=fat via=fault unparked=0 cache_dropped=0 rounds=2 free=0 -> ENOMEM (no frame: out of memory, NOT an I/O error; mapping not marked)
+[PAGEIN-NOMEM] n=2 pid=-1 va=0x1080000000 region=0x1080000000+0x2000 prot=5 src=fat via=touch unparked=0 cache_dropped=0 rounds=2 free=0 -> ENOMEM (no frame: out of memory, NOT an I/O error; mapping not marked)
+[PAGEIN-NOMEM] n=3 pid=-1 va=0x1080000000 region=0x1080000000+0x2000 prot=5 src=fat via=fault unparked=16 cache_dropped=0 rounds=1 free=12 -> recovered (page mapped after reclaim)
+  [PAGEIN] exhausted held=2932675 free_at=0 fault=3 why=NOMEM ioerr=0 touch=-2 reclaim_fault=0 reclaim_bad=0
+  [PAGEIN] memory back fault=0 bad=0; real read error fault=2 ioerr=1
+Tests run:    465
+Tests failed: 0

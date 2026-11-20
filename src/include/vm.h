@@ -557,10 +557,15 @@ int vm_kwrite(struct process *p, uint64_t va, const void *src, int len);
  * Never yields, never blocks; installs one zeroed 4 KiB frame when the
  * fault is a demand case.  Returns 0 when the faulting instruction may
  * be retried, 1 when the caller must kill the process; *why receives
- * "HOLE" | "PROT" | "OOM" | "V1" (v1 process: legacy path) for the
- * report line. */
+ * "HOLE" | "PROT" | "OOM" | "BUS" | "V1" (v1 process: legacy path) for the
+ * report line.  2 (M6/L69, *why "EIO"): a file-backed page could not be
+ * READ -- SIGBUS, and an executable region is marked VM_MAP_IOERR.
+ * 3 (cp-pagein, *why "NOMEM"): a file-backed page could not get a FRAME
+ * even after reclaim -- out of memory, not an I/O error: the trap layer
+ * kills with SIGKILL and nothing is marked. */
 int vm_handle_fault(struct process *grp, uint64_t va, int write, int exec,
                     const char **why);
+#define VM_FAULT_NOMEM 3 /* cp-pagein (H9-12): see vm_handle_fault above */
 
 /* --- L9 (prefetch): background loader for the lazy v2 IMAGE ---------- */
 

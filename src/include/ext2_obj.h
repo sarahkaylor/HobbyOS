@@ -48,8 +48,10 @@ struct vm_object *ext2_obj_get(uint32_t ino, uint64_t cap, int wb);
 
 /* The frame backing byte `off` (4096-aligned), read from the file on first
  * touch; bytes past EOF are zero.  NO lock may be held (disk I/O).  0 on
- * failure (I/O error, out of frames, past the capacity). */
-uint64_t ext2_obj_page(struct vm_object *o, uint64_t off);
+ * failure (I/O error, out of frames, past the capacity); cp-pagein (H9-12):
+ * `*err` (may be NULL) is -ENOMEM when no frame could be allocated (nothing
+ * was read), -EIO for every other failure, 0 when a frame is returned. */
+uint64_t ext2_obj_page(struct vm_object *o, uint64_t off, int *err);
 
 /* Read the file's page at `off` into frame `dst` (zero past EOF), bypassing
  * the object -- the independent read the executable-page gate compares

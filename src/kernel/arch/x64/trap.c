@@ -5504,6 +5504,34 @@ static void general_interrupt_inner(struct trap_frame *tf) {
         process_fault_exit(tf, 7); /* SIGBUS: a failed file load, not SIGSEGV */
         return;
       }
+      /* cp-pagein (H9-12): a file-backed page that found no frame, even after
+         vm.c's bounded reclaim.  Out of memory, NOT an I/O error: Linux's
+         VM_FAULT_OOM ends in the OOM killer's SIGKILL, never in SIGBUS, and
+         the mapping is not marked.  SIGKILL (uncatchable) so a handler that
+         needs the same page cannot loop on it and a runtime cannot read it
+         as an access violation. */
+      if (frc == VM_FAULT_NOMEM) {
+        struct fl_buf fe;
+        fe.n = 0;
+        fl_s(&fe, "[PAGEIN-NOMEM] pid=");
+        fl_dec(&fe, cur->pid);
+        fl_s(&fe, " (");
+        fl_s(&fe, cur->name);
+        fl_s(&fe, ") page-in found no free frame VA=");
+        fl_hex(&fe, cr2);
+        fl_s(&fe, " PC=");
+        fl_hex(&fe, tf->elr);
+        fl_s(&fe, " rw=");
+        fl_c(&fe, pf_w ? 'w' : 'r');
+        fl_c(&fe, pf_x ? 'x' : ' ');
+        fl_s(&fe, " live=");
+        fl_dec(&fe, process_group(cur)->live_threads);
+        fl_s(&fe, " -> SIGKILL (out of memory, not an I/O error)\n");
+        fe.b[fe.n] = 0;
+        uart_puts(fe.b);
+        process_fault_exit(tf, 9); /* SIGKILL: the OOM kill */
+        return;
+      }
       {
         struct fl_buf fl;
         fl.n = 0;

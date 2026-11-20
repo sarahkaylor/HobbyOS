@@ -2164,6 +2164,242 @@ out:
 }
 
 /* =====================================================================
+ * cp-pagein (H9-12): A PAGE-IN THAT FINDS NO FRAME IS NOT AN I/O ERROR.
+ *
+ * h4-l01/l02: the guest was out of frames, nfs_obj_page() returned the same
+ * 0 for "no frame" as for "read failed", the materialize path made it -EIO,
+ * and vm_page_io_error() marked Wine's executable text VM_MAP_IOERR for good:
+ * every later fault in it was SIGBUS.  This test takes EVERY free frame for
+ * real (no fake bitmap: what the page-in sees is what a full guest shows it),
+ * faults an executable private file page, and asserts:
+ *   1. the fault is NOT the EIO answer (2) and the region is NOT marked
+ *      VM_MAP_IOERR; with the fix it is VM_FAULT_NOMEM (3, "NOMEM");
+ *   2. a syscall-side touch of the same page answers ENOMEM (-2), not -1;
+ *   3. (fix, x86) frames parked in vmzero's pool are reclaimed and the same
+ *      page then loads, with the file's bytes;
+ *   4. with memory back, the other page loads and holds the file's bytes;
+ *   5. a REAL read failure (the zero-delivery injection) still answers 2 and
+ *      marks the region (M6/L69 unchanged).
+ * ===================================================================== */
+#ifdef VM_FAULT_NOMEM
+extern uint64_t vm_test_pagein_unpark(void);
+extern int vm_test_pagein_park(uint64_t fr);
+extern volatile uint32_t vm_pagein_nomem_n, vm_pagein_nomem_recovered,
+    vm_pagein_nomem_failed;
+#endif
+/* Every free frame, held in a chain of index frames: [0] next index frame,
+   [1] entries used, [2..511] held frames.  Only 1 frame in 511 is written. */
+static uint64_t pgin_head;
+static int pgin_held;
+static void pgin_hold(uint64_t f) {
+  volatile uint64_t *q = pgin_head ? (volatile uint64_t *)phys_to_virt(pgin_head) : 0;
+  if (!q || q[1] >= 510) {
+    volatile uint64_t *nq = (volatile uint64_t *)phys_to_virt(f);
+    nq[0] = pgin_head;
+    nq[1] = 0;
+    pgin_head = f;
+    pgin_held++;
+    return;
+  }
+  q[2 + q[1]] = f;
+  q[1]++;
+  pgin_held++;
+}
+static uint64_t pgin_take(void) { /* one held frame back (0: none left) */
+  while (pgin_head) {
+    volatile uint64_t *q = (volatile uint64_t *)phys_to_virt(pgin_head);
+    if (q[1] > 0) {
+      q[1]--;
+      pgin_held--;
+      return q[2 + q[1]];
+    }
+    uint64_t f = pgin_head; /* an empty index frame is itself a frame */
+    pgin_head = q[0];
+    pgin_held--;
+    return f;
+  }
+  return 0;
+}
+static void pgin_exhaust(void) {
+  for (int round = 0; round < 8; round++) {
+    uint64_t f;
+    while ((f = frame_alloc()) != 0)
+      pgin_hold(f);
+#ifdef VM_FAULT_NOMEM
+    /* parked zeroed frames count as free; give them back and take them too,
+       so the reclaim under test starts from nothing */
+    if (vm_test_pagein_unpark() == 0)
+      break;
+#else
+    break;
+#endif
+  }
+}
+static void pgin_release_all(void) {
+  uint64_t f;
+  while ((f = pgin_take()) != 0)
+    frame_free(f);
+}
+
+static void test_vm_exec_page_nomem(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_exec_page_nomem...\n");
+  uint16_t cluster = 0;
+  uint32_t fsize = 0;
+  if (vm_file_fixture(&cluster, &fsize) != 0) {
+    uart_puts("ASSERTION FAILED: VMOBJ1.DAT fixture not creatable\n");
+    return;
+  }
+  file_obj_invalidate_all();
+#ifdef VM_FAULT_NOMEM
+  (void)file_obj_reclaim_unmapped(); /* round 2 must find nothing of others' */
+#endif
+  int c0 = file_obj_count();
+  int free0 = frame_free_count();
+  struct process p;
+  vm_file_proc_init(&p, vm_as_create(VM_EXEC_TAG + 2));
+  EXPECT_EQ((p.as != 0), 1);
+  if (!p.as)
+    return;
+  int fd = file_open(&p, VM_FILE_NAME, 0);
+  int64_t b = fd >= 0 ? vm_mmap(&p, 0, fsize, VM_PROT_READ | VM_PROT_EXEC,
+                                VM_MAP_PRIVATE, fd, 0)
+                      : -1;
+  if (fd < 0 || b <= 0) {
+    if (fd >= 0)
+      file_close(&p, fd);
+    vm_as_teardown(p.as);
+    EXPECT_EQ(1, 0);
+    return;
+  }
+  const char *why = 0;
+  uint64_t leaf = 0;
+#ifdef VM_FAULT_NOMEM
+  uint32_t n0 = vm_pagein_nomem_n, f0 = vm_pagein_nomem_failed,
+           r0 = vm_pagein_nomem_recovered;
+#endif
+
+  /* ---- everything below up to pgin_release_all() runs with NO free frame:
+     no EXPECT_EQ (it returns early) until the memory is back ---- */
+  pgin_exhaust();
+  int held = pgin_held;
+  int free_at = frame_free_count();
+  int frc1 = vm_handle_fault(&p, (uint64_t)b, 0, 1, &why);
+  const char *why1 = why;
+  struct vm_region *r1 = vm_region_find(p.as, (uint64_t)b);
+  int ioerr1 = (r1 && (r1->flags & VM_MAP_IOERR)) ? 1 : 0;
+  int absent1 = vm_arch_walk(p.as, (uint64_t)b, &leaf) != 0;
+  if (r1)
+    r1->flags &= ~(uint32_t)VM_MAP_IOERR; /* so step 2 asks the page source */
+  int trc = vm_touch(&p, (uint64_t)b, 8, 0);
+  int frc3 = -1, bad3 = -1;
+#ifdef VM_FAULT_NOMEM
+  uint32_t n1 = vm_pagein_nomem_n, f1 = vm_pagein_nomem_failed;
+#if defined(__x86_64__)
+  /* (3) round 1 of the reclaim: park 16 of the held frames in vmzero's pool
+     (they count as free but frame_alloc cannot reach them) and fault again */
+  for (int k = 0; k < 16; k++) {
+    uint64_t f = pgin_take();
+    if (f && !vm_test_pagein_park(f))
+      frame_free(f);
+  }
+  frc3 = vm_handle_fault(&p, (uint64_t)b, 0, 1, &why);
+  if (frc3 == 0 && vm_arch_walk(p.as, (uint64_t)b, &leaf) == 0) {
+    bad3 = 0;
+    uint64_t ph = vm_arch_leaf_phys(leaf);
+    for (int i = 0; i < 64; i++)
+      if (((const volatile unsigned char *)phys_to_virt(ph))[i] !=
+          (unsigned char)((i * 7 + 3) & 0xFF))
+        bad3++;
+  }
+#endif
+#endif
+  pgin_release_all();
+  /* ---- memory is back ---- */
+
+  uart_puts("  [PAGEIN] exhausted held=");
+  print_int(held);
+  uart_puts(" free_at=");
+  print_int(free_at);
+  uart_puts(" fault=");
+  print_int(frc1);
+  uart_puts(" why=");
+  uart_puts(why1 ? why1 : "-");
+  uart_puts(" ioerr=");
+  print_int(ioerr1);
+  uart_puts(" touch=");
+  print_int(trc);
+  uart_puts(" reclaim_fault=");
+  print_int(frc3);
+  uart_puts(" reclaim_bad=");
+  print_int(bad3);
+  uart_puts("\n");
+  /* (4) memory back: the page that met the shortage loads and holds the
+     file's bytes (on x86 step 3 already mapped it: drop that leaf first, so
+     this is a fresh fault through the same, unmarked region) */
+  if (vm_arch_walk(p.as, (uint64_t)b, &leaf) == 0)
+    (void)vm_unmap_page(p.as, (uint64_t)b);
+  int frc4 = vm_handle_fault(&p, (uint64_t)b, 0, 1, &why);
+  int bad4 = -1;
+  if (frc4 == 0 && vm_arch_walk(p.as, (uint64_t)b, &leaf) == 0) {
+    uint64_t ph = vm_arch_leaf_phys(leaf);
+    bad4 = 0;
+    for (int i = 0; i < 64; i++)
+      if (((const volatile unsigned char *)phys_to_virt(ph))[i] !=
+          (unsigned char)((i * 7 + 3) & 0xFF))
+        bad4++;
+  }
+
+  /* (5) a REAL read failure is unchanged: EIO (2) and the region marked */
+  int unm5 = vm_unmap_page(p.as, (uint64_t)b);
+  fat16_test_inject(2, 0, 64);
+  int frc5 = vm_handle_fault(&p, (uint64_t)b, 0, 1, &why);
+  fat16_test_inject(0, 0, 0);
+  struct vm_region *r5 = vm_region_find(p.as, (uint64_t)b);
+  int ioerr5 = (r5 && (r5->flags & VM_MAP_IOERR)) ? 1 : 0;
+  if (r5)
+    r5->flags &= ~(uint32_t)VM_MAP_IOERR;
+  uart_puts("  [PAGEIN] memory back fault=");
+  print_int(frc4);
+  uart_puts(" bad=");
+  print_int(bad4);
+  uart_puts("; real read error fault=");
+  print_int(frc5);
+  uart_puts(" ioerr=");
+  print_int(ioerr5);
+  uart_puts("\n");
+
+  vm_as_teardown(p.as);
+  file_close(&p, fd);
+  file_obj_invalidate_all();
+  /* asserts only now: EXPECT_EQ returns early */
+  EXPECT_EQ((held > 1000), 1);  /* the exhaustion really took the pool */
+  EXPECT_EQ((frc1 != 2), 1);    /* NOT the EIO answer ... */
+  EXPECT_EQ(ioerr1, 0);         /* ... and the mapping NOT marked */
+  EXPECT_EQ(absent1, 1);        /* nothing was published */
+  EXPECT_EQ(trc, -2);           /* the syscall side: ENOMEM, not EFAULT */
+#ifdef VM_FAULT_NOMEM
+  EXPECT_EQ(frc1, VM_FAULT_NOMEM);
+  EXPECT_EQ((why1 && why1[0] == 'N' && why1[1] == 'O' && why1[2] == 'M'), 1);
+  EXPECT_EQ((int)(n1 - n0) >= 2, 1);
+  EXPECT_EQ((int)(f1 - f0) >= 2, 1);
+#if defined(__x86_64__)
+  EXPECT_EQ(frc3, 0);           /* round 1 gave the parked frames back */
+  EXPECT_EQ(bad3, 0);           /* ... and the page holds the file's bytes */
+  EXPECT_EQ((int)(vm_pagein_nomem_recovered - r0) >= 1, 1);
+#endif
+#endif
+  EXPECT_EQ(frc4, 0);
+  EXPECT_EQ(bad4, 0);
+  EXPECT_EQ(unm5, 0);
+  EXPECT_EQ(frc5, 2);
+  EXPECT_EQ(ioerr5, 1);
+  EXPECT_EQ(file_obj_count(), c0);
+  /* the exhaustion emptied the blk cache, which only frees frames */
+  EXPECT_EQ((frame_free_count() >= free0), 1);
+}
+
+/* =====================================================================
  * M6/L69: A POISONED CACHE FRAME MUST NOT DEFEAT THE EXEC GATE.
  *
  * The measured field failure (L69, UnityPlayer.so off 0x757000):
@@ -3036,6 +3272,8 @@ void vm_test_suite(void) {
   test_vm_file_cow_private_leaf();
   /* M6/L63: a failed/short/zero-delivering read on an exec page => EIO */
   test_vm_exec_page_eio();
+  /* cp-pagein (H9-12): no frame for an exec page-in is not EIO */
+  test_vm_exec_page_nomem();
   /* M6/L63: the image path's sum table catches a consistent zero delivery */
   test_vm_img_page_eio();
   test_vm_jit_arena(); /* M6/L38: exec mappings cluster in one +-2 GiB span */

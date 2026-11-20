@@ -179,14 +179,20 @@ struct vm_object *ext2_obj_get(uint32_t ino, uint64_t cap, int wb) {
   return hit;
 }
 
-uint64_t ext2_obj_page(struct vm_object *o, uint64_t off) {
+uint64_t ext2_obj_page(struct vm_object *o, uint64_t off, int *err) {
+  int err_sink;
+  if (!err) err = &err_sink;
+  *err = -EIO; /* every 0 below is -EIO unless it says otherwise */
   if (!o || o->kind != VM_OBJ_EXT2) return 0;
   uint64_t fr = vm_object_peek(o, off);
-  if (fr) return fr;
+  if (fr) { *err = 0; return fr; }
   uint64_t idx = off / FRAME_SIZE;
   if (idx >= (uint64_t)o->nr_frames) return 0;
   uint64_t nf = frame_alloc();
-  if (!nf) return 0;
+  if (!nf) {
+    *err = -ENOMEM; /* cp-pagein (H9-12): a shortage, not an I/O error */
+    return 0;
+  }
   /* Read AND publish under the ext2 lock: a write() that lands between the
      read and the install would otherwise find no frame to update and the
      stale page would be published (ext2_obj_note_write_locked runs under
@@ -203,6 +209,7 @@ uint64_t ext2_obj_page(struct vm_object *o, uint64_t off) {
   }
   ext2v_unlock(0);
   if (nf) frame_free(nf);
+  if (res) *err = 0;
   return res;
 }
 
