@@ -215,6 +215,7 @@ def classify_session(text):
          "thrs": {}, "devlost": [], "emfile": [], "away": 0, "away_z": 0, "snd_zeros": 0,
          "done": False, "sync": False, "ntsync": [], "cons": None, "fstats": []}
     cur = None
+    s["lines"] = text.count("\n")
     for ln, raw in enumerate(text.split("\n"), 1):
         line = raw.rstrip()
         if not line:
@@ -365,8 +366,12 @@ def print_session(ses, rs):
               f"{(' '.join(live) or 'none') if q else '-'}{' + exited-unreaped ' + ' '.join(zombies(q[-1])) if q and zombies(q[-1]) else ''}, "
               f"sync {'yes' if ses['sync'] else 'no'}, [P8] done {'yes' if ses['done'] else 'no'})")
     if ses["thrs_rows"] >= 10:
-        cap = ses["thrs_rows"] >= THRS_CAP
+        # round 4: since integ25 (H6-02, ee1c77fe) the census has per-sample bounds and
+        # no boot-wide cap, so a long soak prints far more than 4000 rows; only an
+        # exact 4000 is the old kernel's stop (h4-soak1: 12594 rows read as "STOPPED")
+        cap = ses["thrs_rows"] == THRS_CAP
         print(f"-- [THRS] trend: {ses['thrs_rows']} rows{' = the kernel cap (' + str(THRS_CAP) + '): the census STOPPED at serial L' + str(ses['thrs_last_line']) if cap else ''}"
+              f"{'' if cap else ' (last at serial L' + str(ses['thrs_last_line']) + ' of ' + str(ses.get('lines', '?')) + ')'}"
               "; per name: rows, threads / regions / anon MiB / res MiB at 0, 25, 50, 75, 100 %")
         for n, rows in sorted(ses["thrs"].items(), key=lambda kv: -len(kv[1])):
             t = thrs_trend(rows)
