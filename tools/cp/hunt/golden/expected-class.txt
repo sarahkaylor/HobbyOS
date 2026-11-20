@@ -15,6 +15,7 @@
        2  L13      badelr: elr~0x140000000 in Cyberpunk2077.e
        1  L26      watchdog: [WATCHDOG] console silent for more than 20s
        1  L29      cons-takeover: [CONS] takeover cpu=N holder=N why=stall watched_us=N wall_us=N
+-- fault-path instrument rows ([PF*], incl. [PFE]): 0 rows, 0 signatures
 -- [EXITPC] non-zero exit codes: 1 rows, 1 signatures
        1  L5       wine code=0xC0000135 DLL_NOT_FOUND
 -- process exits (by name): 2 rows, 2 signatures

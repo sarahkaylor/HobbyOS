@@ -1,0 +1,18 @@
+Round 4 exit paths under load (strix, Venus, integ25): drive.py's PLAY QUIT row and classify.py's clean-exit
+reading per boot (game status, wineserver -k, processes left after it, sync, [P8] done).
+load = pause -> LOAD GAME -> ManualSave-86 -> confirm, Esc on the loading screen (no effect), QUIT the moment the HUD is back;
+sprint = Esc in mid-walk (W held; Shift let go first after H9-03), sprint-retry = that pause menu showed no focus
+(H9-03 in h4-p04/p07, H9-08 in h4-p17) and the quit went through from a standing Esc; settings = Resolution
+1280x720 -> 1920x1080 applied on a 1920x1080 X screen, QUIT confirmed 103 / 43 / 42 s after the apply.
+
+h4-p02  QUIT (load): confirmed     clean exit: yes (game status=0, wineserver -k 234 ms, left after -k: none, sync yes, [P8] done yes)
+h4-p05  QUIT (load): confirmed     clean exit: yes (game status=0, wineserver -k 233 ms, left after -k: none, sync yes, [P8] done yes)
+h4-p08  QUIT (load): confirmed     clean exit: yes (game status=0, wineserver -k 237 ms, left after -k: none, sync yes, [P8] done yes)
+h4-p12  QUIT (sprint): confirmed; waiting for the game to exit clean exit: yes (game status=0, wineserver -k 235 ms, left after -k: none, sync yes, [P8] done yes)
+h4-p13  QUIT (sprint): confirmed; waiting for the game to exit clean exit: yes (game status=0, wineserver -k 236 ms, left after -k: none, sync yes, [P8] done yes)
+h4-p17  QUIT (sprint-retry): confirmed clean exit: yes (game status=0, wineserver -k 230 ms, left after -k: none, sync yes, [P8] done yes)
+h4-p14  QUIT (settings): confirmed clean exit: yes (game status=0, wineserver -k 223 ms, left after -k: none, sync yes, [P8] done yes)
+h4-p15  QUIT (settings): confirmed clean exit: yes (game status=0, wineserver -k 224 ms, left after -k: none, sync yes, [P8] done yes)
+h4-p16  QUIT (settings): confirmed clean exit: yes (game status=0, wineserver -k 218 ms, left after -k: none, sync yes, [P8] done yes)
+h4-p04  QUIT (sprint-retry): confirmed clean exit: yes (game status=0, wineserver -k 231 ms, left after -k: none, sync yes, [P8] done yes)
+h4-p07  QUIT (sprint-retry): confirmed clean exit: yes (game status=0, wineserver -k 233 ms, left after -k: none, sync yes, [P8] done yes)

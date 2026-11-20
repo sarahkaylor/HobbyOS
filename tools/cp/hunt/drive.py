@@ -91,6 +91,20 @@ class Boot:
         self.pre = "d" + format(int(time.time()) % 46656, "x")
         if not os.path.isdir(self.out):
             raise SystemExit(f"drive: no {self.out}")
+        self.states = os.path.join(self.out, "drive-states.txt")
+        self.cur_state = None
+
+    def state(self, name):
+        """round 4 (H9-hunt4): what the boot is doing now, for glasswatch.py's
+        report (a frozen glass counts as a hitch only in a world-like state)"""
+        if name != self.cur_state:
+            with open(self.states, "a") as f:
+                f.write(f"{time.time():.3f} {name}\n")
+            # and boot_p9's own phase, so fps.csv / classify's per-phase rows
+            # follow the drive (h4-p01's whole session read as "menu")
+            with open(self.ctl, "a") as f:
+                f.write(f"phase {name}\n")
+            self.cur_state = name
 
     def ended(self):
         try:
@@ -432,6 +446,10 @@ PAUSE = [lab for lab, _ in B9.MENUS["pause"]]
 MAIN = [lab for lab, _ in B9.MENUS["main"]]
 
 
+WIGGLE = [True]
+PRESET_KEYS = [""]
+
+
 def seek(b, labels, want, limit=10, name="sk"):
     """tap Up/Down until WANT is highlighted (direction from the label order)"""
     for i in range(limit + 1):
@@ -442,8 +460,9 @@ def seek(b, labels, want, limit=10, name="sk"):
             log(f"seek {want}: on it after {i} taps")
             return True
         d = "down" if lab is None or labels.index(want) > labels.index(lab) else "up"
-        if lab is None and i >= 2:
+        if lab is None and i >= 2 and WIGGLE[0]:
             # cp-hunt H1-12: no visible focus after a sub-menu -> a relative mouse wiggle
+            # (round 4: --no-wiggle measures H6-04, which says the wiggle hides it)
             b.shot(f"{name}w{i}", "look 60 0 1 16", "look -60 0 1 16", "wait 0.5")
         b.shot(f"{name}k{i}", f"key {d}")
     log(f"SEEK {want}: not reached in {limit} taps")
@@ -458,6 +477,7 @@ PAUSE_RX = (r"RESUME|EXIT\s+TO\s+MAIN|"
 
 
 def pause_open(b):
+    b.state("menu:pause")
     p = b.shot("po", "key esc", "wait 4")
     if re.search(PAUSE_RX, boot_ocr(p), re.I):
         return True
@@ -570,10 +590,12 @@ def load_in_world(b, avoid, k):
         return None
     t0 = time.time()
     p, t = b.until(f"cf{k}", r"sure.{0,30}load", 15, "key ret", "wait 2")
+    b.state("load")
     if p:
         b.shot(f"cfy{k}", "key ret", "wait 10")
     w = in_world(b, f"w{k}_", 400)
     log(f"LOAD {k} (pause menu -> {nm}): {'world ' + w if w else 'NO WORLD'} after {time.time() - t0:.0f} s")
+    b.state("world" if w else "?")
     if w:
         b.shot(f"walk{k}", "hold w 3000", "look 400 0 20 16", "hold w 2000", "wait 2")
     return nm if w else None
@@ -587,15 +609,18 @@ def exit_to_main(b, k):
     p, _ = b.until(f"xc{k}", r"sure.{0,20}quit", 15, "key ret", "wait 2")
     if not p:
         return False
+    b.state("exit-main")            # round 4: H6-06's long frame is in this transition
     p, _ = b.until(f"tt{k}", r"PRESS\b.{0,24}\bTO\s+CONTINUE", 400, "key ret", "wait 5")
     log(f"EXIT TO MAIN MENU {k}: title after {time.time() - t0:.0f} s" if p else f"EXIT {k}: no title")
     if not p:
         return False
     p, _ = b.until(f"mm{k}", r"LOAD\s*GAME", 60, "key spc", "wait 5")
+    b.state("menu:main")
     return p is not None
 
 
 def load_from_main(b, k, prefer):
+    b.state("menu:main")
     if not seek(b, MAIN, "LOAD GAME", name=f"ml{k}_"):
         return None
     b.shot(f"mlr{k}", "key ret", "wait 3")
@@ -604,12 +629,15 @@ def load_from_main(b, k, prefer):
     if not nm:
         return None
     t0 = time.time()
+    b.state("load")
     p, _ = b.until(f"ld{k}", r"PRESS\b.{0,24}\bTO\s+CONTINUE", 400, "key ret", "wait 10")
     if not p:
         log(f"MAIN LOAD {k} ({nm}): no PRESS ... TO CONTINUE")
         return None
     w = in_world(b, f"mw{k}_", 90) if b.shot(f"sp{k}", "key spc", "wait 5") else None
     log(f"MAIN LOAD {k} (main menu -> {nm}): {'world ' + w if w else 'NO WORLD'} after {time.time() - t0:.0f} s")
+    if w:
+        b.state("world")
     return nm if w else None
 
 
@@ -732,13 +760,39 @@ def read_value(b, name, row, labels=None, table=None):
     return t
 
 
+# round 4: what a menu / hub / dialog screen reads (any of these: not the world)
+MENU_SCREEN_RX = (r"RESUME|EXIT\s+TO\s+MAIN|QUIT\s*GAME|SAVE\s+GAME|SKIP\s+TIME|DATABASE|STREET\s+CRED|"
+                  r"Track\s+waypoint|BACKPACK|apply\s+these|LOAD\s*GAME|Quicks\w{1,2}ve|SETTINGS|"
+                  r"Windowed\s+Mode|Quick\s+Preset|VSync|Master\s+Volume|Texture\s+Quality|Zoom\s*out|"
+                  r"UPPER\s+BODY|restore\s+def|sure\s+you\s+want")
+
+
+def is_world(p, t=None):
+    """round 4 (h4-p02): the HUD phrases of WORLD_RX are missed by tesseract on
+    some street views, and recover() then toggled the pause menu with Esc
+    (journal 2/3 "back NO").  World = WORLD_RX, or the hint bar reading
+    Crouch / Draw Weapon, or no menu words at all, in both OCR passes"""
+    t = boot_ocr(p) if t is None else t
+    if re.search(NOT_WORLD_RX + r"|RESUME|apply", t, re.I | re.S) or re.search(MENU_SCREEN_RX, t, re.I):
+        return False
+    if re.search(WORLD_RX, t, re.I | re.S):
+        return True
+    h = region_ocr(p, ("hints",))
+    if re.search(r"Crouch|[DO]raw\s*Weapon|Weapon\s*\[", h, re.I):
+        return True
+    return not re.search(MENU_SCREEN_RX, ocr(p, scale=2), re.I)
+
+
 def recover(b, name="rc"):
     """back to the world from whatever menu or dialog is up: Esc (which also
     cancels an apply prompt) until the HUD's input hints show"""
+    # its own drive state: the Esc it presses opens / closes the pause menu, whose
+    # static frames are not world hitches (h4-p02's two "walk" gaps were this)
+    b.state("recover")
     for i in range(6):
         p = b.shot(f"{name}{i}", "wait 1")
         t = boot_ocr(p)
-        if re.search(WORLD_RX, t, re.I | re.S) and not re.search(NOT_WORLD_RX + r"|RESUME|apply", t, re.I | re.S):
+        if is_world(p, t):
             log(f"recover: in the world after {i} steps")
             return True
         if re.search(r"apply\s+these\s+changes", t, re.I):
@@ -821,11 +875,34 @@ def graphics_preset(b, name):
     # h3-set4: the first Down lands on the "Quick Preset" SECTION title, whose
     # Enter asks "Do you want to restore default settings for this section?"
     # (cancelled with Esc, 3/3); the row is the second Down
-    p = b.shot(name + "gd", "key down", "wait 1.2", "key down", "wait 1.2")
-    p = b.shot(name + "ge", "key ret", "wait 2")
-    if re.search(r"restore\s+def", boot_ocr(p), re.I):
-        log("settings: Enter opened the section's restore-defaults prompt: CANCEL")
-        b.shot(name + "gx", "key esc", "wait 2")
+    if PRESET_KEYS[0]:
+        # round 4 (h4-q02): the row's "< value >" selector stepped with the arrow
+        # keys, on the row the tab opens on (no Down: h4-q01's Downs + Enter
+        # never changed the preset, 0/11, and H6's 0/9)
+        p = b.shot(name + "gk", *[f"key {k}" for k in PRESET_KEYS[0].split("+")], "wait 2")
+        if re.search(r"restore\s+def", boot_ocr(p), re.I):
+            b.shot(name + "gkx", "key esc", "wait 2")
+            return None
+        after = row_value(p, "Quick Preset", GRAPHICS_ROWS, GRAPHICS_TABLE) + " // " + " ".join(
+            re.findall(r"Quick\s+Preset\W{0,6}(\w[\w ]{2,30})", boot_ocr(p)))
+        pa, _ = b.until(name + "ga", r"apply\s+these\s+changes", 10, "key esc", "wait 2")
+        if pa:
+            b.shot(name + "gc", "key ret", "wait 5")
+        log(f"SET Quick Preset {before!r} -> {after!r} via {PRESET_KEYS[0]} ({'applied' if pa else 'no apply prompt'})")
+        return after if pa else None
+    # h4-p06b: two Downs + Enter still opened the section's restore-defaults
+    # prompt (as in h3-set4/5): one Down at a time, Enter, and on that prompt
+    # cancel and go one row further (at most 4)
+    for i in range(4):
+        b.shot(name + f"gd{i}", "key down", "wait 1.2")
+        p = b.shot(name + f"ge{i}", "key ret", "wait 2")
+        if re.search(r"restore\s+def", boot_ocr(p), re.I):
+            log(f"settings: Down x{i + 1} + Enter opened the section's restore-defaults prompt: CANCEL")
+            b.shot(name + f"gx{i}", "key esc", "wait 2")
+            continue
+        log(f"settings: Down x{i + 1} + Enter: no prompt (the preset row, or a value row)")
+        break
+    else:
         return None
     after = row_value(p, "Quick Preset", GRAPHICS_ROWS, GRAPHICS_TABLE) + " // " + " ".join(
         re.findall(r"Quick\s+Preset\W{0,6}(\w[\w ]{2,30})", boot_ocr(p)))
@@ -868,9 +945,461 @@ def settings(b, a):
     quit_game(b, "pause")
 
 
+def game_im(p):
+    """the shot's game picture at 1280x720 (boot_p9's game_view)"""
+    return B9.game_view(Image.open(p).convert("RGB"), VIEW["xscreen"], VIEW["game_res"])
+
+
+def motion(p1, p2):
+    """round 4: how much the world moved between two shots: mean |diff| (0-255)
+    of 96x54 grey thumbnails of the picture's centre (the HUD corners cut off).
+    Walking into a wall reads ~1-3, walking or turning in the open 10+."""
+    if not p1 or not p2:
+        return 0.0
+    from PIL import ImageChops
+    box = (160, 100, 1120, 560)
+    t1 = game_im(p1).crop(box).convert("L").resize((96, 54))
+    t2 = game_im(p2).crop(box).convert("L").resize((96, 54))
+    return ImageStat.Stat(ImageChops.difference(t1, t2)).mean[0]
+
+
+# the interaction prompt (right of the crosshair), the hint bar (bottom right)
+# and the notifications (top left), in the 1280x720 game picture
+REGIONS = {"prompt": (640, 250, 1120, 520), "hints": (880, 540, 1280, 720), "notes": (0, 60, 640, 300)}
+
+
+def region_ocr(p, which=("prompt", "hints")):
+    g = game_im(p)
+    out = []
+    for w in which:
+        im = g.crop(REGIONS[w])
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
+            im.save(tf.name)
+        try:
+            out.append(w + ":" + ocr(tf.name, scale=2, psm=6))
+        finally:
+            os.unlink(tf.name)
+    return " | ".join(out)
+
+
+def ocr_all(p):
+    """boot_p9's OCR and a 2x pass, flattened (the HUD hints are small)"""
+    return " ".join((boot_ocr(p) + " " + ocr(p, scale=2)).split())
+
+
+def explore(b, a):
+    """round 4: each in-world key once, with the OCR logged in full, to learn
+    the screens the play loop has to recognise (map, inventory, journal,
+    character, hub, phone, the vehicle call)"""
+    if not in_world(b, "w0_", 30) and not load_from_main(b, 0, a.save):
+        raise Ended("no world at the start")
+    b.state("world")
+    p = b.shot("x0", "wait 2")
+    log(f"EXPLORE world: {ocr_all(p)[:400]!r}")
+    for key, name in (("m", "map"), ("i", "inventory"), ("j", "journal"), ("p", "character"),
+                      ("tab", "hub"), ("t", "phone")):
+        b.state("menu:" + name)
+        p = b.shot("x" + name, f"key {key}", "wait 4")
+        log(f"EXPLORE {name} ({key}): {ocr_all(p)[:400]!r}")
+        p = b.shot("x" + name + "c", "key esc", "wait 3")
+        log(f"EXPLORE {name} after esc: {ocr_all(p)[:200]!r}")
+        if not recover(b, "xr" + name):
+            log(f"EXPLORE {name}: recover failed")
+        b.state("world")
+    b.state("vehicle-call")
+    p = b.shot("xv", "key v", "wait 2")
+    log(f"EXPLORE vehicle call (v): {ocr_all(p)[:300]!r}")
+    for i in range(6):
+        p = b.shot(f"xv{i}", "wait 4")
+        log(f"EXPLORE vehicle +{4 * (i + 1)} s: {ocr_all(p)[:300]!r}")
+    for i in range(8):
+        p = b.shot(f"xl{i}", "look 300 0 10 16", "wait 1")
+        log(f"EXPLORE look {i}: {ocr_all(p)[:300]!r}")
+    b.state("world")
+    log("EXPLORE done")
+
+
+def explore2(b, a):
+    """round 4: walking with feedback (motion between shots; turn when stuck),
+    the vehicle call (tap / hold V) and a search for an enter prompt, the phone
+    (hold T); every reading logged"""
+    if not in_world(b, "w0_", 30) and not load_from_main(b, 0, a.save):
+        raise Ended("no world at the start")
+    b.state("walk")
+    prev = b.shot("e0", "wait 1")
+    for i in range(20):
+        p = b.shot(f"ew{i}", "down shift", "hold w 3000", "up shift")
+        m = motion(prev, p)
+        log(f"EXPLORE2 walk {i}: motion {m:.1f} {region_ocr(p, ('prompt', 'hints', 'notes'))[:260]!r}")
+        if m < 6:
+            q = b.shot(f"et{i}", "look 500 0 20 16", "wait 0.5")
+            log(f"EXPLORE2 turn {i}: motion {motion(p, q):.1f}")
+            p = q
+        prev = p
+    b.state("vehicle-call")
+    for tag, lines in (("tap", ["key v"]), ("hold", ["hold v 1500"])):
+        p = b.shot(f"ev{tag}", *lines, "wait 1.5")
+        log(f"EXPLORE2 vehicle {tag}: {region_ocr(p, ('prompt', 'hints', 'notes'))[:300]!r} // {boot_ocr(p)[:200]!r}")
+        if tag == "hold":
+            p = b.shot("evhx", "key esc", "wait 2")
+            log(f"EXPLORE2 after esc: {boot_ocr(p)[:160]!r}")
+    for i in range(5):
+        p = b.shot(f"evw{i}", "wait 5")
+        log(f"EXPLORE2 vehicle wait {5 * (i + 1)} s: {region_ocr(p, ('prompt', 'notes'))[:200]!r}")
+    for i in range(12):
+        p = b.shot(f"evs{i}", "look 250 0 10 16", "wait 1")
+        r = region_ocr(p, ("prompt", "hints"))
+        log(f"EXPLORE2 search {i}: {r[:220]!r}")
+        if re.search(r"Enter|Get\s*in|Steal|Drive|Vehicle", r, re.I):
+            q = b.shot(f"evf{i}", "key f", "wait 5")
+            log(f"EXPLORE2 F at {i}: {region_ocr(q, ('prompt', 'hints', 'notes'))[:300]!r} // {boot_ocr(q)[:200]!r}")
+            for j in range(3):
+                q = b.shot(f"evd{i}{j}", "hold w 3000", "hold a 800")
+                log(f"EXPLORE2 drive? {j}: motion {motion(p, q):.1f} {region_ocr(q, ('hints',))[:200]!r}")
+                p = q
+            break
+    b.state("menu:phone")
+    p = b.shot("eph", "hold t 1000", "wait 2")
+    log(f"EXPLORE2 phone (hold t): {boot_ocr(p)[:300]!r}")
+    b.shot("ephx", "key esc", "wait 3")
+    recover(b, "ephr")
+    b.state("world")
+    log("EXPLORE2 done")
+
+
+# --- round 4 (H9-hunt4): active play ------------------------------------------------
+# in-world menus: key, what its screen reads (h4-x01's OCR).  Esc from each
+# lands on the hub (LEVEL UP / SKIP TIME / DATABASE), a second Esc (recover)
+# on the world
+PLAY_MENUS = [
+    ("map", "m", r"Track\s+waypoint|Zoom\s*out|FILTER|Jump\s+to|PRIMARY\s+GANGS"),
+    ("inventory", "i", r"BACKPACK|UPPER\s+BODY|QUICK\s+ACCESS|LOWER\s+BODY|OUTFIT"),
+    ("journal", "j", r"TALK\s+TO\s+JACKIE|BEAT\s+ON\s+THE\s+BRAT|OPEN\s+MAP|Go\s+to\s+the\s+fight"),
+    # not the character screen (P): it opens on a "your Perks have been reset"
+    # popup whose Esc leaves the pause menu up, and recover() could not close it
+    # (h4-p01: 2/2)
+    # not the phone: neither a tap of T (h4-x01) nor a 700 ms hold (h4-p01, 0/3)
+    # opened anything in ManualSave-86, and the Esc after it opens the pause menu
+]
+# walk segments: (lines) -- sprint, walk, strafe, jump, crouch, turn and look up/down
+WALKS = [
+    ["down shift", "hold w 4000", "up shift", "look 400 0 20 16"],
+    ["hold w 2500", "hold a 1200", "look -300 40 15 16", "look 0 -40 5 16", "hold w 2000"],
+    ["down shift", "hold w 3000", "up shift", "key spc", "hold w 1500", "hold d 1200", "look 600 0 30 16"],
+    ["key c", "hold w 2000", "key c", "look -500 0 25 16", "down shift", "hold w 3000", "up shift"],
+    ["hold s 1500", "look 250 -30 10 16", "look 0 30 5 16", "down shift", "hold w 4000", "up shift"],
+]
+
+
+class Tally:
+    def __init__(self):
+        self.c = {}
+
+    def add(self, k, ok):
+        e = self.c.setdefault(k, [0, 0])
+        e[1] += 1
+        e[0] += 1 if ok else 0
+
+    def s(self, k):
+        e = self.c.get(k, [0, 0])
+        return f"{e[0]}/{e[1]}"
+
+
+def walk_seg(b, k, prev, tally):
+    b.state("walk")
+    if prev and re.search(PAUSE_RX, boot_ocr(prev), re.I):
+        # a menu step left the pause menu up (h4-p01): back to the world first
+        tally.add("recover-before-walk", recover(b, f"pwr{k}_"))
+        b.state("walk")
+    p = b.shot(f"pw{k}", *WALKS[k % len(WALKS)])
+    m = motion(prev, p)
+    moved = m >= 6
+    tally.add("walk", moved)
+    if not moved:
+        # stuck against something: turn about 90-180 degrees and try again
+        p = b.shot(f"pt{k}", f"look {700 + 300 * (k % 3)} 0 30 16", "down shift", "hold w 2500", "up shift")
+        tally.add("unstuck", motion(prev, p) >= 6)
+    in_w = is_world(p)
+    if k % 5 == 0:
+        log(f"PLAY walk {k}: motion {m:.1f} world-hud {'yes' if in_w else 'no'}")
+    return p
+
+
+def menu_seg(b, k, tally):
+    name, key, rx = PLAY_MENUS[k % len(PLAY_MENUS)]
+    b.state("menu:" + name)
+    p = b.shot(f"pm{name}{k}", key if " " in key else f"key {key}", "wait 3")
+    t = boot_ocr(p)
+    ok = bool(re.search(rx, t, re.I))
+    if not ok:
+        t = t + " " + ocr(p, scale=2)
+        ok = bool(re.search(rx, t, re.I))
+    if ok and name == "map":
+        # pan and zoom: the map streams its own tiles
+        b.shot(f"pmz{k}", "look 300 150 15 16", "hold e 800", "look -300 -150 15 16", "hold q 800", "wait 1")
+    p = b.shot(f"pmx{k}", "key esc", "wait 3")
+    back = recover(b, f"pmr{k}_")
+    tally.add("menus", ok and back)
+    tally.add("menu:" + name, ok)
+    if not (ok and back):
+        log(f"PLAY menu {name}: opened {'yes' if ok else 'NO'} back {'yes' if back else 'NO'} (OCR {t[:100]!r})")
+    b.state("world")
+    return back
+
+
+VEHICLE = {"ok": None}
+
+
+def vehicle_seg(b, k, tally, drive_s):
+    """call the vehicle (V), find the enter prompt, drive DRIVE_S seconds, get
+    out (F).  -> seconds driven (0 if not entered)"""
+    b.state("vehicle-call")
+    p = b.shot(f"pv{k}", "key v", "wait 6")
+    entered = False
+    for i in range(10):
+        p = b.shot(f"pvs{k}_{i}", "look 250 0 10 16", "wait 1")
+        r = region_ocr(p, ("prompt",))
+        if re.search(r"Enter|Get\s*in|Steal|Drive", r, re.I):
+            q = b.shot(f"pvf{k}_{i}", "key f", "wait 5")
+            h = region_ocr(q, ("hints",))
+            entered = bool(re.search(VEH_RX, h + " " + boot_ocr(q), re.I))
+            log(f"PLAY vehicle {k}: prompt at search {i} ({r[:60]!r}); after F: {'IN' if entered else 'not in'} ({h[:80]!r})")
+            break
+    tally.add("vehicle", entered)
+    if not entered:
+        b.state("world")
+        return 0
+    b.state("drive")
+    t0 = time.time()
+    prev = q
+    j = 0
+    while time.time() - t0 < drive_s:
+        q = b.shot(f"pvd{k}_{j}", "down w", "wait 3", "hold a 700", "wait 2", "hold d 900", "wait 2", "up w",
+                   "look 200 0 10 16", "down w", "wait 2", "up w")
+        tally.add("drive-moving", motion(prev, q) >= 6)
+        prev, j = q, j + 1
+    d = time.time() - t0
+    b.state("vehicle-exit")
+    b.shot(f"pvx{k}", "hold s 2500", "key spc", "wait 2", "key f", "wait 4")
+    b.state("world")
+    return d
+
+
+VEH_RX = r"Exit\s+vehicle|Handbrake|Radio|Exit\s+\[|km/h|MPH|Accelerate"
+
+
+def quit_now(b, how):
+    """the session's end: QUIT GAME from the pause menu (the confirm, then the
+    game must exit); HOW only labels it"""
+    b.state("quit:" + how)
+    ok = quit_game(b, "pause")
+    if not ok:
+        # once more from the world (a held key or a popup can hide the pause
+        # menu's focus: h4-p01)
+        b.shot("pqu", "up w", "up shift", "key esc", "wait 3")
+        recover(b, "pqur")
+        ok = quit_game(b, "pause")
+    log(f"PLAY QUIT ({how}): {'confirmed' if ok else 'FAILED to reach QUIT GAME'}")
+    return ok
+
+
+def exit_vehicle(b, tally):
+    """QUIT GAME in the middle of a drive: the throttle held, Esc, QUIT"""
+    for k in range(1):
+        if vehicle_seg(b, 900 + k, tally, 20):
+            break
+    else:
+        log("PLAY exit vehicle: never in a vehicle; quitting while sprinting instead")
+        # Esc in mid-sprint; the keys are let go once the pause menu is up (held,
+        # W and Shift hid the menu's focus for 10 taps: h4-p01)
+        b.state("quit:sprint")
+        # Shift is let go before the Esc: IceWM grabs Shift+Esc (its window menu,
+        # cp-hunt H9-03), so Esc goes in with W still held, mid-walk
+        b.shot("pqs", "down shift", "down w", "wait 3", "up shift", "key esc", "wait 2", "up w", "wait 2")
+        # h4-p01 / h4-p04: no focus here for 10 taps; is it seek's own pointer
+        # wiggle (H6-04's mechanism)?  The first seek moves no pointer
+        w0, WIGGLE[0] = WIGGLE[0], False
+        ok = seek(b, PAUSE, "QUIT GAME", name="pqss")
+        WIGGLE[0] = w0
+        log(f"PLAY sprint pause seek without the wiggle: {'focus found' if ok else 'NO focus'}")
+        if not ok:
+            return quit_now(b, "sprint-retry")
+        p, _ = b.until("pqsc", r"sure.{0,20}quit", 15, "exit_ok", "key ret", "wait 2")
+        if not p:
+            return quit_now(b, "sprint-retry")
+        log("PLAY QUIT (sprint): confirmed; waiting for the game to exit")
+        with open(b.ctl, "a") as f:
+            f.write("key ret\nwait_exit 180\n")
+        return True
+    b.state("drive")
+    b.shot("pqd", "down w", "wait 3", "key esc", "wait 2", "up w", "wait 2")
+    return quit_now(b, "vehicle")
+
+
+def exit_load(b, tally):
+    """QUIT GAME during a save load: pause -> LOAD GAME -> a save -> confirm;
+    Esc tried on the loading screen (no menu is expected there), then QUIT GAME
+    from the pause menu at the first moment the world's HUD is back (the
+    streaming of the loaded world still running)"""
+    if not pause_open(b) or not seek(b, PAUSE, "LOAD GAME", name="pqlg"):
+        return quit_now(b, "load-fallback")
+    b.shot("pqlr", "key ret", "wait 3")
+    open_list(b)
+    nm = list_pick(b, set(), prefer="ManualSave-86") or list_pick(b, set())
+    p, _ = b.until("pqlc", r"sure.{0,30}load", 15, "key ret", "wait 2")
+    if p:
+        b.shot("pqly", "key ret", "wait 1")
+    b.state("load")
+    t0 = time.time()
+    p = b.shot("pqle", "wait 4", "key esc", "wait 2")
+    t = boot_ocr(p)
+    log(f"PLAY exit load: {nm}; Esc on the loading screen -> {t[:80]!r}")
+    if re.search(PAUSE_RX, t, re.I):
+        log("PLAY exit load: a pause menu during the load: QUIT from it")
+        return quit_now(b, "load-menu")
+    p, t = b.until("pqlw", WORLD_RX, 400, every=2, reject=NOT_WORLD_RX)
+    log(f"PLAY exit load: HUD after {time.time() - t0:.0f} s: quitting at once")
+    if re.search(r"WELCOME\s+TO", t or "", re.I):
+        b.shot("pqlx", "key esc", "wait 1")
+    return quit_now(b, "load")
+
+
+def exit_settings(b, tally, a):
+    """QUIT GAME right after a settings apply: VIDEO Windowed Mode or a Quick
+    Preset changed + CONFIRMed, Settings and the pause menu closed, QUIT"""
+    t0 = None
+    if a.exit_setting == "preset":
+        g = graphics_preset(b, "pqs")
+        t0 = time.time() if g else None
+        log(f"PLAY exit settings: Quick Preset -> {g}")
+    elif a.exit_setting == "resolution2":
+        # Resolution away and back, the quit right after the second apply: the
+        # pause menu is then read at the layout its tables were measured on
+        # (h4-p03: after one 1024x768 apply the rows were read at the wrong
+        # place; h4-p09: the VSync row read Off/30/60, i.e. not VSync, and the
+        # Enters started the game's benchmark)
+        if settings_open(b, "pqs"):
+            # with a 1920x1080 X screen (P9_XSCREEN) the game offers 1920x1080 and
+            # H6's h3-set2 path holds (10/10); at 1024x768 in a 1280x720 screen the
+            # rows could not be placed again (h4-p11)
+            away = r"1920\s*x\s*1080" if VIEW["xscreen"] == "1920x1080" else r"1024\s*x\s*768"
+            r1 = video_set(b, "Resolution", away, "pqsa")
+            # back to 1280x720 only without a 1920x1080 screen: in the same Settings
+            # visit the row is not found again (h4-p11, h4-p14), and at 1080p the
+            # pause menu reads fine (h4-p14), so the quit follows the first apply
+            r2 = video_set(b, "Resolution", r"1280\s*x\s*720", "pqsb") if r1 and VIEW["xscreen"] != "1920x1080" else None
+            t0 = r1 if VIEW["xscreen"] == "1920x1080" else (r2 or None)
+            log(f"PLAY exit settings: Resolution -> /{away}/ ({'applied' if r1 else 'NOT'}) -> 1280x720 "
+                f"({'applied' if r2 else 'NOT'})")
+    elif a.exit_setting == "vsync":
+        # a setting that does not move the picture: after a Resolution apply the
+        # pause menu's rows are read at the wrong place (h4-p03: 1024x768 in the
+        # 1280x720 X screen, the seek "found" QUIT GAME on the world)
+        if settings_open(b, "pqs"):
+            cur = read_value(b, "pqsv", "VSync")
+            want = r"\bOff\b" if re.search(r"\bOn\b", cur) else r"\bOn\b"
+            t0 = video_set(b, "VSync", want, "pqsr")
+            log(f"PLAY exit settings: VSync {cur[:30]!r} -> /{want}/ ({'applied' if t0 else 'NOT applied'})")
+    else:
+        if settings_open(b, "pqs"):
+            cur = read_value(b, "pqsv", "Resolution")
+            want = r"1280\s*x\s*720" if not re.search(r"1280\s*x\s*720", cur) else r"1024\s*x\s*768"
+            t0 = video_set(b, "Resolution", want, "pqsr")
+            log(f"PLAY exit settings: Resolution {cur[:30]!r} -> /{want}/ ({'applied' if t0 else 'NOT applied'})")
+    p = b.shot("pqsz", "key esc", "wait 2")
+    b.state("quit:settings")
+    # the Settings screen closes back onto the pause menu: QUIT GAME from there
+    # (unless the Esc went on to the world)
+    if is_world(p) or not re.search(PAUSE_RX, boot_ocr(p), re.I):
+        log("PLAY exit settings: not on the pause menu after the Esc; QUIT through pause_open")
+        return quit_now(b, "settings")
+    if not seek(b, PAUSE, "QUIT GAME", name="pqsq"):
+        return quit_now(b, "settings-fallback")
+    p, _ = b.until("pqsc", r"sure.{0,20}quit", 15, "exit_ok", "key ret", "wait 2")
+    if not p:
+        return False
+    log(f"PLAY QUIT (settings): confirmed {time.time() - t0:.1f} s after the apply" if t0 else "PLAY QUIT (settings): confirmed (no apply)")
+    with open(b.ctl, "a") as f:
+        f.write("key ret\nwait_exit 180\n")
+    return True
+
+
+PRESET_RX = re.compile(r"Ray\s*Tracing\W{0,3}(Low|Medium|Ultra|Overdrive)|Steam\s*Deck|\b(Low|Medium|High|Ultra|Custom)\b", re.I)
+
+
+def preset_name(t):
+    m = PRESET_RX.search(t or "")
+    if not m:
+        return None
+    if m.group(1):
+        return "RT " + m.group(1).title()
+    return m.group(0).title().replace("Steamdeck", "Steam Deck")
+
+
+def presets(b, a):
+    """round 4 item 4: the GRAPHICS Quick Preset changed in the world A.cycles
+    times (Enter on the row steps to the next preset; graphics_preset), each
+    applied, then ~15 s of walking on it; the names read back after each step"""
+    if not in_world(b, "w0_", 30) and not load_from_main(b, 0, a.save):
+        raise Ended("no world at the start")
+    b.state("world")
+    seen = []
+    for k in range(a.cycles):
+        b.state("settings")
+        g = graphics_preset(b, f"qp{k}_")
+        nm = preset_name(g.split(" // ")[-1] if g else None) or preset_name(g)
+        seen.append(nm or "?")
+        b.shot(f"qp{k}z", "key esc", "wait 3", "key esc", "wait 3")
+        if not recover(b, f"qp{k}r"):
+            log(f"PRESET {k}: not back in the world")
+        b.state("walk")
+        p = b.shot(f"qp{k}w", "down shift", "hold w 3000", "up shift", "look 400 0 20 16", "hold w 3000", "wait 4")
+        log(f"PRESET {k + 1}/{a.cycles}: {nm} ({'applied' if g else 'NOT changed'}); world OCR {boot_ocr(p)[:60]!r}")
+    log(f"PRESETS SUMMARY seen={','.join(seen)} distinct={len(set(seen) - {'?'})}")
+    quit_now(b, "pause")
+
+
+def play(b, a):
+    """round 4 item 1: A.minutes of active input in the world, in segments:
+    walk / sprint / strafe / jump / crouch / turn (motion-checked), every 3rd
+    segment an in-world menu (map, inventory, journal, character in turn), every
+    A.vehicle_every-th a vehicle call and drive; then the session's end (A.exit)"""
+    if not in_world(b, "w0_", 30) and not load_from_main(b, 0, a.save):
+        raise Ended("no world at the start")
+    tally = Tally()
+    b.state("world")
+    t0 = time.time()
+    prev = b.shot("p0", "wait 1")
+    k = drive_s = mk = 0
+    while time.time() - t0 < a.minutes * 60:
+        if not b.ended() and a.vehicle_every and k % a.vehicle_every == a.vehicle_every - 1:
+            drive_s += vehicle_seg(b, k, tally, a.drive_s)
+        elif k % 3 == 2:
+            # its own counter: with 3 menus, k % 3 == 2 picked the journal every
+            # time (h4-p02: journal 13, map 0, inventory 0)
+            menu_seg(b, mk, tally)
+            mk += 1
+        else:
+            prev = walk_seg(b, k, prev, tally)
+        k += 1
+        if k % 10 == 0:
+            log(f"PLAY {time.time() - t0:.0f} s: walk {tally.s('walk')} menus {tally.s('menus')} "
+                f"vehicle {tally.s('vehicle')} drive {drive_s:.0f} s")
+    act = (time.time() - t0) / 60
+    log(f"PLAY active {act:.1f} min, {k} segments")
+    b.state("world")
+    ok = {"pause": lambda: quit_now(b, "pause"), "vehicle": lambda: exit_vehicle(b, tally),
+          "load": lambda: exit_load(b, tally), "settings": lambda: exit_settings(b, tally, a),
+          "none": lambda: True}[a.exit]()
+    menus = ",".join(f"{n}:{tally.s('menu:' + n)}" for n, _, _ in PLAY_MENUS)
+    log(f"PLAY SUMMARY active_min={act:.1f} segments={k} walk={tally.s('walk')} unstuck={tally.s('unstuck')} "
+        f"menus={tally.s('menus')} per_menu={menus} vehicle={tally.s('vehicle')} drive_s={drive_s:.0f} "
+        f"drive_moving={tally.s('drive-moving')} exit={a.exit}{'' if ok else ':FAILED'}")
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("what", choices=["churn", "menuloads", "settings", "quit"])
+    ap.add_argument("what", choices=["churn", "menuloads", "settings", "quit", "explore", "explore2", "play", "presets"])
     ap.add_argument("run")
     ap.add_argument("--loads", type=int, default=10)
     ap.add_argument("--menu-loads", type=int, default=5)
@@ -884,9 +1413,19 @@ def main():
     ap.add_argument("--list-steps", type=int, default=24, help="Down taps to walk the save list for one pick")
     ap.add_argument("--seq", help="settings: ROW=REGEX;ROW=REGEX... instead of the default 720p/1080p/window cycle")
     ap.add_argument("--presets", type=int, default=2, help="settings: Quick Preset changes per cycle")
+    ap.add_argument("--save", default="ManualSave-86", help="explore/play: the save loaded from the main menu")
+    ap.add_argument("--minutes", type=float, default=15, help="play: minutes of active input")
+    ap.add_argument("--vehicle-every", type=int, default=0, help="play: a vehicle call every N segments (0 = never)")
+    ap.add_argument("--drive-s", type=float, default=60, help="play: seconds per drive")
+    ap.add_argument("--exit", default="pause", choices=["pause", "vehicle", "load", "settings", "none"])
+    ap.add_argument("--preset-keys", default="", help="presets: qcodes for the Quick Preset row, '+'-joined (e.g. right)")
+    ap.add_argument("--no-wiggle", action="store_true", help="seek: never move the pointer (cp-hunt H6-04)")
+    ap.add_argument("--exit-setting", default="resolution", choices=["resolution", "preset", "vsync", "resolution2"])
     a = ap.parse_args()
     b = Boot(a.run, max_s=a.max_s)
     LIST_STEPS[0] = a.list_steps
+    WIGGLE[0] = not a.no_wiggle
+    PRESET_KEYS[0] = a.preset_keys
     try:
         if a.what == "churn":
             churn(b, a)
@@ -894,6 +1433,14 @@ def main():
             menu_loads(b, a)
         elif a.what == "settings":
             settings(b, a)
+        elif a.what == "explore":
+            explore(b, a)
+        elif a.what == "explore2":
+            explore2(b, a)
+        elif a.what == "play":
+            play(b, a)
+        elif a.what == "presets":
+            presets(b, a)
         else:
             quit_game(b, a.frm)
     except Ended as e:

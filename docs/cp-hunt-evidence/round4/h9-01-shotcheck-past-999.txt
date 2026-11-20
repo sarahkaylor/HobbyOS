@@ -1,0 +1,13 @@
+H9-01: shotcheck.py graded only shots s001..s999 (strix, lane H9-hunt4, 2026-11-19)
+
+boot_p9 names shots f"s{n:03d}-t...": the 1000th is s1000-...; shotcheck's
+SHOT_RX was ^s(\d{3})-t(\d{6}) and silently skipped every later shot, and it
+sorted by file name (s1000 before s101).
+
+H6's h3-churn4 (round 3):  grep -c "shot s" h3-churn4.log -> 1014
+                           r3 table "shots" column     -> blackx1/999
+
+Planted check (test_hunt.py "shotcheck past s999": s998, s999, s1000, s1001):
+  old SHOT_RX:  {"run": "/tmp/h9t/run", "shots": 2, ...}
+  new SHOT_RX:  {"run": "/tmp/h9t/run", "shots": 4, ...}
+Fixed in be0d15e4 (s(\d{3,}), sorted by shot number).

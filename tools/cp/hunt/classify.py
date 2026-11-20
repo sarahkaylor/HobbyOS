@@ -16,7 +16,7 @@ boots has the same key:
 
   kfault    kernel fault / panic / kill rows ([KERNEL] User process fault,
             FATAL, #PF in user space, [LCOMPAT] fault*, [KPANIC], [TORNFRAME],
-            [USERFAULT], [BADVEC], [TLBTIMEOUT], [LOCKERR], signal-delivery
+            [USERFAULT], [BADVEC], [TLBTIMEOUT], [LOCKERR], [FREERACE], signal-delivery
             fallbacks, rt_sigreturn bad rip)
   kstall    stall / lost-wake / timeout rows ([VENUS] stall|fence error|
             timeout, [NFSPIPE] stall, [BLKQ] stall|timeout|wedge, [STALLBREAK],
@@ -27,6 +27,7 @@ boots has the same key:
   dxvk      DXVK / vkd3d-proton "err:" and "warn:" lines (DXVK's "err:   "
             format and vkd3d-proton's "err:vkd3d..." channel)
   red       REDEngineErrorReporter: loaded / its process exits
+  pf        fault-path instrument rows ([PFK]..[PFX], vm.c's [PFE]; round 4)
 
 Plus the boot's verdict, launch->menu time, the fps rows' gaps (if fps.csv is
 beside SERIAL), per-process anon MiB growth from [THRS] (MiB/min, first ->
@@ -104,6 +105,8 @@ KFAULT = [
     ("badvec", re.compile(r"\[BADVEC\].*")),
     ("tlbtimeout", re.compile(r"\[TLBTIMEOUT\].*")),
     ("lockerr", re.compile(r"\[LOCKERR\].*")),
+    # integ25: mmu.c's "freeing root=... while cpu N still on it" (an AS freed under a CPU)
+    ("freerace", re.compile(r"\[FREERACE\].*")),
     ("iommu", re.compile(r"\[IOMMU\] ERROR.*")),
     ("oom", re.compile(r".*\b(out of memory|frame allocation failed|OOM)\b.*", re.I)),
 ]
@@ -131,6 +134,13 @@ KDIAG = [
     # integ17 (cp-kglitch): the stall-proof console's takeover row
     ("cons-takeover", re.compile(r"\[CONS\] takeover.*")),
 ]
+# round 4 (H9-hunt4): the fault-path instrument rows (vm_pfstat.c's [PFK]/[PFH]/
+# [PFL]/[PFI]/[PFS]/[PFR]/[PFT]/[PFX] and vm.c's [PFE], an instruction fetch
+# on a file-backed page, 24 rows per boot) are the `pf` class: counted, never
+# faults.  [PFE] keeps its region kind / prot / present (H7's "not in the pf
+# class yet", docs/cp-fault.md §26).
+PF_RX = re.compile(r"^\[PF([A-Z])\]")
+PFE_RX = re.compile(r"\bprot=(\d+) kind=(\d+) .*?present=(\d+)")
 PROC_RX = re.compile(r"\[KERNEL\] Process (\d+): (.*?) exited unexpectedly or gracefully")
 EXITPC_RX = re.compile(r"\[EXITPC\] pid=(\d+) last_user_pc=(\S+) code=(0x[0-9A-Fa-f]+)")
 NTSTATUS = {
@@ -189,6 +199,11 @@ DEVLOST_RX = re.compile(r"DEVICE_LOST|device[ _-]lost|DEVICE_REMOVED|DEVICE_HUNG
                         r"submit2: no fence slot", re.I)
 EMFILE_RX = re.compile(r"Too many open files|\bEMFILE\b|grab_object|ENFILE", re.I)
 AWAY_RX = re.compile(r"^\[AWAY(-Z)?\] ")
+# round 4: Wine's sync objects (ntsync: every event / mutex / semaphore wineserver
+# holds is one kernel object), the only handle count the kernel can see
+NTSYNC_RX = re.compile(r"\[NTSYNC\] stats .*?sem/mutex/event=(\d+)/(\d+)/(\d+) live=(\d+) max=(\d+)")
+CONS_RX = re.compile(r"\[CONS\] lines=(\d+) .*?stalls=(\d+) stolen_ms=(\d+)")
+FSTATS_RX = re.compile(r"\[VENUS\] fence stats \((\S+)\) retired=(\d+) .*?errors=(\d+).*?>11000:(\d+)")
 SNDZ_RX = re.compile(r"^\[SND\] zeros")
 
 
@@ -198,8 +213,9 @@ def classify_session(text):
     process name, device-lost / EMFILE rows and the [AWAY] / [SND] zeros counts"""
     s = {"census": [], "ends": {}, "timeouts": [], "quiesce": [], "thrs_rows": 0, "thrs_last_line": None,
          "thrs": {}, "devlost": [], "emfile": [], "away": 0, "away_z": 0, "snd_zeros": 0,
-         "done": False, "sync": False}
+         "done": False, "sync": False, "ntsync": [], "cons": None, "fstats": []}
     cur = None
+    s["lines"] = text.count("\n")
     for ln, raw in enumerate(text.split("\n"), 1):
         line = raw.rstrip()
         if not line:
@@ -242,6 +258,20 @@ def classify_session(text):
             e = s["thrs"].setdefault(m.group(11), [])
             e.append({"pid": int(m.group(1)), "live": int(m.group(2)), "gt": int(m.group(3)), "slots": int(m.group(5)),
                       "regs": int(m.group(7)), "anon_mib": int(m.group(9)), "res_mib": int(m.group(10)), "line": ln})
+            continue
+        m = NTSYNC_RX.search(line)
+        if m:
+            s["ntsync"].append({"line": ln, "live": int(m.group(4)), "kmax": int(m.group(5)),
+                                "created": [int(m.group(i)) for i in (1, 2, 3)]})
+            continue
+        m = CONS_RX.search(line)
+        if m:
+            s["cons"] = {"line": ln, "lines": int(m.group(1)), "stalls": int(m.group(2)), "stolen_ms": int(m.group(3))}
+            continue
+        m = FSTATS_RX.search(line)
+        if m:
+            s["fstats"].append({"line": ln, "why": m.group(1), "retired": int(m.group(2)), "errors": int(m.group(3)),
+                                "over11ms": int(m.group(4))})
             continue
         if AWAY_RX.match(line):
             s["away_z" if line.startswith("[AWAY-Z]") else "away"] += 1
@@ -336,8 +366,12 @@ def print_session(ses, rs):
               f"{(' '.join(live) or 'none') if q else '-'}{' + exited-unreaped ' + ' '.join(zombies(q[-1])) if q and zombies(q[-1]) else ''}, "
               f"sync {'yes' if ses['sync'] else 'no'}, [P8] done {'yes' if ses['done'] else 'no'})")
     if ses["thrs_rows"] >= 10:
-        cap = ses["thrs_rows"] >= THRS_CAP
+        # round 4: since integ25 (H6-02, ee1c77fe) the census has per-sample bounds and
+        # no boot-wide cap, so a long soak prints far more than 4000 rows; only an
+        # exact 4000 is the old kernel's stop (h4-soak1: 12594 rows read as "STOPPED")
+        cap = ses["thrs_rows"] == THRS_CAP
         print(f"-- [THRS] trend: {ses['thrs_rows']} rows{' = the kernel cap (' + str(THRS_CAP) + '): the census STOPPED at serial L' + str(ses['thrs_last_line']) if cap else ''}"
+              f"{'' if cap else ' (last at serial L' + str(ses['thrs_last_line']) + ' of ' + str(ses.get('lines', '?')) + ')'}"
               "; per name: rows, threads / regions / anon MiB / res MiB at 0, 25, 50, 75, 100 %")
         for n, rows in sorted(ses["thrs"].items(), key=lambda kv: -len(kv[1])):
             t = thrs_trend(rows)
@@ -345,6 +379,19 @@ def print_session(ses, rs):
                 continue
             print(f"   {n:<18} {t['rows']:5d}  thr {t['threads']}  regs {t['regs']}  anon {t['anon_mib']}  res {t['res_mib']}"
                   f"  (max thr {t['threads_max']}, regs {t['regs_max']}, slots {t['slots_max']})")
+    nt = ses.get("ntsync") or []
+    if nt:
+        lv = [x["live"] for x in nt]
+        print(f"-- [NTSYNC] live objects: {len(nt)} rows, {lv[0]} -> max {max(lv)} -> {lv[-1]} "
+              f"(kernel high-water {max(x['kmax'] for x in nt)}; created sem/mutex/event "
+              f"{'/'.join(str(v) for v in nt[-1]['created'])})")
+    if ses.get("cons"):
+        c = ses["cons"]
+        print(f"-- [CONS] last: stalls={c['stalls']} stolen_ms={c['stolen_ms']} (lines={c['lines']}, L{c['line']})")
+    fs = ses.get("fstats") or []
+    if fs:
+        print(f"-- [VENUS] fence stats: {len(fs)} rows, errors max {max(x['errors'] for x in fs)}, "
+              f"post->retire >11000 us max {max(x['over11ms'] for x in fs)}")
     if ses["away"] or ses["away_z"] or ses["snd_zeros"]:
         print(f"-- [AWAY] rows {ses['away']}, [AWAY-Z] rows {ses['away_z']}, [SND] zeros rows {ses['snd_zeros']}")
     if ses["devlost"]:
@@ -369,7 +416,7 @@ def benign(sig):
 
 def classify_serial(text):
     """-> dict of class -> {signature: [count, first_line_no, example]} plus extras."""
-    cls = {k: {} for k in ("kfault", "kstall", "kdiag", "exit", "exitpc", "audio", "wine_err", "dxvk", "red")}
+    cls = {k: {} for k in ("kfault", "kstall", "kdiag", "pf", "exit", "exitpc", "audio", "wine_err", "dxvk", "red")}
     pidname = {}
     nfps = 0
     fps_vals = []
@@ -397,6 +444,14 @@ def classify_serial(text):
             if code:
                 name = pidname.get(m.group(1), "?")
                 add("exitpc", f"{name} code={m.group(3)} {NTSTATUS.get(code, '')}".strip(), ln, line)
+            continue
+        m = PF_RX.match(line)
+        if m:
+            sig = f"[PF{m.group(1)}]"
+            if m.group(1) == "E":
+                m2 = PFE_RX.search(line)
+                sig += f" kind={m2.group(2)} prot={m2.group(1)} present={m2.group(3)}" if m2 else ""
+            add("pf", f"pf: {sig}", ln, line)
             continue
         hit = False
         for tag, rx in KFAULT:
@@ -518,7 +573,7 @@ def parse_host(path, phases=None):
     if phases:
         for i, (_, t, name) in enumerate(phases):
             end = phases[i + 1][1] if i + 1 < len(phases) else None
-            if name == "world" or name.startswith("soak"):
+            if name == "world" or name.startswith(("soak", "walk", "drive")):   # round 4: drive.py's play states
                 spans.append((hms(t), hms(end) if end else 10 ** 9))
     for ln in open(path, errors="replace"):
         p = ln.split()
@@ -638,6 +693,7 @@ def report(args):
           f"{' (exited)' if 'REDEngineErrorReporter exited' in res['classes']['red'] else ''}")
     for c, title in (("kfault", "kernel faults"), ("kstall", "kernel stalls / lost wakes / timeouts"),
                      ("kdiag", "kernel diagnostics (instrument rows)"),
+                     ("pf", "fault-path instrument rows ([PF*], incl. [PFE])"),
                      ("exitpc", "[EXITPC] non-zero exit codes"), ("exit", "process exits (by name)"),
                      ("audio", "audio (alsa-lib in the guest)"),
                      ("wine_err", "Wine err: lines"), ("dxvk", "DXVK / vkd3d-proton err+warn"),
@@ -690,7 +746,7 @@ def aggregate(paths, min_n, game_only=False, show_boots=12):
     print("   verdicts: " + ", ".join(f"{k}={len(v)}" for k, v in sorted(vs.items(), key=lambda kv: -len(kv[1]))))
     if n <= 40:
         print("   " + ", ".join(f"{r['run']}={r['runlog'].get('verdict', '?')}" for r in runs))
-    for c in ("kfault", "kstall", "kdiag", "exitpc", "audio", "red", "wine_err", "dxvk"):
+    for c in ("kfault", "kstall", "kdiag", "pf", "exitpc", "audio", "red", "wine_err", "dxvk"):
         items = [(k, v) for k, v in agg.items() if k[0] == c and len(v["boots"]) >= min_n]
         if not items:
             continue

@@ -1,0 +1,11 @@
+Round 4 audio boots (strix, Venus, integ25, CP_AUDIO_WAV -> QEMU wav backend; WAVs
+deleted after wavgaps.py + wavcheck.py), each 16 min of active play (drive.py play)
+
+run     wav s    dropouts  at game s                          gaps>=500ms     [SND] zeros  kernel xrun  wavcheck
+h4-p03  1372.2   2         216.7, 223.1                       1 (89.5 s, 1222 ms)   4      2            PASS
+h4-p04  1418.5   4         219.1, 222.0, 229.5, 306.4         1 (89.8 s, 1222 ms)   7      1            PASS
+h4-p05  1359.9   5         174.1, 176.3, 182.7, 285.1, 894.8  0                     7      1            PASS
+edge clicks 0/3.  The two 1222 ms gaps sit at the same point before the main menu
+(WAV s 89.5 / 89.8: the intro's end), not in play.  The world's save loads at game
+s ~150-230: 10 of the 11 dropouts are in the load or the first ~90 s of the world,
+one (h4-p05, game s 894.8) in mid-play.  H5-04/05's class, unchanged.

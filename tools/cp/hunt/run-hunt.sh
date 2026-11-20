@@ -120,13 +120,18 @@ case "$KIND" in
           X+=(P9_FROM=hunt-src1080 P9_XSCREEN=1920x1080 P9_GAME_RES=1920x1080)
         fi
         [ -n "${HUNT_FROM:-}" ] && X+=(P9_FROM="$HUNT_FROM")
-        if [ -n "${HUNT_BOOT:-}" ]; then
-          # a P9 boot with another boot script (e.g. tools/cp/hunt/boot_p9_nn.py):
-          # run-p9.sh hard-codes P8_BOOT, so a generated copy beside this script
-          # (same ROOT) swaps it; removed after the boot
+        if [ -n "${HUNT_BOOT:-}" ] || [ "${HUNT_GPU:-venus}" != venus ]; then
+          # a P9 boot with another boot script (e.g. tools/cp/hunt/boot_p9_nn.py)
+          # or (round 4, H9-hunt4) on lavapipe (HUNT_GPU=lavapipe: the game on the
+          # CPU, run-p8.sh's default GPU): run-p9.sh hard-codes P8_BOOT and
+          # P8_GPU=venus, so a generated copy beside this script (same ROOT) swaps
+          # them; removed after the boot
           GEN="$ROOT/tools/cp/hunt/.run-p9-$RUN.sh"
-          sed "s#P8_BOOT=tools/cp/p9/boot_p9.py#P8_BOOT=$HUNT_BOOT#" tools/cp/p9/run-p9.sh > "$GEN"
-          grep -q "P8_BOOT=$HUNT_BOOT" "$GEN" || { echo "run-hunt: could not swap P8_BOOT" >&2; exit 2; }
+          BOOTPY="${HUNT_BOOT:-tools/cp/p9/boot_p9.py}"
+          sed -e "s#P8_BOOT=tools/cp/p9/boot_p9.py#P8_BOOT=$BOOTPY#" \
+              -e "s#^P8_GPU=venus #P8_GPU=${HUNT_GPU:-venus} #" tools/cp/p9/run-p9.sh > "$GEN"
+          grep -q "P8_BOOT=$BOOTPY" "$GEN" || { echo "run-hunt: could not swap P8_BOOT" >&2; exit 2; }
+          grep -q "^P8_GPU=${HUNT_GPU:-venus} " "$GEN" || { echo "run-hunt: could not swap P8_GPU" >&2; exit 2; }
           set -- env "${X[@]}" bash "$GEN"
         else
           set -- env "${X[@]}" bash tools/cp/p9/run-p9.sh
@@ -141,6 +146,15 @@ echo "== run-hunt kind=$KIND run=$RUN audio=${WAV:-off} venus=$VENUS_BUILD wine=
 BP=$!
 sampler "$BP" "$OUT" > "$H" 2>&1 &
 SP=$!
+# round 4 (H9-hunt4): the glass watcher, every frame's arrival on the VNC
+# console (tools/cp/hunt/glasswatch.py) -> OUT/glass.txt; HUNT_GLASS=0 = off
+GP=""
+if [ "$P9" = 1 ] && [ "${HUNT_GLASS:-1}" = 1 ] && [ "${HUNT_GPU:-venus}" = venus ]; then
+  rm -f "$OUT/glass.txt" "$OUT/drive-states.txt"
+  python3 -I tools/cp/hunt/glasswatch.py watch --sock "$OUT/vnc-sock" --out "$OUT/glass.txt" --pid "$BP" \
+    > "$LOGS/$RUN.glasswatch.err" 2>&1 &
+  GP=$!
+fi
 if [ "$KIND" = drive ]; then
   # the host-side driver: wait for boot_p9's ctl prompt, drive, then end the script
   (
@@ -161,6 +175,7 @@ fi
 wait "$BP"; rc=$?
 [ -n "${DP:-}" ] && { kill "$DP" 2>/dev/null; wait "$DP" 2>/dev/null; }
 kill "$SP" 2>/dev/null; wait "$SP" 2>/dev/null
+[ -n "$GP" ] && { kill "$GP" 2>/dev/null; wait "$GP" 2>/dev/null; }
 echo "rc=$rc $(date +%T)" >> "$L"
 [ -n "${GEN:-}" ] && rm -f "$GEN"
 
@@ -173,9 +188,13 @@ if [ -n "$WAV" ]; then
 fi
 # keep the evidence, drop the 16 GiB sparse data disk unless the next boot needs it (play -> reload)
 cp -f "$SER" "$LOGS/$RUN.serial.txt" 2>/dev/null
-for f in fps.csv mem.csv thrs.csv phases.txt summary.txt hbp.csv verdict.txt saves-after.txt; do
+for f in fps.csv mem.csv thrs.csv phases.txt summary.txt hbp.csv verdict.txt saves-after.txt glass.txt drive-states.txt; do
   [ -f "$OUT/$f" ] && cp -f "$OUT/$f" "$LOGS/$RUN.$f"
 done
+if [ -f "$OUT/glass.txt" ]; then
+  python3 -I tools/cp/hunt/glasswatch.py report "$OUT/glass.txt" --states "$OUT/drive-states.txt" --minutes \
+    > "$LOGS/$RUN.glass-report.txt" 2>&1
+fi
 if [ "$KIND" != play ] && [ "${HUNT_KEEP:-0}" != 1 ]; then rm -f "$OUT/cpdata.img" "$OUT/disk.img"; fi
 echo "run-hunt: $RUN rc=$rc verdict=$(cat "$OUT/verdict.txt" 2>/dev/null)"
 exit $rc

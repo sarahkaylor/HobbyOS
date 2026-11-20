@@ -32,7 +32,9 @@ import sys
 import numpy as np
 from PIL import Image
 
-SHOT_RX = re.compile(r"^s(\d{3})-t(\d{6})(?:-(.*))?\.png$")
+# round 4 (H9-hunt4): boot_p9 numbers shots s001..s999, then s1000, s1001...;
+# `\d{3}` skipped every shot after the 999th (h3-churn4: 1014 shots, 999 graded)
+SHOT_RX = re.compile(r"^s(\d{3,})-t(\d{6})(?:-(.*))?\.png$")
 
 
 def load(p):
@@ -80,7 +82,7 @@ def shots(run):
         m = SHOT_RX.match(f)
         if m:
             out.append((int(m.group(1)), int(m.group(2)), m.group(3) or "", os.path.join(d, f)))
-    return out
+    return sorted(out)          # by shot number: "s1000" sorts before "s101" as a name
 
 
 def check_run(run):

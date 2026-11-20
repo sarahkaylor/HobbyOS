@@ -1,0 +1,12 @@
+H6-04 / H6-06 re-measured (strix, Venus, integ25): drive.py menuloads, 5 x (pause ->
+EXIT TO MAIN MENU -> title -> LOAD GAME -> ManualSave-86 / AutoSave-16 -> world)
+
+H6-04 (main-menu focus after EXIT TO MAIN MENU):
+  h4-m01 (--no-wiggle: no pointer move at all): exits 1-3 "seek LOAD GAME: on it after 2 taps";
+         exit 4: [DRV] 19:55:41 SEEK LOAD GAME: not reached in 10 taps (focus None x 11)
+  h4-m02 (default; the wiggle runs only after 2 blind taps, so it never ran): 5/5 on it after 2 taps
+  -> hidden 1/9 exits, with no pointer move.
+H6-06 (a long frame while EXIT TO MAIN MENU unloads the world), glasswatch, state exit-main:
+  h4-m01: exit 1 839 ms; 2 722 ms; 3 872 + 272 ms; 4 752 + 270 ms
+  h4-m02: exit 1 843 ms; 2 750 ms; 3 871 + 299 ms; 4 780 + 272 ms; 5 903 + 330 ms
+  -> 0/9 frames >= 2 s; 9/9 exits have one 0.72-0.90 s frozen frame ~5 s after the confirm.
