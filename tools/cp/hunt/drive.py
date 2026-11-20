@@ -447,6 +447,7 @@ MAIN = [lab for lab, _ in B9.MENUS["main"]]
 
 
 WIGGLE = [True]
+PRESET_KEYS = [""]
 
 
 def seek(b, labels, want, limit=10, name="sk"):
@@ -874,6 +875,21 @@ def graphics_preset(b, name):
     # h3-set4: the first Down lands on the "Quick Preset" SECTION title, whose
     # Enter asks "Do you want to restore default settings for this section?"
     # (cancelled with Esc, 3/3); the row is the second Down
+    if PRESET_KEYS[0]:
+        # round 4 (h4-q02): the row's "< value >" selector stepped with the arrow
+        # keys, on the row the tab opens on (no Down: h4-q01's Downs + Enter
+        # never changed the preset, 0/11, and H6's 0/9)
+        p = b.shot(name + "gk", *[f"key {k}" for k in PRESET_KEYS[0].split("+")], "wait 2")
+        if re.search(r"restore\s+def", boot_ocr(p), re.I):
+            b.shot(name + "gkx", "key esc", "wait 2")
+            return None
+        after = row_value(p, "Quick Preset", GRAPHICS_ROWS, GRAPHICS_TABLE) + " // " + " ".join(
+            re.findall(r"Quick\s+Preset\W{0,6}(\w[\w ]{2,30})", boot_ocr(p)))
+        pa, _ = b.until(name + "ga", r"apply\s+these\s+changes", 10, "key esc", "wait 2")
+        if pa:
+            b.shot(name + "gc", "key ret", "wait 5")
+        log(f"SET Quick Preset {before!r} -> {after!r} via {PRESET_KEYS[0]} ({'applied' if pa else 'no apply prompt'})")
+        return after if pa else None
     # h4-p06b: two Downs + Enter still opened the section's restore-defaults
     # prompt (as in h3-set4/5): one Down at a time, Enter, and on that prompt
     # cancel and go one row further (at most 4)
@@ -1402,12 +1418,14 @@ def main():
     ap.add_argument("--vehicle-every", type=int, default=0, help="play: a vehicle call every N segments (0 = never)")
     ap.add_argument("--drive-s", type=float, default=60, help="play: seconds per drive")
     ap.add_argument("--exit", default="pause", choices=["pause", "vehicle", "load", "settings", "none"])
+    ap.add_argument("--preset-keys", default="", help="presets: qcodes for the Quick Preset row, '+'-joined (e.g. right)")
     ap.add_argument("--no-wiggle", action="store_true", help="seek: never move the pointer (cp-hunt H6-04)")
     ap.add_argument("--exit-setting", default="resolution", choices=["resolution", "preset", "vsync", "resolution2"])
     a = ap.parse_args()
     b = Boot(a.run, max_s=a.max_s)
     LIST_STEPS[0] = a.list_steps
     WIGGLE[0] = not a.no_wiggle
+    PRESET_KEYS[0] = a.preset_keys
     try:
         if a.what == "churn":
             churn(b, a)
