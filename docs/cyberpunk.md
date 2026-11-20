@@ -1645,6 +1645,73 @@ all green:
   - A parked root waits for the next teardown or idle loop (264 ms at most so far).
   - `x64_tlb_last_targets[]` is still a packed per-CPU array.
 
+#### Main merge and wave 11 (integ27)
+
+`cyberpunk` was merged into GitHub `main` on 2026-11-19 (f2ac6208 = main d3041f1e + integ26) and the branch was
+deleted; integration now targets `main`.
+- **The merge's checks:**
+  - main's own CI tiers, GitHub main vs the merge:
+    - host 37/41 vs 40/42;
+    - x64 unit 448/3 vs 464/0;
+    - ARM unit (with the `.bss` ASSERT relaxed, which both trees overflow) 424/0 vs 437/0;
+    - desktop and the ARM build PASS on both.
+  - The full cyberpunk battery on the merge: `strix:~/cp/integ-gatesmm.txt`.
+
+integ27 = main f2ac6208 + cp-hunt4 (H9-hunt4 round 4, `docs/cp-hunt.md`) + cp-pagein (H10-pagein,
+`docs/cp-pagein.md`). Batch `strix:~/cp/integ-gates27.txt`, logs `~/cp/integ27/`:
+- all 82 probes (H10 adds `pagein`), the infra gates except `ext2w_gate` (below), unit 465/0, host 40/42, castscan, ARM;
+- P2, P4, P5 ×3, P7, k5probes;
+- thrstorm ×3 (1240, 1235 and 1242 rounds, 0 faults);
+- P8 lavapipe ×2 and Venus at the menu (202, 188 and 161 s);
+- the P9 cold boot (status 0, `wineserver -k` 221 ms, quiesce `extra=0`) and the P9 fp720 boot;
+- main's ARM unit tier (relaxed) 438/0 and `desktop_test` PASS;
+- 0 page-table assertion rows.
+
+- **H9-12 fixed (cp-pagein):**
+  - The old bug: a file-backed page-in that found no free frame returned the same 0 as a failed read. The fault path
+    made it a permanent EIO (`VM_MAP_IOERR` on the executable region, SIGBUS). In a 12 GiB lavapipe save load, that
+    killed Wine's SIGTRAP handler and the game.
+  - Now:
+    - The page sources say `-ENOMEM`.
+    - `vm_file_obj_materialize` reclaims in at most 2 rounds, with no lock held and no sleep: first the parked zeroed
+      frames, then the unmapped FAT16/NFS page cache.
+    - It then answers `VM_FAULT_NOMEM`: a `[PAGEIN-NOMEM]` row and SIGKILL, Linux's VM_FAULT_OOM shape. The mapping is
+      never marked.
+    - Real read errors keep M6/L69's EIO + SIGBUS.
+  - Probe `pagein` and unit `test_vm_exec_page_nomem` fail on main and pass with the fix.
+  - In H9's 12 GiB lavapipe recipe, the page that killed h4-l01/l02 is recovered (0 `[EIO]`, 0 SIGBUS). The game still
+    dies of its own unhandled `int3` with the guest out of memory: a lavapipe save load does not fit in 12 GiB.
+- **H9-hunt4 round 4:**
+  - 28 game boots on integ25, 0 crashes on Venus, and a 125-minute active soak with no leaks or fps drift after
+    minute 70.
+  - Findings H9-01..H9-12, in `docs/cp-hunt.md`.
+- **Reds, rerun:**
+  - **`ext2w_gate`:** failed 2 of 8 runs on integ27 and 0 of 4 on main. Each time, a delay-0 crash point's e2fsck had
+    leak-class damage only (`-` bitmap differences, counts) and the synced files were intact.
+    - The writer keeps committing on close right after `SYNCED` (`closewb` thousands per run), so a delay-0 quit can
+      land inside a commit. That is guarantee 2 (cp-ext2w §7.6). The gate's strict delay-0 rule assumes no commit is in
+      flight.
+    - The kernel delta is inert there: 0 `[PAGEIN-NOMEM]` rows.
+  - **P6 Venus:** failed once; d3d12tri rendered at 245 fps but two screendumps 30 s apart were identical. It passed
+    2/2 reruns. See the open items.
+- **Open:**
+  - **Glass freezes on Venus since the main merge:** the screen stops updating while rendering continues. Seen twice:
+    - P8 Venus on the merge, the menu frozen for 172 s;
+    - P6 d3d12 on integ27, frozen for at least 30 s.
+
+    The 13 earlier P6 batches and H9's 24 integ25 Venus boots showed none. The merge brought `gpu_abi.c`'s transfer
+    width check (a box.w up to GPU_ABI_MAX_BYTES for every target) and `fs.c`'s socket-option changes.
+  - **The `ext2w_gate` delay-0 rule** races close write-back commits. Either accept leak-class damage there, or quiesce
+    the writer before `SYNCED`.
+  - **From H9 round 4:**
+    - H9-03: IceWM's Shift+Esc window menu over the game; a one-line `KeySysWinMenu=""` in IceWM's preferences.
+    - H9-05: the H6-07/H6-09 counters are never printed.
+  - **From H10:**
+    - NFS read-ahead windows (up to 256 MiB) are not reclaimed under pressure.
+    - The anon/COW OOM answer is a catchable SIGSEGV where Linux sends SIGKILL.
+  - **Host:** `/mnt/fast` on strix is down until about 2026-11-21. `lsof` hangs on it, and `~/cp/safe-bin/lsof` answers
+    `lsof -t FILE` from /proc.
+
 ### 7.3 Frozen interfaces (binding)
 
 | # | Interface | Owner (sole writer) | Change protocol |
