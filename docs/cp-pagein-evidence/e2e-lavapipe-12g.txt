@@ -1,0 +1,89 @@
+===== pagein-l01 (strix ~/cp/lanes/pagein2 = cp-pagein b7a6cb1d+3e566122; HUNT_GPU=lavapipe P9_MEM=12288 HUNT_SCRIPT=tools/cp/hunt/r4/cold-lvp-m86.p9 bash tools/cp/hunt/run-hunt.sh script pagein-l01)
+[P9W] +    20.8 s  22:06:18  phase launch
+[P9W] +   179.1 s  22:08:57  phase menu
+[P9W] +   179.1 s  22:08:57  phase menu
+[P9W] +   185.9 s  22:09:04  phase loadlist
+[P9W] +   205.1 s  22:09:23  phase loading
+[P9W] +  1027.2 s  22:23:05  verdict detail: the game ended during the play script (after the menu): game status=768 after 1006533 ms; REDEngineErrorReporter ran: yes; steam_api64 loaded
+[P9W] +  1029.9 s  22:23:08  verdict: game-exited; QEMU stopped, slot released; guests on the host now: 0
+-- kernel rows (counts):
+   11  \[PAGEIN-NOMEM\] n=
+   11  -> recovered
+   0  -> ENOMEM
+   0  \[PAGEIN-NOMEM\] pid=
+   0  \[EIO\]
+   1  in=OOM
+   2505  process_create: no free physical memory blocks
+   1  fork: AS clone failed
+-- the int3 and the page-in (serial):
+[KERNEL] User process fault! Vector: 3 RIP: 0x1404bcdbc
+[LCOMPAT] fault sig=5 pid=130 tgid=127 tls=0x10010F700 live_fs=0x0x10010F700
+[PAGEIN-NOMEM] n=1 pid=130 va=0x1080294000 region=0x1080261000+0x60000 prot=5 src=nfs via=fault unparked=5537 cache_dropped=0 rounds=1 free=5560 -> recovered (page mapped after reclaim)
+-- every [PAGEIN-NOMEM] row:
+[PAGEIN-NOMEM] n=1 pid=130 va=0x1080294000 region=0x1080261000+0x60000 prot=5 src=nfs via=fault unparked=5537 cache_dropped=0 rounds=1 free=5560 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=2 pid=129 va=0x10802A7000 region=0x1080261000+0x60000 prot=5 src=nfs via=fault unparked=5361 cache_dropped=0 rounds=1 free=5388 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=3 pid=129 va=0x10811A7000 region=0x1081140000+0x87000 prot=1 src=ext2 via=fault unparked=5266 cache_dropped=0 rounds=1 free=5292 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=4 pid=129 va=0x1081273000 region=0x1081140000+0x16E000 prot=1 src=ext2 via=fault unparked=5268 cache_dropped=0 rounds=1 free=5295 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=5 pid=129 va=0x108021D000 region=0x10801FA000+0x4E000 prot=1 src=fat via=fault unparked=5068 cache_dropped=0 rounds=1 free=5094 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=6 pid=129 va=0x10811C9000 region=0x1081140000+0x9E000 prot=1 src=ext2 via=fault unparked=5060 cache_dropped=0 rounds=1 free=5087 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=7 pid=129 va=0x108124F000 region=0x10811E0000+0x7F000 prot=1 src=ext2 via=fault unparked=5226 cache_dropped=0 rounds=1 free=5253 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=8 pid=20 va=0x108003D000 region=0x108002A000+0x178000 prot=5 src=fat via=fault unparked=5180 cache_dropped=0 rounds=1 free=5206 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=9 pid=129 va=0x1080275000 region=0x1080261000+0x60000 prot=5 src=nfs via=fault unparked=5163 cache_dropped=0 rounds=1 free=5190 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=10 pid=129 va=0x6FFFFFEC6000 region=0x6FFFFFA50000+0x522000 prot=3 src=ext2 via=fault unparked=5156 cache_dropped=0 rounds=1 free=5183 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=11 pid=129 va=0x7FFFFDFE6000 region=0x7FFFFDFD0000+0x1F000 prot=3 src=ext2 via=fault unparked=5153 cache_dropped=0 rounds=1 free=5180 -> recovered (page mapped after reclaim)
+-- the end:
+[KERNEL] Process 128: Cyberpunk2077.e exited unexpectedly or gracefully.
+[KERNEL] fork: AS clone failed
+[X] 1026.832:014c:err:seh:start_debugger Couldn't start debugger L"winedbg --auto 316 948" (8)
+[KERNEL] Process 130: Cyberpunk2077.e exited unexpectedly or gracefully.
+[EXITPC] pid=130 last_user_pc=0x1080143146 code=0x80000003
+[P8] end game status=768 ms=1006533
+[THRS] pid=127 live=62 gt=62 hw=62 slots=115/511 regs=3425 anon=2969 anon_mib=147726 big_mib=64608 stk=1 res_mib=11046 pk_mib=11047 Cyberpunk2077.e
+
+===== pagein-l02 (strix ~/cp/lanes/pagein2 = cp-pagein b7a6cb1d+3e566122; HUNT_GPU=lavapipe P9_MEM=12288 HUNT_SCRIPT=tools/cp/hunt/r4/cold-lvp-m86.p9 bash tools/cp/hunt/run-hunt.sh script pagein-l02)
+[P9W] +    20.8 s  22:23:37  phase launch
+[P9W] +   209.5 s  22:26:46  phase menu
+[P9W] +   209.5 s  22:26:46  phase menu
+[P9W] +   216.1 s  22:26:52  phase loadlist
+[P9W] +   235.2 s  22:27:11  phase loading
+[P9W] +  1082.3 s  22:41:18  verdict detail: the game ended during the play script (after the menu): game status=768 after 1061742 ms; REDEngineErrorReporter ran: yes; steam_api64 loaded
+[P9W] +  1084.9 s  22:41:21  verdict: game-exited; QEMU stopped, slot released; guests on the host now: 0
+-- kernel rows (counts):
+   16  \[PAGEIN-NOMEM\] n=
+   16  -> recovered
+   0  -> ENOMEM
+   0  \[PAGEIN-NOMEM\] pid=
+   0  \[EIO\]
+   0  in=OOM
+   2004  process_create: no free physical memory blocks
+   0  fork: AS clone failed
+-- the int3 and the page-in (serial):
+[KERNEL] User process fault! Vector: 3 RIP: 0x1404bcdbc
+[LCOMPAT] fault sig=5 pid=131 tgid=128 tls=0x10010F700 live_fs=0x0x10010F700
+[PAGEIN-NOMEM] n=1 pid=131 va=0x1080294000 region=0x1080261000+0x60000 prot=5 src=nfs via=fault unparked=2750 cache_dropped=0 rounds=1 free=2776 -> recovered (page mapped after reclaim)
+-- every [PAGEIN-NOMEM] row:
+[PAGEIN-NOMEM] n=1 pid=131 va=0x1080294000 region=0x1080261000+0x60000 prot=5 src=nfs via=fault unparked=2750 cache_dropped=0 rounds=1 free=2776 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=2 pid=130 va=0x10802A7000 region=0x1080261000+0x60000 prot=5 src=nfs via=fault unparked=2554 cache_dropped=0 rounds=1 free=2581 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=3 pid=130 va=0x108021D000 region=0x10801FA000+0x4E000 prot=1 src=fat via=fault unparked=2543 cache_dropped=0 rounds=1 free=2569 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=4 pid=130 va=0x7FFFFEC6B000 region=0x7FFFFEC00000+0x87000 prot=1 src=ext2 via=fault unparked=2528 cache_dropped=0 rounds=1 free=2555 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=5 pid=130 va=0x1081205000 region=0x1081140000+0xF7000 prot=1 src=ext2 via=fault unparked=2451 cache_dropped=0 rounds=1 free=2478 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=6 pid=130 va=0x1081168000 region=0x1081140000+0x30000 prot=1 src=ext2 via=fault unparked=2378 cache_dropped=0 rounds=1 free=2405 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=7 pid=130 va=0x10811E4000 region=0x1081150000+0xB2000 prot=1 src=ext2 via=fault unparked=2391 cache_dropped=0 rounds=1 free=2418 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=8 pid=130 va=0x10811E6000 region=0x1081150000+0xB2000 prot=1 src=ext2 via=fault unparked=2386 cache_dropped=0 rounds=1 free=2413 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=9 pid=130 va=0x108119B000 region=0x1081180000+0x21000 prot=1 src=ext2 via=fault unparked=2328 cache_dropped=0 rounds=1 free=2355 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=10 pid=130 va=0x1081251000 region=0x10811E0000+0x7F000 prot=1 src=ext2 via=fault unparked=2324 cache_dropped=0 rounds=1 free=2347 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=11 pid=130 va=0x10813B0000 region=0x1081300000+0xE4000 prot=1 src=ext2 via=fault unparked=2304 cache_dropped=0 rounds=1 free=2331 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=12 pid=130 va=0x10813C1000 region=0x1081330000+0xAF000 prot=1 src=ext2 via=fault unparked=2198 cache_dropped=0 rounds=1 free=2225 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=13 pid=130 va=0x10813C3000 region=0x1081330000+0xAF000 prot=1 src=ext2 via=fault unparked=2196 cache_dropped=0 rounds=1 free=2223 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=14 pid=130 va=0x10813F0000 region=0x10813C0000+0x3F000 prot=1 src=ext2 via=fault unparked=2157 cache_dropped=0 rounds=1 free=2184 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=15 pid=20 va=0x10801C5000 region=0x10801A2000+0x4E000 prot=1 src=fat via=fault unparked=2158 cache_dropped=0 rounds=1 free=2184 -> recovered (page mapped after reclaim)
+[PAGEIN-NOMEM] n=16 pid=130 va=0x1080275000 region=0x1080261000+0x60000 prot=5 src=nfs via=fault unparked=2153 cache_dropped=0 rounds=1 free=2180 -> recovered (page mapped after reclaim)
+-- the end:
+[KERNEL] Process 129: Cyberpunk2077.e exited unexpectedly or gracefully.
+[X] 1081.955:0150:err:seh:start_debugger Couldn't start debugger L"winedbg --auto 320 1068" (4)
+[KERNEL] Process 131: Cyberpunk2077.e exited unexpectedly or gracefully.
+[EXITPC] pid=131 last_user_pc=0x1080143146 code=0x80000003
+[P8] end game status=768 ms=1061742
+
+===== the one anonymous-fault OOM row (h10 l01; the anon path, unchanged by this lane: in=OOM -> SIGSEGV)
+[KERNEL] pid=129 (REDEngineErrorR) memory fault VA=0x00006FFFFF3BAE00 PC=0x00000010801EBDF0 rw=w  in=OOM region=0x00006FFFFD860000+0x0000000001B6F000 prot=3 kind=3 rsp=0x00007FFFFE0FF6B8 live=1 inH=0 cr3frame=0x000000023336C000 as

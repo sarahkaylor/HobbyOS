@@ -1,0 +1,115 @@
+H10-pagein gate batch, strix (Zen 5), lane tree ~/cp/lanes/root = cp-pagein b7a6cb1d+3e566122; script ~/cp/lanes/root/obj/pagein-gates.sh (integ-gatesmm.sh L10-16 probe loop + unit + host + castscan + ARM)
+PATH carried ~/cp/lanes/root/obj/pagein-bin (an lsof -t shim: the host lsof blocked in an NFS RPC on an unresponsive mount)
+tree cp-pagein start 22:01:50
+build rc=0 22:02:10
+avx rc=0 [LP] done rc=0
+away rc=0 [LP] done rc=0
+badelr rc=0 [LP] done rc=0
+bigobj rc=0 [LP] done rc=0
+census rc=0 [LP] done rc=0
+clock rc=0 [LP] done rc=0
+conslat rc=0 [LP] done rc=0
+console rc=0 [LP] done rc=0
+lp_check_console: kernel rows intact 30579/30579, user rows intact 6972/6972, interleaved lines 0, torn rows 0, missing 0, kernel-row CPUs [0, 1, 2, 3, 4, 5, 6, 7]
+consstall rc=0 [LP] done rc=0
+conswait rc=0 [LP] done rc=0
+cow rc=0 [LP] done rc=0
+cpus rc=0 [LP] done rc=0
+cputime rc=0 [LP] done rc=0
+e2churn rc=0 [LP] done rc=0
+e2fault rc=0 [LP] done rc=0
+e2stress rc=0 [LP] done rc=0
+epserver rc=0 [LP] done rc=0
+errnomap rc=0 [LP] done rc=0
+exec rc=0 [LP] done rc=0
+execthr rc=0 [LP] done rc=0
+exitgroup rc=0 [LP] done rc=0
+exitrace rc=0 [LP] done rc=0
+ext2w rc=0 [LP] done rc=0
+fatcoh rc=0 [LP] done rc=0
+fatren rc=0 [LP] done rc=0
+fattrunc rc=0 [LP] done rc=0
+fd rc=0 [LP] done rc=0
+fdrace rc=0 [LP] done rc=0
+fdscale rc=0 [LP] done rc=0
+forkcow rc=0 [LP] done rc=0
+forkva rc=0 [LP] done rc=0
+fpu_sig rc=0 [LP] done rc=0
+futex_sig rc=0 [LP] done rc=0
+glibc rc=0 [LP] done rc=0
+gs rc=0 [LP] done rc=0
+hello rc=0 [LP] done rc=0
+hrtimer rc=0 [LP] done rc=0
+ipclat rc=0 [LP] done rc=0
+join rc=0 [LP] done rc=0
+killgrp rc=0 [LP] done rc=0
+kstack rc=0 [LP] done rc=0
+loaccept rc=0 [LP] done rc=0
+lowva rc=0 [LP] done rc=0
+manythr rc=0 [LP] done rc=0
+mem rc=0 [LP] done rc=0
+mmap_race rc=0 [LP] done rc=0
+netlink rc=0 [LP] done rc=0
+ntsync rc=0 [LP] done rc=0
+pagein rc=0 [LP] done rc=0
+pemap rc=0 [LP] done rc=0
+pfpar rc=0 [LP] done rc=0
+pfstat rc=0 [LP] done rc=0
+pfx rc=0 [LP] done rc=0
+pipestorm rc=0 [LP] done rc=0
+proc rc=0 [LP] done rc=0
+redzone rc=0 [LP] done rc=0
+rootfree rc=0 [LP] done rc=0
+rusage rc=0 [LP] done rc=0
+shm rc=0 [LP] done rc=0
+shootwait rc=1 [LP] done rc=0
+sigfd rc=0 [LP] done rc=0
+siginfo rc=0 [LP] done rc=0
+sigint rc=0 [LP] done rc=0
+sigmask rc=0 [LP] done rc=0
+sigret rc=0 [LP] done rc=0
+snd rc=0 [LP] done rc=0
+sysc rc=0 [LP] done rc=0
+tcpconn rc=0 [LP] done rc=0
+thr rc=0 [LP] done rc=0
+timers rc=0 [LP] done rc=0
+tlb rc=0 [LP] done rc=0
+tlbstale rc=0 [LP] done rc=0
+tmpfs rc=0 [LP] done rc=0
+tramp_sig rc=0 [LP] done rc=0
+trapsig rc=0 [LP] done rc=0
+vmcommit rc=0 [LP] done rc=0
+vmhold rc=0 [LP] done rc=0
+wad rc=0 [LP] done rc=0
+wfibound rc=0 [LP] done rc=0
+wpfx rc=0 [LP] done rc=0
+wsys rc=0 [LP] done rc=0
+xwire rc=0 [LP] done rc=0
+probes end 22:30:32
+unit rc=0 Tests run:    465
+ Tests failed: 0
+  
+host [host-tests] done: 40/42 passed
+castscan rc=0 castscan: 375 int<->pointer sites outside kmem.h; 0 not in the allowlist; 1 allowlisted rows no longer present
+arm rc=0
+ALLDONE 22:32:31
+
+== shootwait reruns (lane root vs base root-base, alternating); games = 12 GiB game guests running at the time
+== shootwait under load (22:34-22:35, while pagein-l02's 12 GiB lavapipe game boot ran; same script, first pass):
+root#1 rc=1 lp_check_shootwait: FAIL -- 2000 mprotect shootdowns, 9 slow target acks (0.5 %), total 506176 us, max 252611 us 22:34:05 games=1
+root-base#1 rc=1 lp_check_shootwait: FAIL -- 2000 mprotect shootdowns, 8 slow target acks (0.4 %), total 410517 us, max 166877 us 22:34:34 games=1
+root#2 rc=1 lp_check_shootwait: FAIL -- 2000 mprotect shootdowns, 5 slow target acks (0.2 %), total 327030 us, max 106932 us 22:35:06 games=1
+root-base#2 rc=1 lp_check_shootwait: FAIL -- 2000 mprotect shootdowns, 13 slow target acks (0.7 %), total 456819 us, max 110084 us 22:35:31 games=1
+(the battery's own shootwait row: 16 slow target acks (0.8 %), max 77433 us, during pagein-l01/l02)
+== shootwait on a quiet host (second pass, games=0):
+root#1 rc=0 lp_check_shootwait: PASS -- 2000 mprotect shootdowns, 1 slow target acks (0.1 %), total 64473 us, max 1041 us 22:48:04 games=0
+root-base#1 rc=0 lp_check_shootwait: PASS -- 2000 mprotect shootdowns, 1 slow target acks (0.1 %), total 65472 us, max 1309 us 22:48:24 games=0
+root#2 rc=0 lp_check_shootwait: PASS -- 2000 mprotect shootdowns, 0 slow target acks (0.0 %), total 64753 us, max 729 us 22:48:45 games=0
+root-base#2 rc=0 lp_check_shootwait: PASS -- 2000 mprotect shootdowns, 1 slow target acks (0.1 %), total 64330 us, max 1238 us 22:49:05 games=0
+ALLDONE
+
+== game-class gates, tree ~/cp/lanes/pagein2 (same sources), script ~/cp/lanes/pagein2/obj/pagein-p8ts.sh
+gate_p8_lavapipe#1 rc=0    +   195.2 s  22:45:08  main menu OCR at s010-t000174: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   246.1 s  22:45:59  main menu OCR at s011-t000225: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'CREDITS', 'QUIT GAME']    +   247.6 s  22:46:00  verdict: main-menu; QEMU stopped, sl 22:46:00
+thrstorm rc=0 [TS] PASS T1 create (threads=256 why=0) [TS] PASS T1 start (started=256 toolhelp=257) [TS] PASS T2 storm (rounds=1235 ms=60060) [TS] PASS T3 stop (bad=0 first=0)  faults=0 22:47:26
+ALLDONE
+p8 serial [PAGEIN-NOMEM]/[EIO] rows: 0

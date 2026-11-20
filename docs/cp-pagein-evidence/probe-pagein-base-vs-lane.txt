@@ -1,0 +1,72 @@
+== base integ27 (strix ~/cp/lanes/root-base): LP_TIMEOUT=600 bash tools/cp/qemu-slot.sh bash tools/gate/t3_linux_probe.sh pagein (probe + checker copied in)
+--- probe rows ---
+[LP] pagein probe (H10-pagein, H9-12): file /PGIN.BIN
+[LP] PASS setup create (0)
+[LP] PASS setup write 8 pages (7 code, 1 zero) (2)
+[LP] PASS P1 pipe (2)
+[LP] P1 child pid=3 (exhausts the guest, then executes unread file pages)
+[LP] P1 report taken_mib=11407 recovered=0 bus_page=0 bus_code=2 after_back=0xffffffffffffffff
+[LP] PASS P1 the child took the guest's memory (MiB) (11407)
+[LP] FAIL P1 no SIGBUS for a frame shortage (page that took it) (0)
+[LP] FAIL P1 with memory back, the same mapping runs page 5 (not marked) (-1)
+[LP] PASS P3 memory back: a new mapping runs all 7 code pages (7)
+[LP] PASS P4 pipe (2)
+[LP] P4 child pid=5 (executes the all-zero page: the exec gate's EIO)
+[LP] PASS P4 the zero text page is SIGBUS/BUS_ADRERR (EIO unchanged) (2)
+[LP] PASS P4 ... and the mapping stays refused (page 1 too: M6/L69's mark) (-1)
+[LP] done rc=2
+--- unhandled Linux syscalls (name the next handler) ---
+[LCOMPAT] argv argc=1 a0=PROBE.ELF execfn=PROBE.ELF
+[LCOMPAT] fault sig=7 pid=3 tgid=3 tls=0x100011C338 live_fs=0x0x100011C338
+[LCOMPAT] fault sig=7 pid=3 tgid=3 tls=0x100011C338 live_fs=0x0x100011C338
+[LCOMPAT] fault sig=7 pid=5 tgid=5 tls=0x100011C338 live_fs=0x0x100011C338
+[LCOMPAT] fault sig=7 pid=5 tgid=5 tls=0x100011C338 live_fs=0x0x100011C338
+--- faults / exits ---
+[EIO] pid=3 (PROBE.ELF) page-in failed VA=0x0000001080000000 PC=0x0000001080000000 rw=rx region=0x0000001080000000+0x0000000000008000 prot=5 kind=7 ooff=0x0000000000000000 live=1 -> SIGBUS (EIO, not a protection fault)
+[EIO] pid=3 (PROBE.ELF) page-in failed VA=0x0000001080005000 PC=0x0000001080005000 rw=rx region=0x0000001080000000+0x0000000000008000 prot=5 kind=7 ooff=0x0000000000000000 live=1 -> SIGBUS (EIO, not a protection fault)
+[EXITPC] pid=3 last_user_pc=0x1000003B7E code=0x0
+[EIO] pid=5 (PROBE.ELF) page-in failed VA=0x0000001080007000 PC=0x0000001080007000 rw=rx region=0x0000001080000000+0x0000000000008000 prot=5 kind=7 ooff=0x0000000000000000 live=1 -> SIGBUS (EIO, not a protection fault)
+[EIO] pid=5 (PROBE.ELF) page-in failed VA=0x0000001080001000 PC=0x0000001080001000 rw=rx region=0x0000001080000000+0x0000000000008000 prot=5 kind=7 ooff=0x0000000000000000 live=1 -> SIGBUS (EIO, not a protection fault)
+[EXITPC] pid=5 last_user_pc=0x1000003B7E code=0x0
+[EXITPC] pid=2 last_user_pc=0x1000003B7E code=0x1
+t3_linux_probe: FAIL — pagein never printed '[LP] done rc=0' (tier rc=1)
+
+== checker on the base console:
+lp_check_pagein: FAIL -- child A pid=3: [EIO] rows=2 (want 0); [PAGEIN-NOMEM] rows=0 (recovered=0 enomem=0 oom-kill=0; want >= 1); child C pid=5: [EIO] rows=2 (want >= 1)
+
+== lane cp-pagein (strix ~/cp/lanes/root): same command
+--- probe rows ---
+[LP] pagein probe (H10-pagein, H9-12): file /PGIN.BIN
+[LP] PASS setup create (0)
+[LP] PASS setup write 8 pages (7 code, 1 zero) (2)
+[LP] PASS P1 pipe (2)
+[LP] P1 child pid=3 (exhausts the guest, then executes unread file pages)
+[LP] P1 child killed by signal 9 (no report)
+[LP] PASS P1 no SIGBUS for a frame shortage (9)
+[LP] PASS P1 the shortage ended in an out-of-memory kill (SIGKILL) (9)
+[LP] PASS P3 memory back: a new mapping runs all 7 code pages (7)
+[LP] PASS P4 pipe (2)
+[LP] P4 child pid=5 (executes the all-zero page: the exec gate's EIO)
+[LP] PASS P4 the zero text page is SIGBUS/BUS_ADRERR (EIO unchanged) (2)
+[LP] PASS P4 ... and the mapping stays refused (page 1 too: M6/L69's mark) (-1)
+[LP] done rc=0
+--- unhandled Linux syscalls (name the next handler) ---
+[LCOMPAT] argv argc=1 a0=PROBE.ELF execfn=PROBE.ELF
+[LCOMPAT] fault sig=9 pid=3 tgid=3 tls=0x100011C338 live_fs=0x0x100011C338
+[LCOMPAT] fault-no-handler pid=3 sig=9 ipc=0x0x1080000000 rsp=0x0x17FFFFFC98 vec=14 cr2=0x0x1080000000 live=1 -> default action
+[LCOMPAT] fault sig=7 pid=5 tgid=5 tls=0x100011C338 live_fs=0x0x100011C338
+[LCOMPAT] fault sig=7 pid=5 tgid=5 tls=0x100011C338 live_fs=0x0x100011C338
+--- faults / exits ---
+[PAGEIN-NOMEM] pid=3 (PROBE.ELF) page-in found no free frame VA=0x0000001080000000 PC=0x0000001080000000 rw=rx live=1 -> SIGKILL (out of memory, not an I/O error)
+[EXITPC] pid=3 last_user_pc=0x1000003D4F code=0x40000009
+[EIO] pid=5 (PROBE.ELF) page-in failed VA=0x0000001080007000 PC=0x0000001080007000 rw=rx region=0x0000001080000000+0x0000000000008000 prot=5 kind=7 ooff=0x0000000000000000 live=1 -> SIGBUS (EIO, not a protection fault)
+[EIO] pid=5 (PROBE.ELF) page-in failed VA=0x0000001080001000 PC=0x0000001080001000 rw=rx region=0x0000001080000000+0x0000000000008000 prot=5 kind=7 ooff=0x0000000000000000 live=1 -> SIGBUS (EIO, not a protection fault)
+[EXITPC] pid=5 last_user_pc=0x1000003B7E code=0x0
+[EXITPC] pid=2 last_user_pc=0x1000003B7E code=0x0
+--- host-side check: lp_check_pagein.py (console kept: /home/sarah/cp/lanes/root/obj/pagein-logs/pagein-lane1.console.log) ---
+  [PAGEIN-NOMEM] n=1 pid=3 va=0x1080000000 region=0x1080000000+0x8000 prot=5 src=fat via=fault unparked=0 cache_dropped=0 rounds=2 free=24 -> ENOMEM (no frame: out of memory, NOT an I/O error; mapping not marked)
+  [PAGEIN-NOMEM] pid=3 (PROBE.ELF) page-in found no free frame VA=0x0000001080000000 PC=0x0000001080000000 rw=rx live=1 -> SIGKILL (out of memory, not an I/O error)
+  [EIO] pid=5 (PROBE.ELF) page-in failed VA=0x0000001080007000 PC=0x0000001080007000 rw=rx region=0x0000001080000000+0x0000000000008000 prot=5 kind=7 ooff=0x0000000000000000 live=1 -> SIGBUS (EIO, not a protection fault)
+  [EIO] pid=5 (PROBE.ELF) page-in failed VA=0x0000001080001000 PC=0x0000001080001000 rw=rx region=0x0000001080000000+0x0000000000008000 prot=5 kind=7 ooff=0x0000000000000000 live=1 -> SIGBUS (EIO, not a protection fault)
+lp_check_pagein: PASS -- child A pid=3: [EIO] rows=0 (want 0); [PAGEIN-NOMEM] rows=2 (recovered=0 enomem=1 oom-kill=1; want >= 1); child C pid=5: [EIO] rows=2 (want >= 1)
+t3_linux_probe: PASS — pagein reached its done marker
