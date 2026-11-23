@@ -55,8 +55,12 @@ static void nv_hex_byte(uint8_t b) {
  * on the same card (docs/nv-gsp-reference.md section 3.6) -- and the first two
  * guesses were wrong, which is why this comment is long:
  *
- *   0x1FA804  0x041B3000 -> 0x1FFFF000 across init   <- moves, this is the pair
- *   0x1FA808  0x05CF3000 -> 0x00000000 across init   <-   that tracks WPR
+ *   0x1FA804  0x041B3000 -> 0x1FFFF000 across init   <- this pair MOVES across
+ *   0x1FA808  0x05CF3000 -> 0x00000000 across init   <- init; that is all we
+ *        know.  If they are a base/size pair the post values describe a 4 KiB
+ *        region, which cannot hold a 38 MB image, so their meaning (and whether
+ *        they are WPR2 at all) is NOT established -- see
+ *        docs/nv-gsp-wpr-contract.md.
  *   0x1FA82C  0x00100000 -> 0x1FFFFFF0 across init
  *   0x1FA830  0x05CF3FF0 -> 0x00000000 across init
  *   0x1FA824  0x1FFFFE00 -> 0x1FFFFE00  (does NOT move)

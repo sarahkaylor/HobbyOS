@@ -256,7 +256,7 @@ up. Full tables: `docs/nv-gsp-reference.md`; raw dumps in
 | `0xBADF....` = engine absent | `0xBADF5040` persists at `PMC_INTR_0`/`PMC_INTR_EN_0`/`PBUS_INTR_0` **while the card renders Vulkan** | three sentinels with three meanings (`NV_REG_UNREADABLE`, `NV_REG_FENCED`, `NV_REG_…720`); `pmc intr=…` no longer prints "poison" for a healthy card |
 | a sentinel window has no engine | SEC2 at `0x840000` reads the fence word pre-init and falcon-shaped afterwards (`0,0,0x10,0x01000000`) | `struct nv_falcon.fenced`; the log says `fenced`, and only `0xffffffff` still says `absent` |
 | `0x111388` bit 7 = RISC-V ACTIVE | `0x00000010` with GSP-RM running — **bit 4**, same bit as falcon `UC_CTRL.STOPPED` | nothing gates on bit 7; the probe logs the raw word |
-| WPR2 live check at `0x1FA824/28`, "nonzero hi" | hi is `0` in **both** states — a dead word | live check moved to `0x1FA804/08`, the pair that actually moves, with a three-way verdict |
+| WPR2 live check at `0x1FA824/28`, "nonzero hi" | hi is `0` in **both** states — a dead word | the probe now reports `0x1FA804/08` (the pair that moves) with a three-way verdict, and calls the result a *signature*, not "WPR2 is up": whether that pair is WPR2 is still open (§8) |
 
 Two further facts worth having: `0x001668` is **not** a BAR0 register (it reads
 the unreadable word in both states, so the "post-reset mask write" cannot be
@@ -342,7 +342,18 @@ Mesa stack, or the virtio-gpu path, and a machine with no NVIDIA card costs one
 ## 8. Open items
 
 1. **P3 — GSP-RM boot.** The gate. Blob inventory, container formats and the
-   step-by-step sequence with observables: `docs/nv-gsp-firmware.md`.
+   step-by-step sequence with observables: `docs/nv-gsp-firmware.md`. Stages 1-2
+   are done on silicon; 3+ are waiting on two contracts.
+1a. **Which registers are WPR2 on AD102.** Open, and it blocks stage 3. The
+   measured pair that moves across init (`0x1FA804/08`) cannot hold a 38 MB
+   image if it is a base/size pair, and `0x1FA824/828` never move at all. Two
+   readings are on the table (wrong address, or wrong units) and neither is
+   proven. `docs/nv-gsp-wpr-contract.md` is where this gets settled, with a list
+   of candidate addresses a read-only dump can test.
+1b. **The GSP RPC transport.** Queues, element format, message format and the
+   init handshake: `docs/nv-gsp-rpc-contract.md`. Nothing on the transport may be
+   written before the queue-address question is answered — a wrong address hangs
+   the card, and the card is somebody's working machine when we are not using it.
 2. **BAR1 window.** 1 GiB mapped of a 32 GiB aperture — enough for firmware, not
    a design for RM's memory manager. The GSP stage must use the *real* aperture
    size, not the window.

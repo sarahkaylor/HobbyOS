@@ -244,7 +244,7 @@ Source: `docs/nv-gsp-reference.md` §5, driver 580.178.04 on this 4090, plus
 | falcon v4 control offsets (`0x100`, `0x104`, `0x10C`, `0x110`, `0x128`, `0x118`, `0xF4`) | **CONFIRMED as addresses** | every one answers coherently (`0x118=0x2` idle). Bit *semantics* beyond addresses remain unproven by static reads |
 | RISC-V `CPUCTL +0x388` **bit 7 = ACTIVE** | **CONTRADICTED** | with GSP-RM running and Vulkan rendering, `0x111388 = 0x00000010` — **bit 4**, matching falcon `UC_CTRL.STOPPED`. Do not gate on bit 7 |
 | `0x1668 = 0x111` post-reset mask | **CONTRADICTED as a BAR0 address** | `0x001668` reads the unreadable-register word in *both* states, and so does `nv` on a fenced window. It is block-relative or privileged; it cannot be written at BAR0+`0x1668` |
-| WPR2 "live check" lo/hi `0x1FA824/0x1FA828`, nonzero hi | **CONTRADICTED** | hi is `0` with GSP-RM running, and `0` before init: the word never moves. The pair that moves is `0x1FA804`/`0x1FA808` (`0x041B3000`/`0x05CF3000` pre → `0x1FFFF000`/`0` post) |
+| WPR2 "live check" lo/hi `0x1FA824/0x1FA828`, nonzero hi | **CONTRADICTED** | hi is `0` with GSP-RM running, and `0` before init: the word never moves. The pair that *moves* is `0x1FA804`/`0x1FA808` (`0x041B3000`/`0x05CF3000` pre → `0x1FFFF000`/`0` post) — but read as base/size that describes a 4 KiB region, so it is probably not WPR2 either. Which registers are WPR2 on AD102 is **open** |
 | WPR meta 256 B, magic, revision, 128 KiB top-down | not read | lives in VRAM; BAR1 was not mapped by the reference lane. Still a hypothesis (see §5) |
 | mailboxes `+0x040/+0x044`, engine reset `+0x3C0`, queue head `+0xC00` | **UNTESTABLE** | all read 0 in both states — a static dump cannot distinguish "idle" from "not implemented" |
 
