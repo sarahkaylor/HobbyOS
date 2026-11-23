@@ -66,6 +66,7 @@ static void send_dhcp_discover(void) {
 
   // Dispatch via a raw UDP broadcast socket
   struct socket_pcb* pcb = net_socket_create(IP_PROTO_UDP);
+  if (!pcb) return; /* frame-backed PCB table unavailable (see net.c) */
   pcb->local_port = DHCP_CLIENT_PORT;
   pcb->remote_port = DHCP_SERVER_PORT;
   pcb->local_ip = 0;
@@ -118,6 +119,7 @@ static void send_dhcp_request(void) {
   dhcp->options[opt++] = 255; // Option 255: End marker
 
   struct socket_pcb* pcb = net_socket_create(IP_PROTO_UDP);
+  if (!pcb) return; /* frame-backed PCB table unavailable (see net.c) */
   pcb->local_port = DHCP_CLIENT_PORT;
   pcb->remote_port = DHCP_SERVER_PORT;
   pcb->local_ip = 0;

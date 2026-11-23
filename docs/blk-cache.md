@@ -437,3 +437,23 @@ raw logs (markers + FAIL-token scan), never exit codes.
   bytes).  Receipts: `blkcache-evidence/selfhost/P2-AB-RECEIPT.md`,
   `cached-arm2-full-pass.serial.log`, `bypass-arm-full-pass.serial.log`,
   `oldkernel-control-full-pass.serial.log`.
+- 2026-11-23 (second `.bss` overflow, same rule, different table): the ARM
+  **unit-test** image stopped linking on `main` —
+  `ld.lld: error: kernel .bss exceeds the limine placement window`.  Not
+  the block cache: the socket PCB table (`src/kernel/net.c`,
+  `MAX_SOCKETS` x 4 MiB RX ring = **64 MiB**) was still a static array.
+  The image sat 0.45 MB under the line at f307b9f5; the Nov merger added
+  156 KB of `.text`, which pushed `__bss_start` past 0x40200000, the
+  framebuffer's 2 MiB alignment then rounded it up to 0x40400000 and again
+  to 0x40600000, and the link lost 2.15 MB in one step.  Fix: the table is
+  `frame_alloc_contig()`-backed and reserved on first use (net_init on
+  normal boots; the first `net_socket_create()` in the unit tier, so
+  frame_test_suite() keeps its pristine pool — same rule as the cache's own
+  §7 ordering).  `sockets[i].field` is unchanged (a pointer indexes the
+  same way), every receive-path loop guards a not-yet-reserved table, and
+  socket() reports ENFILE instead of faulting.  Result: `__bss_end`
+  0x41794ff4 — ~61 MB of headroom — ARM unit tier 438/438, T3 arm
+  unchanged (same 2 pre-existing LKSTEST failures as the base commit).
+  **Rule, restated:** the placement window is 85.5 MB total; a 64 MiB
+  static table is not "large", it is the whole budget.  Any new
+  multi-MiB table goes to the frame pool.
