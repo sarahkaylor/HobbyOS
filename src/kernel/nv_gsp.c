@@ -439,6 +439,56 @@ static void nv_map_window(struct nv_dev *d, uint32_t base, const char *name) {
   uart_puts("\n");
 }
 
+/* ---- is the fence read-side only? ---------------------------------------
+ *
+ * docs/nv-devinit-contract.md section 6: every read outside the readable half of
+ * the falcon page returns the inaccessibility signature, so "wrote X, read back
+ * the fence word" cannot tell a dropped write from a landed one.  MAILBOX0
+ * (0x110040) reads 0 in BOTH reference dumps -- fenced or not -- which makes it
+ * the one word that can answer the question: write a sentinel, read it, restore.
+ *
+ * Restoring is not optional: 0x110040 is the FWSEC verdict word, and a leftover
+ * sentinel would make a later FWSEC run report failure for the wrong reason.
+ *
+ * Also kills the previous hypothesis: on Turing+ devinit is PMU ucode launched
+ * by FWSEC, not host-replayed golden tables, and no dword in this card's ROM
+ * even contains a falcon-window address.  So there is nothing to replay. */
+int nv_gsp_write_lands(struct nv_dev *d) {
+  uint32_t a = nv_rd32(d, NV_FALCON_GSP_BASE + 0x040);
+  uint32_t b = nv_rd32(d, NV_FALCON_GSP_BASE + 0x044);
+  nv_wr32(d, NV_FALCON_GSP_BASE + 0x040, 0xA5A51234u);
+  uint32_t r1 = nv_rd32(d, NV_FALCON_GSP_BASE + 0x040);
+  nv_wr32(d, NV_FALCON_GSP_BASE + 0x044, 0x5A5A4321u);
+  uint32_t r2 = nv_rd32(d, NV_FALCON_GSP_BASE + 0x044);
+  nv_wr32(d, NV_FALCON_GSP_BASE + 0x040, 0);
+  nv_wr32(d, NV_FALCON_GSP_BASE + 0x044, 0);
+  uint32_t c = nv_rd32(d, NV_FALCON_GSP_BASE + 0x040);
+
+  uart_puts("[NV-PROBE] write-lands baseline=");
+  uart_print_hex(a);
+  uart_puts("/");
+  uart_print_hex(b);
+  uart_puts(" wrote 0xa5a51234 -> ");
+  uart_print_hex(r1);
+  uart_puts(" wrote 0x5a5a4321 -> ");
+  uart_print_hex(r2);
+  uart_puts(" restored=");
+  uart_print_hex(c);
+  if (r1 == 0xA5A51234u && r2 == 0x5A5A4321u) {
+    uart_puts("\n[NV-PROBE] verdict=WRITES LAND: the fence is read-side only, so "
+              "FWSEC can be launched without any unfencing step\n");
+    return 1;
+  }
+  if (r1 == 0 && a == 0) {
+    uart_puts("\n[NV-PROBE] verdict=WRITE DROPPED: the window is genuinely "
+              "write-fenced; next test is a cold VM start without an FLR\n");
+    return 0;
+  }
+  uart_puts("\n[NV-PROBE] verdict=UNEXPECTED (neither a landing nor a zero): do "
+            "not build on this register\n");
+  return -1;
+}
+
 void nv_gsp_map_windows(struct nv_dev *d) {
   if (!d) return;
   uart_puts("[NV-MAP] one char per 64B block, F=fence word -=all ones .=a read\n");
@@ -929,6 +979,7 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
    * writes to the card, and it is the one the metadata block was built for.
    * The trees, the image and the block all stay resident until it returns. */
   nv_gsp_map_windows(d);
+  (void)nv_gsp_write_lands(d);
   /* Stage 6a runs before stage 5 in the canonical order, and needs no ucode:
    * reset the GSP and route its DMA at system memory. */
   if (bldrc == 0) {

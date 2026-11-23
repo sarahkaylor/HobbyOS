@@ -392,14 +392,24 @@ Two findings, both of which changed the code:
    generation falcon headers describe, and it means "which offsets does devinit
    have to unlock" is now an answerable question with a map instead of a guess.
 
-3. **The DMA-configuration registers (`0x600`, `0x624`, `0x10C`) fall inside
-   that fenced span.**
-   They read back the inaccessibility signature after being written. So the falcon
-   block past its basic IO page is not ours yet: on this generation the driver is
-   expected to replay the VBIOS's **devinit (golden-register) tables** before any
-   engine register above the IO page is writable. That is the next rung, it is
-   named, and it is the last thing standing between this driver and launching
-   FWSEC.
+3. **…and nothing needs to be unlocked.** `docs/nv-devinit-contract.md` killed
+   the devinit hypothesis on Turing+ (devinit there is PMU ucode launched *by*
+   FWSEC, not host-replayed golden tables; no dword in this card's ROM even
+   contains a falcon-window address) and pointed out the measurement error
+   underneath it: the fence is on the *read* side, so "wrote X, read back the
+   fence word" never distinguished a dropped write from a landed one. MAILBOX0
+   reads 0 in both states, so it can answer the question. It did:
+
+   ```
+   [NV-PROBE] write-lands baseline=0x0/0x0 wrote 0xa5a51234 -> 0xA5A51234
+              wrote 0x5a5a4321 -> 0x5A5A4321 restored=0x0
+   [NV-PROBE] verdict=WRITES LAND: the fence is read-side only, so FWSEC can be
+              launched without any unfencing step
+   ```
+
+   The writes to `0x600`, `0x624` and `0x10C` almost certainly landed as well;
+   the driver simply cannot read them back. That removes the last blocker before
+   FWSEC: there is nothing to unfence, and nothing to replay.
 
 ### 5.6 What the two contract docs settled (and one plan they killed)
 
