@@ -847,15 +847,48 @@ static void nv_imem_store_row(struct nv_dev *d, uint32_t fbase,
   if (bad < 0) {
     uart_puts(" MATCH (256 bytes copied back are the staged bytes)\n");
     (*matched)++;
-  } else {
-    uart_puts(" DIFF first@+0x");
-    uart_print_hex((uint32_t)bad);
-    uart_puts(" got=");
-    uart_print_hex(got);
-    uart_puts(" want=");
-    uart_print_hex(want);
-    uart_puts("\n");
+    return;
   }
+  uart_puts(" DIFF first@+0x");
+  uart_print_hex((uint32_t)bad);
+  uart_puts(" got=");
+  uart_print_hex(got);
+  uart_puts(" want=");
+  uart_print_hex(want);
+  /* What the copied block IS, if it is a staged block at another offset: the
+   * unit error this would expose is a destination interpreted in words
+   * (block at dst lands at 4*dst) or in quarters (at dst/4). */
+  {
+    uint32_t cand[2] = {off >> 2, off << 2};
+    const char *name[2] = {"off>>2", "off<<2"};
+    int named = 0;
+    for (int i = 0; i < 2; i++) {
+      if (cand[i] + NV_FLCN_BLOCK > img_len) continue;
+      int same = 1;
+      for (uint32_t k = 0; k < NV_FLCN_BLOCK; k++) {
+        if (bb[k] != img[cand[i] + k]) {
+          same = 0;
+          break;
+        }
+      }
+      if (same) {
+        uart_puts(" |block==");
+        uart_puts(name[i]);
+        uart_puts(" (the destination is being read in the wrong unit)");
+        named = 1;
+      }
+    }
+    if (!named) {
+      /* Where does the block's first word appear at all? */
+      uint32_t found = nv_flcn_find_word(img, img_len, got);
+      uart_puts(" |block-head-in-image-at:");
+      if (found == NV_FLCN_IDX_NONE)
+        uart_puts(" NOWHERE");
+      else
+        uart_print_hex(found);
+    }
+  }
+  uart_puts("\n");
 }
 
 /* ---- the 0x1400 status block as a read-only control ---------------------
@@ -885,6 +918,94 @@ static int nv_compare_block(const uint32_t *a, const uint32_t *b, int *first) {
     }
   }
   return n;
+}
+
+/* ---- non-blocking PIO, for sampling inside the launch window -----------
+ *
+ * nv_falcon_dmem_read() waits for the xfer queue to drain first, and once the
+ * window fences that wait costs a full timeout per call -- 20 M spins, measured
+ * as the reason run r2b's sampling row could only say "no change" over 300 ms
+ * of wall clock.  This is the same register pair without the wait, so a sampler
+ * can ask "what does this word say right now" and get an answer or a failure
+ * without stalling the observation it is trying to make.
+ */
+static int nv_pio_rd1_nb(struct nv_dev *d, uint32_t fbase, int is_imem,
+                         uint32_t addr, uint32_t *out) {
+  uint32_t idx = nv_flcn_idx_word(addr);
+  if (idx == NV_FLCN_IDX_NONE) return -ERANGE;
+  uint32_t idx_reg = fbase + (is_imem ? NV_FALCON_CODE_INDEX : NV_FALCON_DATA_INDEX0);
+  uint32_t data_reg = fbase + (is_imem ? NV_FALCON_CODE : NV_FALCON_DATA0);
+  nv_wr32(d, idx_reg, (idx << 2) | (is_imem ? NV_FALCON_IDX_SECRET : 0u) |
+                          NV_FALCON_IDX_RD_AUTOINC);
+  *out = nv_rd32(d, data_reg);
+  return 0;
+}
+
+static int nv_pio_wr1_nb(struct nv_dev *d, uint32_t fbase, int is_imem,
+                         uint32_t addr, uint32_t val) {
+  uint32_t idx = nv_flcn_idx_word(addr);
+  if (idx == NV_FLCN_IDX_NONE) return -ERANGE;
+  uint32_t idx_reg = fbase + (is_imem ? NV_FALCON_CODE_INDEX : NV_FALCON_DATA_INDEX0);
+  uint32_t data_reg = fbase + (is_imem ? NV_FALCON_CODE : NV_FALCON_DATA0);
+  nv_wr32(d, idx_reg, (idx << 2) | (is_imem ? NV_FALCON_IDX_SECRET : 0u) |
+                          NV_FALCON_IDX_WR_AUTOINC);
+  nv_wr32(d, data_reg, val);
+  return 0;
+}
+
+/* ---- is IMEM readable, and is the code in it? --------------------------
+ *
+ * Two questions, and they had been conflated.  Every IMEM read in runs r2a/r2b
+ * answered 0xDEAD5EC1 -- through the PIO port AND through the engine's store
+ * direction -- which is consistent with two very different worlds:
+ *
+ *   (a) reads of IMEM are refused, and the marker is the refusal.  Then the
+ *       code's presence cannot be read at all, and only effects judge it;
+ *   (b) the marker is what IMEM *contains* (a reset fill of the secure memory),
+ *       and the load did not overwrite it.  Then the code did not land.
+ *
+ * Writing a known pattern through the port and reading it back -- first through
+ * the same port, then THROUGH THE ENGINE -- separates them: if the engine
+ * copies the pattern out, reads work, so whatever else reads as the marker is
+ * content.  The pattern is left in place on purpose: the load runs afterwards
+ * and must overwrite it, which is a second, independent statement about the
+ * load.
+ */
+static void nv_imem_write_probe(struct nv_dev *d, struct nv_falcon *f,
+                                uint32_t off, uint32_t pat, uint64_t scratch_phys,
+                                int *pio_ok, int *eng_ok) {
+  uint32_t back = 0, eng = 0;
+  int wrc = nv_pio_wr1_nb(d, f->base, 1, off, pat);
+  int rrc = nv_pio_rd1_nb(d, f->base, 1, off, &back);
+  uart_puts("[NV-IMEMW] @");
+  uart_print_hex(off);
+  uart_puts(" wrote=");
+  uart_print_hex(pat);
+  uart_puts(" wrc=");
+  print_int(wrc);
+  uart_puts(" pio_back=");
+  uart_print_hex(back);
+  (*pio_ok) = (rrc == 0 && back == pat) ? 1 : 0;
+  /* The engine's view of the same word. */
+  uint8_t *bb = (uint8_t *)phys_to_virt(scratch_phys);
+  for (uint32_t i = 0; i < NV_FLCN_BLOCK; i++) bb[i] = 0x5A;
+  int s = falcon_dma_store_block(d, f->base, scratch_phys, 0, off, 1, 1);
+  if (s == 0) {
+    eng = (uint32_t)bb[0] | ((uint32_t)bb[1] << 8) | ((uint32_t)bb[2] << 16) |
+          ((uint32_t)bb[3] << 24);
+  }
+  uart_puts(" store_rc=");
+  print_int(s);
+  uart_puts(" eng_back=");
+  uart_print_hex(eng);
+  (*eng_ok) = (s == 0 && eng == pat) ? 1 : 0;
+  uart_puts((*pio_ok && *eng_ok)
+                ? " BOTH-READ-BACK (IMEM is writable and readable: the marker "
+                  "elsewhere is CONTENT, not a refusal)\n"
+                : (*pio_ok ? " PIO-ONLY (the port reads back the pattern but the "
+                              "engine copy does not: judge IMEM by the port only)\n"
+                           : " NOT-WRITABLE-OR-NOT-READABLE (IMEM refuses this "
+                             "port; nothing about its content can be concluded)\n"));
 }
 
 /* The five words that describe the last DMA request this host programmed.
@@ -1171,6 +1292,7 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
   uint32_t pages = (total + FRAME_SIZE - 1) / FRAME_SIZE;
   uint64_t phys = frame_alloc_contig((int)pages);
   if (!phys) return -ENOMEM;
+  uint64_t imem_scratch = 0; /* allocated below; freed at `out` */
   uint8_t *buf = (uint8_t *)phys_to_virt(phys);
   int rc = nv_vbios_read(d, d->ucode_payload, buf, total);
   if (rc != 0) {
@@ -1293,6 +1415,24 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
    */
   struct nv_falcon *gspf = &d->falcon[NV_FALCON_IDX_GSP];
   int dmem_read_trustworthy = 0;
+  /* One scratch frame serves both IMEM paths: the write probe below and the
+   * engine copies in the landing map.  Allocated here because the write probe
+   * has to run before the load. */
+  imem_scratch = frame_alloc_contig(1);
+  {
+    /* IMEM: is it writable/readable at all, and by which path?   Patterns are
+     * left in place -- the load must overwrite them, which is a statement about
+     * the load in its own right. */
+    if (!imem_scratch) {
+      uart_puts("[NV-IMEMW] skipped: no contiguous scratch frame\n");
+    } else {
+      int pio_ok = 0, eng_ok = 0;
+      nv_imem_write_probe(d, gspf, 0x000, 0x5EC2C0DEu, imem_scratch, &pio_ok,
+                          &eng_ok);
+      nv_imem_write_probe(d, gspf, 0x1000, 0x5EC2C1DEu, imem_scratch, &pio_ok,
+                          &eng_ok);
+    }
+  }
   {
     /* How much DMEM does the engine say it has?  The third probe lands past the
      * image on purpose (to show the port works where nothing was loaded), and
@@ -1512,19 +1652,46 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
       nv_landing_verdict("imem-port", &im);
 
       /* And the engine's store direction: falcon memory -> system memory.  This
-       * is the only path to IMEM content that is not the refused port. */
+       * is the only path to IMEM content that is not the refused port.
+       *
+       * 0x4000 is in the list because of the unit question: if the destination
+       * of a *code* DMA were interpreted as words, the block staged for IMEM
+       * 0x1000 would sit at 0x4000, and this row would say so by name. */
       int imem_ok = 0;
       {
-        uint64_t bp = frame_alloc_contig(1);
         int sm = 0, st = 0;
-        if (!bp) {
+        if (!imem_scratch) {
           uart_puts("[NV-IMEM] store-block skipped: no contiguous frame\n");
         } else {
-          static const uint32_t st_probe[] = {0x000, 0x1000, 0xF000};
+          static const uint32_t st_probe[] = {0x000, 0x1000, 0x4000};
           for (uint32_t i = 0; i < sizeof st_probe / sizeof st_probe[0]; i++)
-            nv_imem_store_row(d, NV_GSP_U, buf, d->ucode_imem, st_probe[i], bp,
-                              &sm, &st);
-          frame_free(bp);
+            nv_imem_store_row(d, NV_GSP_U, buf, d->ucode_imem, st_probe[i],
+                              imem_scratch, &sm, &st);
+        }
+        /* The port's own view of the block the write probe planted: if the
+         * pattern is gone, the load wrote that block; if it is still there, the
+         * load never did. */
+        {
+          uint32_t pb = 0, want0 = 0;
+          int prc = nv_pio_rd1_nb(d, NV_GSP_U, 1, 0x000, &pb);
+          int have_want0 = nv_img_word(buf, d->ucode_imem, 0x000, &want0);
+          uart_puts("[NV-IMEM] port @0x000 after load rc=");
+          print_int(prc);
+          uart_puts(" got=");
+          uart_print_hex(pb);
+          uart_puts(" staged=");
+          uart_print_hex(have_want0 ? want0 : 0);
+          if (pb == 0x5EC2C0DEu)
+            uart_puts(" STILL-THE-PROBE-PATTERN (the code load did not write "
+                      "this IMEM block)\n");
+          else if (have_want0 && pb == want0)
+            uart_puts(" THE-STAGED-WORD (the load landed and the port can read "
+                      "it back)\n");
+          else if (pb == NV_REG_IMEM_MARKER)
+            uart_puts(" THE-MARKER (the port refuses this read: says nothing "
+                      "about the content -- the engine rows are the evidence)\n");
+          else
+            uart_puts(" SOME OTHER VALUE (a third state: report it as raw)\n");
         }
         uart_puts("[NV-IMEM] verdict=");
         if (st == 0)
@@ -1659,7 +1826,7 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
   int samp_changed = 0, samp_which = -1;
   uint32_t samp_now = 0;
   uint64_t samp_at_ns = 0;
-  int samp_fenced = 0;
+  int samp_fenced = 0, samp_reads = 0, samp_fails = 0;
   uint64_t samp_fenced_ns = 0;
 
   /* START accepted, or refused?  Two samples a decade apart in time: 0x10 at
@@ -1697,11 +1864,15 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
       st = nv_rd32(d, 0x1438);
       ctl_10ms = nv_rd32(d, NV_GSP_U + NV_FALCON_UC_CTRL);
       /* Sample DMEM while the window is still ours: the first change is the
-       * core executing, the first fence word is the moment the window closes. */
-      if (samp_pre_ok && !samp_fenced && i < 2000) {
+       * core executing, the first fence word is the moment the window closes.
+       * Non-blocking, because a waiting read after the fence costs a timeout
+       * per call and made r2b's row say "no change" over 300 ms of stalls
+       * rather than over the microseconds it was written for. */
+      if (samp_pre_ok && !samp_fenced && i < 1000) {
         int k = i & 3;
         uint32_t v = 0;
-        if (nv_falcon_dmem_read(d, gspf, samp_addr[k], &v, 1) == 0) {
+        if (nv_pio_rd1_nb(d, NV_GSP_U, 0, samp_addr[k], &v) == 0) {
+          samp_reads++;
           if (v == NV_REG_FENCED) {
             samp_fenced = 1;
             if (have_t && nv_timer_read(d, &now) == 0)
@@ -1712,6 +1883,8 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
             samp_now = v;
             if (have_t && nv_timer_read(d, &now) == 0) samp_at_ns = now - t0;
           }
+        } else {
+          samp_fails++;
         }
       }
       if ((st >> 16) != (kStale >> 16)) {          /* somebody wrote 0x1438 */
@@ -1789,6 +1962,10 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
       uart_print_hex(samp_fenced_ns);
       uart_puts(" ns");
     }
+    uart_puts(" reads=");
+    print_int(samp_reads);
+    uart_puts(" failed=");
+    print_int(samp_fails);
     uart_puts("\n");
   }
 
@@ -1808,7 +1985,9 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
   /* ---- the effect oracle: did the core touch its own memory? ------------ */
   {
     uint32_t dm_post[16];
-    int post_ok = (nv_falcon_dmem_read(d, gspf, 0x000, dm_post, 16) == 0);
+    int post_ok = 1;
+    for (uint32_t i = 0; i < 16; i++)
+      if (nv_pio_rd1_nb(d, NV_GSP_U, 0, i * 4u, &dm_post[i]) != 0) post_ok = 0;
     uint32_t first = 0xffffffffu, got = 0, was = 0;
     int diffs = 0;
     if (dm_pre_ok && post_ok) {
@@ -2007,6 +2186,7 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
     rc = wrote_specific ? 0 : -EPERM;
   }
 out:
+  if (imem_scratch) frame_free(imem_scratch);
   for (uint32_t i = 0; i < pages; i++) frame_free(phys + (uint64_t)i * FRAME_SIZE);
   return rc;
 }
