@@ -590,6 +590,61 @@ int nv_fw_sha256(const uint8_t *buf, uint32_t len, uint8_t out[32]) {
 
 /* ---- 4b. radix3 -------------------------------------------------------- */
 
+static uint64_t fw_align_down(uint64_t v, uint64_t a) { return v & ~(a - 1); }
+static uint64_t fw_align_up(uint64_t v, uint64_t a) {
+  return (v + a - 1) & ~(a - 1);
+}
+
+int nv_wpr_layout(const struct nv_wpr_layout_in *in, struct nv_wpr_layout *out) {
+  if (!in || !out) return -EINVAL;
+  if (in->fb_size == 0 || in->image_size == 0) return -EINVAL;
+  if (in->fb_size < NV_WPR_PRAMIN_RESERVE) return -EINVAL;
+  if (in->wpr_start & (NV_WPR_START_ALIGN - 1)) return -EINVAL;
+
+  struct nv_wpr_layout l;
+  fw_zero(&l, sizeof l);
+  l.frts_size = NV_WPR_FRTS_SIZE;
+  l.non_wpr_heap_size = NV_WPR_NONHEAP_SIZE;
+
+  /* Top down.  wpr_end stops below the PRAMIN reserve, because a region that
+   * reaches into BAR0's own window is a layout the booter may reject. */
+  l.wpr_end = fw_align_down(in->fb_size - NV_WPR_PRAMIN_RESERVE,
+                            NV_WPR_END_ALIGN);
+  l.frts_offset = l.wpr_end - l.frts_size;
+  /* 32 KiB aligned, not 128 KiB: the contract's own value (0x5FE2F8000) is
+   * 0x8000-aligned, and forcing 128 KiB truncates it to 0x5FE2E0000. */
+  l.boot_bin_offset = fw_align_down(l.frts_offset - NV_WPR_BOOTBIN_RESERVE,
+                                    NV_WPR_BOOTBIN_RESERVE);
+  l.image_offset = fw_align_down(l.boot_bin_offset - in->image_size,
+                                 NV_RADIX3_PAGE);
+
+  /* The heap takes whatever is left; the image's start is its end. */
+  l.heap_offset = in->wpr_start + l.non_wpr_heap_size;
+  if (l.image_offset <= l.heap_offset) return -ENOSPC; /* cannot fit */
+  l.heap_size = l.image_offset - l.heap_offset;
+
+  l.wpr_start = in->wpr_start;
+  l.non_wpr_heap_offset = l.wpr_start;
+
+  /* Ordering, non-overlap, and exact tiling: the pieces must sum to the span,
+   * because a layout that leaves unnamed space inside the region is one the
+   * firmware may reject with nothing but a non-zero mailbox to show for it. */
+  if (!(l.wpr_start < l.non_wpr_heap_offset + l.non_wpr_heap_size &&
+        l.non_wpr_heap_offset + l.non_wpr_heap_size <= l.heap_offset &&
+        l.heap_offset < l.image_offset &&
+        l.image_offset + in->image_size <= l.boot_bin_offset &&
+        l.boot_bin_offset <= l.frts_offset &&
+        l.frts_offset + l.frts_size <= l.wpr_end))
+    return -EINVAL;
+  uint64_t span = l.non_wpr_heap_size + l.heap_size + in->image_size +
+                  (l.boot_bin_offset - (l.image_offset + in->image_size)) +
+                  (l.frts_offset - l.boot_bin_offset) + l.frts_size;
+  if (span != l.wpr_end - l.wpr_start) return -EINVAL;
+
+  *out = l;
+  return 0;
+}
+
 void nv_fw_slide_down(uint8_t *buf, uint32_t buf_len, uint32_t off,
                       uint32_t len) {
   if (!buf || off == 0 || len == 0) return;

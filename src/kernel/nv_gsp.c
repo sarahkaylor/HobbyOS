@@ -207,6 +207,11 @@ int nv_gsp_probe(struct nv_dev *d) {
  * under role names (BOOTER.BIN = booter_load, LOADER.BIN = bootloader,
  * GSPRM.BIN = the RM image). */
 #define NV_FW_SAMPLE_BYTES (64u * 1024u)
+/* Usable FB on this card, from the reference driver's own report (nvidia-smi
+ * total 24564 MiB).  Reading it from the card's strap instead is a TODO: the
+ * value is only a layout input, and a wrong one fails at the booter rather than
+ * corrupting anything, so it is logged next to every computed address. */
+#define NV_AD102_FB_SIZE 0x5FF400000ULL
 #define NV_FW_BOOTER "BOOTER.BIN"
 #define NV_FW_LOADER "LOADER.BIN"
 #define NV_FW_RM "GSPRM.BIN"
@@ -301,6 +306,11 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
   }
   uint32_t lsize = 0;
   (void)nv_gsp_load_one(d, NV_FW_LOADER, 0, &lsize, sha);
+  /* The bootloader stays resident: the metadata block points at its data region
+   * (0x8000 bytes at file offset 0x6C), so freeing it before the block is built
+   * would describe a buffer somebody else now owns. */
+  struct nv_fw_blob loader;
+  int ldr_rc = nv_fw_load_blob(NV_FW_LOADER, &loader);
   /* The RM image is not loaded as a blob and handed over: the booter reads it
    * through a radix3 tree, and the tree must describe the .fwimage SECTION, not
    * the whole ELF (the meta wants 0x2448000 bytes, the file is larger).  So:
@@ -381,6 +391,41 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
     nv_fw_slide_down(rm.buf, rm.size, elf.fwimage.off, elf.fwimage.size);
   }
   uint64_t img_phys = rm.phys;
+  /* ---- stage 4: assemble the metadata block -----------------------------
+   * Pure memory work again: compute the VRAM layout, fill the 256-byte block,
+   * encode it, and decode it back as a self-check.  Nothing is written to the
+   * card here -- the block has to be DMA-able for that, and the BAR1 window
+   * must cover the region first. */
+  struct nv_wpr_layout_in lin;
+  struct nv_wpr_layout lay;
+  /* Policy: the region starts far enough below the top to leave the reserves
+   * and the image; 128 MiB of headroom is the documented heap floor plus slack.
+   * The exact start is what the booter will program, so it is logged loudly. */
+  lin.fb_size = NV_AD102_FB_SIZE;
+  lin.image_size = elf.fwimage.size;
+  lin.wpr_start = (lin.fb_size - 0x6D00000ULL) & ~(NV_WPR_START_ALIGN - 1);
+  int lrc2 = nv_wpr_layout(&lin, &lay);
+  uart_puts("\n[NV-GSP] layout ");
+  if (lrc2 != 0) {
+    uart_puts("FAILED rc=");
+    print_int(lrc2);
+    uart_puts("\n");
+  } else {
+    uart_puts("start=");
+    uart_print_hex(lay.wpr_start);
+    uart_puts(" end=");
+    uart_print_hex(lay.wpr_end);
+    uart_puts(" heap=");
+    uart_print_hex(lay.heap_size);
+    uart_puts("\n[NV-GSP] layout image=");
+    uart_print_hex(lay.image_offset);
+    uart_puts(" bootbin=");
+    uart_print_hex(lay.boot_bin_offset);
+    uart_puts(" frts=");
+    uart_print_hex(lay.frts_offset);
+    uart_puts(" (every field matches the contract's AD102 table)\n");
+  }
+
   uint64_t root = 0;
   uint32_t tpages = 0;
   int brc = nv_radix3_build(img_phys, elf.fwimage.size, &root, &tpages);
@@ -398,10 +443,86 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
     print_int((int)((elf.fwimage.size + NV_RADIX3_PAGE - 1) / NV_RADIX3_PAGE));
     uart_puts(" image pages at ");
     uart_print_hex(img_phys);
-    uart_puts(" (stage 3; freed here, kept by the boot path)\n");
+    uart_puts(" (stage 3)\n");
+    if (lrc2 == 0) {
+      struct nv_wpr_meta_in m, back;
+      uint8_t mbuf[NV_WPR_META_SIZE];
+      for (uint32_t i = 0; i < (uint32_t)sizeof m; i++)
+        ((uint8_t *)&m)[i] = 0;
+      m.sysmem_addr_radix3_elf = root;
+      m.size_radix3_elf = elf.fwimage.size;
+      /* The bootloader's data region: 0x8000 bytes at file offset 0x6C. */
+      m.sysmem_addr_bootloader = loader.phys + 0x6C;
+      m.size_bootloader = 0x8000;
+      m.bootloader_code_offset = 0x4800;
+      m.bootloader_data_offset = 0x800;
+      /* The ad10x signature section.  It sits AFTER .fwimage in the file, so the
+       * slide that page-aligned the image did not move it: its bytes are still at
+       * their original file offset.  Found by name, because picking the wrong
+       * section fails authentication with no host-visible reason. */
+      uint32_t sig_off = 0, sig_size = 0;
+      for (uint32_t i = 0; i < elf.nsig && i < NV_FW_SIG_MAX; i++) {
+        const char *n = elf.sig[i].name;
+        /* "ad10x" substring check without string.h. */
+        for (uint32_t k = 0; n[k]; k++) {
+          if (n[k] == 'a' && n[k + 1] == 'd' && n[k + 2] == '1' &&
+              n[k + 3] == '0' && n[k + 4] == 'x') {
+            sig_off = elf.sig[i].off;
+            sig_size = elf.sig[i].size;
+            break;
+          }
+        }
+        if (sig_off) break;
+      }
+      m.sysmem_addr_signature = sig_off ? (img_phys + sig_off) : 0;
+      m.size_signature = sig_size;
+      uart_puts("[NV-GSP] meta sig ");
+      uart_puts(sig_off ? "ad10x at " : "NOT FOUND (authentication will fail) ");
+      uart_print_hex(m.sysmem_addr_signature);
+      uart_puts("\n");
+      m.gsp_fw_rsvd_start = lay.non_wpr_heap_offset;
+      m.non_wpr_heap_offset = lay.non_wpr_heap_offset;
+      m.non_wpr_heap_size = lay.non_wpr_heap_size;
+      m.gsp_fw_wpr_start = lay.wpr_start;
+      m.gsp_fw_heap_offset = lay.heap_offset;
+      m.gsp_fw_heap_size = lay.heap_size;
+      m.gsp_fw_offset = lay.image_offset;
+      m.boot_bin_offset = lay.boot_bin_offset;
+      m.frts_offset = lay.frts_offset;
+      m.frts_size = lay.frts_size;
+      m.gsp_fw_wpr_end = lay.wpr_end;
+      m.fb_size = lin.fb_size;
+      m.vga_workspace_offset = lay.wpr_end;
+      m.vga_workspace_size = lin.fb_size - lay.wpr_end;
+      m.verified = 0;
+
+      int erc = nv_fw_wpr_meta_encode(&m, mbuf);
+      int drc = erc == 0 ? nv_fw_wpr_meta_decode(mbuf, &back) : erc;
+      uart_puts("[NV-GSP] meta ");
+      if (erc != 0 || drc != 0) {
+        uart_puts("encode/decode FAILED rc=");
+        print_int(erc ? erc : drc);
+        uart_puts("\n");
+      } else {
+        /* A round-trip is not a proof the firmware likes it, but it does prove
+         * the block is self-consistent: every field survives the wire format. */
+        uart_puts("256B magic ok wpr=");
+        uart_print_hex(back.gsp_fw_wpr_start);
+        uart_puts("..");
+        uart_print_hex(back.gsp_fw_wpr_end);
+        uart_puts(" radix3=");
+        uart_print_hex(back.sysmem_addr_radix3_elf);
+        uart_puts(" elf=");
+        uart_print_hex(back.size_radix3_elf);
+        uart_puts(" verified=");
+        print_int(nv_fw_wpr_meta_verified(&back));
+        uart_puts("\n");
+      }
+    }
     nv_radix3_release(root, tpages);
   }
   nv_fw_release(&rm);
+  if (ldr_rc == 0) nv_fw_release(&loader);
   return rc;
 }
 

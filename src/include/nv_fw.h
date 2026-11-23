@@ -290,6 +290,66 @@ uint32_t nv_radix3_pages(uint64_t size);
 int nv_radix3_build_into(uint8_t *tree, uint32_t tree_pages, uint64_t tree_phys,
                          uint64_t image_phys, uint64_t image_size);
 
+/* ---- 4c. the VRAM layout the metadata block describes ------------------
+ *
+ * Everything the booter needs to know about where things live inside VRAM, in
+ * ONE place, because these values must tile exactly: the region runs from
+ * gsp_fw_wpr_start to gsp_fw_wpr_end with no gaps and no overlaps, and a
+ * mismatch between two of them is a boot failure with nothing but a non-zero
+ * mailbox to show for it.
+ *
+ * Order, from the TOP of VRAM downwards (docs/nv-gsp-wpr-contract.md 3.2):
+ *   fb_size
+ *   - PRAMIN reserve (16 MiB: the size of BAR0's own window)
+ *   = wpr_end            (128 KiB aligned)
+ *   - frts_size (1 MiB)  = frts_offset
+ *   - bootloader reserve (0x80000) = boot_bin_offset
+ *   - image size (page aligned)    = gsp_fw_offset
+ *   = gsp_fw_heap end
+ *   ... heap ...
+ *   gsp_fw_heap_offset   (1 MiB aligned, = wpr_start + 1 MiB)
+ *   - nonWprHeap (1 MiB) = gsp_fw_rsvd_start / non_wpr_heap_offset
+ *   = wpr_start
+ *
+ * Every field reproduces the contract's AD102 table EXACTLY, given
+ * wpr_start = 0x5F8700000 and fb = 0x5FF400000:
+ *   wpr_end 0x5FE400000, frts 0x5FE300000, boot_bin 0x5FE2F8000,
+ *   image 0x5FBEB0000 (end lands exactly on boot_bin), heap 0x36B0000,
+ *   non-wpr heap 0x5F8600000, span 0x5D00000 = 93 MiB.
+ * The named pieces sum to the span: this layout tiles the region exactly.
+ *
+ * Two arithmetic slips happened while writing this, both caught by the tests in
+ * nv_fw_test.c: reading the bootloader reserve as 0x80000 instead of 0x8000 (it
+ * is the DATA region's size), and forcing a 128 KiB alignment on boot_bin where
+ * the contract's value is only 0x8000 aligned.  Hand-subtracting hex in a
+ * comment is how a wrong "the document must be wrong" conclusion gets written
+ * down; the test computes it. */
+struct nv_wpr_layout_in {
+  uint64_t wpr_start;    /* chosen by policy: lowest address the region may use */
+  uint64_t fb_size;      /* usable FB in bytes */
+  uint64_t image_size;   /* .fwimage length */
+};
+
+struct nv_wpr_layout {
+  uint64_t wpr_start, wpr_end;
+  uint64_t non_wpr_heap_offset, non_wpr_heap_size;
+  uint64_t heap_offset, heap_size;
+  uint64_t image_offset;
+  uint64_t boot_bin_offset;
+  uint64_t frts_offset, frts_size;
+};
+
+#define NV_WPR_PRAMIN_RESERVE 0x1000000ULL /* 16 MiB */
+#define NV_WPR_FRTS_SIZE 0x100000ULL       /* 1 MiB */
+#define NV_WPR_NONHEAP_SIZE 0x100000ULL    /* 1 MiB */
+#define NV_WPR_BOOTBIN_RESERVE 0x8000ULL /* the bootloader data region's size */
+#define NV_WPR_END_ALIGN 0x20000ULL        /* 128 KiB */
+#define NV_WPR_START_ALIGN 0x100000ULL     /* 1 MiB */
+
+/* Compute the layout.  Returns 0, or -ENOSPC when the image + reserves cannot
+ * fit above `wpr_start`, or -EINVAL for a nonsense request. */
+int nv_wpr_layout(const struct nv_wpr_layout_in *in, struct nv_wpr_layout *out);
+
 /* Slide `len` bytes at `buf + off` down to `buf`, inside the same buffer, for
  * a firmware section that does not start on a page boundary.  Byte-wise and
  * backwards, so an overlapping move is safe and no second buffer is needed --

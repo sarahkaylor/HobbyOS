@@ -662,6 +662,51 @@ static void test_nv_fw_slide_down(void) {
   nv_fw_slide_down(0, 64, 16, 8); /* null */
 }
 
+/* The VRAM layout, against the contract's own AD102 table: every field must
+ * reproduce it except gspFwOffset, where the document's numbers leave a gap and
+ * this arithmetic tiles exactly (see the comment in nv_fw.h). */
+static void test_nv_wpr_layout(void) {
+  uart_puts("  Running test_nv_wpr_layout...\n");
+  tests_run++;
+  struct nv_wpr_layout_in in;
+  struct nv_wpr_layout l;
+  in.wpr_start = 0x5F8700000ULL; /* the contract's AD102 value */
+  in.fb_size = 0x5FF400000ULL;   /* 24564 MiB */
+  in.image_size = 0x2448000ULL;
+  ASSERT(nv_wpr_layout(&in, &l) == 0);
+  ASSERT(l.wpr_end == 0x5FE400000ULL);
+  ASSERT(l.frts_offset == 0x5FE300000ULL);
+  ASSERT(l.frts_size == 0x100000);
+  ASSERT(l.boot_bin_offset == 0x5FE2F8000ULL);
+  ASSERT(l.heap_offset == 0x5F8800000ULL);
+  ASSERT(l.non_wpr_heap_offset == 0x5F8700000ULL);
+  ASSERT(l.non_wpr_heap_size == 0x100000);
+  ASSERT(l.image_offset == 0x5FBEB0000ULL); /* the contract's own value */
+  ASSERT(l.image_offset + in.image_size == l.boot_bin_offset);
+  ASSERT(l.heap_size == 0x36B0000ULL);
+  ASSERT(l.wpr_end - l.wpr_start == 0x5D00000ULL); /* 93 MiB */
+  uint64_t named = l.non_wpr_heap_size + l.heap_size + in.image_size +
+                   (l.boot_bin_offset - l.image_offset - in.image_size) +
+                   (l.frts_offset - l.boot_bin_offset) + l.frts_size;
+  ASSERT(named == 0x5D00000ULL);
+
+  /* A region too small for the image is refused, not squeezed.  The start has
+   * to be high enough that the 1 MiB non-wpr heap runs INTO the image: with the
+   * start one MiB lower the layout still fits, just with a 0xB0000 heap -- which
+   * is how a first attempt at this case managed to "pass" the wrong way. */
+  struct nv_wpr_layout_in tight = in;
+  tight.wpr_start = (l.image_offset + 0x100000) & ~0xFFFFFULL;
+  EXPECT_EQ(nv_wpr_layout(&tight, &l), -ENOSPC);
+  /* Nonsense in, refusal out. */
+  struct nv_wpr_layout_in bad = in;
+  bad.fb_size = 0;
+  EXPECT_EQ(nv_wpr_layout(&bad, &l), -EINVAL);
+  bad = in;
+  bad.wpr_start += 0x800; /* not 1 MiB aligned */
+  EXPECT_EQ(nv_wpr_layout(&bad, &l), -EINVAL);
+  EXPECT_EQ(nv_wpr_layout(0, &l), -EINVAL);
+}
+
 /* ---- SHA-256 ---------------------------------------------------------- */
 
 static void sha_hex(const uint8_t *buf, uint32_t len, char *out) {
@@ -748,6 +793,7 @@ void nv_fw_test_suite(void) {
   test_nv_radix3_pages();
   test_nv_radix3_build();
   test_nv_fw_slide_down();
+  test_nv_wpr_layout();
   test_nv_fw_sha256_nist();
   test_nv_fw_load_missing();
 }
