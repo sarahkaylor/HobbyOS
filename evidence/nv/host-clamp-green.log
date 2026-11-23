@@ -1,0 +1,44 @@
+fb_mmap_test_host:
+  PASS: abi: FBIOBLANK == 0x4611 (Linux _IO('F',0x11))
+  PASS: abi: HB_FBIOBLANK matches Linux <linux/fb.h> FBIOBLANK
+  - /dev/fb0 absent; differential mmap check skipped
+  PASS: geo: smem_len == DISPLAY_WIDTH*DISPLAY_HEIGHT*4
+  PASS: geo: smem_len == 8294400 for 1920x1080 B8G8R8A8
+  PASS: geo: smem_len fits Linux fb_fix_screeninfo u32 field
+  PASS: translate: offset 0 len 0 -> whole smem (SDL full-frame mmap)
+  PASS: translate: offset 0 len==smem -> smem
+  PASS: translate: overlong len clamps to smem_len
+  PASS: translate: page-aligned mid offset keeps offset and length
+  PASS: translate: near-end offset clamps length to remainder
+  PASS: translate: offset==smem_len rejected
+  PASS: translate: offset>smem_len rejected
+  PASS: translate: page-misaligned offset rejected
+  PASS: translate: half-page offset rejected
+  PASS: blank: FB_BLANK_UNBLANK accepted (no-op success)
+  PASS: blank: VESA_NO_BLANK accepted
+  PASS: blank: VESA_VSYNC_SUSPEND accepted
+  PASS: blank: VESA_HSYNC_SUSPEND accepted
+  PASS: route: FBIOGET_VSCREENINFO arg size == Linux var struct
+  PASS: route: FBIOGET_VSCREENINFO fills the var struct
+  PASS: route: FBIOGET_FSCREENINFO arg size == Linux fix struct
+  PASS: route: FBIOGET_FSCREENINFO fills the fix struct (smem_start carried)
+  PASS: route: FBIOBLANK arg size 0 (value, not a buffer)
+  PASS: route: FBIOBLANK routed to no-op-success
+  PASS: route: unknown request arg size (size_t)-1
+  PASS: route: unknown request returns -1
+  PASS: route: FBIOGET_* request numbers match Linux header
+  PASS: clamp: the image is 8,294,400 B
+  PASS: clamp: the slot is 10,485,760 B
+  PASS: clamp: the slot has slack over the image
+  PASS: clamp: whole-frame request maps exactly the frame
+  PASS: clamp: a slot-sized request is clamped to the image (2025 pages)
+  PASS: clamp: the result is 2025 pages, never the slot's 2560
+  PASS: clamp: one page past the image still maps the image
+  PASS: clamp: a 1 MiB window maps 1 MiB (not the slot)
+  PASS: clamp: a 1-byte window rounds up to one page
+  PASS: clamp: want 0 refused
+  PASS: clamp: no image refused
+  PASS: clamp: an image larger than the slot refused
+  PASS: clamp: no slot refused
+fb_mmap_test_host: 40 checks, 0 failed
+rc=0

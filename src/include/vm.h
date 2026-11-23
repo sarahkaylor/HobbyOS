@@ -664,11 +664,17 @@ int vm_as_clone_into(struct addr_space *src, struct addr_space *dst);
  * into it.  Returns the new AS or NULL. */
 struct addr_space *vm_as_clone(struct addr_space *src, uint64_t tgid);
 
-/* Map the 4 MiB framebuffer slot (USER_FB_BASE_V2, VMK_FB, RW, noexec)
- * into a v2 group's AS.  Idempotent (returns the VA when already mapped);
- * the leaves point at `fb_phys` and are never freed by teardown.
+/* Map the framebuffer slot (USER_FB_BASE_V2, VMK_FB, RW, noexec) into a v2
+ * group's AS.  Idempotent (returns the VA when already mapped); the leaves
+ * point at `fb_phys` and are never freed by teardown.
+ *
+ * WP-E (PLAN.md §3 E / rung N0): the mapped span is a DISPLAY FRAME
+ * (HB_FB_BYTES, 8,294,400 B), never the slot's size (USER_FB_SIZE,
+ * 10,485,760 B).  vm_map_fb() maps one whole frame; vm_map_fb_len() maps
+ * `want` bytes clamped by hb_fb_map_len() (the /dev/fb0 mmap window).
  * Returns the VA or a negative errno. */
 int64_t vm_map_fb(struct process *grp, uint64_t fb_phys);
+int64_t vm_map_fb_len(struct process *grp, uint64_t fb_phys, uint64_t want);
 int64_t vm_map_fb_obj(struct process *grp, struct vm_object *obj, uint64_t len);
 
 /* --- mmap family v2 (S3; design section 4.1) ------------------------- */

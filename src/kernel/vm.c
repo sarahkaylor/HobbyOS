@@ -5307,7 +5307,11 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
         return -ENOTSUP; /* sub-page window into scanout: not modelled */
       if (!virtio_gpu_get_framebuffer())
         return -ENODEV;
-      return vm_map_fb(grp, kimg_pa(virtio_gpu_get_framebuffer()));
+      /* WP-E (N0): map the TRANSLATED window, not the slot.  The old call
+       * dropped `mlen` (vm.c:5303-5310 in PLAN.md §3) and always mapped
+       * USER_FB_SIZE, so a 1 MiB mmap claimed 10 MiB and the slot walked
+       * 2,191,360 B past the 8,294,400 B framebuffer. */
+      return vm_map_fb_len(grp, kimg_pa(virtio_gpu_get_framebuffer()), mlen);
     }
     obj = file_memfd_obj(grp, fd);
     if (obj) {
@@ -6547,9 +6551,12 @@ int64_t vm_map_fb_obj(struct process *grp, struct vm_object *obj, uint64_t len) 
   struct addr_space *as = grp->as;
   if (vm_region_find(as, USER_FB_BASE_V2))
     return (int64_t)USER_FB_BASE_V2; /* idempotent (also across fork) */
-  len = (len + 0xFFF) & ~0xFFFULL;
-  if (len > USER_FB_SIZE)
-    len = USER_FB_SIZE;
+  /* WP-E: one clamp rule for both halves of the slot (fb_mmap.h) -- a frame
+   * of the display mode at most, never the slot's slack. */
+  uint64_t span = 0;
+  if (hb_fb_map_len(len, HB_FB_BYTES, USER_FB_SIZE, &span) != 0)
+    return -ENOMEM;
+  len = span;
   uint64_t cap = (vm_object_size(obj) + 0xFFF) & ~0xFFFULL;
   if (len > cap)
     return -EINVAL;
@@ -6559,22 +6566,45 @@ int64_t vm_map_fb_obj(struct process *grp, struct vm_object *obj, uint64_t len) 
   return (int64_t)USER_FB_BASE_V2;
 }
 
-int64_t vm_map_fb(struct process *grp, uint64_t fb_phys) {
-  if (!grp || !grp->as)
+/* WP-E (PLAN.md §3 E, rung N0): map a framebuffer window into the group's
+ * USER_FB slot.  `want` is how many bytes the caller asked for -- the
+ * translated /dev/fb0 mmap window, or one whole frame for SYS_MAP_FB.
+ *
+ * What used to happen here: the region and every leaf were sized
+ * USER_FB_SIZE (10,485,760 B, the slot), not the framebuffer.  The slot is
+ * one 1920x1080 frame (8,294,400 B) plus 2,191,360 B of slack, so the last
+ * 535 pages of "framebuffer" were really whatever the linker placed after
+ * the kernel's framebuffer static -- mapped writable into user space.  The
+ * unit tier pins the defect and the fix (test_vm_map_fb_frame: 2560 pages
+ * before, 2025 after); hb_fb_map_len() is the clamp, and it is also the
+ * reason a partial-window mmap now maps only what it asked for.
+ *
+ * Idempotent per address space: a second call returns the slot VA without
+ * touching the region or the leaves. */
+int64_t vm_map_fb_len(struct process *grp, uint64_t fb_phys, uint64_t want) {
+  if (!grp || !grp->as || !fb_phys)
     return -EINVAL;
   struct addr_space *as = grp->as;
   if (vm_region_find(as, USER_FB_BASE_V2))
     return (int64_t)USER_FB_BASE_V2; /* idempotent */
-  if (vm_region_insert(as, USER_FB_BASE_V2, USER_FB_SIZE,
+  uint64_t len = 0;
+  if (hb_fb_map_len(want, HB_FB_BYTES, USER_FB_SIZE, &len) != 0)
+    return -ENOMEM;
+  if (vm_region_insert(as, USER_FB_BASE_V2, len,
                        VM_PROT_READ | VM_PROT_WRITE, VMK_FB, VM_MAP_SHARED,
                        0, 0) != 0)
     return -ENOMEM;
-  /* The whole slot points at the kernel framebuffer static (identity
-     mapped); VMK_FB leaves are never freed by teardown. */
-  for (uint64_t off = 0; off < USER_FB_SIZE; off += FRAME_SIZE) {
+  /* The window points at the kernel framebuffer static (identity mapped);
+     VMK_FB leaves are never freed by teardown. */
+  for (uint64_t off = 0; off < len; off += FRAME_SIZE) {
     if (vm_map_page(as, USER_FB_BASE_V2 + off, fb_phys + off,
                     VM_PROT_READ | VM_PROT_WRITE, VMK_FB) != 0)
       return -ENOMEM;
   }
   return (int64_t)USER_FB_BASE_V2;
+}
+
+int64_t vm_map_fb(struct process *grp, uint64_t fb_phys) {
+  /* SYS_MAP_FB (map_fb()): the whole display frame, never the slot. */
+  return vm_map_fb_len(grp, fb_phys, HB_FB_BYTES);
 }

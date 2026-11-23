@@ -88,6 +88,27 @@ int hb_fb_mmap_translate(uint64_t offset, uint64_t len,
  * value as the FBIOGET_FSCREENINFO smem_len fill (kept in one place). */
 uint64_t hb_fb_smem_len(void);
 
+/* The span a /dev/fb0 mapping may occupy, decided by arithmetic alone (WP-E,
+ * PLAN.md work package E / rung N0).
+ *
+ * The user mapping slot (vm.h USER_FB_SIZE, 10,485,760 B) is ONE display
+ * frame plus slack; the framebuffer it stands on is exactly one frame
+ * (HB_FB_BYTES, 8,294,400 B).  Mapping the slot's length instead of the
+ * image's walks the slot 2,191,360 B past the last byte of the real
+ * framebuffer — into whatever the linker placed after it — and hands that
+ * kernel memory to user space as writable.  This helper is the single place
+ * that decides how much may be mapped:
+ *
+ *   len = round_up_pages(min(want, image_len)),  refused if len > slot_len.
+ *
+ * `want` 0 (nothing to map), `image_len` 0, `image_len` > `slot_len`
+ * (an image that cannot fit its slot) and a rounding overflow are all
+ * -1 (EINVAL-shaped).  Pure: no device, no globals, so vm_map_fb_len() on
+ * both arches and the host suite share this one definition.
+ */
+int hb_fb_map_len(uint64_t want, uint64_t image_len, uint64_t slot_len,
+                  uint64_t *out);
+
 /* Blank/unblank decision for FBIOBLANK.  The fixed 2D scanout has no
  * refresh-rate / blankable / suspend output to turn off (virtio-gpu
  * scanout has no VESA suspend states), so FBIOBLANK is always accepted and
