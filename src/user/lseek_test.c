@@ -66,7 +66,12 @@ int main(void) {
   CHECK("fstat ok", fstat(fd, &st) == 0);
   CHECK("fstat size", st.st_size == FIXLEN);
   CHECK("fstat S_ISREG", S_ISREG(st.st_mode));
-  CHECK("fstat mode perms", (st.st_mode & 0777) == 0644);
+  /* FAT16 has no permission bits: the kernel presents Linux vfat's `mode=`
+   * default for regular files (0755), by fd and by path
+   * (docs/cp-sync.md, docs/cp-ext2b.md).  The open(..., 0644) above is not
+   * stored anywhere, so asserting 0644 here was a tmpfs/NFS assumption --
+   * it had been a standing [LKSTEST] FAIL on every ARM T3 wave. */
+  CHECK("fstat mode perms (vfat 0755)", (st.st_mode & 0777) == 0755);
   CHECK("fstat blocks rounding", st.st_blocks == 1);
   CHECK("fstat nlink", st.st_nlink == 1);
   CHECK("fstat blksize", st.st_blksize == 512);
