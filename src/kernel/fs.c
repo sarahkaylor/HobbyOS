@@ -19,6 +19,7 @@
 #include "vfs_lock.h" /* cp/ext2b: the generic lock manager */
 #include "kmem.h"
 #include "gpu_abi.h" /* M1: /dev/gpu ioctl surface + release hook */
+#include "nv_shim.h" /* WP-F: /dev/nvshim release hook (close destroys objects) */
 #include "ext2_vfs.h" /* cp/ext2: the /EXT data disk */
 #include "tmpfs.h" /* cp/sys: the compat /tmp */
 #include "arch/cpu.h" /* C1-k6: get_cpuid for the per-CPU poll cap */
@@ -853,6 +854,12 @@ int file_open_mode(struct process *cur, const char *filename, int flags,
     int isnvctl = (rest[0] == '/' && rest[1] == 'n' && rest[2] == 'v' &&
                    rest[3] == 'c' && rest[4] == 't' && rest[5] == 'l' &&
                    rest[6] == '\0');
+    /* nv-shim (PLAN.md §3 WP-F): /dev/nvshim -- the nouveau-subset device ABI
+       served by the mock RM.  Exists on both arches (no hardware behind it),
+       so a Vulkan stack can attach before GSP-RM boots. */
+    int isnvshim = (rest[0] == '/' && rest[1] == 'n' && rest[2] == 'v' &&
+                    rest[3] == 's' && rest[4] == 'h' && rest[5] == 'i' &&
+                    rest[6] == 'm' && rest[7] == '\0');
     /* C2-ntsync: /dev/ntsync (linux_compat_ntsync.c, docs/cp-ntsync.md). */
     int isntsync = (rest[0] == '/' && rest[1] == 'n' && rest[2] == 't' &&
                     rest[3] == 's' && rest[4] == 'y' && rest[5] == 'n' &&
@@ -892,6 +899,9 @@ int file_open_mode(struct process *cur, const char *filename, int flags,
       f->open_flags = (uint32_t)flags;
     } else if (isnvctl) {
       f->type = FILE_TYPE_DEVNV;
+      f->open_flags = (uint32_t)flags;
+    } else if (isnvshim) {
+      f->type = FILE_TYPE_DEVNVSHIM;
       f->open_flags = (uint32_t)flags;
     } else if (linux_snd_path_minor(filename) >= 0) {
       /* C4-audio (docs/cp-audio.md): ALSA control / playback PCM node; ENOENT
@@ -2403,7 +2413,7 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
     *errp = (f->type == FILE_TYPE_PIPE || f->type == FILE_TYPE_UNIXSOCK ||
              f->type == FILE_TYPE_CONSOLE || f->type == FILE_TYPE_DEVNULL ||
              f->type == FILE_TYPE_DEVFB || f->type == FILE_TYPE_DEVGPU ||
-             f->type == FILE_TYPE_DEVNV ||
+             f->type == FILE_TYPE_DEVNV || f->type == FILE_TYPE_DEVNVSHIM ||
              f->type == FILE_TYPE_DEVSND)
                 ? ESPIPE : EINVAL;
     return -1;
@@ -2586,6 +2596,11 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
     /* nv: the native NVIDIA control node -- character device 6, same access
        model as /dev/gpu. */
     k_stat_fill(st, K_DEV_DEVFS, 6, K_S_IFCHR | 0666, 0);
+    return 0;
+  case FILE_TYPE_DEVNVSHIM:
+    /* nv-shim: the nouveau-subset ABI node -- character device 7, same access
+       model as /dev/gpu. */
+    k_stat_fill(st, K_DEV_DEVFS, 7, K_S_IFCHR | 0666, 0);
     return 0;
   case FILE_TYPE_DEVSND: /* C4-audio: char 116:minor, as Linux's ALSA nodes */
     k_stat_fill(st, K_DEV_DEVFS, 16 + (uint32_t)f->snd.minor, K_S_IFCHR | 0660, 0);
@@ -3177,6 +3192,7 @@ int file_close(struct process *cur, int fd) {
   file_lock_key(f, &lock_key);
   int desc_last = 0;
   int isgpu = (f->type == FILE_TYPE_DEVGPU); /* M1: released after f->lock */
+  int isnvshim = (f->type == FILE_TYPE_DEVNVSHIM); /* WP-F: same rule */
   int snd_last = -1; /* C4-audio: ALSA minor whose last reference went away */
 
   /* SEC-OBS-B (security-plan.md observation B): pipe/usock close wakes
@@ -3240,6 +3256,9 @@ int file_close(struct process *cur, int fd) {
   /* M1 /dev/gpu: dropping the fd drops the client's context and resources.
    * Outside f->lock (the release path sends control commands). */
   if (isgpu) gpu_abi_release_fd(cur, fd);
+  /* WP-F /dev/nvshim: dropping the fd destroys every object the client made.
+   * The mock's ops are plain C, but the rule is the same: never under f->lock. */
+  if (isnvshim) nv_shim_release_fd(cur, fd);
   /* C4-audio: the device teardown sends control commands: outside f->lock. */
   if (snd_last >= 0) linux_snd_release(snd_last);
 
@@ -3855,6 +3874,10 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
     return got * (int)sizeof(struct hb_input_event);
   } else if (f->type == FILE_TYPE_DEVFB) {
     return 0; /* GB-167: no readback of the framebuffer (Linux EINVAL; EOF here) */
+  } else if (f->type == FILE_TYPE_DEVNVSHIM) {
+    /* nv-shim: no data path -- every request is an ioctl.  EOF, like /dev/fb0
+       and /dev/gpu, rather than the "type-unsupported" dump at the tail. */
+    return 0;
   } else if (f->type == FILE_TYPE_DEVNV) {
     /* nv (docs/nvidia-driver.md): one struct nv_info snapshot per read.  The
        node is not a file, so the cursor is ignored and a short buffer gets a
@@ -4211,6 +4234,10 @@ int file_write(struct process *cur, int fd, const void *buf, int size, struct tr
     /* GB-167: pixel writes are accepted and counted; compositing them onto a
        window is the next child (the node has no surface to own yet). */
     return size;
+  } else if (f->type == FILE_TYPE_DEVNVSHIM) {
+    /* nv-shim: no byte stream, only ioctls (Linux: a char dev with no write
+       op answers EINVAL).  A silent success here would look like a submit. */
+    return -EINVAL;
   } else if (f->type == FILE_TYPE_CONSOLE) {
     /* The same sink file_write's unassigned-fd 1/2 fallback uses, now behind
        a real file object so fstat/dup/lseek on the fd behave like a device. */
@@ -4904,6 +4931,20 @@ int file_is_devnv(struct process *p, int fd) {
   if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
     return 0;
   return gfile(gfd)->type == FILE_TYPE_DEVNV;
+}
+
+/* WP-F: is `fd` the /dev/nvshim node?  The compat ioctl route hands requests
+ * to nv_shim_ioctl(), and close calls nv_shim_release_fd() through the same
+ * predicate.  Unlike DEVNV this node is not arch-gated: the mock needs no
+ * hardware, so the ABI is exercisable on both arches. */
+int file_is_devnvshim(struct process *p, int fd) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS)
+    return 0;
+  int gfd = p->open_fds[fd];
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
+    return 0;
+  return gfile(gfd)->type == FILE_TYPE_DEVNVSHIM;
 }
 
 /* ---- C2-ntsync (docs/cp-ntsync.md): the driver's view of its fds ------- */

@@ -80,6 +80,13 @@ int file_is_devgpu(struct process *p, int fd);
  * which is indistinguishable from a missing driver. */
 int file_is_devnv(struct process *p, int fd);
 
+/* --- /dev/nvshim (PLAN.md §3 WP-F, implemented in fs.c) -----------------
+ * 1 when `fd` is the node opened from /dev/nvshim.  The compat ioctl route
+ * dispatches NVSHIM_IOC_* through nv_shim_ioctl(), and the close path calls
+ * nv_shim_release_fd() so every object the client created dies with its fd.
+ * Served by the mock RM, so it works with no card and on both arches. */
+int file_is_devnvshim(struct process *p, int fd);
+
 /* C4-audio: the ALSA node's minor when `fd` is one (linux_snd.h), else -1. */
 int file_devsnd_minor(struct process *p, int fd);
 

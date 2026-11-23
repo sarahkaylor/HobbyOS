@@ -57,6 +57,7 @@ void run_all_unit_tests(void) {
   nv_test_suite(); /* nv: NVIDIA driver core + falcon, against a fake MMIO */
   nv_fw_test_suite(); /* nv_fw: firmware container/HS/ELF/WPR/SHA-256 parsers */
 #endif
+  nv_shim_test_suite(); /* WP-F: /dev/nvshim ABI over the mock RM (both arches) */
   virtio_input_test_suite();
   fb_ioctl_test_suite();
   vdisplay_test_suite();
