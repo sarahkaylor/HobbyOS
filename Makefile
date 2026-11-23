@@ -1869,6 +1869,19 @@ $(UPTIME_BIN): $(OBJ_DIR)/uptime.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc
 	$(OBJCOPY) -O binary $(OBJ_DIR)/uptime.elf $(UPTIME_BIN)
 
 # nv: NVSMI.BIN reports the native NVIDIA driver's state (/dev/nvctl).
+#
+# ARCH=intel only, and that is a property of the ABI this tool reads, not a
+# convenience: the whole /dev/nvctl surface -- struct nv_info and the NV_IOC_*
+# numbers -- lives inside `#ifdef __x86_64__` in src/include/nv.h, because the
+# driver behind it needs PCIe config space, MSI-X and a 64-bit BAR window that
+# the aarch64 port does not have.  On ARM nv.c compiles to an empty TU, there
+# is no /dev/nvctl and no struct nv_info, so there is nothing for this tool to
+# print and no node for it to open.  Keeping it in the ARM image would mean a
+# second definition of the record (a wire format with no producer), which is
+# exactly the "two sources of truth" the nv lanes avoid -- so the tool is built
+# where its ABI exists.  An ARM disk.img therefore carries no /NVSMI.BIN, and
+# nothing on that image reads it.
+ifeq ($(ARCH),intel)
 $(OBJ_DIR)/nvsmi.o: src/user/nvsmi.c $(USER_LIBC) $(USER_HDRS) src/include/nv.h
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
@@ -1879,6 +1892,7 @@ $(NVSMI_BIN): $(OBJ_DIR)/nvsmi.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o
 
 $(NVSMI_BIN): .EXTRA_PREREQS += src/user/linker.ld
 disk.img: $(NVSMI_BIN)
+endif
 
 $(OBJ_DIR)/kill.o: src/user/kill.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
@@ -3097,7 +3111,13 @@ ifneq ($(LO_ON_DISK),)
 	$(MCOPY) -i disk.img $(SBASE_BIN) ::/SBASE.BIN
 endif
 	$(MCOPY) -i disk.img $(UPTIME_BIN) ::/UPTIME.BIN
+ifeq ($(ARCH),intel)
+	# NVSMI.BIN is x86_64-only: it reads /dev/nvctl, whose struct nv_info is
+	# inside `#ifdef __x86_64__` (src/include/nv.h) because the driver needs
+	# PCIe/MSI-X/BAR windows the aarch64 port does not have.  See the rule
+	# above for why an ARM image does not ship a second definition instead.
 	$(MCOPY) -i disk.img $(NVSMI_BIN) ::/NVSMI.BIN
+endif
 	$(MCOPY) -i disk.img $(KILL_BIN) ::/KILL.BIN
 	$(MCOPY) -i disk.img $(BASENAME_BIN) ::/BASENAME.BIN
 	$(MCOPY) -i disk.img $(DIRNAME_BIN) ::/DIRNAME.BIN
