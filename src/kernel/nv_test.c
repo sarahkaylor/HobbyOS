@@ -53,6 +53,14 @@ struct fake_gpu {
   uint32_t mbox0, mbox1;     /* GSP falcon mailboxes */
   uint32_t riscv_ctl;        /* GSP RISC-V status word */
   uint32_t nwrites;
+  /* Write trail + the falcon reset/scrub bits, so a staged sequence can be
+     asserted offline instead of only being observed on a card. */
+  uint32_t wr_log[64];
+  uint32_t wr_n;
+  uint32_t hwcfg2;
+  int reset_stuck; /* 1 = the 0x3C0 pulse never completes the reset */
+  uint32_t reset_pulses;
+  uint32_t v600, v624, v10c;
 };
 
 static struct fake_gpu fg;
@@ -96,6 +104,7 @@ static uint32_t fake_rd32(void *ctx, uint32_t off) {
   if (off == NV_FALCON_GSP_BASE + 0x1000 + 0x388) return fg.riscv_ctl;
   if (off == 0x1FA804) return fg.wpr_a;
   if (off == 0x1FA808) return fg.wpr_b;
+  if (off == 0x1100F4) return fg.hwcfg2;
   if (off == 0x1FA824) return fg.wpr2_lo;
   if (off == 0x1FA828) return fg.wpr2_hi;
   if (off == 0x1FA82C) return 0;
@@ -152,6 +161,20 @@ static uint32_t fake_rd32(void *ctx, uint32_t off) {
 static void fake_wr32(void *ctx, uint32_t off, uint32_t val) {
   (void)ctx;
   fg.nwrites++;
+  if (fg.wr_n < 64) fg.wr_log[fg.wr_n++] = off;
+  if (off == 0x110600) fg.v600 = val;
+  if (off == 0x110624) fg.v624 = val;
+  if (off == 0x11010C) fg.v10c = val;
+  /* The engine-reset word: a 1 then a 0 completes the reset and clears the
+     scrubbing bit, which is what the GSP reset sequence waits for. */
+  if (off == 0x1103C0) {
+    if (val == 1) {
+      fg.reset_pulses++;
+      if (!fg.reset_stuck) fg.hwcfg2 |= (1u << 31);
+    } else if (val == 0 && !fg.reset_stuck) {
+      fg.hwcfg2 &= ~(1u << 12);
+    }
+  }
   int fi = fake_falcon_of(off);
   if (fi >= 0) {
     uint32_t lo = off - fake_bases[fi];
@@ -434,6 +457,71 @@ static void test_nv_falcon_fenced_vs_absent(void) {
   EXPECT_EQ(d2->falcon[NV_FALCON_IDX_SEC2].fenced, 0);
 }
 
+/* The GSP reset that FWSEC requires: the exact writes, in order, and the two
+ * read-backs the sequence waits for.  Asserting the write trail is what makes
+ * this test worth having -- a reset that looks right but pulses at the wrong
+ * time would otherwise only be caught by a hang on the card. */
+static void test_nv_gsp_fwsec_reset(void) {
+  uart_puts("  Running test_nv_gsp_fwsec_reset...\n");
+  tests_run++;
+  struct nv_dev *d = fake_attach();
+  ASSERT(nv_falcon_probe_all(d) == 0);
+
+  /* Already STOPPED (the state a handover leaves): the destructive half is
+   * skipped, because on the card it fenced the window instead of resetting. */
+  ASSERT(nv_gsp_fwsec_reset(d) == 0);
+  EXPECT_EQ((int)fg.reset_pulses, 0);
+  ASSERT(fg.wr_n >= 3);
+  EXPECT_EQ((int)fg.wr_log[0], 0x110624);
+  EXPECT_EQ((int)fg.wr_log[1], 0x11010C);
+  EXPECT_EQ((int)fg.wr_log[2], 0x110600);
+  EXPECT_EQ((int)fg.v600, 5);
+  ASSERT((fg.v624 & (1u << 7)) != 0);
+  EXPECT_EQ((int)fg.v10c, 0);
+
+  /* Running core: the full sequence, pulse included. */
+  struct nv_dev *dr = fake_attach();
+  ASSERT(nv_falcon_probe_all(dr) == 0);
+  fg.uctl[NV_FALCON_IDX_GSP] = 0; /* running */
+  ASSERT(nv_gsp_fwsec_reset(dr) == 0);
+  EXPECT_EQ((int)fg.reset_pulses, 1);
+  ASSERT(fg.wr_n >= 7);
+  EXPECT_EQ((int)fg.wr_log[0], 0x110048);
+  EXPECT_EQ((int)fg.wr_log[1], 0x110014);
+  EXPECT_EQ((int)fg.wr_log[2], 0x1103C0);
+  EXPECT_EQ((int)fg.wr_log[3], 0x1103C0);
+  EXPECT_EQ((int)fg.wr_log[4], 0x110624);
+  EXPECT_EQ((int)fg.wr_log[5], 0x11010C);
+  EXPECT_EQ((int)fg.wr_log[6], 0x110600);
+  /* The read-backs the sequence is judged on. */
+  ASSERT((fg.hwcfg2 & (1u << 31)) != 0); /* reset completed */
+  EXPECT_EQ((int)(fg.hwcfg2 & (1u << 12)), 0); /* scrubbing finished */
+}
+
+/* A reset that never completes must stop the stage dead: nothing may be loaded
+ * into a falcon that did not come out of reset, so the DMA configuration writes
+ * must not happen. */
+static void test_nv_gsp_fwsec_reset_timeout(void) {
+  uart_puts("  Running test_nv_gsp_fwsec_reset_timeout...\n");
+  tests_run++;
+  struct nv_dev *d = fake_attach();
+  ASSERT(nv_falcon_probe_all(d) == 0);
+  /* The core must be RUNNING for the reset to be attempted at all (a stopped
+   * core skips it, see above), and then the pulse must fail to complete. */
+  fg.uctl[NV_FALCON_IDX_GSP] = 0;
+  fg.reset_stuck = 1; /* bit 31 never sets */
+  EXPECT_EQ(nv_gsp_fwsec_reset(d), -ETIMEDOUT);
+  uint32_t v600_seen = 0;
+  for (uint32_t i = 0; i < fg.wr_n; i++)
+    if (fg.wr_log[i] == 0x110600) v600_seen = 1;
+  EXPECT_EQ((int)v600_seen, 0);
+  /* No GSP window at all is -ENODEV, not a crash. */
+  struct nv_dev *d2 = fake_attach();
+  fg.falcon_caps2[NV_FALCON_IDX_GSP] = 0xffffffffu;
+  ASSERT(nv_falcon_probe_all(d2) == 0);
+  EXPECT_EQ(nv_gsp_fwsec_reset(d2), -ENODEV);
+}
+
 /* The boot stage must stop at the first unverified contract and say so, rather
  * than perform a speculative write into the write-protected region. */
 static void test_nv_gsp_boot_stops_at_gate(void) {
@@ -598,6 +686,8 @@ void nv_test_suite(void) {
   test_nv_gsp_probe_wpr_verdicts();
   test_nv_falcon_fenced_vs_absent();
   test_nv_gsp_boot_stops_at_gate();
+  test_nv_gsp_fwsec_reset();
+  test_nv_gsp_fwsec_reset_timeout();
   test_nv_bringup_stages();
   test_nv_dmem_pio_roundtrip();
   test_nv_imem_pio_roundtrip();

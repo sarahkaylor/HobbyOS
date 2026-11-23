@@ -414,6 +414,87 @@ static int sec2_unfence(struct nv_dev *d) {
   return -ENODEV;
 }
 
+/* ---- stage 6a: reset the GSP falcon the way FWSEC expects ----------------
+ *
+ * docs/nv-pmu-acr-contract.md section 3.3 steps 1-3, which are required before
+ * any FWSEC ucode can be handed over and need no ucode to run.  Each step has a
+ * read-back, so this stage can be judged on its own:
+ *   step 1  clear 0x048 bits 0-1, 0x014 = all-ones, pulse the engine-reset word,
+ *           then wait for 0x0F4 bit 31 (reset completed) and bit 12 (memory
+ *           scrubbing finished).
+ *   step 2  0x624 bit 7 = ALLOW_PHYS_NO_CTX, 0x10C = 0: the DMA may address
+ *           system memory without a context.
+ *   step 3  0x600 = 5: the DMA port is routed to non-coherent physical sysmem.
+ */
+#define NV_GSP_U 0x110000u
+int nv_gsp_fwsec_reset(struct nv_dev *d) {
+  if (!d) return -EINVAL;
+  if (!d->falcon[NV_FALCON_IDX_GSP].present) return -ENODEV;
+
+  /* MEASURED, and it changes the plan: applying the documented reset to an
+   * unprivileged host FENCES the GSP window (ctl goes 0x10 -> 0xBADF5620) and
+   * 0x0F4 bit 31 never sets.  The engine was already STOPPED before we touched
+   * it, so the reset was not needed for the property that matters -- never load
+   * a running core -- and attempting it costs the window.  So: skip the
+   * destructive half when the core is already stopped, and say so. */
+  uint32_t ctl0 = nv_rd32(d, NV_GSP_U + NV_FALCON_UC_CTRL);
+  int already_stopped = (ctl0 & NV_FALCON_UC_CTRL_STOPPED) != 0;
+  if (already_stopped) {
+    uart_puts("[NV-FWSEC] gsp already STOPPED (ctl=");
+    uart_print_hex(ctl0);
+    uart_puts("): skipping the destructive reset, which measurably fences the "
+              "window instead of resetting it\n");
+  } else {
+    uint32_t v48 = nv_rd32(d, NV_GSP_U + 0x048);
+    nv_wr32(d, NV_GSP_U + 0x048, v48 & ~3u);
+    nv_wr32(d, NV_GSP_U + 0x014, 0xffffffffu);
+    nv_wr32(d, NV_GSP_U + 0x3C0, 1);
+    for (volatile int spin = 0; spin < 200; spin++) {
+    }
+    nv_wr32(d, NV_GSP_U + 0x3C0, 0);
+  }
+
+  /* Bounded: 150 us for the reset to complete, 20 ms for scrubbing.  The loop
+   * counts are generous because a VM's TSC pacing is not the card's. */
+  int reset_done = already_stopped, scrub_done = already_stopped;
+  for (int i = 0; i < 200000; i++) {
+    uint32_t hw = nv_rd32(d, NV_GSP_U + 0x0F4);
+    if (hw & (1u << 31)) reset_done = 1;
+    if (reset_done && !(hw & (1u << 12))) {
+      scrub_done = 1;
+      break;
+    }
+  }
+  uint32_t ctl = nv_rd32(d, NV_GSP_U + NV_FALCON_UC_CTRL);
+  uart_puts("[NV-FWSEC] reset done=");
+  print_int(reset_done);
+  uart_puts(" scrubbed=");
+  print_int(scrub_done);
+  uart_puts(" ctl=");
+  uart_print_hex(ctl);
+  uart_puts(" hwcfg2=");
+  uart_print_hex(nv_rd32(d, NV_GSP_U + 0x0F4));
+  uart_puts("\n");
+  if (!reset_done || !scrub_done) {
+    uart_puts("[NV-FWSEC] reset did not complete (bit31 never set or bit12 never "
+              "cleared): nothing may be loaded into this falcon\n");
+    return -ETIMEDOUT;
+  }
+
+  uint32_t v624 = nv_rd32(d, NV_GSP_U + 0x624);
+  nv_wr32(d, NV_GSP_U + 0x624, v624 | (1u << 7));
+  nv_wr32(d, NV_GSP_U + 0x10C, 0);
+  nv_wr32(d, NV_GSP_U + 0x600, 0x5);
+  uart_puts("[NV-FWSEC] dma cfg 624=");
+  uart_print_hex(nv_rd32(d, NV_GSP_U + 0x624));
+  uart_puts(" 10c=");
+  uart_print_hex(nv_rd32(d, NV_GSP_U + 0x10C));
+  uart_puts(" 600=");
+  uart_print_hex(nv_rd32(d, NV_GSP_U + 0x600));
+  uart_puts("\n");
+  return 0;
+}
+
 int nv_gsp_sec2_start_booter(struct nv_dev *d, const uint8_t *booter,
                              uint32_t len, uint64_t meta_phys) {
   if (!d || !booter || len < 0x7700 + 0x6000) return -EINVAL;
@@ -814,6 +895,14 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
    * Everything above this line is memory work.  This is the first stage that
    * writes to the card, and it is the one the metadata block was built for.
    * The trees, the image and the block all stay resident until it returns. */
+  /* Stage 6a runs before stage 5 in the canonical order, and needs no ucode:
+   * reset the GSP and route its DMA at system memory. */
+  if (bldrc == 0) {
+    int frc = nv_gsp_fwsec_reset(d);
+    uart_puts("[NV-GSP] stage6a (gsp reset) result=");
+    print_int(frc);
+    uart_puts("\n");
+  }
   if (bldrc == 0 && lrc2 == 0 && d->gsp_meta_phys != 0) {
     int src2 = nv_gsp_sec2_start_booter(d, booter.buf, booter.size,
                                         d->gsp_meta_phys);

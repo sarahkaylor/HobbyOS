@@ -337,9 +337,52 @@ the engine-reset pulse alone will never open `0x840000`; and the `0x1400` block
 *is* readable pre-boot, with `0x1438 = 0` (no FWSEC status recorded yet), which
 gives the next stage its success oracle. FWSEC-FRTS — on the GSP falcon, with
 `frtsOffset>>12`/`frtsSize>>12`/`type=2` and `init_cmd = 0x15` — is the next
-stage, and it needs the card's VBIOS for its ucode (AppID `0x85`, found through
-the `FF B8 "BIT\0"` token scan). Reading the VBIOS read-only is therefore the
-next concrete step, before any more writes.
+stage, and it needs the card's VBIOS for its ucode (AppID `0x85`).
+
+### 5.8 The VBIOS chain is resolved, and FWSEC now has a different blocker
+
+`docs/nv-vbios-map.md` settled the ucode lookup from dumped bytes, and the driver
+implements it. This run, on the card:
+
+```
+[NV-VBIOS] images: img0=0xFC00 efi=0x14E00 b2=0x24A00 type2=0xE0 shift=0x14E00
+[NV-VBIOS] ucode table at 0x95BE8 hdr=01 06 06 10
+[NV-VBIOS] slot 9 app=133 logical=0x2F03C -> desc 0x43E3C FWSEC
+[NV-VBIOS] desc hdr=0x032C0301 hdrsize=0x32C stored=0xFF80 imem=0xF200 dmem=0xD80
+           engid=0x400 ucode=9
+[NV-VBIOS] FWSEC payload 0x44168..0x540E8
+```
+
+Every number matches the byte-level map derived independently from a Linux
+guest's dump, including the payload's exact end (`0x44168 + 65408 = 0x540E8`) and
+the `IMEM + DMEM == StoredSize` checksum (`61952 + 3456 = 65408`). The address
+rule that made this hard: VBIOS-internal pointers address a **logical** image with
+the EFI ROM removed, so `flash = logical + 0x14E00` above `0xFC00` — which is why
+`0x80DE8` read as noise when used raw.
+
+Then FWSEC step 1-3, also measured, and it moved the blocker:
+
+```
+[NV-FWSEC] gsp already STOPPED (ctl=0x10): skipping the destructive reset,
+           which measurably fences the window instead of resetting it
+[NV-FWSEC] reset done=1 scrubbed=1 ctl=0x10 hwcfg2=0x47B7
+[NV-FWSEC] dma cfg 624=0xBADF5620 10c=0xBADF5620 600=0xBADF5620
+```
+
+Two findings, both of which changed the code:
+
+1. **The documented falcon reset must not be applied here.** On this card it turns
+   the GSP window fenced (`0x10 → 0xBADF5620`) and `0x0F4` bit 31 never sets. The
+   core is already STOPPED on handover, which is the property that matters, so the
+   reset is skipped — with a test asserting the destructive half does not run on a
+   stopped core and does run on a running one.
+2. **The DMA-configuration registers (`0x600`, `0x624`, `0x10C`) are fenced too.**
+   They read back the inaccessibility signature after being written. So the falcon
+   block past its basic IO page is not ours yet: on this generation the driver is
+   expected to replay the VBIOS's **devinit (golden-register) tables** before any
+   engine register above the IO page is writable. That is the next rung, it is
+   named, and it is the last thing standing between this driver and launching
+   FWSEC.
 
 ### 5.6 What the two contract docs settled (and one plan they killed)
 

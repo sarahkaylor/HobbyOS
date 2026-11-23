@@ -249,118 +249,135 @@ int nv_vbios_probe(struct nv_dev *d) {
     return -ENOENT;
   }
 
-  /* The table header, then the entries: should be 01 06 06 <n> ...
+  /* THE ADDRESS RULE (docs/nv-vbios-map.md section 4): VBIOS-internal pointers
+   * address a LOGICAL image with the EFI ROM image removed.  So a pointer is not
+   * an offset until the size of the image in front of it is added back.  This is
+   * why 0x80DE8 (the token's pointer) reads as noise when used raw: the real
+   * table is at 0x80DE8 + shift.
    *
-   * On this card the pointer came back as 0x80DE8 -- just past a 512 KiB ROM --
-   * and reading there gave nonsense.  Some implementations alias the PROM
-   * aperture modulo the flash size, so the same bytes are also tried with the
-   * address masked to the aperture.  Whichever one validates as a V1 table is
-   * the one used, and the log says which. */
-  uint32_t t = rom_off + uc_table;
-  uint32_t t_alias = (rom_off + uc_table) & (NV_PROM_SIZE - 1);
-  uart_puts("[NV-VBIOS] table at ");
-  uart_print_hex(t);
-  uart_puts(" alias ");
-  uart_print_hex(t_alias);
-  uart_puts(" bytes ");
-  for (int i = 0; i < 6; i++) {
-    uart_print_hex(vb_byte(d, NV_PROM_BASE + t + (uint32_t)i));
-    uart_puts(" ");
-  }
-  uart_puts("| ");
-  for (int i = 0; i < 6; i++) {
-    uart_print_hex(vb_byte(d, NV_PROM_BASE + t_alias + (uint32_t)i));
-    uart_puts(" ");
-  }
+   * shift is derived from the image chain rather than hard-coded, so a VBIOS
+   * update does not silently move it.  Validation rows 2-3 of the recipe make a
+   * wrong shift fail loudly instead of parsing noise. */
+  uint32_t pcir0 = vb_word(d, NV_PROM_BASE + 0x18);
+  uint32_t img0 = vb_word(d, NV_PROM_BASE + pcir0 + 0x10) * 512;
+  uint32_t b1 = img0;
+  uint32_t pcir1 = b1 + vb_word(d, NV_PROM_BASE + b1 + 0x18);
+  uint32_t img1 = vb_word(d, NV_PROM_BASE + pcir1 + 0x10) * 512;
+  uint32_t b2 = b1 + img1;
+  uint32_t pcir2 = b2 + vb_word(d, NV_PROM_BASE + b2 + 0x18);
+  uint32_t type2 = vb_byte(d, NV_PROM_BASE + pcir2 + 0x14);
+  uint32_t shift = b2 - img0;
+  uart_puts("[NV-VBIOS] images: img0=");
+  uart_print_hex(img0);
+  uart_puts(" efi=");
+  uart_print_hex(img1);
+  uart_puts(" b2=");
+  uart_print_hex(b2);
+  uart_puts(" type2=");
+  uart_print_hex(type2);
+  uart_puts(" shift=");
+  uart_print_hex(shift);
   uart_puts("\n");
-  if (vb_byte(d, NV_PROM_BASE + t) != 1 &&
-      vb_byte(d, NV_PROM_BASE + t_alias) == 1) {
-    uart_puts("[NV-VBIOS] the aperture aliases; using the masked offset\n");
-    t = t_alias;
-  }
-  /* The pointer did not land on a V1 table.  Rather than trust a pointer whose
-   * base convention is evidently not what the contract assumed, find the table
-   * by structure: a V1 header followed by entries whose descriptor offsets land
-   * inside the ROM.  Structural search is self-validating, and it reports where
-   * the table actually is so the next reader does not have to re-derive it. */
-  if (vb_byte(d, NV_PROM_BASE + t) != 1) {
-    uint32_t hit = 0;
-    for (uint32_t off = 0x400; off + 64 < NV_PROM_SIZE; off++) {
-      if (vb_byte(d, NV_PROM_BASE + off) != 1) continue;
-      uint32_t h2 = vb_byte(d, NV_PROM_BASE + off + 1);
-      uint32_t e2 = vb_byte(d, NV_PROM_BASE + off + 2);
-      uint32_t c2 = vb_byte(d, NV_PROM_BASE + off + 3);
-      /* The header sizes are 6 or 8 in every table seen published; a looser
-       * filter matched a run of zeros-plus-0x08 and reported a table of
-       * all-zero app ids, which is why it is this narrow. */
-      if ((h2 != 6 && h2 != 8) || (e2 != 6 && e2 != 8)) continue;
-      if (c2 == 0 || c2 > 32) continue;
-      /* Every entry needs a plausible app id and a descriptor pointer that
-       * lands in the ROM and not in the first 1 KiB (headers live there). */
-      int ok = 1;
-      for (uint32_t i = 0; i < c2 && ok; i++) {
-        uint32_t en = off + h2 + i * e2;
-        if (vb_byte(d, NV_PROM_BASE + en) == 0) ok = 0;
-        uint32_t dp = vb_dword(d, NV_PROM_BASE + en + 2);
-        if (dp < 0x400 || dp >= NV_PROM_SIZE) ok = 0;
-      }
-      if (!ok) continue;
-      hit = off;
-      break;
-    }
-    if (!hit) {
-      uart_puts("[NV-VBIOS] structural scan found no V1 ucode table either; the "
-                "pointer base convention is unresolved for this VBIOS\n");
-    }
-    if (hit) {
-      uart_puts("[NV-VBIOS] structural scan found a V1 ucode table at ");
-      uart_print_hex(hit);
-      uart_puts(" (pointer said ");
-      uart_print_hex(t);
-      uart_puts(")\n");
-      t = hit;
-    }
-  }
-  uart_puts("[NV-VBIOS] ucode table hdr=");
-  for (int i = 0; i < 6; i++) {
-    uart_print_hex(vb_byte(d, NV_PROM_BASE + t + (uint32_t)i));
-    uart_puts(" ");
-  }
-  uart_puts("\n");
-  uint32_t ver = vb_byte(d, NV_PROM_BASE + t + 0);
-  uint32_t thdr = vb_byte(d, NV_PROM_BASE + t + 1);
-  uint32_t tesz = vb_byte(d, NV_PROM_BASE + t + 2);
-  uint32_t tcnt = vb_byte(d, NV_PROM_BASE + t + 3);
-  if (ver != 1 || thdr < 6 || tesz < 6 || tcnt == 0 || tcnt > 64) {
-    uart_puts("[NV-VBIOS] ucode table is not V1 as expected; stopping\n");
+  if (vb_word(d, NV_PROM_BASE) != 0xAA55 || vb_word(d, NV_PROM_BASE + b1) != 0xAA55 ||
+      img0 == 0 || img1 == 0 || shift == 0 || type2 != 0xE0) {
+    uart_puts("[NV-VBIOS] image chain does not validate; refusing to translate "
+              "pointers with a guessed shift\n");
     pci_cfg_write8(&pdd, 0x50, c50);
     return -EINVAL;
   }
-  int found85 = 0;
+
+  uint32_t t = uc_table + shift;
+  uart_puts("[NV-VBIOS] ucode table at ");
+  uart_print_hex(t);
+  uart_puts(" hdr=");
+  for (int i = 0; i < 4; i++) {
+    uart_print_hex(vb_byte(d, NV_PROM_BASE + t + (uint32_t)i));
+    uart_puts(" ");
+  }
+  uart_puts("\n");
+  uint32_t ver = vb_byte(d, NV_PROM_BASE + t);
+  uint32_t thdr = vb_byte(d, NV_PROM_BASE + t + 1);
+  uint32_t tesz = vb_byte(d, NV_PROM_BASE + t + 2);
+  uint32_t tcnt = vb_byte(d, NV_PROM_BASE + t + 3);
+  if (ver != 1 || thdr < 6 || tesz < 6 || tcnt == 0 || tcnt > 64 ||
+      t + thdr + tcnt * tesz >= NV_PROM_SIZE) {
+    uart_puts("[NV-VBIOS] translated table is not a V1 ucode table; stopping\n");
+    pci_cfg_write8(&pdd, 0x50, c50);
+    return -EINVAL;
+  }
+
+  /* Walk the slots.  Zero slots are normal here: this card's table has 16 and
+   * only 7 carry an application, so "skip empty" is not an error case. */
+  uint32_t desc = 0;
   for (uint32_t i = 0; i < tcnt; i++) {
     uint32_t e = t + thdr + i * tesz;
-    uint32_t app = vb_byte(d, NV_PROM_BASE + e + 0);
-    uint32_t tgt = vb_byte(d, NV_PROM_BASE + e + 1);
+    uint32_t app = vb_byte(d, NV_PROM_BASE + e);
+    if (app == 0) continue;
     uint32_t dptr = vb_dword(d, NV_PROM_BASE + e + 2);
-    uart_puts("[NV-VBIOS] app=");
+    uart_puts("[NV-VBIOS] slot ");
+    print_int((int)i);
+    uart_puts(" app=");
     print_int((int)app);
-    uart_puts(" target=");
-    print_int((int)tgt);
-    uart_puts(" desc=");
+    uart_puts(" logical=");
     uart_print_hex(dptr);
     if (app == 0x85) {
-      found85 = 1;
-      uart_puts("  <-- FWSEC");
+      desc = dptr + shift;
+      uart_puts(" -> desc ");
+      uart_print_hex(desc);
+      uart_puts(" FWSEC");
     }
     uart_puts("\n");
   }
-  pci_cfg_write8(&pdd, 0x50, c50); /* shadow back on */
-  if (!found85) {
-    uart_puts("[NV-VBIOS] app id 0x85 (FWSEC) not present in the table\n");
+  if (desc == 0) {
+    uart_puts("[NV-VBIOS] no app 0x85 (FWSEC) in the table\n");
+    pci_cfg_write8(&pdd, 0x50, c50);
     return -ENOENT;
   }
-  uart_puts("[NV-VBIOS] FWSEC ucode is in this card's ROM\n");
-  return 0;
+
+  /* Descriptor validation ladder, rows 5-7 of the recipe.  Each check is one the
+   * published V3 layout makes possible, so a bad decode fails here rather than
+   * in the boot ROM with a non-zero mailbox and no explanation. */
+  uint32_t H = vb_dword(d, NV_PROM_BASE + desc);
+  uint32_t hsize = (H >> 16) & 0xFFFF;
+  uint32_t stored = vb_dword(d, NV_PROM_BASE + desc + 4);
+  uint32_t imem = vb_dword(d, NV_PROM_BASE + desc + 0x14);
+  uint32_t dmem = vb_dword(d, NV_PROM_BASE + desc + 0x20);
+  uint32_t engid = vb_dword(d, NV_PROM_BASE + desc + 0x24);
+  uart_puts("[NV-VBIOS] desc hdr=");
+  uart_print_hex(H);
+  uart_puts(" hdrsize=");
+  uart_print_hex(hsize);
+  uart_puts(" stored=");
+  uart_print_hex(stored);
+  uart_puts(" imem=");
+  uart_print_hex(imem);
+  uart_puts(" dmem=");
+  uart_print_hex(dmem);
+  uart_puts(" engid=");
+  uart_print_hex(engid & 0xFFFF);
+  uart_puts(" ucode=");
+  uart_print_hex((engid >> 16) & 0xFF);
+  uart_puts("\n");
+  if (!(H & 1) || ((H >> 8) & 0xFF) != 3 || hsize < 44 || hsize > 0x2000 ||
+      imem + dmem != stored || desc + hsize + stored > NV_PROM_SIZE) {
+    uart_puts("[NV-VBIOS] descriptor fails validation (V3 layout, IMEM+DMEM == "
+              "StoredSize, payload inside the ROM); stopping\n");
+    pci_cfg_write8(&pdd, 0x50, c50);
+    return -EINVAL;
+  }
+  d->ucode_desc = desc;
+  d->ucode_payload = desc + hsize;
+  d->ucode_size = stored;
+  d->ucode_imem = imem;
+  d->ucode_dmem = dmem;
+  d->ucode_engid = engid & 0xFFFF;
+  d->ucode_id = (engid >> 16) & 0xFF;
+  uart_puts("[NV-VBIOS] FWSEC payload ");
+  uart_print_hex(d->ucode_payload);
+  uart_puts("..");
+  uart_print_hex(d->ucode_payload + stored);
+  uart_puts(" (hand this to FWSEC: desc + StoredSize, do not patch it)\n");
+  pci_cfg_write8(&pdd, 0x50, c50); /* shadow back on */
 }
 
 int nv_init(void) {

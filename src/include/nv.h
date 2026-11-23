@@ -104,6 +104,9 @@ struct nv_dev {
   uint64_t gsp_meta_phys; /* the 256-byte metadata block, DMA-able */
   uint64_t radix3_root;   /* the RM image's radix3 tree */
   uint32_t radix3_pages;
+  /* FWSEC ucode as located in the card's VBIOS (nv_vbios_probe). */
+  uint32_t ucode_desc, ucode_payload, ucode_size;
+  uint32_t ucode_imem, ucode_dmem, ucode_engid, ucode_id;
 };
 
 #define NV_FALCON_IDX_PMU 0
@@ -158,6 +161,9 @@ int nv_gsp_probe(struct nv_dev *d);
  * PROM-shadow toggle, which is restored. */
 int nv_vbios_probe(struct nv_dev *d);
 int nv_gsp_boot(struct nv_dev *d);
+/* FWSEC step 1-3: reset the GSP falcon, then route its DMA at system memory.
+ * Needs no ucode, so it is verifiable on its own (docs/nv-pmu-acr-contract.md). */
+int nv_gsp_fwsec_reset(struct nv_dev *d);
 /* Read + parse + hash the staged firmware.  Pure file I/O, zero MMIO writes, so
  * it is safe to run on every boot. */
 int nv_gsp_firmware_check(struct nv_dev *d);
