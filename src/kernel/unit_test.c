@@ -77,6 +77,7 @@ void run_all_unit_tests(void) {
   fpu_sig_test_suite(); /* M6/L63: signal-frame FP image: alignment guard */
   trap_user_class_test_suite(); /* GB-243: GB-101 user-CS classifier decision */
   trap_badvec_arm_test_suite(); /* GB-244: pid-1 kernel-CS DR0 arming decision */
+  pci_test_suite(); /* PCIe bus layer + shared ACPI locator + MSI-X registry */
 #endif
 
   /* -----------------------------------------------------------------------

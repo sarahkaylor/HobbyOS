@@ -59,9 +59,7 @@ struct nv_chip_name {
   const char *name;
 };
 
-static const struct nv_chip_name nv_chips[] = {
-    {0x162, "TU102"}, {0x170, "GA100"}, {0x172, "GA102"},
-    {0x192, "AD102"}, {0x1B2, "GB202"},
+static const struct nv_chip_name nv_chips[] = { {0x162, "TU102"}, {0x170, "GA100"}, {0x172, "GA102"}, {0x192, "AD102"}, {0x1B2, "GB202"},
 };
 
 static const char *nv_chip_lookup(uint32_t chipset) {
@@ -109,7 +107,7 @@ int nv_identify(struct nv_dev *d) {
   if (!d) return -EINVAL;
   d->boot0 = nv_rd32(d, NV_PMC_BOOT_0);
   d->boot1 = nv_rd32(d, NV_PMC_BOOT_1);
-  if (d->boot0 == 0 || d->boot0 == 0xffffffffu) {
+  if (d->boot0 == 0 || d->boot0 == 0xffffffffu || nv_is_poison(d->boot0)) {
     uart_puts("[NV] identify failed: BOOT_0=");
     uart_print_hex(d->boot0);
     uart_puts(" (no register window)\n");
@@ -145,24 +143,36 @@ int nv_identify(struct nv_dev *d) {
 
 /* ---- stage PMC --------------------------------------------------------- */
 
+/* Measured on AD102 (2026-11-22): PMC_ENABLE reads 0x40000000 and PTIMER's
+ * old enable bit (16) does not stick -- from G80 this register is a per-engine
+ * carveout and PTIMER is not gated by it at all.  Gating the bring-up on that
+ * bit cost a whole hardware cycle: the driver stopped at "pmc" and never
+ * probed a single falcon.  So the bit is only touched on the chips whose
+ * documentation gives it that meaning (pre-G80), and the TIMER stage -- which
+ * reads a counter that must advance -- is the actual proof that PTIMER is
+ * alive.  A register read is evidence; a write we cannot verify is not. */
 int nv_pmc_enable_timer(struct nv_dev *d) {
   if (!d) return -EINVAL;
   d->pmc_enable = nv_rd32(d, NV_PMC_ENABLE);
   if (d->pmc_enable == 0xffffffffu) return -EIO;
+  int legacy_timer_bit = d->chipset < 0x50;
   int wrote = 0;
-  if (!(d->pmc_enable & NV_PMC_ENABLE_TIMER)) {
+  if (legacy_timer_bit && !(d->pmc_enable & NV_PMC_ENABLE_TIMER)) {
     nv_wr32(d, NV_PMC_ENABLE, d->pmc_enable | NV_PMC_ENABLE_TIMER);
     d->pmc_enable = nv_rd32(d, NV_PMC_ENABLE);
     wrote = 1;
   }
+  uint32_t intr = nv_rd32(d, NV_PMC_INTR_0);
+  uint32_t pbus = nv_rd32(d, NV_PBUS_INTR_0);
   uart_puts("[NV] pmc enable=");
   uart_print_hex(d->pmc_enable);
   uart_puts(" intr=");
-  uart_print_hex(nv_rd32(d, NV_PMC_INTR_0));
+  uart_print_hex(intr);
+  if (intr == NV_PMC_INTR_POISON) uart_puts("(poison)");
   uart_puts(" pbus_intr=");
-  uart_print_hex(nv_rd32(d, NV_PBUS_INTR_0));
-  uart_puts(wrote ? " (timer bit set)\n" : " (timer bit already set)\n");
-  if (!(d->pmc_enable & NV_PMC_ENABLE_TIMER)) return -EIO;
+  uart_print_hex(pbus);
+  uart_puts(wrote ? " (timer enable bit written)\n"
+                  : " (timer not gated by PMC_ENABLE on this chip)\n");
   d->state = NV_STATE_PMC;
   return 0;
 }
@@ -225,6 +235,7 @@ int nv_timer_probe(struct nv_dev *d, uint32_t *hz_out) {
   uart_puts(" hz~");
   print_int((int)(hz / 1000000u));
   uart_puts("MHz\n");
+  d->timer_hz = hz;
   if (hz_out) *hz_out = hz;
   d->state = NV_STATE_TIMER;
   return 0;
@@ -248,7 +259,9 @@ static int nv_falcon_probe_one(struct nv_dev *d, int idx, uint32_t base,
    * block that is not a falcon; >= 7 is a generation the register layout in
    * nv_regs.h does not describe, and pretending otherwise would corrupt
    * memory the moment ucode is loaded. */
-  if (f->caps2 != 0xffffffffu && f->version >= 3 && f->version <= 6) {
+  if (f->caps2 != 0xffffffffu && !nv_is_poison(f->caps) &&
+      !nv_is_poison(f->caps2) && !nv_is_poison(f->ctl) && f->version >= 3 &&
+      f->version <= 6) {
     f->present = 1;
     d->falcon_mask |= 1u << idx;
   }
@@ -377,6 +390,7 @@ void nv_fill_info(struct nv_dev *d, struct nv_info *out) {
   out->pmc_enable = d->pmc_enable;
   out->gsp_required = (uint32_t)d->gsp_required;
   out->irq_vector = d->irq_vector;
+  out->timer_hz = d->timer_hz;
   out->bar0_phys = d->bar0_phys;
   out->bar0_size = d->bar0_size;
   out->bar1_phys = d->bar1_phys;

@@ -77,6 +77,7 @@ struct nv_dev {
   uint8_t *bar1_window; /* uncached kernel pointer into the VRAM aperture */
 
   uint32_t irq_vector; /* 0 = no MSI-X vector allocated */
+  uint32_t timer_hz;   /* measured PTIMER ticks/s (0 = not measured) */
   int state;
   int failed_stage;
   int gsp_stage;

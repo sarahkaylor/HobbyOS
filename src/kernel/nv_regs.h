@@ -1,6 +1,8 @@
 #ifndef NV_REGS_H
 #define NV_REGS_H
 
+#include <stdint.h>
+
 /* ============================================================================
  *  NVIDIA GPU register map (BAR0), the subset this driver touches.
  *
@@ -40,8 +42,27 @@
 #define NV_PMC_BOOT_0_CHIPSET(v) (((v) >> 20) & 0x1ff)
 
 /* PMC_ENABLE: bit 16 enables PTIMER from NV3 onwards (pmc.rst, "Engine
- * enables": "16: PTIMER [NV3-]").  Every other bit is left exactly as read. */
+ * enables": "16: PTIMER [NV3-]").  MEASURED 2026-11-22 on AD102: the bit reads
+ * 0 and does not stick, because from G80 the register is a per-engine carveout
+ * and PTIMER is not gated by it.  The driver therefore only touches the bit on
+ * pre-G80 chips and trusts the counter itself (see nv_pmc_enable_timer). */
 #define NV_PMC_ENABLE_TIMER (1u << 16)
+
+/* NVIDIA poison value: a read of a register the firmware/hardware will not
+ * answer (e.g. PMC_INTR before a driver owns interrupts) returns 0xBADF5040
+ * rather than a real status.  Observed on AD102 at PMC_INTR_0 and
+ * PBUS_INTR_0 on 2026-11-22; reported as "poison" rather than treated as a
+ * live interrupt state. */
+#define NV_PMC_INTR_POISON 0xBADF5040u
+
+/* A poisoned READ has 0xBADF in the high half (0xBADF5040 for PMC_INTR,
+ * 0xBADF5620 measured on AD102 at BAR0+0x840000, a window that is NOT the SEC2
+ * engine on this chip).  Anything that decodes to a poison value is treated as
+ * "no engine here": a driver that probes a window by shape must not accept a
+ * sentinel as a falcon version. */
+static inline int nv_is_poison(uint32_t v) {
+  return v != 0xffffffffu && (v >> 16) == 0xBADFu;
+}
 
 /* ---- PBUS: host/bus glue, BAR0 + 0x100000 (pbus.rst) ------------------- */
 #define NV_PBUS_INTR_0 0x100100
@@ -87,8 +108,8 @@
 #define NV_FALCON_STATUS_BUSY (0x04C)
 #define NV_FALCON_STATUS_PAUSE (0x05C)
 #define NV_FALCON_MAILBOX0 (0x090) /* host/falcon mailbox pair; the docs list
-                                    * 0x090/0x094 as "???" on v3+ and the
-                                    * driver uses them only in the boot path */
+* 0x090/0x094 as "???" on v3+ and the
+* driver uses them only in the boot path */
 #define NV_FALCON_MAILBOX1 (0x094)
 #define NV_FALCON_UC_CTRL (0x100)
 #define NV_FALCON_UC_ENTRY (0x104) /* ucode entry point (PC low bits) */
@@ -116,10 +137,10 @@
 #define NV_FALCON_SP (0xFEC)
 #define NV_FALCON_PC (0xFF0)
 #define NV_FALCON_HWCFG2_LEGACY (0xFFC) /* pre-v3 host IO index; on v5 this is
-                                         * the "riscv/hwcfg" alias window */
+* the "riscv/hwcfg" alias window */
 
 /* UC_CTRL bits (rnndb uc_cpuctl).  Writing START_TRIGGER starts the
- * processor at UC_ENTRY; RESET_* triggers scrub the memories. */
+* processor at UC_ENTRY; RESET_* triggers scrub the memories. */
 #define NV_FALCON_UC_CTRL_RESET_TLB (1u << 0)
 #define NV_FALCON_UC_CTRL_START (1u << 1)
 #define NV_FALCON_UC_CTRL_RESET_UNK2 (1u << 2)

@@ -54,7 +54,7 @@ struct fake_gpu {
 static struct fake_gpu fg;
 
 static const uint32_t fake_bases[FAKE_NR_FALCON] = {
-    NV_FALCON_PMU_BASE, NV_FALCON_GSP_BASE, NV_FALCON_SEC2_BASE};
+  NV_FALCON_PMU_BASE, NV_FALCON_GSP_BASE, NV_FALCON_SEC2_BASE};
 
 static int fake_falcon_of(uint32_t off) {
   for (int i = 0; i < FAKE_NR_FALCON; i++) {
@@ -99,14 +99,14 @@ static uint32_t fake_rd32(void *ctx, uint32_t off) {
     case 0x084: return fg.scratch[fi][3];
     case NV_FALCON_DATA_INDEX0: return fg.data_idx[fi];
     case NV_FALCON_DATA0: {
-      uint32_t idx = fg.data_ptr[fi]++;
-      return idx < FAKE_DMEM_WORDS ? fg.dmem[fi][idx] : 0xffffffffu;
-    }
+        uint32_t idx = fg.data_ptr[fi]++;
+        return idx < FAKE_DMEM_WORDS ? fg.dmem[fi][idx] : 0xffffffffu;
+      }
     case NV_FALCON_CODE_INDEX: return fg.code_idx[fi];
     case NV_FALCON_CODE: {
-      uint32_t idx = fg.code_ptr[fi]++;
-      return idx < FAKE_IMEM_WORDS ? fg.imem[fi][idx] : 0xffffffffu;
-    }
+        uint32_t idx = fg.code_ptr[fi]++;
+        return idx < FAKE_IMEM_WORDS ? fg.imem[fi][idx] : 0xffffffffu;
+      }
     default: return 0;
     }
   }
@@ -155,19 +155,19 @@ static void fake_wr32(void *ctx, uint32_t off, uint32_t val) {
       fg.data_ptr[fi] = (val >> 2) & 0x3fff;
       break;
     case NV_FALCON_DATA0: {
-      uint32_t idx = fg.data_ptr[fi]++;
-      if (!fg.dmem_corrupt && idx < FAKE_DMEM_WORDS) fg.dmem[fi][idx] = val;
-      break;
-    }
+        uint32_t idx = fg.data_ptr[fi]++;
+        if (!fg.dmem_corrupt && idx < FAKE_DMEM_WORDS) fg.dmem[fi][idx] = val;
+        break;
+      }
     case NV_FALCON_CODE_INDEX:
       fg.code_idx[fi] = val;
       fg.code_ptr[fi] = (val >> 2) & 0x3fff;
       break;
     case NV_FALCON_CODE: {
-      uint32_t idx = fg.code_ptr[fi]++;
-      if (idx < FAKE_IMEM_WORDS) fg.imem[fi][idx] = val;
-      break;
-    }
+        uint32_t idx = fg.code_ptr[fi]++;
+        if (idx < FAKE_IMEM_WORDS) fg.imem[fi][idx] = val;
+        break;
+      }
     default: break;
     }
     return;
@@ -221,26 +221,41 @@ static void test_nv_identify_dead_window(void) {
   EXPECT_EQ(nv_identify(d), -ENODEV);
 }
 
-static void test_nv_pmc_timer_enable(void) {
-  uart_puts("  Running test_nv_pmc_timer_enable...\n");
+/* Pre-G80: bit 16 really is PTIMER's enable, so the driver writes it, and
+ * every other bit must survive the read-modify-write (clobbering PMC_ENABLE
+ * disables engines the firmware may be using). */
+static void test_nv_pmc_timer_enable_legacy(void) {
+  uart_puts("  Running test_nv_pmc_timer_enable_legacy...\n");
   tests_run++;
   struct nv_dev *d = fake_attach();
+  fg.boot0 = (0x40u << 20); /* a pre-G80 chipset */
   fg.pmc_enable = 0x00000003u; /* timer bit clear */
   ASSERT(nv_pmc_enable_timer(d) == 0);
   EXPECT_EQ((int)(fg.pmc_enable & NV_PMC_ENABLE_TIMER), (int)NV_PMC_ENABLE_TIMER);
-  /* Every other enable bit must be preserved: clobbering PMC_ENABLE disables
-   * engines the firmware may be using. */
   EXPECT_EQ((int)(fg.pmc_enable & 0x3u), 0x3);
   EXPECT_EQ((int)d->state, (int)NV_STATE_PMC);
 }
 
-static void test_nv_pmc_timer_enable_refused(void) {
-  uart_puts("  Running test_nv_pmc_timer_enable_refused...\n");
+/* Modern (measured on AD102): the bit does not stick, and that is NOT a
+ * failure -- gating on it stopped the whole bring-up on real hardware.  The
+ * driver must leave the register alone and let the TIMER stage prove PTIMER. */
+static void test_nv_pmc_modern_does_not_gate_on_timer_bit(void) {
+  uart_puts("  Running test_nv_pmc_modern_does_not_gate_on_timer_bit...\n");
   tests_run++;
   struct nv_dev *d = fake_attach();
-  fg.pmc_enable = 0;
-  fg.pmc_ignore_writes = 1;
-  EXPECT_EQ(nv_pmc_enable_timer(d), -EIO);
+  d->chipset = 0x192;
+  fg.pmc_enable = 0x40000000u;
+  fg.pmc_ignore_writes = 1; /* the write would not stick anyway */
+  uint32_t before = fg.pmc_enable;
+  ASSERT(nv_pmc_enable_timer(d) == 0);
+  EXPECT_EQ((int)fg.pmc_enable, (int)before); /* untouched */
+  EXPECT_EQ((int)d->state, (int)NV_STATE_PMC);
+  /* Poison in the interrupt register is reported, not mistaken for state. */
+  fg.pmc_intr = NV_PMC_INTR_POISON;
+  struct nv_dev *d2 = fake_attach();
+  d2->chipset = 0x192;
+  fg.pmc_intr = NV_PMC_INTR_POISON;
+  EXPECT_EQ(nv_pmc_enable_timer(d2), 0);
 }
 
 static void test_nv_timer_read_retry(void) {
@@ -297,10 +312,20 @@ static void test_nv_falcon_probe_rejects_unknown_version(void) {
   tests_run++;
   struct nv_dev *d = fake_attach();
   /* Version 9 is not a falcon layout nv_regs.h describes: loading ucode
-   * through these offsets would corrupt whatever is really there. */
+   * through these offsets would corrupt whatever is really there.  All three
+   * windows are unknown, so the driver must report that it found no engine it
+   * understands -- not "the PMU is missing" while a GSP window passes. */
   fg.falcon_caps2[NV_FALCON_IDX_PMU] = 9;
+  fg.falcon_caps2[NV_FALCON_IDX_GSP] = 9;
+  fg.falcon_caps2[NV_FALCON_IDX_SEC2] = 9;
   EXPECT_EQ(nv_falcon_probe_all(d), -ENODEV);
   EXPECT_EQ((int)d->falcon_mask, 0);
+  EXPECT_EQ(d->falcon[NV_FALCON_IDX_PMU].present, 0);
+  /* A single unknown window among known ones is skipped, not fatal. */
+  struct nv_dev *d3 = fake_attach();
+  fg.falcon_caps2[NV_FALCON_IDX_SEC2] = 9;
+  EXPECT_EQ(nv_falcon_probe_all(d3), 0);
+  EXPECT_EQ((int)d3->falcon_mask, 0x3);
 }
 
 static void test_nv_bringup_stages(void) {
@@ -443,8 +468,8 @@ void nv_test_suite(void) {
   test_nv_identify_ad102();
   test_nv_identify_unknown_chipset();
   test_nv_identify_dead_window();
-  test_nv_pmc_timer_enable();
-  test_nv_pmc_timer_enable_refused();
+  test_nv_pmc_timer_enable_legacy();
+  test_nv_pmc_modern_does_not_gate_on_timer_bit();
   test_nv_timer_read_retry();
   test_nv_timer_probe();
   test_nv_timer_probe_stalled();
