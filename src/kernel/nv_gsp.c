@@ -323,6 +323,15 @@ static int nv_gsp_load_one(struct nv_dev *d, const char *name, int parse_hs,
 #define XF_FULL (1u << 0) /* 0x118: the previous request is still queued */
 #define XF_DONE (1u << 1) /* 0x118: the engine collected the request */
 #define XF_STORE (1u << 5) /* 0x118: DIR=1 -- falcon memory -> system memory */
+/* Should the engine's STORE direction be used to read IMEM back?
+ *
+ * MEASURED r2c: NOT YET.  A store request encoded the way the load is (same
+ * registers, DIR bit set) leaves 0x118 bit 0 (FULL) stuck set, and the next DMA
+ * request -- the FWSEC image load -- then times out on its first block
+ * (`dma state pre-load 118=0x637`, `stage6b result=-110`).  So the encoding is
+ * wrong in a way this driver does not understand yet, and using it costs a
+ * deploy.  Kept, compiled out, with the evidence attached. */
+#define NV_IMEM_STORE_PROBE 0
 #define XF_IDLE (1u << 1) /* 0x120 bit 1: a DIFFERENT status word, not completion */
 #define NV_SEC2_ADDR2 0x841000
 #define NV_BROM_PARAADDR0 (NV_SEC2_ADDR2 + 0x210)
@@ -781,6 +790,7 @@ static void nv_imem_read_row(struct nv_dev *d, struct nv_falcon *f, uint32_t off
   }
 }
 
+#if NV_IMEM_STORE_PROBE
 /* falcon memory -> system memory, one 256-byte block, through the XFER engine.
  * Same four registers as the load, with DIR (0x118 bit 5) set.  Returns 0 when
  * the engine reported the request collected, -ETIMEDOUT otherwise; the caller
@@ -891,6 +901,8 @@ static void nv_imem_store_row(struct nv_dev *d, uint32_t fbase,
   uart_puts("\n");
 }
 
+#endif /* NV_IMEM_STORE_PROBE */
+
 /* ---- the 0x1400 status block as a read-only control ---------------------
  *
  * "Was 0x1438 written, or was the region cleared?" is answered by the
@@ -986,9 +998,10 @@ static void nv_imem_write_probe(struct nv_dev *d, struct nv_falcon *f,
   uart_puts(" pio_back=");
   uart_print_hex(back);
   (*pio_ok) = (rrc == 0 && back == pat) ? 1 : 0;
+#if NV_IMEM_STORE_PROBE
   /* The engine's view of the same word. */
   uint8_t *bb = (uint8_t *)phys_to_virt(scratch_phys);
-  for (uint32_t i = 0; i < NV_FLCN_BLOCK; i++) bb[i] = 0x5A;
+  for (uint32_t i = 0; i < NV_FLCN_BLOCK; i++) bb[i] = 0xA6;
   int s = falcon_dma_store_block(d, f->base, scratch_phys, 0, off, 1, 1);
   if (s == 0) {
     eng = (uint32_t)bb[0] | ((uint32_t)bb[1] << 8) | ((uint32_t)bb[2] << 16) |
@@ -999,13 +1012,20 @@ static void nv_imem_write_probe(struct nv_dev *d, struct nv_falcon *f,
   uart_puts(" eng_back=");
   uart_print_hex(eng);
   (*eng_ok) = (s == 0 && eng == pat) ? 1 : 0;
-  uart_puts((*pio_ok && *eng_ok)
-                ? " BOTH-READ-BACK (IMEM is writable and readable: the marker "
-                  "elsewhere is CONTENT, not a refusal)\n"
-                : (*pio_ok ? " PIO-ONLY (the port reads back the pattern but the "
-                              "engine copy does not: judge IMEM by the port only)\n"
-                           : " NOT-WRITABLE-OR-NOT-READABLE (IMEM refuses this "
-                             "port; nothing about its content can be concluded)\n"));
+#else
+  (void)scratch_phys;
+  (void)eng;
+  uart_puts(" store_probe=disabled(see NV_IMEM_STORE_PROBE)");
+  (*eng_ok) = 0;
+#endif
+  if (*pio_ok)
+    uart_puts(" PORT-READS-BACK (a pattern written through the port reads back, "
+              "so IMEM content IS visible this way and the marker elsewhere is "
+              "content, not a refusal)\n");
+  else
+    uart_puts(" PORT-CANNOT-CONFIRM (a pattern written through the port does not "
+              "read back: the code port refuses IMEM, so no read through it says "
+              "anything about what the code memory holds)\n");
 }
 
 /* The five words that describe the last DMA request this host programmed.
@@ -1659,6 +1679,7 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
        * 0x1000 would sit at 0x4000, and this row would say so by name. */
       int imem_ok = 0;
       {
+#if NV_IMEM_STORE_PROBE
         int sm = 0, st = 0;
         if (!imem_scratch) {
           uart_puts("[NV-IMEM] store-block skipped: no contiguous frame\n");
@@ -1668,6 +1689,7 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
             nv_imem_store_row(d, NV_GSP_U, buf, d->ucode_imem, st_probe[i],
                               imem_scratch, &sm, &st);
         }
+#endif
         /* The port's own view of the block the write probe planted: if the
          * pattern is gone, the load wrote that block; if it is still there, the
          * load never did. */
@@ -1693,6 +1715,7 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
           else
             uart_puts(" SOME OTHER VALUE (a third state: report it as raw)\n");
         }
+#if NV_IMEM_STORE_PROBE
         uart_puts("[NV-IMEM] verdict=");
         if (st == 0)
           uart_puts("NO-STORE-PATH (the engine never took a store request)\n");
@@ -1703,6 +1726,7 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
         } else
           uart_puts("IMEM COPY DISAGREES WITH THE STAGED BYTES (the rows above "
                     "name the first word)\n");
+#endif
       }
       /* A port read that matched would be just as good as the engine copy. */
       if (im.probes > 0 && im.match == im.probes) imem_ok = 1;
@@ -2191,32 +2215,105 @@ out:
   return rc;
 }
 
+/* The metadata block's `verified` field, read and written byte-wise (it is a
+ * wire structure the firmware also touches). */
+#define NV_WPR_OFF_VERIFIED 0xF8u
+#define NV_WPR_VERIFIED_WORD 0xA0A0A0A0A0A0A0A0ULL
+
+/* `force` = run the attempt even when the SEC2 window refuses to be read. */
+int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
+                                uint32_t len, uint64_t meta_phys, int force);
+
+static uint64_t nv_meta_get64(const uint8_t *p) {
+  uint64_t v = 0;
+  for (int i = 7; i >= 0; i--) v = (v << 8) | p[i];
+  return v;
+}
+
+static void nv_meta_put64(uint8_t *p, uint64_t v) {
+  for (int i = 0; i < 8; i++) {
+    p[i] = (uint8_t)v;
+    v >>= 8;
+  }
+}
+
 int nv_gsp_sec2_start_booter(struct nv_dev *d, const uint8_t *booter,
                              uint32_t len, uint64_t meta_phys) {
+  return nv_gsp_sec2_start_booter_ex(d, booter, len, meta_phys, 0);
+}
+
+/* `force` runs the attempt even when the SEC2 window refuses to be read.
+ *
+ * Why that is worth a deploy: the fence is READ-side only (measured on the GSP
+ * window: every write lands, every read answers the fence word), and the
+ * booter's own verdict channel -- the metadata block's `verified` word -- lives
+ * in host memory, so the question "did the booter run?" does not need the
+ * fenced window at all.  The window's refusal therefore stops the *observation*
+ * of the attempt, not the attempt.
+ *
+ * The assumption being spent: that SEC2's window is like the GSP's in this
+ * respect.  It is measured on the GSP and INFERRED here; if the booter does not
+ * run, one reading is that SEC2's fence also drops writes.
+ *
+ * And because `verified` == 0 is also what an untouched block reads, it is
+ * pre-filled with a sentinel before the start and logged after: a value that
+ * came back is evidence, a value nobody wrote is not. */
+int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
+                                uint32_t len, uint64_t meta_phys, int force) {
   if (!d || !booter || len < 0x7700 + 0x6000) return -EINVAL;
   if (meta_phys == 0) return -EINVAL;
 
-  int rc = sec2_unfence(d);
-  if (rc != 0) return rc;
+  uint8_t *meta = (uint8_t *)phys_to_virt(meta_phys);
+  uint64_t ver_before = meta ? nv_meta_get64(meta + NV_WPR_OFF_VERIFIED) : 0;
 
-  /* Halt it: never load a core that is running. */
+  int rc = sec2_unfence(d);
+  if (rc != 0 && !force) return rc;
+  if (rc != 0) {
+    uart_puts("[NV-SEC2] FORCED: the fence refused the read path.  The fence is "
+              "read-side only (measured on the GSP window) and the booter's "
+              "verdict channel -- the metadata's verified word -- is in host "
+              "memory, so the attempt is made and judged there\n");
+  }
+  /* Pre-fill the verdict word: 0 is also "nobody wrote here". */
+  if (meta) {
+    nv_meta_put64(meta + NV_WPR_OFF_VERIFIED, 0x5EC2A0A0ULL);
+    uart_puts("[NV-SEC2] meta verified prefill: was=");
+    uart_print_hex(ver_before);
+    uart_puts(" now=");
+    uart_print_hex(nv_meta_get64(meta + NV_WPR_OFF_VERIFIED));
+    uart_puts(" (sentinel 0x5ec2a0a0; the booter must overwrite it with "
+              "0xa0a0...)\n");
+  }
+
+  /* Halt it: never load a core that is running.  On a fenced window the
+   * control word cannot be read, so the reset is issued and the launch is not
+   * gated on a value the window refuses to show. */
   uint32_t ctl = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL);
-  if (!(ctl & NV_FALCON_UC_CTRL_STOPPED)) {
+  int ctl_readable = !(ctl == NV_REG_FENCED || ctl == 0xffffffffu);
+  if (!ctl_readable) {
     nv_wr32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL,
             NV_FALCON_UC_CTRL_RESET_TLB | NV_FALCON_UC_CTRL_RESET_UNK2 |
                 NV_FALCON_UC_CTRL_RESET_UNK3);
-    for (int i = 0; i < 100000; i++) {
-      ctl = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL);
-      if (ctl & NV_FALCON_UC_CTRL_STOPPED) break;
+    uart_puts("[NV-SEC2] halt unobservable (ctl reads the fence word): reset "
+              "issued, launch NOT gated on it\n");
+  } else {
+    if (!(ctl & NV_FALCON_UC_CTRL_STOPPED)) {
+      nv_wr32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL,
+              NV_FALCON_UC_CTRL_RESET_TLB | NV_FALCON_UC_CTRL_RESET_UNK2 |
+                  NV_FALCON_UC_CTRL_RESET_UNK3);
+      for (int i = 0; i < 100000; i++) {
+        ctl = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL);
+        if (ctl & NV_FALCON_UC_CTRL_STOPPED) break;
+      }
     }
+    uart_puts("[NV-SEC2] halt ctl=");
+    uart_print_hex(ctl);
+    if (!(ctl & NV_FALCON_UC_CTRL_STOPPED)) {
+      uart_puts(" FAILED (never reached STOPPED)\n");
+      return -ETIMEDOUT;
+    }
+    uart_puts("\n");
   }
-  uart_puts("[NV-SEC2] halt ctl=");
-  uart_print_hex(ctl);
-  if (!(ctl & NV_FALCON_UC_CTRL_STOPPED)) {
-    uart_puts(" FAILED (never reached STOPPED)\n");
-    return -ETIMEDOUT;
-  }
-  uart_puts("\n");
 
   /* The DMA reads system memory coherently and physically. */
   nv_wr32(d, NV_SEC2_FBIF_TRANSCFG, NV_LOCAL_TRANSCFG_COHERENT);
@@ -2310,6 +2407,41 @@ int nv_gsp_sec2_start_booter(struct nv_dev *d, const uint8_t *booter,
   uart_puts(" mailbox0=");
   uart_print_hex(mb0);
   uart_puts("\n");
+
+  /* The verdict that does not need the fenced window: did the booter write its
+   * own acknowledgement into the metadata block?  Polled for a bounded time,
+   * because the booter builds WPR2 before it answers. */
+  int verified = 0;
+  if (meta) {
+    uint64_t v = nv_meta_get64(meta + NV_WPR_OFF_VERIFIED);
+    uint64_t t0 = 0, now = 0;
+    int have_t = nv_timer_read(d, &t0) == 0;
+    for (int i = 0; i < 200000; i++) {
+      v = nv_meta_get64(meta + NV_WPR_OFF_VERIFIED);
+      if (v == NV_WPR_VERIFIED_WORD) break;
+      if (have_t && (i & 0x3f) == 0 && nv_timer_read(d, &now) == 0 &&
+          now - t0 > 300000000ULL)
+        break; /* 300 ms: the reference's own budget for this step */
+    }
+    uart_puts("[NV-SEC2] meta verified=");
+    uart_print_hex(v);
+    uart_puts(" (radix3=");
+    uart_print_hex(nv_meta_get64(meta + 0x10));
+    uart_puts(" size=");
+    uart_print_hex(nv_meta_get64(meta + 0x18));
+    uart_puts(")");
+    if (v == NV_WPR_VERIFIED_WORD) {
+      verified = 1;
+      uart_puts(" verdict=0xA0A0... THE BOOTER RAN AND WPR2 IS BUILT\n");
+    } else if (v == 0x5EC2A0A0ULL) {
+      uart_puts(" verdict=STILL THE SENTINEL (nothing wrote the metadata block: "
+                "the booter did not run, or could not reach host memory)\n");
+    } else {
+      uart_puts(" verdict=NEITHER THE SENTINEL NOR 0xA0A0 (a third state: report "
+                "it as raw)\n");
+    }
+  }
+  if (verified) return 0;
   if (!halted) {
     uart_puts("[NV-SEC2] the booter never halted: it is spinning or the start "
               "did not take\n");
@@ -2613,8 +2745,12 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
     uart_puts("\n");
   }
   if (bldrc == 0 && lrc2 == 0 && d->gsp_meta_phys != 0) {
-    int src2 = nv_gsp_sec2_start_booter(d, booter.buf, booter.size,
-                                        d->gsp_meta_phys);
+    /* FORCED (round 2): the fence gate below is a read-side refusal, and the
+     * booter's own verdict -- the metadata block's `verified` word -- is in host
+     * memory, so the attempt is made and judged there instead of being refused
+     * before it starts.  See nv_gsp_sec2_start_booter_ex. */
+    int src2 = nv_gsp_sec2_start_booter_ex(d, booter.buf, booter.size,
+                                           d->gsp_meta_phys, 1);
     uart_puts("[NV-GSP] stage5 result=");
     print_int(src2);
     uart_puts(src2 == 0 ? " (booter ran and reported success)\n"
