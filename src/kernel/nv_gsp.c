@@ -530,22 +530,29 @@ int nv_gsp_fwsec_reset(struct nv_dev *d) {
    * it, so the reset was not needed for the property that matters -- never load
    * a running core -- and attempting it costs the window.  So: skip the
    * destructive half when the core is already stopped, and say so. */
+  /* The reset is REQUIRED for STARTCPU to be accepted -- measured: without it the
+   * core answers START with "still halted".  It was previously skipped because
+   * applying it made the window read as fenced, but that fence is read-side only
+   * (measured), so the reset was probably working all along and the driver was
+   * misreading the result.  Do it unconditionally, and wait with a delay rather
+   * than a poll, because 0x0F4 (the reset/scrub status) is inside the fenced
+   * span and cannot be read. */
   uint32_t ctl0 = nv_rd32(d, NV_GSP_U + NV_FALCON_UC_CTRL);
-  int already_stopped = (ctl0 & NV_FALCON_UC_CTRL_STOPPED) != 0;
-  if (already_stopped) {
-    uart_puts("[NV-FWSEC] gsp already STOPPED (ctl=");
-    uart_print_hex(ctl0);
-    uart_puts("): skipping the destructive reset, which measurably fences the "
-              "window instead of resetting it\n");
-  } else {
-    uint32_t v48 = nv_rd32(d, NV_GSP_U + 0x048);
-    nv_wr32(d, NV_GSP_U + 0x048, v48 & ~3u);
-    nv_wr32(d, NV_GSP_U + 0x014, 0xffffffffu);
-    nv_wr32(d, NV_GSP_U + 0x3C0, 1);
-    for (volatile int spin = 0; spin < 200; spin++) {
-    }
-    nv_wr32(d, NV_GSP_U + 0x3C0, 0);
+  uart_puts("[NV-FWSEC] gsp ctl before reset=");
+  uart_print_hex(ctl0);
+  uart_puts(" (reset is done unconditionally: the status word it is judged by is "
+            "unreadable here)\n");
+  uint32_t v48 = nv_rd32(d, NV_GSP_U + 0x048);
+  nv_wr32(d, NV_GSP_U + 0x048, v48 & ~3u);
+  nv_wr32(d, NV_GSP_U + 0x014, 0xffffffffu);
+  nv_wr32(d, NV_GSP_U + 0x3C0, 1);
+  for (volatile int spin = 0; spin < 2000; spin++) {
   }
+  nv_wr32(d, NV_GSP_U + 0x3C0, 0);
+  /* Scrubbing: bounded, ~20 ms spec, given generous margin under a VM. */
+  for (volatile int spin = 0; spin < 2000000; spin++) {
+  }
+  int already_stopped = 1;
 
   /* Bounded: 150 us for the reset to complete, 20 ms for scrubbing.  The loop
    * counts are generous because a VM's TSC pacing is not the card's. */
@@ -657,6 +664,37 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
   uart_puts("[NV-FWSEC] DMEM loaded\n");
 
   nv_wr32(d, NV_GSP_U + 0x104, 0);
+
+  /* Does the core accept a start?  0x110100 lies in a READABLE block, so unlike
+   * most of this window it can answer.  STOPPED (bit 4) clearing is the proof
+   * that the start took; if it stays set, no ucode/descriptor question matters
+   * yet. */
+  {
+    uint32_t pre = nv_rd32(d, NV_GSP_U + 0x100);
+    nv_wr32(d, NV_GSP_U + 0x100, NV_FALCON_UC_CTRL_START);
+    uint32_t post = nv_rd32(d, NV_GSP_U + 0x100);
+    uart_puts("[NV-FWSEC] start-probe ctl pre=");
+    uart_print_hex(pre);
+    uart_puts(" post=");
+    uart_print_hex(post);
+    /* A masked read cannot answer this: after the reset the whole word comes
+     * back as the fence word, whose bit 4 is clear, which would read as
+     * "accepted" and means nothing.  Only conclude when the value is real. */
+    if (post == NV_REG_FENCED || post == 0xffffffffu)
+      uart_puts(" (ctl unreadable after reset: acceptance cannot be judged here; "
+                "MAILBOX0 is the only observable)\n");
+    else
+      uart_puts((post & NV_FALCON_UC_CTRL_STOPPED) ? " START REFUSED (still STOPPED)\n"
+                                                   : " START ACCEPTED\n");
+  }
+  /* The GSP's boot-ROM parameters live in the RISC-V block, inside the fenced
+   * span.  Write them anyway: writes land where reads do not (measured), so the
+   * only cost is nothing and the alternative is a core that never validates. */
+  nv_wr32(d, 0x111210, 0x10);
+  nv_wr32(d, 0x11119C, 1);
+  nv_wr32(d, 0x111198, d->ucode_id ? d->ucode_id : 3);
+  nv_wr32(d, 0x111180, 1);
+  uart_puts("[NV-FWSEC] brom(gsp) para/engid/ucode/modsel written at 0x1112xx\n");
   for (int variant = 0; variant < 2; variant++) {
     if (variant == 1) {
       /* bl-dmem descriptor, 11 dwords, INFERRED layout. */
