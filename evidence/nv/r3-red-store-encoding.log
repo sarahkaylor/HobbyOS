@@ -1,0 +1,18 @@
+# r3 red run: the store-encoding case fails when the DIR bit is wrong
+#
+# Mutation (one line, src/kernel/nv_flcn.c):
+#   cmd |= NV_FLCN_XF_DIR;      ->   cmd |= (1u << 6);   /* wrong direction bit */
+#
+# Gate line, from `TOOLS_SKIP=1 BROWSER_SKIP=1 ./run_unit_tests_intel.sh`
+# on the c4 box (/srv/nv/wp-a3), kernel unit tier:
+#
+  Running test_nv_flcn_store_encodings...
+EXPECT_EQ FAILED: (int)nv_flcn_store_cmd(256u, 0, 0, NV_FLCN_STORE_V_PLAIN) == 0x620 at src/kernel/nv_flcn_test.c:259
+...
+Tests run:    581
+Tests failed: 1
+Tests failed!
+#
+# Reverted; the green run on the same tree reports "Tests run: 581 / Tests
+# failed: 0 / UNIT TESTS PASSED".  The case names the encoding, so the failure
+# is legible without reading the encoder.
