@@ -315,6 +315,10 @@ int nv_bringup(struct nv_dev *d) {
     d->failed_stage = NV_STATE_FALCON;
     return rc;
   }
+  /* The firmware stage only ever *observes* here: WPR2, mailbox pair, RISC-V
+   * status.  It cannot fail the bring-up -- a card with firmware already
+   * running is a fact to report, not an error. */
+  (void)nv_gsp_probe(d);
   return 0;
 }
 
@@ -348,22 +352,32 @@ int nv_ioc_size(unsigned long req) {
   if (req == NV_IOC_INFO) return (int)sizeof(struct nv_info);
   if (req == NV_IOC_REG_READ) return (int)sizeof(struct nv_reg_req);
   if (req == NV_IOC_SELFTEST) return (int)sizeof(struct nv_selftest_req);
+  if (req == NV_IOC_PEEK) return (int)sizeof(struct nv_peek_req);
   return -1;
 }
 
 /* Register reads are restricted to the blocks the driver owns and can name.
  * A blanket "read any BAR0 offset" ioctl is a hardware-DoS primitive (some
- * offsets are write-triggered or read-clear), so the whitelist is explicit. */
+ * offsets are write-triggered or read-clear), so the whitelist is explicit and
+ * grows only when a bring-up stage needs a block:
+ *   PMC, PTIMER, PBUS                  -- identification and time
+ *   the three falcon windows (+0x2000)  -- processors; the GSP window is larger
+ *                                          than 4 KiB on this generation, and
+ *                                          the RISC-V core lives inside it
+ *   PFB 0x1F0000..0x200000              -- WPR2 base/size/lock registers, which
+ *                                          the GSP stage must read before it
+ *                                          programs anything
+ *   the 0x840000 window                -- kept so evidence of a poisoned window
+ *                                          stays reproducible */
 static int nv_reg_allowed(uint32_t off) {
-  if (off < 0x1000) return 1;                    /* PMC */
-  if (off >= 0x9000 && off < 0xA000) return 1;   /* PTIMER */
+  if (off < 0x1000) return 1;                      /* PMC */
+  if (off >= 0x9000 && off < 0xA000) return 1;     /* PTIMER */
   if (off >= 0x100000 && off < 0x101000) return 1; /* PBUS */
-  uint32_t bases[3] = {NV_FALCON_PMU_BASE, NV_FALCON_GSP_BASE,
-                       NV_FALCON_SEC2_BASE};
-  for (int i = 0; i < 3; i++) {
-    if (off >= bases[i] && off < bases[i] + 0x2FF) return 1;
-    if (off >= bases[i] + 0xFE8 && off <= bases[i] + 0xFFC) return 1;
-  }
+  if (off >= 0x1F0000 && off < 0x200000) return 1; /* PFB: WPR2 et al. */
+  if (off >= NV_FALCON_SEC2_BASE && off < NV_FALCON_SEC2_BASE + 0x1000)
+    return 1;
+  if (off >= NV_FALCON_PMU_BASE && off < NV_FALCON_PMU_BASE + 0x2000) return 1;
+  if (off >= NV_FALCON_GSP_BASE && off < NV_FALCON_GSP_BASE + 0x3000) return 1;
   return 0;
 }
 
@@ -405,6 +419,11 @@ void nv_fill_info(struct nv_dev *d, struct nv_info *out) {
     out->falcon_busy[i] = d->falcon[i].busy;
   }
   out->gsp_stage = (uint32_t)d->gsp_stage;
+  out->wpr2_lo = d->wpr2_lo;
+  out->wpr2_hi = d->wpr2_hi;
+  out->gsp_msg0 = d->gsp_msg0;
+  out->gsp_msg1 = d->gsp_msg1;
+  out->gsp_ucctl = d->gsp_ucctl;
 }
 
 int nv_ioctl(struct process *p, int fd, unsigned long req, uint64_t arg) {
@@ -426,6 +445,28 @@ int nv_ioctl(struct process *p, int fd, unsigned long req, uint64_t arg) {
     if (!nv_reg_allowed(rq.off)) return -EPERM;
     rq.val = nv_rd32(d, rq.off);
     return vm_kwrite(p, arg, &rq, (int)sizeof(rq)) == 0 ? 0 : -EFAULT;
+  }
+  if (req == NV_IOC_PEEK) {
+    struct nv_peek_req pr;
+    if (vm_user_read(p, arg, &pr, (int)sizeof(pr)) != 0) return -EFAULT;
+    if (pr.count == 0 || pr.count > NV_PEEK_MAX || (pr.first & 3)) {
+      pr.result = (uint32_t)-EINVAL;
+      (void)vm_kwrite(p, arg, &pr, (int)sizeof(pr));
+      return -EINVAL;
+    }
+    /* The whole requested range must be inside the whitelist: a range that
+     * spans out of it is refused rather than partially served, so a caller
+     * cannot learn anything the whitelist did not intend. */
+    if (!nv_reg_allowed(pr.first) ||
+        !nv_reg_allowed(pr.first + (pr.count - 1) * 4)) {
+      pr.result = (uint32_t)-EPERM;
+      (void)vm_kwrite(p, arg, &pr, (int)sizeof(pr));
+      return -EPERM;
+    }
+    for (uint32_t i = 0; i < pr.count; i++)
+      pr.val[i] = nv_rd32(d, pr.first + i * 4);
+    pr.result = 0;
+    return vm_kwrite(p, arg, &pr, (int)sizeof(pr)) == 0 ? 0 : -EFAULT;
   }
   if (req == NV_IOC_SELFTEST) {
     struct nv_selftest_req sr;

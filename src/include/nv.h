@@ -78,6 +78,12 @@ struct nv_dev {
 
   uint32_t irq_vector; /* 0 = no MSI-X vector allocated */
   uint32_t timer_hz;   /* measured PTIMER ticks/s (0 = not measured) */
+  /* GSP firmware stage observations (nv_gsp.c).  Read-only facts the card
+   * reports about its own firmware state; they are in nv_info so a userspace
+   * tool can see them without a second ioctl. */
+  uint32_t wpr2_lo, wpr2_hi; /* write-protected region base/size (PFB) */
+  uint32_t gsp_msg0, gsp_msg1; /* falcon mailbox pair (boot handshake) */
+  uint32_t gsp_ucctl;          /* RISC-V core status word */
   int state;
   int failed_stage;
   int gsp_stage;
@@ -134,6 +140,11 @@ int nv_read_info(void *buf, int len);
 /* Kernel unit tier (nv_test.c). */
 void nv_test_suite(void);
 
+/* GSP firmware stage (nv_gsp.c): probe is read-only and safe; boot() is the
+ * staged machine and stops at the first unverified contract with -ENOTSUP. */
+int nv_gsp_probe(struct nv_dev *d);
+int nv_gsp_boot(struct nv_dev *d);
+
 /* Falcon engine helpers (nv_falcon.c). */
 int nv_falcon_dmem_write(struct nv_dev *d, const struct nv_falcon *f,
                          uint32_t addr, const uint32_t *words, int n);
@@ -162,7 +173,7 @@ int nv_selftest(struct nv_dev *d, uint32_t which, uint32_t *detail);
  * Uses the Linux _IOC encoding like /dev/gpu (docs/gpu-abi.md), reached
  * through the compat ioctl route in linux_compat_fd.c.  Numbers below 0x40
  * so the request fits a 32-bit unsigned long on any consumer. */
-#define NV_ABI_VERSION 1
+#define NV_ABI_VERSION 2
 #define NV_FALCON_NAME_LEN 8
 
 /* magic 'n': dir(2 bits) | size(14) | type(8) | nr(8), the Linux layout
@@ -176,6 +187,7 @@ int nv_selftest(struct nv_dev *d, uint32_t which, uint32_t *detail);
 #define NV_IOC_INFO NV_IOC(2, 0x01, sizeof(struct nv_info))
 #define NV_IOC_REG_READ NV_IOC(3, 0x02, sizeof(struct nv_reg_req))
 #define NV_IOC_SELFTEST NV_IOC(3, 0x03, sizeof(struct nv_selftest_req))
+#define NV_IOC_PEEK NV_IOC(3, 0x04, sizeof(struct nv_peek_req))
 
 struct nv_info {
   uint32_t abi; /* NV_ABI_VERSION */
@@ -206,11 +218,26 @@ struct nv_info {
   uint32_t falcon_busy[3];
   uint32_t timer_hz;   /* measured PTIMER ticks per second (0 = unmeasured) */
   uint32_t gsp_stage;
+  uint32_t wpr2_lo, wpr2_hi;  /* PFB write-protected region: base and size */
+  uint32_t gsp_msg0, gsp_msg1; /* GSP falcon mailbox pair */
+  uint32_t gsp_ucctl;          /* GSP RISC-V status word */
 };
 
 struct nv_reg_req {
   uint32_t off; /* BAR0 byte offset */
   uint32_t val; /* out: register value */
+};
+
+/* Batch register read for bring-up work: one ioctl, up to 256 words, inside
+ * the driver's whitelist (see nv_reg_allowed).  A per-word ioctl cannot dump a
+ * 4 KiB engine window without 1024 syscalls, and bring-up is exactly the job of
+ * comparing windows of registers against a reference. */
+#define NV_PEEK_MAX 256
+struct nv_peek_req {
+  uint32_t first;  /* BAR0 offset of the first word (4-byte aligned) */
+  uint32_t count;  /* words to read, 1..NV_PEEK_MAX */
+  uint32_t result; /* out: 0 = ok, negative errno */
+  uint32_t val[NV_PEEK_MAX];
 };
 
 struct nv_selftest_req {

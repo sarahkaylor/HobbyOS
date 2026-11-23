@@ -86,6 +86,23 @@ if ! r1 "qm status $VMID" >/dev/null 2>&1; then
   r1 "qm set $VMID --args '$VM_ARGS'" >/dev/null || exit 1
 fi
 
+# Stage the GSP firmware when the fetch script has run.  The driver's next stage
+# loads /NVIDIA/GSP/*.BIN through the normal file API, so a probe run has to
+# carry them on the image -- 37 MB, which is why they live in a gitignored tree
+# and are copied here rather than committed.  Set STAGE_FW=0 to keep them off.
+if [ "${STAGE_FW:-1}" = "1" ] && [ -d third_party/nvfw/ga102/gsp ]; then
+  mmd -i disk.img ::/NVIDIA 2>/dev/null || true
+  mmd -i disk.img ::/NVIDIA/GSP 2>/dev/null || true
+  for f in third_party/nvfw/ad102/gsp/booter_load-*.bin \
+           third_party/nvfw/ad102/gsp/booter_unload-*.bin \
+           third_party/nvfw/ad102/gsp/bootloader-*.bin \
+           third_party/nvfw/ga102/gsp/gsp-*.bin; do
+    [ -f "$f" ] || continue
+    mcopy -o -i disk.img "$f" ::/NVIDIA/GSP/ || exit 1
+    say "staged $(basename "$f") on the image"
+  done
+fi
+
 say "recreating VM $VMID on $PVE_HOST"
 r1 "qm stop $VMID >/dev/null 2>&1; sleep 2; qm status $VMID" || true
 if [ "$GPU" = 1 ]; then

@@ -48,6 +48,9 @@ struct fake_gpu {
   uint32_t last_xfer_off[FAKE_NR_FALCON];
   uint32_t last_xfer_addr[FAKE_NR_FALCON];
   int dmem_corrupt; /* model DMEM that silently drops writes */
+  uint32_t wpr2_lo, wpr2_hi; /* PFB write-protected region */
+  uint32_t mbox0, mbox1;     /* GSP falcon mailboxes */
+  uint32_t riscv_ctl;        /* GSP RISC-V status word */
   uint32_t nwrites;
 };
 
@@ -81,6 +84,20 @@ static void fake_reset(void) {
 
 static uint32_t fake_rd32(void *ctx, uint32_t off) {
   (void)ctx;
+  /* The GSP-specific and PFB registers must be answered BEFORE the generic
+   * falcon-window switch: 0x110040 (+0x040) lives inside the GSP window, so a
+   * test that only patched the window switch would silently read 0 and look
+   * like a driver bug.  (That is exactly the failure this ordering fixes.) */
+  if (off == NV_FALCON_GSP_BASE + 0x040) return fg.mbox0;
+  if (off == NV_FALCON_GSP_BASE + 0x044) return fg.mbox1;
+  if (off == NV_FALCON_GSP_BASE + 0x3C0) return 0;
+  if (off == NV_FALCON_GSP_BASE + 0x1668) return 0;
+  if (off == NV_FALCON_GSP_BASE + 0x1000 + 0x388) return fg.riscv_ctl;
+  if (off == 0x1FA824) return fg.wpr2_lo;
+  if (off == 0x1FA828) return fg.wpr2_hi;
+  if (off == 0x1FA82C) return 0;
+  if (off == 0x1FA830) return 0;
+  if (off == 0x1FA7C8) return 0;
   int fi = fake_falcon_of(off);
   if (fi >= 0) {
     if (fg.falcon_caps2[fi] == 0xffffffffu) return 0xffffffffu;
@@ -328,6 +345,48 @@ static void test_nv_falcon_probe_rejects_unknown_version(void) {
   EXPECT_EQ((int)d3->falcon_mask, 0x3);
 }
 
+/* The firmware probe must be observation-only and must report a card whose
+ * WPR2 is already programmed -- that is the state a re-run finds, and the
+ * difference between "nothing has ever run here" and "someone else's firmware
+ * owns VRAM" changes what the boot stage may do next. */
+static void test_nv_gsp_probe_reports_wpr2(void) {
+  uart_puts("  Running test_nv_gsp_probe_reports_wpr2...\n");
+  tests_run++;
+  struct nv_dev *d = fake_attach();
+  ASSERT(nv_falcon_probe_all(d) == 0);
+  fg.wpr2_lo = 0x00A00000u;
+  fg.wpr2_hi = 0x00000400u; /* size != 0 -> already programmed */
+  fg.mbox0 = 0xDEADBEEFu;
+  fg.mbox1 = 0x12345678u;
+  fg.riscv_ctl = 0x80u; /* ACTIVE bit */
+  ASSERT(nv_gsp_probe(d) == 0);
+  EXPECT_EQ((int)d->wpr2_lo, (int)0x00A00000u);
+  EXPECT_EQ((int)d->wpr2_hi, (int)0x00000400u);
+  EXPECT_EQ((int)d->gsp_msg0, (int)0xDEADBEEFu);
+  EXPECT_EQ((int)d->gsp_ucctl, 0x80);
+  EXPECT_EQ(d->gsp_stage, 1); /* PROBED */
+  /* Probe is a read: it must not have written a single register. */
+  EXPECT_EQ((int)fg.nwrites, 0);
+  /* Probe without a GSP window is -ENODEV, not a crash. */
+  struct nv_dev *d2 = fake_attach();
+  fg.falcon_caps2[NV_FALCON_IDX_GSP] = 0xffffffffu;
+  ASSERT(nv_falcon_probe_all(d2) == 0); /* PMU still present */
+  EXPECT_EQ(nv_gsp_probe(d2), -ENODEV);
+}
+
+/* The boot stage must stop at the first unverified contract and say so, rather
+ * than perform a speculative write into the write-protected region. */
+static void test_nv_gsp_boot_stops_at_gate(void) {
+  uart_puts("  Running test_nv_gsp_boot_stops_at_gate...\n");
+  tests_run++;
+  struct nv_dev *d = fake_attach();
+  ASSERT(nv_falcon_probe_all(d) == 0);
+  fg.uctl[NV_FALCON_IDX_GSP] = 0; /* running: halt must be real work */
+  EXPECT_EQ(nv_gsp_boot(d), -ENOTSUP);
+  EXPECT_EQ(d->gsp_stage, 2); /* HALTED */
+  ASSERT((fg.uctl[NV_FALCON_IDX_GSP] & NV_FALCON_UC_CTRL_STOPPED) != 0);
+}
+
 static void test_nv_bringup_stages(void) {
   uart_puts("  Running test_nv_bringup_stages...\n");
   tests_run++;
@@ -475,6 +534,8 @@ void nv_test_suite(void) {
   test_nv_timer_probe_stalled();
   test_nv_falcon_probe();
   test_nv_falcon_probe_rejects_unknown_version();
+  test_nv_gsp_probe_reports_wpr2();
+  test_nv_gsp_boot_stops_at_gate();
   test_nv_bringup_stages();
   test_nv_dmem_pio_roundtrip();
   test_nv_imem_pio_roundtrip();

@@ -140,6 +140,21 @@ int main(void) {
     print("\n");
   }
 
+  print("nv: gsp stage   ");
+  print_dec((long)info.gsp_stage);
+  print("  wpr2 ");
+  print_hex((long)info.wpr2_lo);
+  print(" size ");
+  print_hex((long)info.wpr2_hi);
+  print("\n");
+  print("nv: gsp mailbox ");
+  print_hex((long)info.gsp_msg0);
+  print(" ");
+  print_hex((long)info.gsp_msg1);
+  print("  riscv_ctl ");
+  print_hex((long)info.gsp_ucctl);
+  print("\n");
+
   if (info.gsp_required) {
     print("nv: gsp         required on this chip; 3D/memory/display work only "
           "after GSP-RM boots\n");
