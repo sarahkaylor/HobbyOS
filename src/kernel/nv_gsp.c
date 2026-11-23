@@ -46,6 +46,7 @@
 #include "nv.h"
 #include "nv_regs.h"
 #include "nv_fw.h"
+#include "nv_flcn.h"
 #include "frame.h"
 #include "kmem.h"
 #include "errno.h"
@@ -319,8 +320,9 @@ static int nv_gsp_load_one(struct nv_dev *d, const char *name, int parse_hs,
 #define XF_SEC(n) (((n) & 0x3) << 2)
 #define XF_WRITE (1u << 5)
 #define XF_SIZE(log2) (((log2) & 0x7) << 8)
-#define XF_FULL (1u << 0)
-#define XF_IDLE (1u << 1)
+#define XF_FULL (1u << 0) /* 0x118: the previous request is still queued */
+#define XF_DONE (1u << 1) /* 0x118: the engine collected the request */
+#define XF_IDLE (1u << 1) /* 0x120 bit 1: a DIFFERENT status word, not completion */
 #define NV_SEC2_ADDR2 0x841000
 #define NV_BROM_PARAADDR0 (NV_SEC2_ADDR2 + 0x210)
 #define NV_BROM_ENGIDMASK (NV_SEC2_ADDR2 + 0x19C)
@@ -330,12 +332,25 @@ static int nv_gsp_load_one(struct nv_dev *d, const char *name, int parse_hs,
 /* One 256-byte-block DMA.  `is_imem` selects the code path (and SEC pages);
  * `src_off` is the offset inside the image, which for IMEM requests is also the
  * address the block lands at. */
+/* What the encoder actually asked for, so the F1 row can quote the parameter
+ * the transfer received rather than a literal repeated at the call site. */
+static uint32_t g_dma_dst_first, g_dma_dst_last, g_dma_nblk;
+
 static int falcon_dma_block(struct nv_dev *d, uint32_t fbase,
                             uint64_t src_phys, uint32_t src_end, uint32_t dst,
                             int is_imem, int sec) {
-  /* Full means the previous request has not been collected yet. */
+  if (g_dma_nblk == 0) g_dma_dst_first = dst;
+  g_dma_dst_last = dst;
+  g_dma_nblk++;
+  /* FULL (0x118 bit 0) means the previous request has not been collected yet.
+   * 0x118 is the command register itself and reads back the engine's own state;
+   * 0x120 is a DIFFERENT status word on this part (measured 0x10 while 0x118
+   * read 0x2, in the same run).  Polling 0x120 for these bits is what made the
+   * load report -ETIMEDOUT on the first block as soon as the window became
+   * readable -- before that the fence word sent the code down its "cannot
+   * watch, pace and continue" path instead. */
   for (int i = 0; i < 200000; i++) {
-    if (!(nv_rd32(d, fbase + NV_XFER_STATUS) & XF_FULL)) break;
+    if (!(nv_rd32(d, fbase + NV_XFER_CTRL) & XF_FULL)) break;
     if (i == 199999) return -110;
   }
   nv_wr32(d, fbase + NV_XFER_EXT_BASE,
@@ -344,8 +359,11 @@ static int falcon_dma_block(struct nv_dev *d, uint32_t fbase,
           (uint32_t)((src_phys >> 40) & 0x1FF));
   nv_wr32(d, fbase + NV_XFER_FALCON_ADDR, dst);
   nv_wr32(d, fbase + NV_XFER_EXT_ADDR, src_end);
-  uint32_t ctrl = XF_SIZE(8) | XF_SEC(sec);
-  if (is_imem) ctrl |= XF_IMEM;
+  /* The command word comes from the one place that encodes it (nv_flcn.c), so
+   * the SIZE field cannot be "8 for 256 bytes" again: that masked to 0, which
+   * asks the engine for a 4-byte transfer, and the engine accepts it silently. */
+  uint32_t ctrl = nv_flcn_xfer_cmd(NV_FLCN_BLOCK, is_imem, sec);
+  if (ctrl == 0xffffffffu) return -EINVAL;
   nv_wr32(d, fbase + NV_XFER_CTRL, ctrl);
   /* Idle means the request left the queue; the writes landed.  But the status
    * register is INSIDE the read-fenced span (measured), so on a fenced window
@@ -354,15 +372,59 @@ static int falcon_dma_block(struct nv_dev *d, uint32_t fbase,
    * mailbox probe taught.  So: if the status reads the fence word, pace the
    * blocks with a short delay and let the final verdict judge the stage. */
   for (int i = 0; i < 200000; i++) {
-    uint32_t st = nv_rd32(d, fbase + NV_XFER_STATUS);
-    if (st == 0xffffffffu || (st >> 16) == 0xBADFu) {
-      for (volatile int spin = 0; spin < 50; spin++) {
+    uint32_t st = nv_rd32(d, fbase + NV_XFER_CTRL);
+    if (st & XF_DONE) return 0; /* bit 1: the request was collected */
+    if (st == NV_REG_FENCED || st == 0xffffffffu) {
+      /* Unobservable window: the transfer still happens, so pace it instead of
+       * aborting -- but pace it by TIME (~10 us, a 256-byte sysmem read several
+       * times over), not by 50 spins of nothing, which issues the next command
+       * before the engine can have drained the last one. */
+      uint64_t t0 = 0, now = 0;
+      if (nv_timer_read(d, &t0) == 0) {
+        for (int k = 0; k < 100000; k++) {
+          if (nv_timer_read(d, &now) == 0 && now - t0 > 10000ULL) break;
+        }
+      } else {
+        for (volatile int spin = 0; spin < 200000; spin++) {
+        }
       }
       return 0;
     }
-    if (st & XF_IDLE) return 0;
   }
   return -110;
+}
+
+/* ---- F2: load a block through the PIO port instead of the DMA -------------
+ *
+ * PLAN.md §2's F2.  The DMA path has four things that can each be wrong and
+ * cannot be observed here (the plug is inside the read-fenced span: 0x110,
+ * 0x114, 0x118, 0x11c and 0x120 all answer 0xBADF5620 in every state this
+ * driver has measured).  The PIO ports are a different mechanism: one writing
+ * index register, one data register, no request, no context, no status word to
+ * poll -- the write completes or it does not, and the ucode's behaviour is the
+ * judge.  This driver has already proved DMEM round-trips through port 0
+ * (nv_selftest), and IMEM needs two extra things both stacks set: the SECRET
+ * bit (28) on the index word for secure pages, and a CODE_VIRT_ADDR write per
+ * block.
+ *
+ * No status polling: the index register's autoincrement makes the block
+ * synchronous by construction, which is exactly why this is the experiment
+ * that does not depend on a readable fence.
+ */
+static int falcon_pio_block(struct nv_dev *d, uint32_t fbase, const uint8_t *src,
+                            uint32_t nbytes, uint32_t dst, int is_imem, int sec) {
+  uint32_t idx_reg = fbase + (is_imem ? NV_FALCON_CODE_INDEX : NV_FALCON_DATA_INDEX0);
+  uint32_t data_reg = fbase + (is_imem ? NV_FALCON_CODE : NV_FALCON_DATA0);
+  uint32_t init = NV_FALCON_IDX_ADDR(dst) | NV_FALCON_IDX_WR_AUTOINC;
+  if (is_imem && sec) init |= (1u << 28); /* SECRET: the page is a secure page */
+  nv_wr32(d, idx_reg, init);
+  if (is_imem) nv_wr32(d, fbase + NV_FALCON_CODE_VIRT_ADDR, 0);
+  for (uint32_t w = 0; w + 3 < nbytes; w += 4) {
+    uint32_t v = (uint32_t)src[w] | ((uint32_t)src[w + 1] << 8) |
+                 ((uint32_t)src[w + 2] << 16) | ((uint32_t)src[w + 3] << 24);
+    nv_wr32(d, data_reg, v);
+  }
+  return 0;
 }
 
 /* Bring SEC2 out of the fence.  Before anything initialises it, the whole
@@ -508,6 +570,153 @@ void nv_gsp_map_windows(struct nv_dev *d) {
   nv_map_window(d, NV_FALCON_PMU_BASE, "pmu 0x10A000");
 }
 
+/* ---- observability the FWSEC experiment queue needs (PLAN.md section 2) ---
+ *
+ * F1-F5 are all "read a register and decide", and the fence makes that
+ * dangerous: a register inside the fenced span answers 0xBADF5620 whether it
+ * holds 0, a real value, or nothing at all (PLAN.md section 6 rule 1).  So
+ * every register an experiment turns on is *established readable in the same
+ * run* -- write a sentinel, read it back, put the register back -- and the raw
+ * values are always logged next to the Boolean.
+ */
+
+/* Write `sentinel`, read it back, then set the register to `restore`.
+ * Returns 1 when the sentinel survived the round trip: the register is
+ * readable and writable right now.  `restore` is supplied by the caller
+ * instead of the pre-write value because on a fenced window the pre-write
+ * value is the fence word itself, and writing that back would be a poison
+ * write. */
+static int nv_probe_word(struct nv_dev *d, uint32_t off, uint32_t sentinel,
+                         uint32_t restore) {
+  uint32_t before = nv_rd32(d, off);
+  nv_wr32(d, off, sentinel);
+  uint32_t back = nv_rd32(d, off);
+  nv_wr32(d, off, restore);
+  uint32_t after = nv_rd32(d, off);
+  uart_puts("[NV-PROBE] @");
+  uart_print_hex(off);
+  uart_puts(" before=");
+  uart_print_hex(before);
+  uart_puts(" wrote=");
+  uart_print_hex(sentinel);
+  uart_puts(" back=");
+  uart_print_hex(back);
+  uart_puts(" restore=");
+  uart_print_hex(after);
+  uart_puts(back == sentinel ? " READABLE+WRITABLE\n"
+                             : " NOT-READ-WRITE (fenced, or writes dropped)\n");
+  return back == sentinel;
+}
+
+/* The five words that describe the last DMA request this host programmed.
+ * 0x110 is the system-memory base (>>8), 0x114 the falcon-memory side
+ * (DMATRFFBOFFS: the *destination*), 0x118 the command, 0x11C the image-side
+ * offset, 0x120 the status.  One row, so a report can quote it verbatim. */
+static void nv_xfer_state(struct nv_dev *d, uint32_t fbase, const char *when) {
+  uart_puts("[NV-FWSEC] dma state ");
+  uart_puts(when);
+  uart_puts(" 110=");
+  uart_print_hex(nv_rd32(d, fbase + NV_XFER_EXT_BASE));
+  uart_puts(" 114=");
+  uart_print_hex(nv_rd32(d, fbase + NV_XFER_FALCON_ADDR));
+  uart_puts(" 118=");
+  uart_print_hex(nv_rd32(d, fbase + NV_XFER_CTRL));
+  uart_puts(" 11c=");
+  uart_print_hex(nv_rd32(d, fbase + NV_XFER_EXT_ADDR));
+  uart_puts(" 120=");
+  uart_print_hex(nv_rd32(d, fbase + NV_XFER_STATUS));
+  uart_puts("\n");
+}
+
+/* ---- work package B: the fuse check -------------------------------------
+ *
+ * PLAN.md section 2 item B / docs/nv-pmu-acr-contract.md section 1.6 item 10.
+ * Every falcon image is signed with a key whose version is fused into the
+ * part; 0x8241C0 + (UcodeId-1)*4 holds that version for the ucode id the
+ * descriptor names.  If the descriptor's SignatureVersions has no version in
+ * common with the fuse, the Boot ROM rejects the image and NO amount of
+ * transport or parameter fixing can help -- which is exactly the branch this
+ * check exists to separate.  Read-only: eight dwords.
+ */
+#define NV_PFUSED_FW_VERSION0 0x8241C0u
+
+static void nv_fuse_check(struct nv_dev *d) {
+  /* The block holds one dword per ucode id, ids 1..N.  The descriptor's own id
+   * can be above 8 (this card's FWSEC is id 9), so the dump is 16 dwords wide
+   * AND the register the verdict uses is read explicitly: an index computed
+   * against the dump's width would silently read past it, which is exactly the
+   * "0 means no version" mistake this check exists to avoid. */
+  uint32_t raw[16];
+  int nfence = 0;
+  uint32_t id = d->ucode_id ? d->ucode_id : 9;
+  for (uint32_t i = 0; i < 16; i++) {
+    raw[i] = nv_rd32(d, NV_PFUSED_FW_VERSION0 + i * 4);
+    if (raw[i] == NV_REG_FENCED || raw[i] == 0xffffffffu) nfence++;
+  }
+  uart_puts("[NV-FUSE] reg 0x8241c0..1ff:");
+  for (uint32_t i = 0; i < 16; i++) {
+    uart_puts(" ");
+    uart_print_hex(raw[i]);
+  }
+  uart_puts(" fenced_words=");
+  print_int(nfence);
+  uart_puts("\n");
+
+  uint32_t fuse_addr = NV_PFUSED_FW_VERSION0 + (id - 1u) * 4u;
+  uint32_t fuse = nv_rd32(d, fuse_addr);
+  uint32_t vers = d->ucode_sigvers;
+  uint32_t idx = nv_fwsec_sig_index(fuse, vers, d->ucode_sigcount);
+
+  uart_puts("[NV-FUSE] ucode=");
+  print_int((int)id);
+  uart_puts(" fuse@");
+  uart_print_hex(fuse_addr);
+  uart_puts("=");
+  uart_print_hex(fuse);
+  uart_puts(" sigvers=");
+  uart_print_hex(vers);
+  uart_puts(" sigcount=");
+  print_int((int)d->ucode_sigcount);
+  uart_puts(" and=");
+  uart_print_hex(fuse & vers);
+  uart_puts(" sig_index=");
+  if (idx == NV_FWSEC_SIG_NONE) {
+    uart_puts("none\n");
+  } else {
+    print_int((int)idx);
+    uart_puts("\n");
+  }
+
+  if (fuse == NV_REG_FENCED || fuse == 0xffffffffu) {
+    uart_puts("[NV-FUSE] verdict=INCONCLUSIVE: the fuse word reads the "
+              "inaccessibility signature, so a zero here is unreadable, not a "
+              "verdict (PLAN.md section 6 rule 1)\n");
+    return;
+  }
+  if (fuse == 0) {
+    uart_puts("[NV-FUSE] verdict=NO-FUSED-VERSION for this ucode id: the "
+              "descriptor cannot authenticate on this part\n");
+    return;
+  }
+  if (idx == NV_FWSEC_SIG_NONE) {
+    uart_puts("[NV-FUSE] verdict=IMAGE-INVALID-FOR-FUSES: fuse says version 0x");
+    uart_print_hex(fuse);
+    uart_puts(" and the descriptor offers only sigvers 0x");
+    uart_print_hex(vers);
+    uart_puts("; no signature the host can patch will verify\n");
+    return;
+  }
+  uart_puts("[NV-FUSE] verdict=COMPATIBLE (fuse and descriptor share a "
+            "version): the image is valid for this part's fuses, so a failure "
+            "is transport or ucode, not fuses. The signature to copy into DMEM "
+            "is index ");
+  print_int((int)idx);
+  uart_puts(" (of ");
+  print_int((int)d->ucode_sigcount);
+  uart_puts(")\n");
+  (void)raw;
+}
+
 /* ---- stage 6a: reset the GSP falcon the way FWSEC expects ----------------
  *
  * docs/nv-pmu-acr-contract.md section 3.3 steps 1-3, which are required before
@@ -543,6 +752,10 @@ int nv_gsp_fwsec_reset(struct nv_dev *d) {
   uart_print_hex(ctl0);
   uart_puts(" (reset is done unconditionally: the status word it is judged by is "
             "unreadable here)\n");
+  /* Is 0x114 readable *before* the destructive half?  F1 judges the DMA by this
+   * register, so whether the reset costs the read path has to be measured in
+   * the same run rather than remembered from another boot. */
+  (void)nv_probe_word(d, NV_GSP_U + NV_XFER_FALCON_ADDR, 0x00C0FFEEu, 0);
   uint32_t v48 = nv_rd32(d, NV_GSP_U + 0x048);
   nv_wr32(d, NV_GSP_U + 0x048, v48 & ~3u);
   nv_wr32(d, NV_GSP_U + 0x014, 0xffffffffu);
@@ -553,34 +766,93 @@ int nv_gsp_fwsec_reset(struct nv_dev *d) {
   /* Scrubbing: bounded, ~20 ms spec, given generous margin under a VM. */
   for (volatile int spin = 0; spin < 2000000; spin++) {
   }
-  int already_stopped = 1;
 
   /* Bounded: 150 us for the reset to complete, 20 ms for scrubbing.  The loop
-   * counts are generous because a VM's TSC pacing is not the card's. */
-  int reset_done = already_stopped, scrub_done = already_stopped;
+   * counts are generous because a VM's TSC pacing is not the card's.
+   *
+   * HONESTY (docs/nv-fwsec-launch-contract.md §6): 0x0F4 sits inside the
+   * read-fenced span, so on this card bit 31 and bit 12 are often the fence
+   * word rather than state.  The previous version initialised both Booleans to
+   * 1 ("already stopped") and so reported `reset done=1 scrubbed=1` without
+   * ever having seen the bits -- a pass nobody observed.  Now the bits are
+   * reported as observed and the launch is deliberately NOT gated on them: the
+   * contract's rule is "do not gate any decision on a read of a fenced block",
+   * and the launch's own verdict channels (0x1438 hi16, 0x840100) are the
+   * gates. */
+  uint32_t hwcfg2 = 0;
+  int bit31 = 0, bit12 = 0;
   for (int i = 0; i < 200000; i++) {
-    uint32_t hw = nv_rd32(d, NV_GSP_U + 0x0F4);
-    if (hw & (1u << 31)) reset_done = 1;
-    if (reset_done && !(hw & (1u << 12))) {
-      scrub_done = 1;
-      break;
-    }
+    hwcfg2 = nv_rd32(d, NV_GSP_U + 0x0F4);
+    bit31 = (hwcfg2 & (1u << 31)) ? 1 : 0;
+    bit12 = (hwcfg2 & (1u << 12)) ? 1 : 0;
+    if (bit31 && !bit12) break;
   }
   uint32_t ctl = nv_rd32(d, NV_GSP_U + NV_FALCON_UC_CTRL);
-  uart_puts("[NV-FWSEC] reset done=");
-  print_int(reset_done);
-  uart_puts(" scrubbed=");
-  print_int(scrub_done);
+  uart_puts("[NV-FWSEC] reset observed bit31=");
+  print_int(bit31);
+  uart_puts(" bit12=");
+  print_int(bit12);
+  uart_puts(" hwcfg2=");
+  uart_print_hex(hwcfg2);
   uart_puts(" ctl=");
   uart_print_hex(ctl);
-  uart_puts(" hwcfg2=");
-  uart_print_hex(nv_rd32(d, NV_GSP_U + 0x0F4));
+  if (hwcfg2 == NV_REG_FENCED || hwcfg2 == 0xffffffffu)
+    uart_puts(" verdict=UNOBSERVABLE (fence word): 0x0f4 is inside the read-fenced "
+              "span, so the reset's own handshake cannot be read here -- the "
+              "launch proceeds and is judged by 0x1438/0x840100 instead\n");
+  else
+    uart_puts(" verdict=READABLE (these are real bits, not the fence word)\n");
+  /* After the reset: is 0x114 still a register we can judge a DMA by? */
+  (void)nv_probe_word(d, NV_GSP_U + NV_XFER_FALCON_ADDR, 0x00C0FFEEu, 0);
+  nv_xfer_state(d, NV_GSP_U, "after-reset");
+
+  /* ---- the two state fixups the reference applies at exactly this point ---
+   *
+   * Both are INFERRED-from-SOURCE and both were missing here, so they are one
+   * change with one question attached: does putting the falcon in the state
+   * the reference leaves it in let STARTCPU reach the core?
+   *
+   *   FALCON_RM (0x084) <- PMC_BOOT_0.  Every falcon enable in the reference
+   *   writes it at the end of the reset, before the first load.
+   *
+   *   The RISC-V core select cleared.  Measured: 0x111668 is unreadable BEFORE
+   *   the reset (0xBADF5620) and reads 0x110 -- RISCV|BRFETCH, VALID clear --
+   *   after the launch attempt, so the reset is where it becomes observable.
+   *   The reference clears the select bit before a falcon (non-RISC-V) load and
+   *   waits for bit 0; a START issued while the core is selected as RISC-V need
+   *   not reach the falcon core at all.
+   */
+  nv_wr32(d, NV_GSP_U + 0x084, nv_rd32(d, 0x000000));
+  uart_puts("[NV-FWSEC] falcon_rm(0x084) <- pmc_boot0=0x");
+  uart_print_hex(nv_rd32(d, 0x000000));
   uart_puts("\n");
-  if (!reset_done || !scrub_done) {
-    uart_puts("[NV-FWSEC] reset did not complete (bit31 never set or bit12 never "
-              "cleared): nothing may be loaded into this falcon\n");
-    return -ETIMEDOUT;
+  {
+    uint32_t bcr = nv_rd32(d, NV_GSP_BCR_CTRL);
+    if (bcr == NV_REG_FENCED || bcr == 0xffffffffu) {
+      uart_puts("[NV-FWSEC] f3 core-select 0x111668 unreadable after reset (");
+      uart_print_hex(bcr);
+      uart_puts("): cannot clear the RISC-V selection\n");
+    } else if (bcr & NV_GSP_BCR_RISCV) {
+      nv_wr32(d, NV_GSP_BCR_CTRL, 0);
+      uint32_t b = bcr;
+      for (int i = 0; i < 100000; i++) {
+        b = nv_rd32(d, NV_GSP_BCR_CTRL);
+        if (b & NV_GSP_BCR_VALID) break;
+      }
+      uart_puts("[NV-FWSEC] f3 core-select cleared: 0x111668 ");
+      uart_print_hex(bcr);
+      uart_puts(" -> ");
+      uart_print_hex(b);
+      uart_puts((b & NV_GSP_BCR_VALID)
+                    ? " (VALID: the falcon core is now the selected core)\n"
+                    : " (VALID never set: the clear did not take)\n");
+    } else {
+      uart_puts("[NV-FWSEC] f3 core-select already falcon: 0x111668=");
+      uart_print_hex(bcr);
+      uart_puts("\n");
+    }
   }
+  (void)nv_probe_word(d, NV_GSP_U + 0x084, 0x5A5A5A5Au, nv_rd32(d, 0x000000));
 
   uint32_t v624 = nv_rd32(d, NV_GSP_U + 0x624);
   nv_wr32(d, NV_GSP_U + 0x624, v624 | (1u << 7));
@@ -630,34 +902,292 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
    * descriptor's own PKCDataOffset).  Both stacks copy 384 bytes there before
    * the DMA; without it the ROM rejects the image and the core never runs. */
   uint8_t sig[384];
-  if (nv_vbios_read(d, d->ucode_desc + 0x2C, sig, sizeof sig) == 0) {
+  /* Which of the descriptor's 384-byte signatures the part's fused key version
+   * selects.  Copying the wrong one is rejected by the Boot ROM with no
+   * host-visible reason, so this is derived (nv_fwsec_sig_index) instead of
+   * being assumed to be the first one.  Measured on this card: fuse at
+   * 0x8241e0 = 1, SignatureVersions 0x3, SignatureCount 2 -> index 1. */
+  {
+    uint32_t id = d->ucode_id ? d->ucode_id : 9;
+    uint32_t fuse = nv_rd32(d, NV_PFUSED_FW_VERSION0 + (id - 1u) * 4u);
+    uint32_t idx = nv_fwsec_sig_index(fuse, d->ucode_sigvers, d->ucode_sigcount);
+    uart_puts("[NV-FWSEC] sig fuse=");
+    uart_print_hex(fuse);
+    uart_puts(" selects index=");
+    if (idx == NV_FWSEC_SIG_NONE) {
+      uart_puts("none (no version the fuse and the descriptor share): the image "
+                "cannot authenticate on this part\n");
+      rc = -EINVAL;
+      goto out;
+    }
+    print_int((int)idx);
+    uart_puts("\n");
+    uint32_t sig_off = d->ucode_desc + 0x2C + idx * (uint32_t)sizeof sig;
+    if (sig_off + (uint32_t)sizeof sig > d->ucode_payload) {
+      uart_puts("[NV-FWSEC] signature index runs past the descriptor block: "
+                "refusing to read inside the payload\n");
+      rc = -EINVAL;
+      goto out;
+    }
+    if (nv_vbios_read(d, sig_off, sig, sizeof sig) != 0) {
+      uart_puts("[NV-FWSEC] PKC signature read FAILED: the ROM aperture did not "
+                "answer\n");
+      rc = -EIO;
+      goto out;
+    }
     for (uint32_t i = 0; i < sizeof sig; i++)
       buf[d->ucode_imem + 0xB24 + i] = sig[i];
-    uart_puts("[NV-FWSEC] PKC signature patched at DMEM 0xB24\n");
+    uart_puts("[NV-FWSEC] PKC signature patched at DMEM 0xB24 from desc+0x");
+    uart_print_hex(idx * (uint32_t)sizeof sig + 0x2C);
+    uart_puts(" head=");
+    for (uint32_t i = 0; i < 4; i++) nv_hex_byte(sig[i]);
+    uart_puts("\n");
+  }
+  /* ---- the FRTS command ------------------------------------------------
+   * FWSEC's payload is a small OS; the host hands it exactly one command
+   * through the DMEMMAPPER application interface in the DMEM image, and the
+   * region it must carve out is FRTS's whole purpose.  Without this patch the
+   * ucode wakes up with init_cmd = 0 and produces no WPR2 -- which looks
+   * identical to "the core never ran" from every host-visible register.
+   * Offsets and field order: docs/nv-pmu-acr-contract.md §3.2, measured
+   * against this card's own DMEM image (appif 0x1C, DMEMMAPPER 0xAE0,
+   * command buffer 0xD40, init_cmd 0xB0C). */
+  {
+    uint8_t *dmem = buf + d->ucode_imem;
+    uint32_t cmd_off = nv_fwsec_cmd_buffer(dmem, d->ucode_dmem, d->ucode_iface);
+    uart_puts("[NV-FWSEC] frts patch dmem_iface=0x");
+    uart_print_hex(d->ucode_iface);
+    uart_puts(" cmd_buf=0x");
+    uart_print_hex(cmd_off);
+    uart_puts(" region_pages=");
+    uart_print_hex(frts_off);
+    uart_puts("/");
+    uart_print_hex(frts_size);
+    uart_puts(" type=2\n");
+    int prc = nv_fwsec_patch_frts(dmem, d->ucode_dmem, d->ucode_iface, frts_off,
+                                  frts_size);
+    uart_puts("[NV-FWSEC] frts result=");
+    print_int(prc);
+    if (prc == 0) {
+      /* Read the staged image back: the evidence is the bytes the DMA will
+       * copy, not the arguments this function was given. */
+      uint32_t init_cmd = 0, w[11];
+      for (uint32_t i = 0; i < 11; i++) w[i] = 0;
+      int rrc = nv_fwsec_read_cmd(dmem, d->ucode_dmem, d->ucode_iface, &init_cmd,
+                                  w, 11);
+      uart_puts(" readback=");
+      print_int(rrc);
+      uart_puts(" init_cmd=0x");
+      uart_print_hex(init_cmd);
+      uart_puts("\n[NV-FWSEC] frts cmd dwords:");
+      for (uint32_t i = 0; i < 11; i++) {
+        uart_puts(" ");
+        uart_print_hex(w[i]);
+      }
+      uart_puts("\n");
+    } else {
+      uart_puts(prc == -ERANGE ? " (command buffer too small)" : " (not the image the descriptor described)");
+      uart_puts("\n");
+      rc = prc;
+      goto out;
+    }
   }
   uart_puts("[NV-FWSEC] ucode staged phys=");
   uart_print_hex(phys);
-  uart_puts(" log2=SIZE(8)=256\n");
+  uart_puts(" dmem_image=+0x");
+  uart_print_hex(d->ucode_imem);
+  uart_puts(" block=256\n");
+
+  /* F1 precondition: is the register the experiment reads a register in THIS
+   * run?  (PLAN.md §6 rule 1 -- a masked read is not evidence.) */
+  nv_xfer_state(d, NV_GSP_U, "pre-load");
+  (void)nv_probe_word(d, NV_GSP_U + NV_XFER_FALCON_ADDR, 0x00C0FFEEu, 0);
 
   /* 256-byte blocks into the GSP this time -- the previous version targeted
    * SEC2 for every transfer, so the ucode never reached the engine it was
    * meant for.  DMEM's tail is padded up to a block boundary. */
-  for (uint32_t off = 0; off < d->ucode_imem; off += 256) {
-    rc = falcon_dma_block(d, NV_GSP_U, phys, off, 0, 1, 1);
-    if (rc != 0) goto out;
-  }
-  for (uint32_t off = 0; off < d->ucode_dmem; off += 256) {
-    rc = falcon_dma_block(d, NV_GSP_U, phys, d->ucode_imem + off, 0, 0, 0);
-    if (rc != 0) goto out;
+  uint32_t nblk = 0, dst_first = 0, dst_last = 0;
+  g_dma_nblk = 0;
+  /* ---- F2 (PLAN.md §2): load the image by PIO, not by DMA -----------------
+   * One constant decides which transport runs, because which one runs *is* the
+   * experiment: the DMA path's status registers are all inside the read-fenced
+   * span (measured twice), so "the request was accepted" cannot be observed
+   * there at all, while the PIO port has no request to accept.  Set to 0 to
+   * run the identical block sequence through the DMA engine. */
+  const int kFwsecPio = 0;
+  uart_puts("[NV-FWSEC] f2 transport=");
+  uart_puts(kFwsecPio ? "PIO (port 0: 0x180/0x184 IMEM with SECRET, 0x1c0/0x1c4 "
+                        "DMEM; no DMA request, no context, no status word)\n"
+                      : "DMA (256-byte requests)\n");
+
+  if (kFwsecPio) {
+    for (uint32_t off = 0; off < d->ucode_imem; off += NV_FLCN_BLOCK) {
+      uint32_t n = d->ucode_imem - off;
+      if (n > NV_FLCN_BLOCK) n = NV_FLCN_BLOCK;
+      rc = falcon_pio_block(d, NV_GSP_U, buf + off, n, off, 1, 1);
+      if (rc != 0) goto out;
+      g_dma_nblk++;
+    }
+    uart_puts("[NV-FWSEC] f2 imem pio blocks=");
+    print_int((int)g_dma_nblk);
+    uart_puts(" bytes=");
+    uart_print_hex(d->ucode_imem);
+    uart_puts("\n");
+    for (uint32_t off = 0; off < d->ucode_dmem; off += NV_FLCN_BLOCK) {
+      uint32_t n = d->ucode_dmem - off;
+      if (n > NV_FLCN_BLOCK) n = NV_FLCN_BLOCK;
+      rc = falcon_pio_block(d, NV_GSP_U, buf + d->ucode_imem + off, n, off, 0, 0);
+      if (rc != 0) goto out;
+      g_dma_nblk++;
+    }
+    /* The DMA-side oracle (0x114) is not programmed by this path, so the F1
+     * row below would be meaningless: say so instead of printing it. */
+    nblk = g_dma_nblk;
+    uart_puts("[NV-FWSEC] f1 not applicable this run: the PIO path never writes "
+              "0x114, so the IMEM destination cannot be read back even in "
+              "principle\n");
+  } else {
+    for (uint32_t off = 0; off < d->ucode_imem; off += NV_FLCN_BLOCK) {
+      rc = falcon_dma_block(d, NV_GSP_U, phys, off, off, 1, 1);
+      if (rc != 0) goto out;
+    }
+    /* ---- F1 (PLAN.md §2): did the image land in the GSP's own memory? -----
+     * Read after the IMEM load and before the DMEM load, which is what the
+     * experiment specifies.  0x114 is the falcon-memory side of the transfer,
+     * so with 0xF200 bytes in 256-byte blocks the last destination this host
+     * asks for is 0xF200-0x100 = 0xF100.  The value the encoder actually
+     * passed is logged next to it, and the readability probe above says
+     * whether the register can answer at all -- on this card it cannot, which
+     * is itself the result: the plan's F1 oracle (0x114) is inside the
+     * read-fenced span. */
+    uart_puts("[NV-FWSEC] f1 requested imem dst first=");
+    uart_print_hex(g_dma_dst_first);
+    uart_puts(" last=");
+    uart_print_hex(g_dma_dst_last);
+    uart_puts(" blocks=");
+    print_int((int)g_dma_nblk);
+    uart_puts(" (a landing image leaves 0x114=0xF100)\n");
+    nv_xfer_state(d, NV_GSP_U, "post-imem");
+    {
+      uint32_t a114 = nv_rd32(d, NV_GSP_U + NV_XFER_FALCON_ADDR);
+      uint32_t want =
+          d->ucode_imem >= NV_FLCN_BLOCK ? d->ucode_imem - NV_FLCN_BLOCK : 0;
+      if (a114 == want) {
+        uart_puts("[NV-FWSEC] f1 verdict=POSITIVE 0x114=0xF100: the last block's "
+                  "destination is the top of IMEM, so the image was addressed "
+                  "into the GSP\n");
+      } else if (a114 == NV_REG_FENCED || a114 == 0xffffffffu) {
+        uart_puts("[NV-FWSEC] f1 verdict=MASKED 0x114 reads the inaccessibility "
+                  "signature, so this register cannot answer on this card; the "
+                  "destination the encoder used is the row above\n");
+      } else if (a114 == 0) {
+        uart_puts("[NV-FWSEC] f1 verdict=NEGATIVE 0x114=0: every block was "
+                  "addressed at falcon offset 0, so the image did not land\n");
+      } else {
+        uart_puts("[NV-FWSEC] f1 verdict=UNEXPECTED 0x114=");
+        uart_print_hex(a114);
+        uart_puts(": neither the top of IMEM nor 0 -- judge by the probe "
+                  "above\n");
+      }
+    }
+    for (uint32_t off = 0; off < d->ucode_dmem; off += NV_FLCN_BLOCK) {
+      rc = falcon_dma_block(d, NV_GSP_U, phys, d->ucode_imem + off, off, 0, 0);
+      if (rc != 0) goto out;
+    }
+    nblk = g_dma_nblk;
+    dst_first = g_dma_dst_first;
+    dst_last = g_dma_dst_last;
   }
   uart_puts("[NV-FWSEC] GSP IMEM+DMEM loaded\n");
+  uart_puts("[NV-FWSEC] blocks total=");
+  print_int((int)nblk);
+  uart_puts(" dst first=");
+  uart_print_hex(dst_first);
+  uart_puts(" last=");
+  uart_print_hex(dst_last);
+  uart_puts(" last-cmd=");
+  uart_print_hex(nv_flcn_xfer_cmd(NV_FLCN_BLOCK, 0, 0));
+  uart_puts("\n");
 
   /* Boot-ROM parameters: the values this image needs, not the booter's. */
+  /* ---- did the image land?  Read it back ---------------------------------
+   *
+   * F1's indirect oracle (0x114) only says what the host asked for.  This says
+   * what the falcon's memory holds: DMEM is non-secure, so a PIO read of the
+   * three patched structures is ground truth, and IMEM is read with the SECRET
+   * bit set the same way it was written.  Values compared are the ones in the
+   * staging buffer, not re-derived constants.
+   *
+   * Gated on 0x120 being readable: nv_falcon_*_read() waits for the xfer queue
+   * to drain, and on a fenced status register that wait is 20 M iterations of
+   * nothing (measured before the core-select clear made this window readable).
+   */
+  {
+    uint32_t st120 = nv_rd32(d, NV_GSP_U + NV_XFER_STATUS);
+    if (st120 == NV_REG_FENCED || st120 == 0xffffffffu) {
+      uart_puts("[NV-FWSEC] readback skipped: 0x120 reads ");
+      uart_print_hex(st120);
+      uart_puts(" (fenced), so the xfer queue cannot be drained\n");
+    } else {
+      struct nv_falcon *gsp = &d->falcon[NV_FALCON_IDX_GSP];
+      uint32_t back[3] = {0, 0, 0};
+      int rd = nv_falcon_dmem_read(d, gsp, 0xB0C, &back[0], 1);
+      int rd2 = nv_falcon_dmem_read(d, gsp, 0xD40, &back[1], 1);
+      int rd3 = nv_falcon_dmem_read(d, gsp, 0xB24, &back[2], 1);
+      uint32_t want_init = 0, want_d40 = 0, want_sig = 0;
+      {
+        const uint8_t *dm = buf + d->ucode_imem;
+        want_init = (uint32_t)dm[0xB0C] | ((uint32_t)dm[0xB0D] << 8) |
+                    ((uint32_t)dm[0xB0E] << 16) | ((uint32_t)dm[0xB0F] << 24);
+        want_d40 = (uint32_t)dm[0xD40] | ((uint32_t)dm[0xD41] << 8) |
+                   ((uint32_t)dm[0xD42] << 16) | ((uint32_t)dm[0xD43] << 24);
+        want_sig = (uint32_t)dm[0xB24] | ((uint32_t)dm[0xB25] << 8) |
+                   ((uint32_t)dm[0xB26] << 16) | ((uint32_t)dm[0xB27] << 24);
+      }
+      uart_puts("[NV-FWSEC] dmem readback rc=");
+      print_int(rd + rd2 + rd3);
+      uart_puts(" init_cmd=");
+      uart_print_hex(back[0]);
+      uart_puts("/");
+      uart_print_hex(want_init);
+      uart_puts(" frts@d40=");
+      uart_print_hex(back[1]);
+      uart_puts("/");
+      uart_print_hex(want_d40);
+      uart_puts(" sig=");
+      uart_print_hex(back[2]);
+      uart_puts("/");
+      uart_print_hex(want_sig);
+      uart_puts((rd == 0 && rd2 == 0 && rd3 == 0 && back[0] == want_init &&
+                 back[1] == want_d40 && back[2] == want_sig)
+                    ? " verdict=DMEM HOLDS THE IMAGE (the load landed and the "
+                      "patches travelled with it)\n"
+                    : " verdict=DMEM MISMATCH (what the falcon holds is not what "
+                      "was staged)\n");
+    }
+  }
+
+  /* Is a write into the BROM parameter window landing?  That block is the one
+   * place the launch contract lists as "never sampled" (its D4), and if writes
+   * there are dropped then the Boot ROM verifies nothing and the core stops in
+   * its own ROM with no host-visible reason.  The probe writes MOD_SEL's real
+   * value first, reads it back, and leaves it in place -- no restore of a
+   * possibly-poisoned word. */
+  (void)nv_probe_word(d, 0x111180, 0x5A5A5A5Au, 1);
   nv_wr32(d, 0x111210, 0xB24); /* PARAADDR = PKCDataOffset */
   nv_wr32(d, 0x11119C, 0x400); /* ENGIDMASK */
   nv_wr32(d, 0x111198, d->ucode_id ? d->ucode_id : 9);
   nv_wr32(d, 0x111180, 1); /* MOD_SEL = RSA3K */
   nv_wr32(d, NV_GSP_U + 0x104, 0);
+  uart_puts("[NV-FWSEC] pre-start 100=");
+  uart_print_hex(nv_rd32(d, NV_GSP_U + NV_FALCON_UC_CTRL));
+  uart_puts(" 104=");
+  uart_print_hex(nv_rd32(d, NV_GSP_U + NV_FALCON_UC_ENTRY));
+  uart_puts(" 118=");
+  uart_print_hex(nv_rd32(d, NV_GSP_U + NV_XFER_CTRL));
+  uart_puts(" 120=");
+  uart_print_hex(nv_rd32(d, NV_GSP_U + NV_XFER_STATUS));
+  uart_puts("\n");
   uart_puts("[NV-FWSEC] brom para=0xB24 engid=0x400 ucode=");
   print_int((int)(d->ucode_id ? d->ucode_id : 9));
   uart_puts("\n");
@@ -666,14 +1196,141 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
    * sentinel in bits 31:16 a run is distinguishable from a no-op. */
   const uint32_t kStale = 0xBEEF0000u;
   nv_wr32(d, 0x1438, kStale);
+  uint32_t ctl_pre = nv_rd32(d, NV_GSP_U + NV_FALCON_UC_CTRL);
   nv_wr32(d, NV_GSP_U + NV_FALCON_UC_CTRL, NV_FALCON_UC_CTRL_START);
+  /* START accepted, or refused?  Two samples a decade apart in time: 0x10 at
+   * both is a refused start (nothing ran); clear at 1 us and 0x10 at 10 ms is a
+   * core that ran and died (docs/nv-fwsec-launch-contract.md step 13). */
+  for (volatile int spin = 0; spin < 400; spin++) {
+  }
+  uint32_t ctl_1us = nv_rd32(d, NV_GSP_U + NV_FALCON_UC_CTRL);
   /* The verdict channel is BAR0 0x1438 (bits 31:16), NOT MAILBOX0: the vendor
    * passes NULL mailboxes for FWSEC, so an untouched mailbox means nothing.  The
    * second observable is the privilege drop: SEC2 stops reading as fenced. */
+  /* Bound the wait the way the contract does: 2 s for the core to halt, with
+   * the verdict channel sampled throughout so a status written early is not
+   * missed.  The first version polled 0x1438 for ~200 k iterations and gave up
+   * while the core was still RUNNING (measured: ctl 0x10 -> 0x0 and stayed),
+   * which read as "never ran" when it meant "still working". */
   uint32_t st = 0;
-  for (int i = 0; i < 200000; i++) {
-    st = nv_rd32(d, 0x1438);
-    if ((st >> 16) != (kStale >> 16)) break;
+  uint32_t ctl_10ms = ctl_1us;
+  int halted = 0;
+  {
+    uint64_t t0 = 0, now = 0;
+    int have_t = nv_timer_read(d, &t0) == 0;
+    static const uint64_t marks[4] = {1000000ULL, 10000000ULL, 100000000ULL,
+                                      1000000000ULL}; /* 1 ms .. 1 s */
+    int mi = 0;
+    uint64_t waited = 0;
+    for (int i = 0; i < 4000000; i++) {
+      st = nv_rd32(d, 0x1438);
+      ctl_10ms = nv_rd32(d, NV_GSP_U + NV_FALCON_UC_CTRL);
+      if ((st >> 16) != (kStale >> 16)) break;      /* FWSEC wrote a status */
+      if (ctl_10ms & NV_FALCON_UC_CTRL_STOPPED) {   /* the core halted */
+        halted = 1;
+        break;
+      }
+      if (have_t && (i & 0xff) == 0 && nv_timer_read(d, &now) == 0) {
+        waited = now - t0;
+        if (mi < 4 && waited >= marks[mi]) {
+          uart_puts("[NV-FWSEC] still running at +");
+          uart_print_hex(waited);
+          uart_puts(" ns: ctl=");
+          uart_print_hex(ctl_10ms);
+          uart_puts(" 1438=");
+          uart_print_hex(st);
+          uart_puts("\n");
+          mi++;
+        }
+        /* 2 s: the reference's own halt budget for this launch. */
+        if (waited > 2000000000ULL) break;
+      }
+    }
+  }
+  uart_puts("[NV-FWSEC] halt wait done halted=");
+  print_int(halted);
+  uart_puts("\n");
+  uart_puts("[NV-FWSEC] after start ctl_1us=");
+  uart_print_hex(ctl_1us);
+  uart_puts(" ctl_late=");
+  uart_print_hex(ctl_10ms);
+  uart_puts(" ctl_before=");
+  uart_print_hex(ctl_pre);
+  uart_puts(" (0x10 at both samples = START refused; clear then 0x10 = ran and "
+            "died)\n");
+
+  /* Every word a later experiment would want, taken in the same run as the
+   * start: mailbox pair, entry point, and the two secondary oracles. */
+  uart_puts("[NV-FWSEC] oracles 040=");
+  uart_print_hex(nv_rd32(d, NV_GSP_U + NV_FALCON_MAILBOX0_FLCN));
+  uart_puts(" 044=");
+  uart_print_hex(nv_rd32(d, NV_GSP_U + NV_FALCON_MAILBOX1_FLCN));
+  uart_puts(" 104=");
+  uart_print_hex(nv_rd32(d, NV_GSP_U + NV_FALCON_UC_ENTRY));
+  uart_puts(" 240=");
+  uart_print_hex(nv_rd32(d, NV_GSP_U + NV_FALCON_SEC_MODE));
+  uart_puts(" 148=");
+  uart_print_hex(nv_rd32(d, NV_GSP_U + 0x148));
+  uart_puts(" 14c=");
+  uart_print_hex(nv_rd32(d, NV_GSP_U + 0x14C));
+  uart_puts("\n");
+  /* If the core is still running, ask it where: TRACEPC (SCTL 0x240, index
+   * 0x148, frame 0x14c).  On a fenced window these read the fence word and the
+   * row says so; on a live one they name the loop the core is sitting in, which
+   * is the only remaining host-side view of a core that will not halt. */
+  if (!halted) {
+    uint32_t sctl = nv_rd32(d, NV_GSP_U + NV_FALCON_SEC_MODE);
+    uint32_t tidx = nv_rd32(d, NV_GSP_U + 0x148);
+    uart_puts("[NV-FWSEC] tracepc sctl=");
+    uart_print_hex(sctl);
+    uart_puts(" tidx=");
+    uart_print_hex(tidx);
+    uint32_t nr = (tidx >> 16) & 0xffu;
+    if (nr > 8u) nr = 8u;
+    for (uint32_t sp = 0; sp < nr; sp++) {
+      nv_wr32(d, NV_GSP_U + 0x148, sp);
+      uart_puts(" f");
+      print_int((int)sp);
+      uart_puts("=");
+      uart_print_hex(nv_rd32(d, NV_GSP_U + 0x14C));
+    }
+    uart_puts("\n");
+  }
+
+  /* F3 (PLAN.md §2): does the GSP report itself in RISC-V mode?  0x111 is
+   * VALID|RISCV|BRFETCH and is only written after a successful FWSEC, so a
+   * pre-launch 0xBADF5620 here and 0x111 later is the whole evidence chain. */
+  {
+    uint32_t bcr = nv_rd32(d, NV_GSP_BCR_CTRL);
+    uart_puts("[NV-FWSEC] f3 bcr_ctrl(0x111668)=");
+    uart_print_hex(bcr);
+    if (bcr == NV_REG_FENCED)
+      uart_puts(" verdict=fenced (unreadable: no RISC-V evidence either way)\n");
+    else if ((bcr & NV_GSP_BCR_VALID) && (bcr & NV_GSP_BCR_RISCV))
+      uart_puts(" verdict=RISCV-MODE (VALID|RISCV set: the switch was taken and "
+                "the core got that far)\n");
+    else
+      uart_puts((bcr & NV_GSP_BCR_VALID)
+                    ? " verdict=core-select set but RISC-V clear: the switch was "
+                      "not taken\n"
+                    : " verdict=NOT-SWITCHED (VALID clear; the RISCV/BRFETCH bits "
+                      "being set is a mode selection, not the switch -- 0x111 is "
+                      "the whole value a taken switch reads back as)\n");
+  }
+  /* F4 (PLAN.md §2): the secondary oracle -- FWSEC's own job was to drop the
+   * privilege level so SEC2 answers.  The pass condition is "not the fence
+   * word", never a particular value. */
+  {
+    uint32_t s100 = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL);
+    uint32_t s000 = nv_rd32(d, NV_FALCON_SEC2_BASE);
+    uart_puts("[NV-FWSEC] f4 sec2 0x840100=");
+    uart_print_hex(s100);
+    uart_puts(" 0x840000=");
+    uart_print_hex(s000);
+    if (s100 == NV_REG_FENCED)
+      uart_puts(" verdict=STILL FENCED (FWSEC's job was not done)\n");
+    else
+      uart_puts(" verdict=UNFENCED (the privilege level dropped: FWSEC ran)\n");
   }
   uint32_t sec2 = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL);
   uart_puts("[NV-FWSEC] status1438=");
@@ -689,8 +1346,6 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
   rc = (st != kStale && (st >> 16) == 0) ? 0 : -EPERM;
 out:
   for (uint32_t i = 0; i < pages; i++) frame_free(phys + (uint64_t)i * FRAME_SIZE);
-  (void)frts_off;
-  (void)frts_size;
   return rc;
 }
 
@@ -1096,6 +1751,10 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
    * The trees, the image and the block all stay resident until it returns. */
   nv_gsp_map_windows(d);
   (void)nv_gsp_write_lands(d);
+  /* Work package B (the fuse check) runs here: read-only, and it decides
+   * whether the image can authenticate at all on this part before a launch is
+   * worth interpreting. */
+  if (d->ucode_desc) nv_fuse_check(d);
   /* Stage 6a runs before stage 5 in the canonical order, and needs no ucode:
    * reset the GSP and route its DMA at system memory. */
   if (bldrc == 0) {

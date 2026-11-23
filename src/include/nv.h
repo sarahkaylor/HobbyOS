@@ -107,6 +107,9 @@ struct nv_dev {
   /* FWSEC ucode as located in the card's VBIOS (nv_vbios_probe). */
   uint32_t ucode_desc, ucode_payload, ucode_size;
   uint32_t ucode_imem, ucode_dmem, ucode_engid, ucode_id;
+  uint32_t ucode_iface;    /* descriptor InterfaceOffset (V3 +0x0C) */
+  uint32_t ucode_sigvers;  /* descriptor SignatureVersions (V3 +0x28) */
+  uint32_t ucode_sigcount; /* descriptor SignatureCount (V3 +0x27) */
 };
 
 #define NV_FALCON_IDX_PMU 0

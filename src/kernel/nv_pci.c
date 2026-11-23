@@ -380,12 +380,29 @@ int nv_vbios_probe(struct nv_dev *d) {
   d->ucode_dmem = dmem;
   d->ucode_engid = engid & 0xFFFF;
   d->ucode_id = (engid >> 16) & 0xFF;
+  /* SignatureVersions / SignatureCount: the fused-key half of the descriptor
+   * (V3 +0x27/+0x28).  The host cannot authenticate anything itself -- the Boot
+   * ROM does -- but which of the descriptor's 384-byte signatures gets copied
+   * into DMEM depends on these two, so they are read here and not guessed. */
+  d->ucode_iface = vb_dword(d, NV_PROM_BASE + desc + 0x0C);
+  d->ucode_sigcount = vb_byte(d, NV_PROM_BASE + desc + 0x27);
+  d->ucode_sigvers = vb_word(d, NV_PROM_BASE + desc + 0x28);
+  uart_puts("[NV-VBIOS] desc sigcount=");
+  print_int((int)d->ucode_sigcount);
+  uart_puts(" sigvers=");
+  uart_print_hex(d->ucode_sigvers);
+  uart_puts(" pkc_off=");
+  uart_print_hex(vb_dword(d, NV_PROM_BASE + desc + 0x08));
+  uart_puts(" iface=");
+  uart_print_hex(d->ucode_iface);
+  uart_puts("\n");
   uart_puts("[NV-VBIOS] FWSEC payload ");
   uart_print_hex(d->ucode_payload);
   uart_puts("..");
   uart_print_hex(d->ucode_payload + stored);
   uart_puts(" (hand this to FWSEC: desc + StoredSize, do not patch it)\n");
   pci_cfg_write8(&pdd, 0x50, c50); /* shadow back on */
+  return 0;
 }
 
 int nv_init(void) {
