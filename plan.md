@@ -1,291 +1,172 @@
-# HobbyOS GNU Terminal Program Ports — Remaining Work Plan
+# HobbyOS native NVIDIA driver (Ada / RTX 4090) — execution plan
 
-Status date: 2026-09-25. Working tree: `/home/sarah/Documents/GitHub/HobbyOS`.
-All work is committed locally **only** — never pushed to GitHub.
+Working plan for the `nv/ada-driver` branch. Not committed to the repo (the
+public design + status doc is `docs/nvidia-driver.md`).
 
-## 1. Current state
+## 0. Objective
 
-### Committed (local git, never pushed)
-- **textutils (GNU textutils 2.1, byte-exact):** `wc`, `head`, `tail`, `cut`, `nl`,
-  `tr`, `paste`, `fold`, `comm`, `tsort`, `expand`, `unexpand`, `cksum`, `md5sum`,
-  `tac` — 16 tools with strict host parity (`make <tool>_parity_strict`,
-  ~1,500 byte-exact cases, 16/16 PASS) plus on-device test binaries run in the
-  ARM test wave.
-- **sed 4.8** (full port + GNU regex engine + wchar/locale sysroot work), 59-case
-  golden suite.
-- **grep 2.5.4**, 65-case golden suite (libc dirent/getopt surface added).
-- **diffutils `cmp`**, 55-case parity (required `st_ino` synthesis in `kernel/fs.c`).
-- **Kernel/libc support:** POSIX open semantics + FAT16 entry durability, synthesized
-  inodes, load-the-wave-from-a-thread + pool headroom, x64 TSC timer + LAPIC multi-core
-  fixes, monotonic timer.
+A native HobbyOS driver for NVIDIA GPUs (`nv`), targeting the RTX 4090
+(AD102, `10de:2684`) passed through to a HobbyOS VM, built fresh (studying
+nouveau / open-gpu-kernel-modules / envytools docs allowed; no copying).
+Validation hardware: `root@192.168.10.174` (Proxmox `r1`), VM 117 currently
+owns `0000:01:00`. Build host: `sarah@192.168.0.123` (sarahpc, x86_64, KVM).
 
-### In flight (uncommitted)
-- **FAT16 long-file-name (LFN) support** — `src/kernel/fat16.c` + `fat16_test.c`
-  (see §2).
-- **GNU nano 8.7 ported to user space** — `src/user/nano/` (18 pristine sources +
-  `hb_curses.c` curses subset + `config.h`/`curses.h`/`term.h`), console-window
-  terminal surface (`graphics/window.c` `wm_term_*`, ANSI/CSI processing +
-  Ctrl-key compose in `desktop.c`), libc fills (time/libgen/strings/realpath/
-  mkstemp/access/term), host suites (`desktop_term_test`, `desktop_input_test`,
-  `nano_term_test`), E2E harness `run_nano_test.py` + `fat16img.py`.
-  **Validated end-to-end on ARM and x86_64** (menu launch, typing, `^O` save,
-  HELLO.TXT byte-exact readback from the FAT image).
-- **nano interactive-rendering fix** — typed text now paints **per keystroke**
-  (user's "I don't see the text I am typing" bug). Root cause: nano's
-  `place_the_cursor()` wraps its `wnoutrefresh(midwin)` in `#ifdef _CURSES_H_`
-  (ncurses' header guard), but our `curses.h` guarded with `HB_CURSES_H` — the
-  refresh was compiled out, so under nano 8.7's deferred-refresh design typed
-  characters never reached the virtual screen until a full refresh (menu
-  commands/^L/Enter). Fix: `curses.h` also defines `_CURSES_H_`; `wgetch` now
-  flushes pending screen updates before waiting (real-ncurses behavior). The
-  E2E harness gained **on-screen assertions** (per-keystroke pixel-diff checks,
-  `^O` write-prompt row check, FAT byte readback) and now runs **10 checks on
-  both ARM and x86_64**.
-- **x64 kernel-task resume fix — LANDED** — `src/kernel/process.c` +
-  `src/kernel/arch/x64/trap.c`: kernel tasks run on their own region stack;
-  `save_context` stores the frame's RSP-at-interrupt field (`[tf+304]`); the
-  kernel-mode resume copies the register frame straight onto the task's own
-  stack (no per-CPU scratch bounce). See §2.
+Final validation ask: RimWorld and Cyberpunk "work well" on this card.
+That is only reachable with hardware 3D inside HobbyOS, which needs (a) GSP-RM
+firmware booted by the kernel driver and (b) a Vulkan userspace (Mesa nvk).
+This plan delivers (a) as far as hardware verification allows, plus a measured
+statement of where games stand today (Venus stack) and the exact remaining
+rungs. Overclaiming here is the failure mode to avoid.
 
-### Test status
-- Host unit tests: PASS (482 checks, 0 failed). Host strict parity: 16/16 PASS.
-- nano host integration (`nano_term_test`): PASS (33 checks, 0 failed) —
-  includes per-keystroke delta rendering (`test_typing_deltas`) on stdscr+newwin.
-- nano E2E (`run_nano_test.py`, now with on-screen assertions): **10/10 PASS on
-  both ARM and x86_64** — per-keystroke painting (pixel deltas), the `^O`
-  "Write to File:" prompt row, save + FAT byte-exact readback
-  (`hello from nano\nsecond linexyz\n`), root-dir listing, clean ^X exit.
-- ARM (`make test`): **green end-to-end** — `System halt`, 616 PASS, 0 LOCKFOREVER;
-  the UNEXPAND_T suite (was **silently running the wrong binary** — FAT16 8.3
-  truncation bug) is fixed by LFN support and now **`[UNEXPTEST] PASS`** on a fresh run.
-- x64 (`make test_intel`): the kernel-task resume bug (§2) is **fixed** — the wave
-  now boots and runs (13 suite verdicts, 1848 checks; nano's x64 E2E green
-  end-to-end with HELLO.TXT byte-exact). It then wedges in a **proc_lock
-  lost-owner**: 7 cores spinning in `spinlock_acquire_irqsave` on `proc_lock`,
-  the 8th silent, onset during the net-timeout test's exit/fd-close churn.
-  ARM runs the identical wave clean, so the wedge is x64-specific (or the new
-  resume path under churn). Next: live forensics (HMP regs + `lock_wait_addr`/
-  `lock_wait_caller`) or the pending block-to-deschedule refactor (§2b).
+## 1. Facts established before coding (2026-11-22)
 
-## 2. Immediate steps (M0 — unblock both architectures)
+| fact | evidence |
+|---|---|
+| HobbyOS x64 has **no PCI bus driver**; only a private CF8/CFC helper inside `src/kernel/virtio_net.c` | grep; `docs/graphics-accel.md` §2.6 |
+| ACPI RSDP/XSDT + DMAR parsing exists, private to `src/kernel/iommu_vtd.c` (`find_rsdp`, `find_acpi_table`) | read |
+| VT-d IOMMU driver exists (`iommu_vtd.c`) but only for the QEMU emulated `intel-iommu` | read |
+| `mmu_map_mmio_range()` maps arbitrary phys (incl. >4 GiB) non-cacheable, 1 GiB/2 MiB pages | `src/kernel/arch/x64/mmu.c:277` |
+| x64 IDT has gates only for 32–47, 129, 130, 132; IRQ dispatch is `general_interrupt_inner()` with per-device globals | `src/kernel/arch/x64/trap.c` |
+| No MSI/MSI-X support anywhere | grep |
+| Graphics today: Mesa (virgl/Venus/lavapipe) in the guest → virtio-gpu 3D → host virglrenderer | `docs/gpu-abi.md`, `docs/cyberpunk.md` |
+| Cyberpunk runs on HobbyOS (Venus, strix): 720p ~30 fps, 1080p lower; P9 target 30 fps not met | `docs/cyberpunk.md` §0 |
+| r1: 4090 `01:00` + two 5090 `41:00`,`82:00`, all bound to `vfio-pci`; no host NVIDIA driver, no Vulkan, virglrenderer 1.9.0 | ssh probe |
+| VM 117 (Windows gaming) owns `0000:01:00` (`hostpci0: 0000:01:00,pcie=1,x-vga=1`) — may be shut down | `cat /etc/pve/qemu-server/117.conf` |
+| sarahpc: clang 21, lld, qemu, mtools, /dev/kvm, HobbyOS checkout | ssh probe |
 
-1. **Finish FAT16 LFN** (in progress): strict 8.3 matching (no silent truncation),
-   minimal VFAT long-name read support (mtools-created records), long-name create
-   (writes 0x0F chains mtools can read back), unlink clears the preceding 0x0F
-   records. Unit tests added in `fat16_test.c`.
-   - Verify: `make unit_tests` (all 44+, incl. new LFN cases),
-     host-side `mdir`/`mcopy` of the OS-created LFN files, then a fresh
-     `make test` full wave with **`[UNEXPTEST] PASS`** on ARM.
-   - Commit: `fat16: VFAT long-file-name support + strict 8.3 matching (fixes
-     UNEXPAND_T silently loading the wrong binary)`.
-2. ~~Fix x64 kernel-task resume~~ **DONE** — kernel tasks now run on their own
-   region stack; `save_context` saves the frame's RSP-at-interrupt field
-   (`[tf+304]`); `enter_user_space`'s kernel-mode resume copies the frame
-   straight onto the task's own stack (no per-CPU scratch bounce). Verified by
-   the nano x64 E2E end-to-end; see §1 test status for the wave re-run.
-   - Verify: `make test_intel` full wave on x64; no `WATCHDOG` messages, `EXIT=0`.
-3. Optional follow-up (defer unless cheap): LFN-aware `rename` (long→long) and
-   `DIR`-entry iteration (`ls -l` long names still show 8.3 aliases).
+## 2. Driver architecture
 
-## 2b. Concurrency & test-run timing work (2026-09-25/26)
+```
+userspace   NVSMI.BIN  (card info / register read behind a whitelist)
+              |  ioctl /dev/nvctl
+kernel      nv.c        probe, lifecycle, ABI, staged bring-up state machine
+            nv_regs.h   register map (PMC/PBUS/PFB/PTIMER/FALCON/GSP)
+            nv_falcon.c falcon engine: IMEM/DMEM, DMA load, mailbox
+            nv_gsp.c    GSP-RM boot: WPR meta, booter, HS, RPC queues
+            pci.c/h     generic PCIe: ECAM(MCFG)+legacy, BARs, caps, MSI-X
+            acpi.c/h    RSDP/XSDT/MCFG/DMAR table locator (shared)
+            irq table   irq_register_vector() + gates 0xA0..0xBF
+```
 
-Goal: reliable ≤5-minute full ARM waves, stable on up to 16 cores. Best clean
-full wave so far: **6:39 (615 PASS, 19 ALL-PASSED, 0 FAIL, 8c/8GB/MTTCG)**.
+Design rules:
+- `#ifdef __x86_64__` everywhere (ARM compiles empty TUs), no new syscall rows
+  (SYS_MAX frozen): `/dev/nvctl` rides the Linux-ABI `ioctl` path like
+  `/dev/gpu` (`file_is_devgpu`-style predicate in `file_obj.h`).
+- Kernel identity-maps phys → virt, so DMA buffers use their kernel addresses
+  as bus addresses. Target VM gets **no vIOMMU** (documented decision) so
+  device DMA = guest-physical identity; VT-d path stays for the emulated case.
+- Everything side-effecting is a state machine with a `[NV]` serial row per
+  transition, so a failed stage names itself instead of vanishing.
+- MMIO access goes through a `struct nv_mmio_ops` vtable so the sequencing is
+  host-testable with a fake register file (this is how P1/P2/P3 get unit
+  coverage without a GPU).
+- No copying: register names/sequences re-derived from public documentation
+  (envytools docs, open-gpu-kernel-modules headers, nouveau's *behaviour*),
+  and each sequence in our source cites the datasheet section or the behaviour
+  it reproduces (not the source file).
 
-Landed (uncommitted):
-- **Pipe/proc ABBA deadlock — fixed.** Cycle was `process_fork`(proc_lock) →
-  `fs_reopen`(f->lock) → `pipe_reopen`(p->lock) vs `pipe_read`(p->lock) →
-  `process_wakeup`(proc_lock). Global lock order is now
-  **proc_lock ≺ f->lock ≺ p->lock**; `pipe.c` collects a wake mask under
-  `p->lock`, releases it, and only then calls `process_wakeup()`. Verified by
-  clean parallel completions (rc=0, "System halt").
-- **Wake-vs-schedule race — fixed (core).** A wake landing in the
-  block-to-`schedule()` gap (the `-2`/EAGAIN retry path) set a still-running
-  process READY; `schedule()` then skipped the save and resumed a **stale
-  context**, silently replaying/skipping syscalls (root cause of stress
-  ping-pong protocol drift → endgame deadlocks, shell-test validation
-  flakes, and leftover processes blocking system halt). `schedule()` now
-  saves the LIVE trap frame for the READY case too, and a cross-CPU
-  "taken elsewhere" guard prevents two CPUs from running/saving one process.
-- **`pipe_close` stale masks:** masks are now cleared when collected.
-- **Default stderr fd inheritance:** no longer inherits a *pipe* end the
-  parent happens to hold on fd 2 (was: child kept a duplicate read end of its
-  own stdout pipe alive → full pipe + dead drainer = self-deadlock;
-  observed SH.BIN wedged).
-- **GICv3 support** (`gic.c`): QEMU `virt` silently switches to GICv3 above
-  8 PEs; 16-core boot now works. `MAX_CPUS` back to 8 (16 still regressed).
-- QEMU flags: ARM `-smp 8 -m 8192M -accel tcg,thread=multi` (MTTCG is the
-  single biggest lever; before it, TCG ran single-threaded).
-- `virtio_blk` no longer holds `blk_lock` across the device wait.
+## 3. Stages and gates
 
-Remaining (this thrust):
-- **Load-path collapse (DONE, verified):** the wave spent ~all of its wall
-  time in program loads because each load cost ~3000 block-device round
-  trips: fat16_read walked the cluster chain from the start for *every
-  sector* (O(n^2) FAT reads, uncached) and every sector was its own
-  virtio request.  Fixes: one multi-sector device request per contiguous
-  cluster run (`virtio_blk_do_op` count), a one-sector FAT cache, a
-  forward cluster walk, and `fat16_read_direct()` (loader reads straight
-  into the child's physical block).  Result: **full wave 19/19 verdicts +
-  System halt in ~40 s** (was 480 s / best-ever 6:39).
-- **Net TX wait bounded (DONE):** `virtio_net_send` waited on the TX used
-  ring with an unbounded wfi loop; a lost/coalesced completion left
-  NFSTEST "RUNNING" with no CPU on it, blocking system halt ~1 run in 3.
-  Now capped at 500 ms (returns -1, resyncs the ack).
-- **Atomic block-to-deschedule refactor**: make [set BLOCKED+mask] and
-  [save+deschedule] one proc_lock critical section (schedule variant that
-  assumes the lock).  The current fix makes same-CPU resumes exact and
-  cross-CPU takeovers corruption-free; a cross-CPU takeover can still replay
-  from the previous save point.  Low occurrence; do before calling recovery
-  airtight.
-- **16-core stability (retried 2026-09-26 with the fixed tree; still open):**
-  boots and runs; the failure is now understood as scale pressure, not the old
-  lock bugs: (a) the 64 process slots (capped by 64-bit pipe pid masks) fill
-  under 16-way concurrency — SHTEST-family children + spawn workers + unreaped
-  EXITED slots starve new creates ("no free process slots"); (b) `sys_spawn`
-  retries creation in a hot loop while the table is full, livelocking its CPU;
-  (c) a lost-owner RUNNING process (no CPU on it) can stop the wave driver.
-  Captured live via HMP + guest-memory process-table dumps.  Code supports
-  MAX_CPUS 16 (1MB stack region); reintroduce only after slot-liveness work
-  (spawn backoff, faster reap) — the 8-core path is the fast, verified one.
-- **x64 status (checked 2026-09-26):** the x64 wave does not run — boot
-  reaches the wave start and triple-fault-reboot-loops (184 boot cycles in
-  one capture; a fault dump precedes it).  Verified NOT a regression from
-  this work: the same reboot loop reproduces on ad80463 (pre-io-changes)
-  and the crash happens before any of the changed code paths execute (the
-  first loader print never appears).  The reboot loop matches the long
-  known x64 flakiness (see the #GP item above); x64 remains deprioritized
-  until the ARM path is fully hardened.
-- **Lost-owner watchdog (NEW):** the scheduler idle loop now reclaims a
-  process stuck in RUNNING with no CPU owner (a leaked wake — the wedged
-  network tests' signature) back to READY after ~500 idle rounds and logs
-  `[LOSTWAKE]` so the underlying race stays diagnosable.  Also fixes the
-  [IDLESTUCK] dump trigger (monotone counter guard; the old modulo could be
-  skipped when CPUs raced the shared counter).
-- **≤5-min reliable waves**: ACHIEVED (0.7 min clean runs); verify stability
-  across a 5x parallel battery, then re-commit.
-- Uncommitted deliverables to commit after verification: net fix, load-path
-  fixes, plan.md updates.
+| stage | deliverable | gate (must actually run) |
+|---|---|---|
+| P0 harness | `tools/nv/deploy.sh` (build on sarahpc → push to r1 → recreate VM → boot → pull serial), `tools/nv/gpu-switch.sh` (move 4090 between VMs, stop 117 last/first), VM 300 `hobbyos-nv`, VM 301 `linux-ref` | HobbyOS x64 boots on r1 with and without the 4090; serial captured |
+| P1 pci | `acpi.c/h`, `pci.c/h`, `pci_test.c`, IRQ vector table | unit tier green (host + x64 QEMU); on r1 the 4090 is enumerated with BAR sizes equal to the reference Linux VM's |
+| P2 nv core | `nv.c/h`, `nv_regs.h`, `/dev/nvctl`, `NVSMI.BIN` | `[NV]` rows on real hardware: boot0 → AD102, BAR0/BAR1/VRAM match reference VM; `NVSMI.BIN` prints them from userspace |
+| P3 falcon/GSP | `nv_falcon.c`, `nv_gsp.c`, `nv_fw.c/h`, firmware fetch+analysis doc | falcon ucode loaded and run, boot status/mailbox rows captured (partial credit recorded honestly) |
+| P3a firmware | `nv_gsp_firmware_check()` + `deploy.sh` staging | **DONE on silicon**: 38,061,600 B RM image read into contiguous frames, container parsed, SHA-256 == host `shasum` (`e30231ec0d317021`) |
+| P3b WPR/boot | WPR2 layout, metadata, booter handoff | **GATED**: needs `docs/nv-gsp-wpr-contract.md` (lane L-wpr); each step must prove itself by read-back |
+| P3c RPC | queue + message transport | **GATED** on `docs/nv-gsp-rpc-contract.md` (lane L-rpc) |
+| P4 games | measurement + ladder | RimWorld/Cyberpunk numbers on the Venus stack (control) + reference-VM 4090 numbers for the same titles; explicit statement of what the driver adds and what is still missing |
 
-Lessons:
-- `make test_arm` returns 0 even when the guest is killed — always grep the
-  log for `ALL PASSED`/`System halt`.
-- Kill QEMU by exact pattern (`pkill -f 'qemu-system-aarch6[4]'`) — both
-  `pkill -x` (name >15 chars) and plain `-f` self-matches have bitten.
-- Freeze taxonomy: class A = spinlock ABBA (locks held, CPUs spinning);
-  class B = idle dead-lock (all CPUs in `safe_wfi`, an alive-but-blocked
-  process holds the system open). HMP `info registers -a` + guest-memory
-  reads (`xp`) of `proc_table`/`global_file_table`/`pipes` distinguish them.
+## 4. Games validation shape
 
-## 3. OS / libc support needed for the next ports
+1. **Control A (existing stack)**: RimWorld + Cyberpunk on HobbyOS via Venus
+   (strix KVM) — numbers already in `docs/cyberpunk.md`; re-quote with anchors.
+2. **Control B (the card is good)**: RimWorld native Linux in VM 301 with the
+   4090 passed through — fps at 1080p. Answers "is this card enough for these
+   games" independent of HobbyOS.
+3. **Target**: HobbyOS + native `nv` driver — needs P3 complete + Mesa nvk, so
+   P4 reports the gap, not a pass. No fabricated fps.
 
-| Capability | Needed by | Effort | Notes |
-|---|---|---|---|
-| Raw-mode TTY: termios-like (ICANON off), input queues | nano, less, ed | M | Biggest piece; also enables interactive tests to be driven |
-| Keyboard: arrows, function keys, escape sequences | nano, less | M | Keyboard driver already delivers scancodes; decode at TTY layer |
-| Terminal size (rows/cols) query | nano, less | S | Expose framebuffer/text size via a terminal ioctl |
-| `opendir`/`readdir` on FAT | find, ls -l | S | FAT dir iteration exists; expose via libc dirent |
-| Signal delivery (`SIGINT`, `SIGTERM`, handlers) | xargs, ed, nano | M | Needed for courtesy kills and ^C |
-| `getline`, `fnmatch` | find, sort | S | fnmatch for find `-name` |
-| wchar/collation locale | sort, join, diff | L | Already partially in sysroot for sed; sort can ship LC_ALL=C first |
-| Compression (deflate) | gzip | M | zlib is GPL-incompatible; use the small zopfli/deflate core or write a minimal deflate |
-| Archive reader/writer | tar | M | ustar is trivial; GNU tar adds long-name/dir features |
+## 5. Lanes
 
-Legend: S = small, M = medium, L = large.
+| lane | worktree | owns |
+|---|---|---|
+| L-pci | `~/Documents/GitHub/hobbyos-nv/lane-pci` | `src/include/{pci,acpi}.h`, `src/kernel/{pci,acpi,pci_test}.c`, trap.c vector table, unit_test.c registration |
+| L-infra | `lane-infra` | `tools/nv/*`, r1 VMs, reference measurements, evidence |
+| L-gsp | `lane-gsp` | `docs/nv-gsp-firmware.md`, firmware fetch tool, `nv_gsp.c` skeleton + host tests |
+| parent | `ada` (= `nv/ada-driver`) | `nv.c/h`, `nv_regs.h`, `nv_falcon.c`, `/dev/nvctl` wiring, `NVSMI.BIN`, integration, pushes |
 
-## 4. Candidate ports — priority + plan
+## 5.1 State at 2026-11-23 (measured, not planned)
 
-Each item: vendor source (GNU, GPL/AGPL), port, host parity harness
-(`src/host/build_*_ref.sh` + `*_parity.sh`), in-OS test binary in the wave, both
-architectures, then a commit. "Nothing as ambitious as emacs" — gawk/nano are the
-ceiling, not the floor.
+| item | state | evidence |
+|---|---|---|
+| card owned by HobbyOS | yes | `[NV] found 10DE:2684 at 2:0.0`, BAR0 16 MiB, BAR1 32 GiB (64 MiB window mapped) |
+| identification | yes | `boot0=0x192000A1 chipset=0x192 AD102 stepping=161 gsp=required` |
+| timer | yes | `ptimer hz~999 MHz`, advance proven |
+| falcon probe | yes | PMU/GSP `present`; SEC2 `fenced` (was wrongly reported `absent`) |
+| register map cross-check | yes | 9/9 rows equal to NVIDIA 580.178.04's pre-init dump (`docs/nvidia-driver.md` §5.5) |
+| firmware on disk | yes | BOOTER/LOADER/GSPRM staged as 8.3 role names, read through FAT16 |
+| firmware integrity | yes | kernel SHA-256 == host `shasum` for all three blobs |
+| RM image described (radix3) | **yes** | `root=0x2054cd000 pages=21 maps 9288 image pages` |
+| metadata block | **yes** (built, DMA-able) | `256B magic ok wpr=0x5F8700000..0x5FE400000 block_phys=0x2054e2000` |
+| VRAM layout | **yes**, matches the contract field for field | `image=0x5FBEB0000 bootbin=0x5FE2F8000 frts=0x5FE300000` |
+| booter started on SEC2 | **no — gated** | `[NV-SEC2] unfence FAILED: no single PMC_ENABLE bit lifts the fence` |
+| GSP-RM running | **no** | needs PMU → FWSEC → SEC2 first (measured, §5.7) |
+| hardware 3D | **no** | needs GSP-RM + a Vulkan userspace |
+| unit tier | **512 tests, 0 failed** | `run_unit_tests_intel.sh` on sarahpc |
+| branch | `nv/ada-driver` @ `9cb42ecf`+, not merged | owner review pending |
 
-### Wave 1 — textutils companions (small, high value, no new OS work)
-1. **sort** — textutils 2.1. High value; the biggest remaining textutil. Ship
-   `LC_ALL=C`/byte order first, keep the 2.1 algorithm; `-k`/`-t`/`-n`/-u` etc.
-   Needs some libc (temp files already exist).
-2. **uniq** — trivial; pairs with sort for dedup pipelines.
-3. **join** — straightforward relational-join on sorted files; same file machinery
-   as comm (already ported).
-4. **look / fmt / sum / users / logname / whoami** — near-zero effort, trivial
-   libc; cheap to batch with sort in one commit.
+What a reviewer should test first: `tools/nv/deploy.sh --mode test --gpu --wave
+NVSMI.BIN` reproduces every row above in ~4 minutes.
 
-### Wave 2 — file-tree / process tools (medium)
-5. **find (findutils 4.9)** — high value. Requires `opendir/readdir` (small) and
-   recursively walking subdirs; implement `-name/-type/-size/-print/-exec` (non-GNU
-   cosmetic parity first). Use findutils' own `fnmatch`.
-6. **xargs (findutils 4.9)** — high value; composes with find/grep. Needs
-   fork/exec/wait (exists via spawn), arg batching, and a `SIGCHLD`-ish reap
-   (existing wait plumbing).
+## 5.2 Resume sheet (state at branch 6313df11)
 
-### Wave 3 — archives & compression (medium, self-contained)
-7. **gzip** — deflate + gzip framing + CRC32 (CRC32 already in tree for cksum).
-   Port gzip-1.13's core with the license-preserved bits; in-OS tests: round-trip
-   gzip→gzip -d byte-exact, sizes, exit codes.
-8. **GNU tar** — ustar create/extract/list; directory+link records on FAT.
-   Possible friction: long names (LFN now supported!), symlinks (none on FAT —
-   degrade to hardlink/plain record). Good after LFN lands.
+Read this first after any pause. Everything below is measured, not planned.
 
-### Wave 4 — terminal work + interactive editors (the headline)
-9. **Terminal subsystem** (§3): raw mode, cursor addressing, arrow/function keys,
-   screen size query. This is the OS-side prerequisite for the next two.
-10. **nano** — the named headline target. After terminal work: port nano's core
-    (GPL); byte-parity is not the bar here — functional parity (edit, save,
-    navigate, search) plus a scripted end-to-end edit-driving test.
-11. **ed** — classic line editor; smaller than nano, pure byte-exact parity
-    possible; can land before or after nano.
+| Stage | State | Evidence row |
+|---|---|---|
+| PCI / BARs / ID / timer | done | `[NV] found 10DE:2684`, `ptimer hz~999MHz` |
+| Register map vs NVIDIA driver | 9/9 rows equal | `docs/nvidia-driver.md` 5.5 |
+| Firmware from disk (38 MB, contiguous) | done | `[NV-GSP] fw GSPRM.BIN bytes=38061600 phys=0x200c29000` |
+| radix3 for the RM image | done | `radix3 root=0x2054c3000 pages=21 maps 9288 image pages` |
+| WPR metadata block (VBIOS-independent) | done | `meta 256B magic ok wpr=0x5F8700000..0x5FE400000 block_phys=...` |
+| VRAM layout matches contract | done, field for field | `image=0x5FBEB0000 bootbin=0x5FE2F8000 frts=0x5FE300000` |
+| VBIOS read + FWSEC ucode located | done | `desc 0x43E3C`, payload `0x44168..0x540E8`, `IMEM+DMEM==StoredSize` |
+| Falcon page accepts writes | **yes** (read fence only) | `[NV-PROBE] verdict=WRITES LAND` |
+| GSP reset + ucode staged (IMEM/DMEM) | done | `[NV-FWSEC] IMEM loaded`, `DMEM loaded` |
+| FWSEC actually executes | **NO** | `mailbox never overwritten -- the ucode did not run` |
+| SEC2 booter | blocked behind FWSEC | `[NV-SEC2] fence is privilege state` |
+| GSP-RM RPC | contract written, not coded | `docs/nv-gsp-rpc-contract.md` |
 
-### Wave 5 — remaining high-value GNU staples (as appetite allows)
-12. **diff / sdiff** (diffutils) — diff compares via the same line-buffer
-    machinery as cmp; the LCS/Hunt–Szymanski algorithm is the meat. Middle size.
-13. **awk (gawk)** — the classic "big four" companion to grep/sed. Large but
-    self-contained (no TTY). Strong candidate after the small waves.
-14. **less** — pager; needs the terminal work (raw + keys + size). Post-nano.
+### Blockers, in the order they must fall
 
-### Explicitly out of scope
-emacs (user), vi-family clone (vim is huge; consider `ex`/`ed` instead),
-perl/python/ruby, X11/GUI tools, anything non-terminal.
+1. **Why the core does not run.** Two candidates, both cheap to settle:
+   (a) `bl_dmem_desc_v2` field layout is inferred (11 dwords, 64-bit bases);
+   (b) the boot ROM's GSP parameters at `0x111210`-ish may not be writable, so
+   the ROM refuses to start.  Settle (b) first: it invalidates (a) if true.
+2. **SEC2's fence** lifts only after FWSEC; do not re-attempt engine pokes.
+3. **The booter** (already coded, `nv_gsp_sec2_start_booter`) needs the metadata
+   `verified` word — a read-back that may also be masked, so judge by behaviour.
+4. **RPC** (`docs/nv-gsp-rpc-contract.md`): queues in sysmem, 129-entry address
+   table, 48-byte elements, `VRPC` header, doorbell `0x110C00`.
+5. **Games**: `docs/nv-games-state.md` — the honest ladder, measured.
 
-## 5. Verification standards (apply to every port & kernel change)
+### Rules that have earned their place (all learned the hard way here)
 
-- **Host parity:** `make <tool>_parity_strict` must PASS against the vendored
-  reference build (byte-exact stdout+stderr+rc). Negative controls: a wrong
-  reference must fail the harness.
-- **In-OS wave:** every tool ships a `*_test.c` binary in the wave; the full
-  `make test` (ARM) and `make test_intel` (x64) suites must end `EXIT=0` with every
-  `[<TOOL>TEST]` verdict present. Watch specifically for silent mis-execution
-  (the UNEXPAND_T.BIN lesson: verify the verdict exists and names the right file).
-- **Kernel/libc changes:** `make unit_tests` all green (44+), plus host unit tests.
-- **Style:** `python3 tools/cstyle.py check` on every touched file.
-- **Both arches:** any non-arch-specific code compiles and passes on arm + intel;
-  arch code builds and runs on its target (x64 gate: `make test_intel`).
-- **Independent verification:** subagent parity claims are re-run by the parent
-  (proven policy after batch-2 delegation drift).
-- **Determinism:** vendor the exact upstream source version; never "modernize"
-  semantics mid-port (the tr/nl divergences are documented deliberate spots).
+- A masked read is not evidence. Every wrong conclusion so far came from reading
+  a fenced register as if it were data. Use `MAILBOX0`-style channels or effect.
+- Hex arithmetic in comments is how a false "the document must be wrong" gets
+  written; put the numbers in a test instead.
+- Prefill any register whose zero means success before judging it.
+- One `[NV-*]` row per stage, and the row names the stage when it fails.
 
-## 6. Milestone ordering
+## 6. Risks
 
-- **M0** (this session): FAT16 LFN commit → x64 trap fix commit → `make test`
-  green on ARM **and** `make test_intel` green on x64. Both arches healthy again.
-- **M1** (wave 1): sort + uniq + join (+ trivial textutils) — one or two commits.
-- **M2** (wave 2): find + xargs (opendir/readdir + wait plumbing).
-- **M3** (wave 3): gzip + tar.
-- **M4** (wave 4): terminal subsystem → nano → ed.
-- **M5** (wave 5): diff/sdiff, gawk, less (deprioritized until M1–M3 per appetite).
-
-Each milestone ends with: strict host parity PASS, full ARM + x64 wave green,
-unit tests green, cstyle clean, one or more local commits.
-
-## 7. Known landmines / lessons (carry forward)
-
-- **FAT16 names:** never truncate a query onto an 8.3 short entry (wrong-binary
-  bug); LFN records are skipped-by-attr traps — now resolved.
-- **x64 trap path:** same-ring (kernel) interrupts push no RSP; any resume path
-  must reconstruct the interrupted RSP explicitly (process.c + trap.c fix).
-- **GETOPT macros:** keep the brace-less transcription from `sys2.h` (braced
-  variants zero `val`, silently swallowing `--help`/`--version`).
-- **Inode synthesis** for `cmp` (st_ino was always 0).
-- **Deterministic refs:** build reference binaries from the vendored textual
-  source, not the distro's (semantics drift).
-- **Do not push** — local commits only, per original instruction.
+| risk | mitigation |
+|---|---|
+| GSP boot is a multi-week RE problem | graded stages; falcon + booter progress is real, verifiable work; document the fence precisely |
+| 4090 BAR1 is 32 GiB (ReBAR); QEMU may assign a huge window HobbyOS can't map | BAR probe falls back to the 256 MiB window; log both sizes; `mmu_map_mmio_range` handles >4 GiB |
+| Only one VM can hold the card | `gpu-switch.sh`, stop/recreate discipline, never two VMs with the same hostpci |
+| Passthrough VM needs a console without the GPU | virtio-vga + serial socket; `x-vga=0` on the 4090 |
+| Agents sharing one tree collide on obj/disk.img | one worktree per lane; parent runs integration builds and all hardware boots |
