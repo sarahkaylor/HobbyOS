@@ -67,6 +67,11 @@ void run_all_unit_tests(void) {
   virtio_net_test_suite();
   net_test_suite();
   net_rdma_test_suite();
+  /* WP-D: the DMA facility.  Registered outside the __x86_64__ block because
+   * the facility itself is arch-independent: on AArch64 there is no IOMMU
+   * translation in the GPU's DMA path, so nv_dma_translation_enabled() is 0 by
+   * construction and the identity guard is the whole story there. */
+  nv_dma_test_suite();
   nfs_test_suite();
   timer_test_suite();
   smp_test_suite();

@@ -874,4 +874,24 @@ int iommu_vtd_is_active(void) {
   return vtd_initialized;
 }
 
+/* ---------------------------------------------------------------------------
+ *  Is translation actually live?
+ *
+ *  iommu_vtd_is_active() answers "did init succeed", which is true in the
+ *  state this tree boots in: driver initialised, GPU passthrough entry
+ *  installed, translation NOT enabled (net_rdma.c explains why enabling it
+ *  globally would break NVMe/virtio DMA).  In that state a device's DMA
+ *  address is still its CPU physical address.
+ *
+ *  Only GSTS.TES says otherwise, and it is the same bit
+ *  iommu_vtd_enable_translation() polls -- so a caller gating on this can
+ *  never disagree with the enable path.  Read it live: the state can change
+ *  after a mapping exists, and a cached copy would let a stale "off" answer
+ *  hand a device a physical address while the IOMMU is translating.
+ * ------------------------------------------------------------------------ */
+int iommu_vtd_translation_enabled(void) {
+  if (!vtd_initialized || !dmar_base) return 0;
+  return (vtd_read32(VTD_GSTS_REG) & VTD_GSTS_TES) ? 1 : 0;
+}
+
 #endif /* __x86_64__ */

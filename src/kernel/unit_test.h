@@ -75,6 +75,10 @@ void math_test_suite(void);
 void virtio_net_test_suite(void);
 void net_test_suite(void);
 void net_rdma_test_suite(void);
+/* WP-D: DMA facility -- bus address distinct from phys, identity guard.
+ * Arch-independent on purpose: it runs on AArch64 too, where translation is a
+ * fact about the platform (0) rather than a stub. */
+void nv_dma_test_suite(void);
 void nfs_test_suite(void);
 void elf_loader_test_suite(void); /* docs/shared-libs.md lane B */
 void linux_compat_pi_test_suite(void); /* PI futex word state machine */

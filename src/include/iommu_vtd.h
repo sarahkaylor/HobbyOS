@@ -261,8 +261,24 @@ void iommu_vtd_invalidate_context(void);
 
 /**
  * Returns 1 if the IOMMU was successfully initialized, 0 otherwise.
+ *
+ * NOTE: this is "initialised", NOT "translating".  A caller that needs to know
+ * whether a DMA address is being translated must ask
+ * iommu_vtd_translation_enabled() -- the passthrough path leaves the driver
+ * initialised with translation off, which is the current state.
  */
 int iommu_vtd_is_active(void);
+
+/**
+ * Returns 1 if global DMA remapping translation is actually live (GSTS.TES),
+ * 0 otherwise (including "driver not initialised").
+ *
+ * This is the bit iommu_vtd_enable_translation() waits on, so the two can
+ * never disagree.  Until it is 1, a device's DMA address IS its CPU physical
+ * address; once it is 1, that equality is gone and an IOVA mapping is
+ * required.  nv_dma.c gates every bus address on this answer.
+ */
+int iommu_vtd_translation_enabled(void);
 
 /**
  * Enables global DMA remapping translation. Must be called AFTER
