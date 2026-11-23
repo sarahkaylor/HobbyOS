@@ -25,8 +25,13 @@
 #include "errno.h"
 
 #define FAKE_NR_FALCON 3
-#define FAKE_DMEM_WORDS 256
-#define FAKE_IMEM_WORDS 64
+/* Big enough to hold the addresses the FWSEC read-back uses: the card's DMEM
+ * image is 0xD80 bytes and the read-back probes 0xB0C, which is word 0x2C3 --
+ * a 256-word model could not represent the very read this tier exists to pin,
+ * so a write there was silently dropped and the assertion failed for the
+ * model's reason rather than the driver's. */
+#define FAKE_DMEM_WORDS 2048
+#define FAKE_IMEM_WORDS 4096
 
 struct fake_gpu {
   uint32_t boot0, boot1, pmc_enable, pmc_intr, pbus_intr;
@@ -640,6 +645,73 @@ static void test_nv_selftest(void) {
   EXPECT_EQ((int)detail2[4], 0);
 }
 
+/* ---- the DMEM read path: units, and its own proof ---------------------
+ *
+ * Round 1 ended with "DMEM MISMATCH" and no way to tell a broken load from a
+ * broken read.  The read path is the instrument every later conclusion uses, so
+ * it gets three things here: the byte-offset -> word-index arithmetic asserted
+ * against the fake's storage, a refusal for an address the index field cannot
+ * hold (it used to wrap silently to DMEM 0 and answer with real data), and a
+ * probe that writes/reads a pattern and can therefore fail.
+ */
+static void test_nv_dmem_addr_units(void) {
+  uart_puts("  Running test_nv_dmem_addr_units...\n");
+  tests_run++;
+  struct nv_dev *d = fake_attach();
+  ASSERT(nv_falcon_probe_all(d) == 0);
+  const struct nv_falcon *f = &d->falcon[NV_FALCON_IDX_GSP];
+  uint32_t v = 0x5EC2B0Cu, r = 0;
+  /* Byte offset 0xB0C is word 0x2C3 in the port's index field, and the fake
+   * stores words the way the hardware does -- indexed by that field.  A driver
+   * that wrote the byte offset, or that shifted twice, lands somewhere else in
+   * DMEM and this assertion says which. */
+  ASSERT(nv_falcon_dmem_write(d, f, 0xB0C, &v, 1) == 0);
+  /* The register the driver wrote: bits 15:2 are the word address, so the
+   * value must carry 0xB0C in that field.  Reading the register instead of the
+   * driver's own argument is the point -- a shift applied once too often still
+   * looks right in the argument. */
+  EXPECT_EQ((int)(fg.data_idx[NV_FALCON_IDX_GSP] & 0xFFFCu), 0xB0C);
+  EXPECT_EQ((int)((fg.data_idx[NV_FALCON_IDX_GSP] >> 2) & 0x3fffu), 0x2C3);
+  EXPECT_EQ((int)fg.dmem[NV_FALCON_IDX_GSP][0x2C3], 0x5EC2B0Cu);
+  ASSERT(nv_falcon_dmem_read(d, f, 0xB0C, &r, 1) == 0);
+  EXPECT_EQ((int)r, 0x5EC2B0Cu);
+  /* The DMEM image is read with the SECRET bit clear; IMEM ucode with it set,
+   * and the code port's index word must carry that bit or the read addresses a
+   * different space than the write did. */
+  ASSERT(nv_falcon_imem_read_ex(d, f, 0x100, &r, 1, 1) == 0);
+  ASSERT((fg.code_idx[NV_FALCON_IDX_GSP] & NV_FALCON_IDX_SECRET) != 0);
+  EXPECT_EQ((int)((fg.code_idx[NV_FALCON_IDX_GSP] >> 2) & 0x3fffu), 0x40);
+  /* One word past what the 14-bit field can address: refused.  Before the fix
+   * this returned 0 and handed back DMEM word 0 -- the aliasing bug that makes
+   * a wrong read indistinguishable from a right one. */
+  EXPECT_EQ(nv_falcon_dmem_read(d, f, 0x10000, &r, 1), -ERANGE);
+  EXPECT_EQ(nv_falcon_dmem_write(d, f, 0x10000, &v, 1), -ERANGE);
+}
+
+static void test_nv_dmem_probe(void) {
+  uart_puts("  Running test_nv_dmem_probe...\n");
+  tests_run++;
+  struct nv_dev *d = fake_attach();
+  ASSERT(nv_falcon_probe_all(d) == 0);
+  const struct nv_falcon *f = &d->falcon[NV_FALCON_IDX_GSP];
+  uint32_t seen = 0;
+  /* A working port: the pattern survives, and the word is left at `restore`
+   * (0) so the probe cannot plant data in the image it is about to load. */
+  EXPECT_EQ(nv_falcon_dmem_probe(d, f, 0xB0C, 0x5EC2B0Cu, 0, &seen), 1);
+  EXPECT_EQ((int)seen, 0x5EC2B0Cu);
+  EXPECT_EQ((int)fg.dmem[NV_FALCON_IDX_GSP][0x2C3], 0);
+  /* A port that answers from the wrong place (here: writes dropped) must
+   * report 0, and must not report the pattern it hoped for. */
+  fg.dmem_corrupt = 1;
+  seen = 0;
+  EXPECT_EQ(nv_falcon_dmem_probe(d, f, 0xB0C, 0x5EC2B0Cu, 0, &seen), 0);
+  EXPECT_EQ((int)seen, 0);
+  /* An address the port cannot hold is an error, not a failed probe: the
+   * difference between "the read path answered something else" and "the read
+   * path was never asked the question" has to survive into the log. */
+  EXPECT_EQ(nv_falcon_dmem_probe(d, f, 0x10000, 1, 0, &seen), -ERANGE);
+}
+
 static void test_nv_ioc_sizes(void) {
   uart_puts("  Running test_nv_ioc_sizes...\n");
   tests_run++;
@@ -691,6 +763,8 @@ void nv_test_suite(void) {
   test_nv_bringup_stages();
   test_nv_dmem_pio_roundtrip();
   test_nv_imem_pio_roundtrip();
+  test_nv_dmem_addr_units();
+  test_nv_dmem_probe();
   test_nv_xfer_encoding();
   test_nv_falcon_halt_start();
   test_nv_selftest();

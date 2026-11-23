@@ -81,7 +81,49 @@ uint32_t nv_fwsec_sig_index(uint32_t fuse_reg, uint32_t sigvers,
   return idx;
 }
 
-/* ---- 3. the FRTS command ---------------------------------------------- */
+/* ---- 3. falcon memory addresses --------------------------------------- */
+
+uint32_t nv_flcn_idx_word(uint32_t byte_addr) {
+  /* Aligned, and inside what the 14-bit word-address field can express.  The
+   * mask used to be applied silently (0x3fff after the shift), so a request
+   * for DMEM 0x10000 read DMEM 0 and answered with real data -- undetectable
+   * from the value alone.  Refusing is the only honest answer: a caller that
+   * asked for memory the port cannot address has a bug, not a result. */
+  if (byte_addr & 3u) return NV_FLCN_IDX_NONE;
+  if (byte_addr > (0x3fffu << 2)) return NV_FLCN_IDX_NONE;
+  return byte_addr >> 2;
+}
+
+uint32_t nv_flcn_find_word(const uint8_t *img, uint32_t len, uint32_t val) {
+  if (!img) return NV_FLCN_IDX_NONE;
+  for (uint32_t off = 0; off + 4u <= len; off += 4u) {
+    if (get32(img + off) == val) return off;
+  }
+  return NV_FLCN_IDX_NONE;
+}
+
+int nv_flcn_compare_words(const uint32_t *words, uint32_t n, const uint8_t *img,
+                          uint32_t img_len, uint32_t img_off,
+                          struct nv_flcn_mismatch *out) {
+  if (!words || !img || n == 0u) return -EINVAL;
+  if (img_off + n * 4u < img_off) return -ERANGE; /* overflow */
+  if (img_off + n * 4u > img_len) return -ERANGE;
+  for (uint32_t i = 0; i < n; i++) {
+    uint32_t want = get32(img + img_off + i * 4u);
+    if (words[i] != want) {
+      if (out) {
+        out->index = i;
+        out->off = img_off + i * 4u;
+        out->got = words[i];
+        out->want = want;
+      }
+      return 1;
+    }
+  }
+  return 0;
+}
+
+/* ---- 4. the FRTS command ---------------------------------------------- */
 
 #define APPIF_ID_DMEMMAPPER 4u
 #define DMAP_SIGNATURE 0x50414D44u /* "DMAP" (little-endian bytes 44 4d 41 50) */

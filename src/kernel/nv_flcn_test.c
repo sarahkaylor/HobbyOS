@@ -175,11 +175,85 @@ static void test_nv_fwsec_patch_refusals(void) {
   EXPECT_EQ(nv_fwsec_patch_frts(dmem, sizeof dmem, 0xFF0, 1, 1), -EINVAL);
 }
 
+/* ---- falcon memory addresses ------------------------------------------
+ *
+ * The conversion the DMEM read-back depends on, pinned as arithmetic rather
+ * than as a comment: DMEM 0xB0C is byte offset 0xB0C and the port's index
+ * field takes word 0x2C3.  Both wrong answers are silent on the card -- a byte
+ * offset used as a word index reads four times too far, and an address masked
+ * into the 14-bit field wraps to the start of the memory and answers with real
+ * data -- so this is the one place a mistake is cheap to catch. */
+static void test_nv_flcn_idx_word(void) {
+  uart_puts("  Running test_nv_flcn_idx_word...\n");
+  tests_run++;
+  /* The three addresses the FWSEC read-back uses, in this card's DMEM image. */
+  EXPECT_EQ((int)nv_flcn_idx_word(0xB0C), 0x2C3);
+  EXPECT_EQ((int)nv_flcn_idx_word(0xD40), 0x350);
+  EXPECT_EQ((int)nv_flcn_idx_word(0xB24), 0x2C9);
+  EXPECT_EQ((int)nv_flcn_idx_word(0x000), 0);
+  /* The top of the field: word 0x3FFF is byte 0xFFFC. */
+  EXPECT_EQ((int)nv_flcn_idx_word(0xFFFC), 0x3FFF);
+  /* One word past it is refused, not wrapped: 0x10000 >> 2 is 0x4000, which
+   * the field cannot hold, and masking it would read DMEM word 0. */
+  EXPECT_EQ((int)nv_flcn_idx_word(0x10000), (int)NV_FLCN_IDX_NONE);
+  /* Unaligned byte offsets have no word index at all. */
+  EXPECT_EQ((int)nv_flcn_idx_word(0xB0D), (int)NV_FLCN_IDX_NONE);
+  EXPECT_EQ((int)nv_flcn_idx_word(0x2), (int)NV_FLCN_IDX_NONE);
+}
+
+/* The diagnosis: when the falcon returns a word the staged image does not have
+ * at that offset, name the offset it does appear at. */
+static void test_nv_flcn_find_word(void) {
+  uart_puts("  Running test_nv_flcn_find_word...\n");
+  tests_run++;
+  uint8_t img[0x20];
+  for (uint32_t i = 0; i < sizeof img; i++) img[i] = 0;
+  tput32(img + 0x0C, 0x5EC2B0Cu);
+  tput32(img + 0x1C, 0x5EC2B0Cu); /* a second copy: the first one wins */
+  EXPECT_EQ((int)nv_flcn_find_word(img, sizeof img, 0x5EC2B0Cu), 0x0C);
+  EXPECT_EQ((int)nv_flcn_find_word(img, sizeof img, 0x5EC2B0Du),
+            (int)NV_FLCN_IDX_NONE);
+  /* A value straddling the end of the image is not a match. */
+  img[0x1F] = 0x77;
+  EXPECT_EQ((int)nv_flcn_find_word(img, sizeof img, 0x77000000u),
+            (int)NV_FLCN_IDX_NONE);
+  EXPECT_EQ((int)nv_flcn_find_word(0, sizeof img, 1u), (int)NV_FLCN_IDX_NONE);
+}
+
+/* The read-back comparator: it must point AT the word that disagreed, which is
+ * what turns "MISMATCH" into an offset a human can look up in the image. */
+static void test_nv_flcn_compare_words(void) {
+  uart_puts("  Running test_nv_flcn_compare_words...\n");
+  tests_run++;
+  uint8_t img[0x40];
+  for (uint32_t i = 0; i < sizeof img; i++) img[i] = 0;
+  tput32(img + 0x1C, 0x15); /* the staged init_cmd byte offset, 0xB0C, is
+                             * relative to a DMEM image starting at 0xAF0 */
+  tput32(img + 0x1C + 4, 0x2);
+  uint32_t words[4] = {0x15, 0x2, 0, 0};
+  struct nv_flcn_mismatch mm;
+  for (uint32_t i = 0; i < sizeof mm; i++) ((uint8_t *)&mm)[i] = 0;
+  EXPECT_EQ(nv_flcn_compare_words(words, 4, img, sizeof img, 0x1C, &mm), 0);
+  words[1] = 0x30; /* what round 1 actually read back at DMEM 0xD40 */
+  ASSERT(nv_flcn_compare_words(words, 4, img, sizeof img, 0x1C, &mm) == 1);
+  EXPECT_EQ((int)mm.index, 1);
+  EXPECT_EQ((int)mm.off, 0x20);
+  EXPECT_EQ((int)mm.got, 0x30);
+  EXPECT_EQ((int)mm.want, 0x2);
+  /* A range the image cannot cover is refused rather than compared against
+   * whatever follows it in memory. */
+  EXPECT_EQ(nv_flcn_compare_words(words, 4, img, sizeof img, 0x34, &mm), -ERANGE);
+  EXPECT_EQ(nv_flcn_compare_words(0, 4, img, sizeof img, 0, &mm), -EINVAL);
+}
+
 void nv_flcn_test_suite(void) {
   test_nv_flcn_xfer_cmd();
   test_nv_fwsec_sig_index();
   test_nv_fwsec_patch_frts();
   test_nv_fwsec_patch_refusals();
+  test_nv_flcn_idx_word();
+  test_nv_flcn_find_word();
+  test_nv_flcn_compare_words();
 }
 
 #endif /* KERNEL_MODE_UNIT_TEST */

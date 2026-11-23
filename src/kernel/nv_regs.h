@@ -199,8 +199,14 @@ static inline int nv_is_fenced(uint32_t v) { return v == NV_REG_FENCED; }
 #define NV_FALCON_XFER_PORT(p) (((p) & 0x7) << 12)
 
 /* CODE_INDEX / DATA_INDEX: bits 2-15 are the word address (>> 2), bit 24
- * auto-increment on write, bit 25 auto-increment on read. */
-#define NV_FALCON_IDX_ADDR(a) (((a) >> 2) & 0x3fff)
+ * auto-increment on write, bit 25 auto-increment on read.
+ *
+ * The address conversion is NOT a macro here any more: it is
+ * nv_flcn_idx_word() in nv_flcn.c, which refuses an address the field cannot
+ * express instead of masking it (a masked address read returns real data from
+ * somewhere else, which no read-back can detect).  Bit 28 is SECRET on the
+ * code port (secure pages). */
+#define NV_FALCON_IDX_SECRET (1u << 28)
 #define NV_FALCON_IDX_WR_AUTOINC (1u << 24)
 #define NV_FALCON_IDX_RD_AUTOINC (1u << 25)
 

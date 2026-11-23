@@ -23,6 +23,7 @@
 
 #include "nv.h"
 #include "nv_regs.h"
+#include "nv_flcn.h"
 
 extern void uart_puts(const char *s);
 extern void uart_print_hex(uint64_t v);
@@ -113,16 +114,31 @@ int nv_falcon_reset_engines(struct nv_dev *d, const struct nv_falcon *f) {
  * Port 0 is the always-present window (CAPS2.DATA_PORTS says how many exist;
  * the driver only needs one).  Auto-increment mode writes the index once and
  * streams words through DATA0, which is what the ports are for.  Addresses
- * and lengths are 4-byte aligned by construction (word arrays). */
+ * and lengths are 4-byte aligned by construction (word arrays).
+ *
+ * THE ADDRESS IS A BYTE OFFSET AND THE REGISTER WANTS A WORD INDEX.  That
+ * conversion now happens exactly once, in nv_flcn_idx_word(), and an address
+ * the 14-bit field cannot express is refused instead of masked.  The previous
+ * form applied the mask silently, so a read at 0x10000 returned DMEM word 0 --
+ * a plausible-looking value from the wrong place, which is the one failure
+ * mode a read-back cannot detect for itself.
+ */
 static int flcn_pio(struct nv_dev *d, const struct nv_falcon *f, uint32_t idx_reg,
                     uint32_t data_reg, uint32_t addr, uint32_t *words, int n,
-                    int write) {
+                    int write, uint32_t extra_bits) {
   if (!f->present || !words || n <= 0) return -22; /* -EINVAL */
-  if (addr & 3) return -22;
+  if (addr & 3u) return -22;                      /* not a word address */
+  uint32_t idx = nv_flcn_idx_word(addr);
+  if (idx == NV_FLCN_IDX_NONE) return -34; /* -ERANGE: not addressable */
   int rc = nv_falcon_wait_idle(d, f, 100);
   if (rc) return rc;
+  /* The field is bits 15:2, so the WORD index has to be shifted back into its
+   * place: writing `idx` on its own puts word/4 in the field, i.e. addresses a
+   * quarter of the intended byte offset.  That is the defect this round found:
+   * self-consistent (a write and a read at the same wrong address both answer),
+   * and invisible unless something compares against the staged bytes. */
   flcn_wr(d, f, idx_reg,
-          NV_FALCON_IDX_ADDR(addr) |
+          (idx << 2) | extra_bits |
               (write ? NV_FALCON_IDX_WR_AUTOINC : NV_FALCON_IDX_RD_AUTOINC));
   for (int i = 0; i < n; i++) {
     if (write) {
@@ -137,24 +153,61 @@ static int flcn_pio(struct nv_dev *d, const struct nv_falcon *f, uint32_t idx_re
 int nv_falcon_dmem_write(struct nv_dev *d, const struct nv_falcon *f,
                          uint32_t addr, const uint32_t *words, int n) {
   return flcn_pio(d, f, NV_FALCON_DATA_INDEX0, NV_FALCON_DATA0, addr,
-                  (uint32_t *)words, n, 1);
+                  (uint32_t *)words, n, 1, 0);
 }
 
 int nv_falcon_dmem_read(struct nv_dev *d, const struct nv_falcon *f,
                         uint32_t addr, uint32_t *words, int n) {
   return flcn_pio(d, f, NV_FALCON_DATA_INDEX0, NV_FALCON_DATA0, addr, words, n,
-                  0);
+                  0, 0);
 }
 
 int nv_falcon_imem_write(struct nv_dev *d, const struct nv_falcon *f,
                          uint32_t addr, const uint32_t *words, int n) {
   return flcn_pio(d, f, NV_FALCON_CODE_INDEX, NV_FALCON_CODE, addr,
-                  (uint32_t *)words, n, 1);
+                  (uint32_t *)words, n, 1, 0);
+}
+
+/* IMEM pages carrying ucode are secure pages: both stacks set bit 28 of the
+ * index word for them, which is why the read path needs the same bit as the
+ * write path or it reads a different address space. */
+int nv_falcon_imem_read_ex(struct nv_dev *d, const struct nv_falcon *f,
+                           uint32_t addr, uint32_t *words, int n, int sec) {
+  return flcn_pio(d, f, NV_FALCON_CODE_INDEX, NV_FALCON_CODE, addr, words, n, 0,
+                  sec ? (1u << 28) : 0u);
 }
 
 int nv_falcon_imem_read(struct nv_dev *d, const struct nv_falcon *f,
                         uint32_t addr, uint32_t *words, int n) {
-  return flcn_pio(d, f, NV_FALCON_CODE_INDEX, NV_FALCON_CODE, addr, words, n, 0);
+  return nv_falcon_imem_read_ex(d, f, addr, words, n, 0);
+}
+
+/* ---- is the DMEM read path a read path? --------------------------------
+ *
+ * Every conclusion the launch draws about the falcon's memory is a PIO read
+ * through these registers, and until now that read had never been proved on
+ * the card: the DMEM read-back disagreed with the staged buffer in every word
+ * it examined, and a disagreement is only evidence once the instrument is
+ * known to work.
+ *
+ * Write a pattern at `addr`, read it back through the same port, then leave
+ * `restore` there.  Returns 1 when the pattern survived the round trip, 0 when
+ * it did not (the port answers something else -- wrong units, wrong port, or a
+ * window that is not the engine we think), negative on a port error.  The
+ * caller logs the raw words either way, because "0" and "unreadable" must not
+ * be allowed to look the same.
+ */
+int nv_falcon_dmem_probe(struct nv_dev *d, const struct nv_falcon *f,
+                         uint32_t addr, uint32_t pattern, uint32_t restore,
+                         uint32_t *observed) {
+  uint32_t w = pattern, back = 0, rst = restore;
+  int rc = nv_falcon_dmem_write(d, f, addr, &w, 1);
+  if (rc != 0) return rc;
+  rc = nv_falcon_dmem_read(d, f, addr, &back, 1);
+  (void)nv_falcon_dmem_write(d, f, addr, &rst, 1);
+  if (observed) *observed = back;
+  if (rc != 0) return rc;
+  return back == pattern ? 1 : 0;
 }
 
 /* ---- XFER: DMA a block of card memory into IMEM or DMEM -----------------

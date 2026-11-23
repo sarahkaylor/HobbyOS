@@ -183,6 +183,17 @@ int nv_falcon_imem_write(struct nv_dev *d, const struct nv_falcon *f,
                          uint32_t addr, const uint32_t *words, int n);
 int nv_falcon_imem_read(struct nv_dev *d, const struct nv_falcon *f,
                         uint32_t addr, uint32_t *words, int n);
+/* The same read with the SECRET page bit the writer used: ucode pages are
+ * secure, and reading them without the bit addresses a different space. */
+int nv_falcon_imem_read_ex(struct nv_dev *d, const struct nv_falcon *f,
+                           uint32_t addr, uint32_t *words, int n, int sec);
+/* Prove the DMEM port addresses the byte offset the caller asked for: write a
+ * pattern, read it back, then leave `restore` there.  1 = the pattern survived
+ * (the read path is trustworthy for this address), 0 = it did not, negative on
+ * a port error.  `observed` gets the word the port actually answered. */
+int nv_falcon_dmem_probe(struct nv_dev *d, const struct nv_falcon *f,
+                         uint32_t addr, uint32_t pattern, uint32_t restore,
+                         uint32_t *observed);
 int nv_falcon_wait_idle(struct nv_dev *d, const struct nv_falcon *f, int ms);
 int nv_falcon_halt(struct nv_dev *d, const struct nv_falcon *f);
 void nv_falcon_start(struct nv_dev *d, const struct nv_falcon *f,

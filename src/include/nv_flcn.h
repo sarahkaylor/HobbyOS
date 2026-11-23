@@ -117,6 +117,51 @@ int nv_fwsec_read_cmd(const uint8_t *dmem, uint32_t dmem_len, uint32_t iface_off
 uint32_t nv_fwsec_cmd_buffer(const uint8_t *dmem, uint32_t dmem_len,
                              uint32_t iface_off);
 
+/* ---- falcon memory addresses: bytes in, word index out ------------------
+ *
+ * The PIO index registers (0x180 code, 0x1c0 data) hold the address as a WORD
+ * index in bits 15:2.  Every caller of this driver thinks in bytes (DMEM 0xB0C
+ * is a byte offset out of the image), so exactly one conversion happens, here,
+ * and the caller shifts the result back into the field's place when it writes
+ * the register:
+ *
+ *     idx = nv_flcn_idx_word(0xB0C)   -> 0x2C3      (the field's value)
+ *     register = (idx << 2) | AUTOINC -> 0xB0C|...  (the field's position)
+ *
+ * Writing `idx` unshifted is the defect this round found on the card: the
+ * register then addresses a quarter of the intended byte offset, and a write
+ * followed by a read at the same address still round-trips, so the error is
+ * invisible without a comparison against the staged bytes.
+ *
+ * Getting it wrong in the other direction -- a byte offset too large for the
+ * 14-bit field -- used to be masked silently, which read real data from the
+ * start of the memory.  It is refused now.
+ */
+#define NV_FLCN_IDX_NONE 0xffffffffu
+uint32_t nv_flcn_idx_word(uint32_t byte_addr);
+
+/* The byte offset inside a staged image at which `val` appears, or
+ * NV_FLCN_IDX_NONE.  Searching the image for the word the falcon returned is
+ * the difference between "the read-back does not match" and "the read-back
+ * answered from offset X, i.e. the address units are wrong by this much". */
+uint32_t nv_flcn_find_word(const uint8_t *img, uint32_t len, uint32_t val);
+
+/* First word at which `words` disagrees with the staged image, as bytes out of
+ * the image so the row names an offset a human can look up. */
+struct nv_flcn_mismatch {
+  uint32_t index; /* 0-based word index of the first mismatch */
+  uint32_t off;   /* byte offset in the image (= img_off + 4*index) */
+  uint32_t got;   /* the word the falcon returned */
+  uint32_t want;  /* the word the staged image holds there */
+};
+/* Returns 1 and fills `out` on a mismatch, 0 when the whole range matches,
+ * -EINVAL/-ERANGE on bad arguments.  Comparing word-by-word and reporting
+ * WHERE is the whole point: "DMEM MISMATCH" without an offset is not evidence
+ * of anything. */
+int nv_flcn_compare_words(const uint32_t *words, uint32_t n, const uint8_t *img,
+                          uint32_t img_len, uint32_t img_off,
+                          struct nv_flcn_mismatch *out);
+
 /* Kernel unit tier (nv_flcn_test.c). */
 void nv_flcn_test_suite(void);
 
