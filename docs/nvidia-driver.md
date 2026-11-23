@@ -1,232 +1,308 @@
 # The `nv` driver: a native NVIDIA GPU driver for HobbyOS
 
-Status: **v1 — bring-up driver on real hardware; GSP-RM boot is the open gate.**
-Branch `nv/ada-driver`. Written 2026-11-22. Every claim below is either a fact
-measured in this repo (with the command or log line that produced it) or marked
-**not yet reached** — a stage the driver does not implement, named so nobody
-plans on it as if it existed.
+Status: **v2 — bring-up verified on a physical RTX 4090 (AD102), including the
+GSP processor; booting GSP-RM firmware is the open gate.** Branch
+`nv/ada-driver`. Written 2026-11-22.
+
+Every claim below is either measured in this repo (with the command or log line
+that produced it) or marked **not reached** — a stage the driver does not
+implement. Nothing is projected as if it existed.
 
 Target hardware: **RTX 4090 (AD102, `10de:2684`)**, passed through to a HobbyOS
-VM on the Proxmox host `r1` (`192.168.10.174`). Build/test host:
+VM (VM 300, `hobbyos-nv`) on Proxmox `r1` (`192.168.10.174`). Build/test host:
 `sarah@192.168.0.123` (x86_64, KVM).
 
-Companion docs: `docs/gpu-abi.md` (the virtio-gpu `/dev/gpu` ABI — a *different*
-GPU path, unchanged by this work), `docs/cyberpunk.md` (the Proton/Venus
-graphics ladder that games actually run on today), `docs/rimworld-plan.md`.
+Companion docs: `docs/nvidia-driver.md` (this file), `docs/nv-gsp-firmware.md`
+(the firmware analysis), `docs/gpu-abi.md` + `docs/cyberpunk.md` (the
+virtio-gpu/Venus graphics path, unchanged by this work).
 
 ---
 
 ## 0. TL;DR
 
-HobbyOS now has a **PCIe bus layer** and an **NVIDIA driver** that owns the real
-card: it enumerates the GPU by vendor/class, sizes and maps the BARs, decodes
-the GPU identity from `PMC_BOOT_0`, brings the register window up
-(PMC/PTIMER), finds the PMU/GSP/SEC2 **falcon** engines, and reports all of it —
-from the kernel as `[NV]` serial rows and from userspace through `/dev/nvctl`
-and `NVSMI.BIN`.
+HobbyOS now has a **PCIe bus layer** and a **native NVIDIA driver** that owns a
+real card. On the physical 4090 in VM 300 the driver:
 
-What it does **not** do yet: accelerate anything. On Turing and later (the 4090
-included) every useful GPU function — memory management, channels, display,
-3D — runs inside NVIDIA's **GSP-RM** firmware, which the kernel driver has to
-boot on the GSP processor. That boot (signed blobs, a write-protected region in
-VRAM, an RPC queue handshake) is stage P3 in §5 and is **not done**. The
-consequence is stated plainly in §6: **games do not get hardware 3D from this
-driver yet**, and the honest path for them is unchanged (the virtio-gpu/Venus
-stack).
+- enumerates the GPU by vendor + display class over PCI config space,
+- sizes and maps its BARs, including a **32 GiB ReBAR aperture on BAR1**,
+- decodes the GPU identity from `PMC_BOOT_0` → **AD102, chipset 0x192**,
+- proves the register window is live by reading the **PTIMER counter at
+  ~999 MHz** (it advances),
+- finds the **PMU and GSP processors** (`UC_CAPS2` version 6; PMU asleep, GSP
+  stopped) and correctly rejects the poisoned window at 0x840000,
+- reports all of it from userspace: `/dev/nvctl` + `NVSMI.BIN`, and
+- leaves the desktop booting normally with the card present.
 
----
+What it does **not** do: accelerate anything. On Turing and later every useful
+GPU function lives inside **GSP-RM** firmware, which the driver has to boot on
+the GSP. That is stage P3, it is **not implemented**, and §6 states the
+consequence for games plainly.
 
 ## 1. Why a native driver at all
 
 The graphics stack in this repo renders with **Mesa in the guest talking to
-`virtio-gpu 3D`**, and the *host* GPU does the work (virgl for GL, Venus for
-Vulkan). That is why Cyberpunk runs at all (§6) — and also why a card inside
-the guest cannot help it: with no host renderer in the VM, the guest must drive
-the GPU itself.
+`virtio-gpu 3D`**; the *host* GPU does the work (virgl for GL, Venus for
+Vulkan). That is why games run at all (§6) — and also why a card inside the
+guest cannot help them: in a VM with no host renderer, the guest must drive the
+GPU itself.
 
 A native driver is the only way to use a physical NVIDIA card from HobbyOS. The
-industry-standard open path is NVIDIA's kernel interface + Mesa's `nvk`
-(Vulkan) / Zink (GL on Vulkan), which needs a kernel driver that:
-
-1. owns PCIe (config space, BARs, MSI-X, DMA),
-2. boots GSP-RM and speaks its RPC protocol,
-3. implements the memory/channel objects `nvk` allocates through,
-4. exposes them to the userspace driver (a `nouveau`-shaped ioctl surface).
-
-This document covers (1) fully and (2) partially. (3) and (4) are the rungs
-after the GSP gate opens.
+open industry path is a kernel driver that (1) owns PCIe, (2) boots GSP-RM and
+speaks its RPC protocol, (3) implements the memory/channel objects a userspace
+driver allocates through (Mesa's `nvk` for Vulkan, Zink for GL on Vulkan), and
+(4) exposes them as an ioctl surface. This document covers (1) fully and (2)
+partially.
 
 ## 2. What landed
 
 | File | Role |
 |---|---|
-| `src/include/pci.h`, `src/kernel/pci.c`, `src/kernel/pci_test.c` | PCIe bus layer: ECAM from ACPI MCFG with a legacy CF8/CFC fallback, multi-function scan, BAR sizing (32/64-bit, I/O, unimplemented), capability walk, MSI/MSI-X programming. |
-| `src/include/acpi.h`, `src/kernel/acpi.c` | Shared RSDP/XSDT/MCFG/DMAR table locator (extracted from the VT-d driver, so there is one implementation). |
-| `src/include/irq.h`, `src/kernel/irq_table.c`, `trap.c` gates | Vector registry for `0xA0..0xBF`: `irq_alloc_vector`, `irq_register_vector`, `irq_dispatch`, LAPIC id. This is how an MSI-X message reaches a handler. |
-| `src/include/nv.h`, `src/kernel/nv_regs.h` | The driver's interfaces and its register map (with a public source cited per block). |
+| `src/include/pci.h`, `src/kernel/pci.c`, `src/kernel/pci_test.c` | PCIe bus layer: ECAM from ACPI MCFG with a legacy 0xCF8/0xCFC fallback, multi-function scan, BAR sizing (32/64-bit, I/O, unimplemented), capability walk, MSI/MSI-X programming. |
+| `src/include/acpi.h`, `src/kernel/acpi.c` | Shared RSDP/XSDT/MCFG/DMAR locator, with a **fw_cfg fallback** that accepts both firmware shapes (an RSDP address *or* the RSDP bytes) — see §5.4. |
+| `src/include/irq.h`, `src/kernel/irq_table.c`, `trap.c` | Vector registry for `0xA0..0xBF` (`irq_alloc_vector`, `irq_register_vector`, `irq_dispatch`, LAPIC id), wired into the x64 trap handler. |
+| `src/include/nv.h`, `src/kernel/nv_regs.h` | Driver interfaces and the register map (public source cited per block, measurements added inline). |
 | `src/kernel/nv.c` | Card-independent core: identify, PMC, PTIMER, falcon probe, staged bring-up, `/dev/nvctl` ABI, `read(2)` snapshot. |
-| `src/kernel/nv_pci.c` | Hardware half: pick the GPU, map BAR0 and a bounded BAR1 window, set MEM\|MASTER, run bring-up, program MSI-X (function-masked until GSP owns interrupts). |
-| `src/kernel/nv_falcon.c` | Falcon engine: DMEM/IMEM windows, the DMA ("xfer") request encoder, start/halt with a bounded stop wait, self-test. |
-| `src/kernel/nv_test.c` | 18 kernel unit-tier tests driving the shipped code against a fake register file. |
+| `src/kernel/nv_pci.c` | Hardware half: pick the GPU, map BAR0 + a bounded BAR1 window, set MEM\|MASTER, run bring-up, program MSI-X (function-masked until GSP owns interrupts). |
+| `src/kernel/nv_falcon.c` | Falcon engine: DMEM/IMEM windows, the DMA ("xfer") request encoder, start/halt with bounded waits, self-test. |
+| `src/kernel/nv_test.c` | 20 kernel unit-tier tests driving the shipped code against a fake register file. |
 | `src/user/nvsmi.c` → `/NVSMI.BIN` | Userspace report tool. |
 
-Wiring: `main.c` calls `nv_init()` on x64 after the timer is live; `fs.c`
-creates `/dev/nvctl` (character device 6) and serves `read(2)`; the compat
-`ioctl` route hands `NV_IOC_*` to `nv_ioctl()`.
+Wiring: `main.c` calls `nv_init()` on x64 once the timer is live; `fs.c` creates
+`/dev/nvctl` (character device 6) and serves `read(2)`; the compat `ioctl` route
+hands `NV_IOC_*` to `nv_ioctl()`.
 
-### 2.1 The ABI, in one table
+### 2.1 The ABI in one table
 
 | Surface | Who | Shape |
 |---|---|---|
-| `read(/dev/nvctl)` | native HobbyOS programs | one `struct nv_info` snapshot per read (no ioctl row exists for native programs; `SYS_MAX` is frozen) |
-| `ioctl(/dev/nvctl, NV_IOC_INFO)` | Linux-ABI consumers | same struct, copy-in/copy-out |
-| `ioctl(..., NV_IOC_REG_READ)` | bring-up diagnostics | reads one register **inside a whitelist** (PMC 0..0xFFF, PTIMER, PBUS, the three falcon windows) — never a blanket BAR0 read |
-| `ioctl(..., NV_IOC_SELFTEST)` | bring-up diagnostics | falcon scratch + DMEM round-trip; destructive to running ucode, so never automatic |
+| `read(/dev/nvctl)` | native HobbyOS programs | one `struct nv_info` snapshot per read (native programs have no `ioctl(2)` row; `SYS_MAX` is frozen) |
+| `ioctl(..., NV_IOC_INFO)` | Linux-ABI consumers | the same struct, copy-in/copy-out |
+| `ioctl(..., NV_IOC_REG_READ)` | diagnostics | one register **inside a whitelist** (PMC, PTIMER, PBUS, the three falcon windows) — never a blanket BAR0 read |
+| `ioctl(..., NV_IOC_SELFTEST)` | diagnostics | falcon scratch + DMEM round-trip; destructive to running ucode, so never automatic |
 
 ### 2.2 Design rules this driver was built to
 
-- **One MMIO seam.** Every register access goes through `struct nv_mmio_ops`.
-  The unit tier supplies a fake register file, so the shipped code path (not a
-  copy) is what 18 tests exercise, including the failure modes: a dead window,
-  an all-ones falcon, a PTIMER that never ticks, a torn 64-bit timer read, an
-  engine that refuses to stop, and a DMEM that silently drops writes.
-- **A stage that fails names itself.** `nv.state` is the last completed stage
-  and `nv.failed_stage` the one that failed; both are in the console rows and in
-  the ABI struct.
+- **One MMIO seam** (`struct nv_mmio_ops`). The unit tier supplies a fake
+  register file, so the shipped code path — not a copy — is what the tests
+  exercise, including the failure modes: dead window, all-ones falcon, torn
+  64-bit timer read, an engine that refuses to stop, a DMEM that drops writes.
+- **A failed stage names itself**: `state` is the last completed stage,
+  `failed_stage` the one that failed, both on the console and in the ABI.
 - **Nothing is guessed about a chip we have not seen.** The GPU-id table holds
   only ids verified against published device tables (`nv162` TU102, `nv170`
-  GA100, `nv172` GA102, `nv192` AD102, `nv1b2` GB202). An unknown id prints as
-  `NV<hex>`, which is honest, rather than a plausible marketing name.
-- **Turing and later are gated on firmware, and the driver says so.**
-  `gsp_required` is derived from the chipset id (`>= 0x160`) and reported.
+  GA100, `nv172` GA102, `nv192` AD102, `nv1b2` GB202); an unknown id prints as
+  `NV<hex>`.
+- **Turing and later are gated on firmware, and the driver says so**
+  (`gsp_required`, derived from the chipset id).
 
 ## 3. Register knowledge and its provenance
 
-No code was copied from another driver. Offsets and bit layouts come from
-public register documentation, cited per block in `nv_regs.h`:
+No code was copied from another driver. Offsets and bit layouts come from public
+register documentation, cited per block in `nv_regs.h`:
 
 | Block | Source |
 |---|---|
-| PMC identification + engine enables | `envytools` `docs/hw/bus/pmc.rst`, `rnndb/bus/pmc.xml` |
+| PMC identification + engine enables | envytools `docs/hw/bus/pmc.rst`, `rnndb/bus/pmc.xml` |
 | PTIMER counter + retry loop | `docs/hw/bus/ptimer.rst` |
 | PBUS interrupt registers | `docs/hw/bus/pbus.rst`, `rnndb/bus/pbus.xml` |
 | Falcon IO space, `UC_CTRL`/`UC_CAPS2` bits, `XFER_*` encoding, CODE/DATA windows | `docs/hw/falcon/{io,proc,xfer}.rst`, `rnndb/falcon.xml` |
-| Chipset field is 9 bits from Turing | `(boot0 & 0x1ff00000) >> 20`, cross-checked against the published GPU-id ↔ name table |
-| GSP falcon window at `0x110000` | stated in the public kernel driver's GSP constructor; the driver does **not** trust it — it accepts a window only if `UC_CAPS2` decodes to a falcon version 3..6 |
+| 9-bit chipset field | `(boot0 & 0x1ff00000) >> 20`, cross-checked against the published GPU-id ↔ name table |
+| GSP window at `0x110000` | stated in the public kernel driver's GSP constructor; **not trusted** — a window is accepted only if `UC_CAPS2` decodes to a falcon version 3..6 |
 
 Where a value is inferred rather than documented, the comment says so and the
-driver logs the raw register, so the inference is checkable on hardware.
+driver logs the raw register so the inference is checkable on hardware. Three
+places where the *hardware* corrected the documentation are recorded in §5.3.
 
 ## 4. Build and run
 
 ```bash
-# kernel (either arch; the ARM build compiles this whole subsystem out)
-make ARCH=intel -j8 hobbyos.elf
-
-# unit tier (x64): builds MODE=unit_tests and runs the suites, nv's included
-./run_unit_tests_intel.sh          # KVM when /dev/kvm exists
-
-# userspace report, inside the guest
-nvsmi
+make ARCH=intel -j8 hobbyos.elf        # the ARM build compiles this subsystem out
+./run_unit_tests_intel.sh              # x64 unit tier, nv's 20 tests included
+nvsmi                                  # inside the guest: the driver's report
 ```
 
-Enumerating on a real card prints (one row per stage):
+`tools/nv/deploy.sh` (lane infra) builds, uploads to `r1`, recreates VM 300,
+boots it and pulls the serial log. A full loop is ~4 minutes: build, gzip the
+1 GiB disk over the link (~45 s), boot, read.
+
+## 5. Evidence
+
+### 5.1 Physical RTX 4090, serial log
+
+VM 300 (`hobbyos-nv`, q35, 8 vCPU, 16 GiB, `hostpci0: 0000:01:00,pcie=1`,
+virtio-vga console, serial to file) booted `MODE=test` with `/WAVE.CFG` naming
+`NVSMI.BIN`. Verbatim rows from `/root/hobbyos-nv/serial.log`:
 
 ```
-[NV] found 10de:2684 at 01:00.0 subsys 1462:5104
-[PCI] transport=ecam base=<mmcfg base>
-[PCI] 01:00.0 10de:2684 class 0x030000 bar0 <base>/<size> ...
-[NV] bar1 window mapped <n> of <m> bytes
-[NV] id boot0=<b0> boot1=<b1> chipset=0x192 gpu=AD102 stepping=<s> gsp=required
-[NV] pmc enable=<e> intr=<i> pbus_intr=<p> (timer bit already set)
-[NV] ptimer t0=<t0> t1=<t1> dticks=<d> dus=<us> hz~<mhz>MHz
-[NV] falcon pmu base=0x10a000 ver=<v> caps=... present
-[NV] falcon gsp base=0x110000 ver=<v> caps=... present
-[NV] falcon sec2 base=0x840000 ver=<v> caps=... absent
-[NV] msix table programmed vec=<v> entries=<n> (function masked until GSP owns interrupts)
-[NV] state=falcon ...
+[ACPI] fw_cfg rsdp addr=0x0000000020445352 size=4
+[ACPI] no valid RSDP in the first 1 MiB of low memory
+[PCI] transport=legacy-cf8 base=0x0000000000000CF8 (no MCFG)
+[NV] found 0x00000000000010DE:0x0000000000002684 at 2:0.0 subsys 0x0000000000001462:0x0000000000005104
+[PCI] 2:0.0 vendor=0x00000000000010DE device=0x0000000000002684 class=3:0:0 hdr=0x0000000000000080 subsys=0x0000000000001462:0x0000000000005104
+[PCI]   bar0 base=0x0000000080000000 size=0x0000000001000000 mem
+[PCI]   bar1 base=0x0000380800000000 size=0x0000000800000000 mem 64bit prefetch
+[PCI]   bar3 base=0x0000381000000000 size=0x0000000002000000 mem 64bit prefetch
+[PCI]   bar5 base=0x0000000000007000 size=0x0000000000000080 io
+[PCI]   msi capable
+[PCI]   pcie capable
+[NV] bar1 window mapped 0x0000000040000000 of 0x0000000800000000 bytes
+[NV] id boot0=0x00000000192000A1 boot1=0x0000000000000000 chipset=0x0000000000000192 gpu=AD102 stepping=161 gsp=required
+[NV] pmc enable=0x0000000040000000 intr=0x00000000BADF5040(poison) pbus_intr=0x00000000BADF5040 (timer not gated by PMC_ENABLE on this chip)
+[NV] ptimer t0=0x0000000199F3FE60 t1=0x000000019A403A20 dticks=0x00000000004C3BC0 dus=0x0000000000001388 hz~999MHz
+[NV] falcon pmu base=0x000000000010A000 ver=6 caps=0x00000000800E0100 caps2=0x00000000EA104136 ctl=0x0000000000000020 busy=0x0000000000000000 present
+[NV] falcon gsp base=0x0000000000110000 ver=6 caps=0x0000000080420100 caps2=0x00000000CA101136 ctl=0x0000000000000010 busy=0x0000000000000000 present
+[NV] falcon sec2 base=0x0000000000840000 ver=6 caps=0x0000000080420100 caps2=0x00000000CA101136 ctl=0x00000000BADF5620 busy=0x00000000BADF5620 absent
+[NV] state=falcon chip=AD102 bar0=0x0000000080000000 bar0size=0x0000000001000000 bar1=0x0000380800000000 bar1size=0x0000000800000000 bar3=0x0000381000000000 bar3size=0x0000000002000000 falcons=0x0000000000000003 vec=0 gsp=required
 ```
 
-The bracketed values are filled from the real run in §5.1 — this document does
-not carry placeholder hardware numbers.
+and from userspace in the same boot:
 
-## 5. The ladder to hardware 3D
+```
+nv: HobbyOS native NVIDIA driver report
+nv: abi         1
+nv: state       falcon
+nv: gpu         AD102 chipset 0x0000000000000192
+nv: pci         2:0.0 vendor 10de:0x0000000000002684
+nv: bar0 phys   0x0000000080000000
+nv: bar0 size   0x0000000001000000
+nv: bar1 phys   0x0000380800000000        <- 32 GiB ReBAR aperture, base above 4 GiB
+nv: bar1 size   0x0000000800000000
+nv: bar3 phys   0x0000381000000000
+nv: pmc boot0   0x00000000192000A1
+nv: ptimer hz   999347200
+nv: irq vector  0x0000000000000000
+nv: falcon      pmu v6 caps 0x00000000800E0100 caps2 0x00000000EA104136 ctl 0x0000000000000020
+nv: falcon      gsp v6 caps 0x0000000080420100 caps2 0x00000000CA101136 ctl 0x0000000000000010
+nv: falcon      sec2 absent
+nv: gsp         required on this chip; 3D/memory/display work only after GSP-RM boots
+nv: verdict     driver reached 'falcon'; hardware 3D is not available until GSP-RM is running
+```
 
-| stage | content | state |
-|---|---|---|
-| P0 | test harness: HobbyOS VM on `r1` with the 4090 passed through, serial capture, deploy script | **done** (§5.1) |
-| P1 | PCIe bus layer (ECAM/legacy, BARs, caps, MSI-X) + vector registry | **done**, unit-tested (§5.2) |
-| P2 | identify, PMC, PTIMER, falcon discovery, `/dev/nvctl` + `NVSMI.BIN` | **done** (§5.1) |
-| P3 | GSP-RM boot: firmware inventory, WPR2 setup, booter load/run, HS/RM, RPC queues | **not yet reached** — firmware analysis is in `docs/nv-gsp-firmware.md` |
-| P4 | RM RPC client: memory allocation, VM mapping, channels/GPFIFO, fences | not started (needs P3) |
-| P5 | nouveau-shaped ioctl surface + Mesa `nvk` port, so Vulkan runs on the card | not started (needs P4) |
-| P6 | present path: `nvk` → HobbyOS scanout without a readback | not started |
+Reading of those rows, in plain terms:
 
-P3 is the gate that matters. Everything a game needs — allocating VRAM,
-creating a channel, submitting a pushbuffer, setting a display mode — is an RM
-RPC call that only exists after GSP-RM is running. There is no useful shortcut:
-on Turing+ the card no longer documents (and no longer supports) a driver-side
-path to those engines.
+| observation | what it proves |
+|---|---|
+| `10DE:2684` at `2:0.0`, subsys `1462:5104` | the pass-through worked; the driver found the real card, not a fake |
+| BAR1 = **0x800000000 = 32 GiB**, 64-bit prefetchable, base `0x380800000000` | ReBAR is enabled and the PCIe layer sizes a 32 GiB 64-bit BAR correctly (a naive 32-bit BAR probe cannot) |
+| `boot0=0x192000A1` → chipset `0x192` → AD102 | identification is from the card, not from the PCI id table |
+| `dticks=0x4C3BC0` over `0x1388` µs → **999 MHz** | the register window is live and the PTIMER really counts; a stuck or aliased window cannot produce this |
+| PMU `ctl=0x20` (SLEEPING), GSP `ctl=0x10` (STOPPED) | the processors' control registers decode to coherent states, which is what a driver needs before loading ucode |
+| SEC2 window at 0x840000 reads `0xBADF5620` → absent | the driver refuses a poisoned window instead of accepting "version 6" from garbage (§5.3) |
 
-### 5.1 Hardware evidence
+Desktop evidence with the card present: `Desktop starting...` follows the driver
+rows, and a QMP screendump of that boot is `docs/nv-4090-desktop.png`
+(1920×1080, non-black fraction 1.0, taskbar + clock + cursor visible).
 
-*(filled from the run in §7 — see the evidence log)*
+### 5.2 Unit tier
 
-### 5.2 Unit-tier evidence
+`./run_unit_tests_intel.sh` on the build host (KVM), merged tree:
 
-*(filled from the run in §7 — see the evidence log)*
+```
+Tests run:    490
+Tests failed: 0
+```
+
+The 490 include `pci_test`'s MCFG/BAR/capability/multi-function/IRQ cases and
+`nv_test`'s 20, which drive the real `nv.c`/`nv_falcon.c` through a fake
+register file. The same kernel booted on the physical card also reports
+`Tests run: 483` / `0 failed` in `MODE=unit_tests` — the suite is green with and
+without the GPU and under both TCG/KVM and the Proxmox VM.
+
+### 5.3 Three things the hardware taught us (each is a fixed defect)
+
+1. **PTIMER is not gated by `PMC_ENABLE` bit 16 on modern chips.** The bit reads
+   0 and refuses the write on AD102. The first version treated that as fatal and
+   stopped at stage `pmc`, so it never probed a single processor. Now the bit is
+   only written on pre-G80 parts and the counter itself (999 MHz, advancing) is
+   the proof. *A read is evidence; an unverifiable write is not.*
+2. **NVIDIA poison values decode as plausible register contents.** A read of a
+   window that is not the engine answers `0xBADF....` (`0xBADF5040` at
+   `PMC_INTR_0`, `0xBADF5620` at BAR0+0x840000). `0xCA101136 & 0xF == 6`, so a
+   version-based probe accepted the poisoned window as a falcon v6. Poison is
+   now rejected for `BOOT_0`, `UC_CAPS`, `UC_CAPS2` and `UC_CTRL`, and reported
+   as such.
+3. **A test reporter that fails unconditionally looks exactly like a broken
+   driver.** `pci_test`'s hex row helper printed `FAIL` for every comparison,
+   including `got == want`; five suites read as red on a green build. It is an
+   assert-equal now.
+
+### 5.4 ACPI under OVMF: measured, still open
+
+With OVMF + limine (the VM's boot path) there is no RSDP in the legacy scan
+window, so the PCIe layer falls back to `0xCF8` config access — which works for
+this card (bus 2) and is why every row above is real. The driver now also asks
+QEMU's fw_cfg for `etc/acpi/rsdp`; measured on this VM, that entry is **4 bytes**
+containing `"RSD "` (`0x20445352`), i.e. neither the pointer form (QEMU's BIOS
+path publishes a 4-byte address) nor a complete RSDP (20+ bytes with a valid
+checksum). The fallback therefore declines it rather than guessing, and logs the
+size. **Open item** — see §8.5; the experiment is a direct-kernel/BIOS boot of
+the same kernel, where the entry should be the address form, plus a look at what
+firmware this OVMF build actually publishes.
 
 ## 6. Games: what the 4090 does for RimWorld and Cyberpunk today
 
-The question the task asks is whether these games "work well" on this card.
-There are two different questions inside it, and they have different answers.
+Two questions hide inside "do they work well", and they have different answers.
 
-**Is the card fast enough for these games?** Yes, by a wide margin. Measured
-numbers for the same titles on comparable hardware are already in this repo:
-Cyberpunk 2077 (Steam build 2.5, Low preset) runs at a **menu median of
-142.8–144.4 fps through one virtualised layer** (Venus, 9070 XT host) and at
-388–399 fps host-native — `docs/cyberpunk.md` §0.2. Nothing about a 4090 makes
-that harder; pixel throughput is not the constraint.
+**Is the card fast enough?** Yes, by a wide margin — and this repo has the
+numbers, not a guess. Cyberpunk 2077 (Steam build 2.5, Low preset) runs at a
+**menu median of 142.8–144.4 fps through one virtualisation layer** (Venus on an
+RX 9070 XT) and 388–399 fps host-native (`docs/cyberpunk.md` §0.2), and the same
+document records the game *playing* through Venus at a **720p median of 30.3 fps**
+(p10 25.5–27.6; 1080p 34.5) with the P9 functional half passing (10-minute
+session, save/reload). Nothing about a 4090 makes pixel throughput the
+constraint.
 
-**Does HobbyOS use the 4090 for them?** No, and that is not a driver bug — it is
-the missing rungs. The table below is the honest state:
+**Does HobbyOS use the 4090 for them?** No. Not because the driver is wrong, but
+because two rungs are missing:
 
-| title | how it runs on HobbyOS today | does the `nv` driver change it? |
+| title | how it runs on HobbyOS today | does `nv` accelerate it? |
 |---|---|---|
-| RimWorld (native Linux ELF, GL 3.3) | Mesa GL in the guest → virtio-gpu 3D → host GL (virgl) | **no** — GL on the card needs a GL driver over `nvk`/Zink (P5), and `nvk` needs GSP-RM (P3) |
-| Cyberpunk 2077 (Windows PE, D3D12) | Wine + vkd3d-proton → Mesa Venus → virtio-gpu 3D → host Vulkan | **no** — same dependency: Vulkan on the card is `nvk` (P5) |
+| RimWorld (native Linux ELF, GL 3.3) | Mesa GL in the guest → virtio-gpu 3D → host GL (virgl) | **no** — GL on the card needs Zink over `nvk` (P5), and `nvk` needs GSP-RM (P3) |
+| Cyberpunk 2077 (Windows PE, D3D12) | Wine + vkd3d-proton → Venus → host Vulkan | **no** — same dependency chain |
 
-The measured state of those paths (from `docs/cyberpunk.md`): Cyberpunk plays
-through Venus at a **720p median of 30.3 fps** (p10 25.5–27.6, 1080p 34.5), the
-P9 functional half passes (10-minute session, save/reload), and the 30 fps
-target is met at the median without margin. RimWorld's path is the same stack
-through GL. **A card passed into a HobbyOS VM does not accelerate either of
-them today**, because the guest-side driver that would use it does not exist
-yet — and pretending otherwise would be the single most misleading thing this
+So the honest answer to the task's validation question is: **the card is more
+than enough for these titles, and HobbyOS cannot use it for them yet.** A card
+passed into a HobbyOS VM today gets enumerated, identified and reported — it does
+not render. Claiming otherwise would be the single most misleading thing this
 document could do.
 
-What would change it, in order, is P3 → P4 → P5 in §5. P3 is hardware-firmware
-work with a hard dependency on NVIDIA-signed blobs; P4 and P5 are large but
-conventional. Until then the supported way to run these games on HobbyOS is the
-virtio-gpu/Venus stack, and the `nv` driver is additive — it does not touch
-`/dev/gpu`, the Mesa stack, or the `virtio-gpu` path, and a machine with no
-NVIDIA card costs one `[NV]` line at boot.
+What closes the gap, in order: **P3** (GSP-RM boot, `docs/nv-gsp-firmware.md`),
+**P4** (RM RPC client: memory, VM, channels, fences), **P5** (nouveau-shaped
+ioctl surface + Mesa `nvk`, so Vulkan runs on the card and Zink carries GL). P3
+is firmware work gated on NVIDIA-signed blobs; P4/P5 are large but conventional.
+Until then the supported way to run these games on HobbyOS is the
+virtio-gpu/Venus stack, and `nv` is additive: it does not touch `/dev/gpu`, the
+Mesa stack, or the virtio-gpu path, and a machine with no NVIDIA card costs one
+`[NV]` line at boot.
 
-## 7. Evidence log
+## 7. The ladder to hardware 3D
 
-*(appended as stages run; see §5.1/§5.2)*
+| stage | content | state |
+|---|---|---|
+| P0 | harness: HobbyOS VM on `r1` with the 4090 passed through, serial + screenshot capture, deploy script | **done** |
+| P1 | PCIe bus layer + ACPI locator + MSI-X vector registry | **done**, unit-tested |
+| P2 | identify, PMC, PTIMER, falcon discovery, `/dev/nvctl` + `NVSMI.BIN` | **done on hardware** (§5.1) |
+| P3 | GSP-RM boot: firmware inventory, WPR2, booter load/run, HS/RM, RPC queues | **not reached** — analysis in `docs/nv-gsp-firmware.md` |
+| P4 | RM RPC client: memory allocation, VM mapping, channels/GPFIFO, fences | not started (needs P3) |
+| P5 | nouveau-shaped ioctls + Mesa `nvk`/Zink | not started (needs P4) |
+| P6 | present path: card → HobbyOS scanout without a readback | not started |
 
 ## 8. Open items
 
-1. **P3 (GSP-RM boot)** — the gate. Firmware inventory and container analysis:
-   `docs/nv-gsp-firmware.md`.
-2. **BAR1 window bound** — the driver maps 1 GiB of the VRAM aperture. A
-   ReBAR-enabled 4090 exposes 32 GiB; nothing needs more than a window yet, but
-   the GSP WPR placement must respect the *real* aperture, not the window.
-3. **MSI-X is programmed but function-masked** — intentional until GSP-RM owns
-   the interrupt-ack protocol (`PMC_INTR` writes belong to it).
-4. **No vIOMMU in the target VM** — device DMA is guest-physical identity.
-   Supporting an emulated `intel-iommu` in front of the card is a separate task;
-   the VT-d driver already exists for the RDMA path.
-5. **`nvk`** — nothing in this branch builds or touches Mesa. P5 is where that
+1. **P3 — GSP-RM boot.** The gate. Blob inventory, container formats and the
+   step-by-step sequence with observables: `docs/nv-gsp-firmware.md`.
+2. **BAR1 window.** 1 GiB mapped of a 32 GiB aperture — enough for firmware, not
+   a design for RM's memory manager. The GSP stage must use the *real* aperture
+   size, not the window.
+3. **MSI-X is programmed but function-masked** (deliberately): the interrupt-ack
+   protocol on Turing+ belongs to GSP-RM.
+4. **No vIOMMU in the target VM** (device DMA is guest-physical identity).
+   Supporting the emulated `intel-iommu` in front of the card is a separate task;
+   the VT-d driver exists for the RDMA path.
+5. **ACPI/ECAM under OVMF** (§5.4): `etc/acpi/rsdp` is 4 bytes of `"RSD "`. Next
+   experiment: boot the same kernel via the BIOS/direct-kernel path and compare
+   the entry, and check whether this OVMF publishes tables only through the UEFI
+   configuration table (which a multiboot1 kernel never sees). Until then the
+   legacy 0xCF8 path is what the log shows, and it is sufficient for this card.
+6. **`nvk`** — nothing in this branch builds or touches Mesa; P5 is where that
    starts.

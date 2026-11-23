@@ -247,8 +247,9 @@ static int fw_name_eq(const char *ent, const char *want) {
   return 0;
 }
 
-/* Look a file up in fw_cfg's directory.  Returns its selector, or -1. */
-static int fw_find_file(const char *name) {
+/* Look a file up in fw_cfg's directory.  Returns its selector, or -1, and
+ * stores the file's size when `out_size` is given. */
+static int fw_find_file(const char *name, uint32_t *out_size) {
   fw_sel(0x0000);
   char sig[4];
   for (int i = 0; i < 4; i++) sig[i] = (char)fw_byte();
@@ -269,12 +270,15 @@ static int fw_find_file(const char *name) {
     return -1;
   }
   for (uint32_t i = 0; i < count; i++) {
-    (void)fw_be32(); /* size */
+    uint32_t fsize = fw_be32();
     uint16_t sel = fw_be16();
     (void)fw_be16(); /* reserved */
     char ent[56];
     for (int c = 0; c < 56; c++) ent[c] = (char)fw_byte();
-    if (fw_name_eq(ent, name)) return (int)sel;
+    if (fw_name_eq(ent, name)) {
+      if (out_size) *out_size = fsize;
+      return (int)sel;
+    }
   }
   /* fw_cfg is present but has no such file.  That is the OVMF case: OVMF
    * builds its own ACPI tables and does not publish QEMU's blob, so the RSDP
@@ -286,15 +290,53 @@ static int fw_find_file(const char *name) {
   return -1;
 }
 
-/* Read the RSDP address QEMU publishes.  Returns 0 and the physical address. */
-static int acpi_rsdp_from_fwcfg(uint64_t *out) {
-  int sel = fw_find_file("etc/acpi/rsdp");
+/* The fw_cfg entry "etc/acpi/rsdp" comes in two shapes depending on firmware:
+ *   - a 4-byte guest-physical address of the RSDP (QEMU's legacy/BIOS path);
+ *   - the RSDP itself, starting with "RSD PTR " (measured 2026-11-22: the
+ *     entry's first four bytes read 0x20445352 == "RSD ", so this OVMF+limine
+ *     launch publishes the table, not a pointer).
+ * Both are handled: read up to the full RSDP, then either take the address or
+ * use the bytes directly.  A driver that only understood the pointer form
+ * would report "no ACPI" on a machine that handed it the table.
+ * Returns 0 when the root table was taken, -1 otherwise. */
+static int acpi_from_fwcfg(void) {
+  uint32_t fsize = 0;
+  int sel = fw_find_file("etc/acpi/rsdp", &fsize);
   if (sel < 0) return -1;
+  static uint8_t buf[64];
+  uint32_t want = fsize < sizeof buf ? fsize : (uint32_t)sizeof buf;
+  if (want < 4) return -1;
   fw_sel((uint16_t)sel);
-  uint32_t pa = 0;
-  for (int i = 0; i < 4; i++) pa |= (uint32_t)fw_byte() << (8 * i);
+  for (uint32_t i = 0; i < want; i++) buf[i] = fw_byte();
+  if (want >= ACPI_RSDP_V1_SIZE && rsdp_valid(buf)) {
+    if (root_from_rsdp(buf) != 0) return -1;
+    g_rsdp_phys = 0; /* the table came from firmware, not from memory */
+    g_ready = 1;
+    uart_puts("[ACPI] RSDP via fw_cfg blob (");
+    print_int((int)fsize);
+    uart_puts(" bytes) root=");
+    uart_puts(g_root_is_xsdt ? "XSDT" : "RSDT");
+    uart_puts(" entries=");
+    print_int(acpi_table_count());
+    uart_puts("\n");
+    return 0;
+  }
+  uint32_t pa = (uint32_t)buf[0] | ((uint32_t)buf[1] << 8) |
+                ((uint32_t)buf[2] << 16) | ((uint32_t)buf[3] << 24);
+  uart_puts("[ACPI] fw_cfg rsdp addr=");
+  uart_print_hex(pa);
+  uart_puts(" size=");
+  print_int((int)fsize);
+  uart_puts("\n");
   if (pa == 0 || pa == 0xffffffffu) return -1;
-  *out = pa;
+  if (acpi_init_from_root(pa) != 0) return -1;
+  uart_puts("[ACPI] RSDP via fw_cfg phys=");
+  uart_print_hex(g_rsdp_phys);
+  uart_puts(" root=");
+  uart_puts(g_root_is_xsdt ? "XSDT" : "RSDT");
+  uart_puts(" entries=");
+  print_int(acpi_table_count());
+  uart_puts("\n");
   return 0;
 }
 
@@ -322,21 +364,9 @@ int acpi_init(void) {
     }
   }
 
-  /* Fallback: QEMU publishes the RSDP address through fw_cfg even when the
-   * legacy window holds nothing (measured under OVMF + limine). */
-  {
-    uint64_t fw_pa = 0;
-    if (acpi_rsdp_from_fwcfg(&fw_pa) == 0 && acpi_init_from_root(fw_pa) == 0) {
-      uart_puts("[ACPI] RSDP via fw_cfg phys=");
-      uart_print_hex(g_rsdp_phys);
-      uart_puts(" root=");
-      uart_puts(g_root_is_xsdt ? "XSDT" : "RSDT");
-      uart_puts(" entries=");
-      print_int(acpi_table_count());
-      uart_puts("\n");
-      return 0;
-    }
-  }
+  /* Fallback: fw_cfg carries the RSDP even when the legacy window holds
+   * nothing (measured under OVMF + limine). */
+  if (acpi_from_fwcfg() == 0) return 0;
 
   uart_puts("[ACPI] no valid RSDP in the first 1 MiB of low memory\n");
   return -1;
