@@ -213,12 +213,14 @@ Each of these is a task with an experiment, not a fact:
    has the mailbox registers defined) — otherwise a wrong WPR2 offset looks
    exactly like a hang.
 
-## 6. What the reference driver does, in register terms (unverified here)
+## 6. What the reference driver does, in register terms
 
 Established from the reference driver's own device headers and boot code during
-the research pass, and recorded so the next session starts from a named map
-rather than a guess.  **None of this has been exercised by `nv` yet** — every row
-is a hypothesis to verify against hardware, not a fact about our driver:
+the research pass.  **Superseded in part by measurement**: a reference Linux
+guest with NVIDIA's driver on the same card produced a pre/post BAR0 dump
+(`docs/nv-gsp-reference.md`), and three rows below were contradicted by it.  The
+table is kept as the record of what was believed, with §6.1 holding the verdict —
+do not build on a row marked CONTRADICTED:
 
 | item | value |
 |---|---|
@@ -231,10 +233,38 @@ is a hypothesis to verify against hardware, not a fact about our driver:
 | first RPC exchange | queue head kick via `PGSP_QUEUE_HEAD(0)`; pre-queued `GSP_SET_SYSTEM_INFO` then `SET_REGISTRY`, then wait for the `GSP_INIT_DONE` event |
 | RPC frame | 32-byte header: version `0x03000000`, signature `"VRPC"`, length, function, result fields; queue elements carry auth tags, so the region must be exactly as the firmware expects |
 
-Two of those rows are checkable *without* booting anything: read `0x1FA828`
-(a nonzero value proves a previous owner left WPR2 programmed) and read
-`0x1668` before and after a reset to see the mask write take effect.  They are
-the cheapest first experiments on the real card.
+### 6.1 Measured verdicts (2026-11-23)
+
+Source: `docs/nv-gsp-reference.md` §5, driver 580.178.04 on this 4090, plus
+`nv`'s own probe on the same card (`[NV-GSP] probe` rows in the serial log).
+
+| row | verdict | what is actually true |
+|---|---|---|
+| GSP block `0x110000`, `UC_CAPS/CAPS2/CTRL` | **CONFIRMED** | `0x110108=0x80420100`, `0x11012C=0xCA101136`, `0x110100=0x10`; identical pre/post init and identical to `nv`'s log |
+| falcon v4 control offsets (`0x100`, `0x104`, `0x10C`, `0x110`, `0x128`, `0x118`, `0xF4`) | **CONFIRMED as addresses** | every one answers coherently (`0x118=0x2` idle). Bit *semantics* beyond addresses remain unproven by static reads |
+| RISC-V `CPUCTL +0x388` **bit 7 = ACTIVE** | **CONTRADICTED** | with GSP-RM running and Vulkan rendering, `0x111388 = 0x00000010` — **bit 4**, matching falcon `UC_CTRL.STOPPED`. Do not gate on bit 7 |
+| `0x1668 = 0x111` post-reset mask | **CONTRADICTED as a BAR0 address** | `0x001668` reads the unreadable-register word in *both* states, and so does `nv` on a fenced window. It is block-relative or privileged; it cannot be written at BAR0+`0x1668` |
+| WPR2 "live check" lo/hi `0x1FA824/0x1FA828`, nonzero hi | **CONTRADICTED** | hi is `0` with GSP-RM running, and `0` before init: the word never moves. The pair that moves is `0x1FA804`/`0x1FA808` (`0x041B3000`/`0x05CF3000` pre → `0x1FFFF000`/`0` post) |
+| WPR meta 256 B, magic, revision, 128 KiB top-down | not read | lives in VRAM; BAR1 was not mapped by the reference lane. Still a hypothesis (see §5) |
+| mailboxes `+0x040/+0x044`, engine reset `+0x3C0`, queue head `+0xC00` | **UNTESTABLE** | all read 0 in both states — a static dump cannot distinguish "idle" from "not implemented" |
+
+Two consequences the driver already carries:
+
+- **`0xBADF_xxxx` is not one thing.** `0xBADF5040` is the chip's answer for a
+  register this host may not read and it *persists on a healthy card*;
+  `0xBADF5620` is a fenced window that a driver has not initialised yet.  `nv`
+  used to call both "poison" and print a working card as if it were broken.
+- **"Fenced" is not "absent".** SEC2 reads the fence word before init and
+  falcon-shaped afterwards, so `nv` now reports `fenced` for a BADF window and
+  keeps `absent` for `0xffffffff`.
+
+Cross-check, and the reason to trust these rows: `nv`'s own probe on the same
+card reproduces the reference's *pre-init* numbers exactly — `wpr a=0x041B3000
+b=0x05CF3000 mmu=0x00100000:0x05CF3FF0`, `mask1668=fenced`,
+`riscv_cpuctl=fenced` — after the reference guest had run GSP-RM and been
+stopped. Two independent software stacks, same words. It also means the
+write-protected region is torn down on VM stop/unload, so the normal case for
+`nv` is "untouched", not "already programmed".
 
 ## 7. Bottom line
 

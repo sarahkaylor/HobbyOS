@@ -48,7 +48,8 @@ struct fake_gpu {
   uint32_t last_xfer_off[FAKE_NR_FALCON];
   uint32_t last_xfer_addr[FAKE_NR_FALCON];
   int dmem_corrupt; /* model DMEM that silently drops writes */
-  uint32_t wpr2_lo, wpr2_hi; /* PFB write-protected region */
+  uint32_t wpr2_lo, wpr2_hi; /* PFB write-protected region (legacy pair) */
+  uint32_t wpr_a, wpr_b;     /* PFB 0x1FA804/08: the pair that moves */
   uint32_t mbox0, mbox1;     /* GSP falcon mailboxes */
   uint32_t riscv_ctl;        /* GSP RISC-V status word */
   uint32_t nwrites;
@@ -93,6 +94,8 @@ static uint32_t fake_rd32(void *ctx, uint32_t off) {
   if (off == NV_FALCON_GSP_BASE + 0x3C0) return 0;
   if (off == NV_FALCON_GSP_BASE + 0x1668) return 0;
   if (off == NV_FALCON_GSP_BASE + 0x1000 + 0x388) return fg.riscv_ctl;
+  if (off == 0x1FA804) return fg.wpr_a;
+  if (off == 0x1FA808) return fg.wpr_b;
   if (off == 0x1FA824) return fg.wpr2_lo;
   if (off == 0x1FA828) return fg.wpr2_hi;
   if (off == 0x1FA82C) return 0;
@@ -268,10 +271,10 @@ static void test_nv_pmc_modern_does_not_gate_on_timer_bit(void) {
   EXPECT_EQ((int)fg.pmc_enable, (int)before); /* untouched */
   EXPECT_EQ((int)d->state, (int)NV_STATE_PMC);
   /* Poison in the interrupt register is reported, not mistaken for state. */
-  fg.pmc_intr = NV_PMC_INTR_POISON;
+  fg.pmc_intr = NV_REG_UNREADABLE;
   struct nv_dev *d2 = fake_attach();
   d2->chipset = 0x192;
-  fg.pmc_intr = NV_PMC_INTR_POISON;
+  fg.pmc_intr = NV_REG_UNREADABLE;
   EXPECT_EQ(nv_pmc_enable_timer(d2), 0);
 }
 
@@ -354,16 +357,23 @@ static void test_nv_gsp_probe_reports_wpr2(void) {
   tests_run++;
   struct nv_dev *d = fake_attach();
   ASSERT(nv_falcon_probe_all(d) == 0);
+  /* Post-init signature measured on the real card.  The legacy pair is set to
+   * a nonzero value on purpose: the old "nonzero hi means firmware ran" check
+   * would have agreed here, so the test proves the verdict comes from the pair
+   * that actually moves. */
+  fg.wpr_a = 0x1FFFF000u;
+  fg.wpr_b = 0x00000000u;
   fg.wpr2_lo = 0x00A00000u;
-  fg.wpr2_hi = 0x00000400u; /* size != 0 -> already programmed */
+  fg.wpr2_hi = 0x00000400u;
   fg.mbox0 = 0xDEADBEEFu;
   fg.mbox1 = 0x12345678u;
-  fg.riscv_ctl = 0x80u; /* ACTIVE bit */
+  fg.riscv_ctl = 0x10u; /* bit 4 set, bit 7 clear: the measured live state */
   ASSERT(nv_gsp_probe(d) == 0);
+  EXPECT_EQ((int)d->wpr_ctl_a, (int)0x1FFFF000u);
+  EXPECT_EQ((int)d->wpr_ctl_b, 0);
   EXPECT_EQ((int)d->wpr2_lo, (int)0x00A00000u);
-  EXPECT_EQ((int)d->wpr2_hi, (int)0x00000400u);
   EXPECT_EQ((int)d->gsp_msg0, (int)0xDEADBEEFu);
-  EXPECT_EQ((int)d->gsp_ucctl, 0x80);
+  EXPECT_EQ((int)d->gsp_ucctl, 0x10);
   EXPECT_EQ(d->gsp_stage, 1); /* PROBED */
   /* Probe is a read: it must not have written a single register. */
   EXPECT_EQ((int)fg.nwrites, 0);
@@ -372,6 +382,56 @@ static void test_nv_gsp_probe_reports_wpr2(void) {
   fg.falcon_caps2[NV_FALCON_IDX_GSP] = 0xffffffffu;
   ASSERT(nv_falcon_probe_all(d2) == 0); /* PMU still present */
   EXPECT_EQ(nv_gsp_probe(d2), -ENODEV);
+}
+
+/* The two other verdicts: an untouched card must read as untouched (that is
+ * the state in which laying out the region is safe), and a card whose values
+ * match neither known signature must read as unknown rather than as either. */
+static void test_nv_gsp_probe_wpr_verdicts(void) {
+  uart_puts("  Running test_nv_gsp_probe_wpr_verdicts...\n");
+  tests_run++;
+  struct nv_dev *d = fake_attach();
+  ASSERT(nv_falcon_probe_all(d) == 0);
+  fg.wpr_a = 0x041B3000u; /* pre-init signature */
+  fg.wpr_b = 0x05CF3000u;
+  ASSERT(nv_gsp_probe(d) == 0);
+  EXPECT_EQ((int)d->wpr_ctl_a, (int)0x041B3000u);
+  /* A card with neither signature (e.g. different VRAM size) must not be
+   * reported as untouched -- "unknown" is the honest answer and the boot stage
+   * treats it as programmed. */
+  struct nv_dev *d2 = fake_attach();
+  ASSERT(nv_falcon_probe_all(d2) == 0);
+  fg.wpr_a = 0x12340000u;
+  fg.wpr_b = 0x00005678u;
+  ASSERT(nv_gsp_probe(d2) == 0);
+  EXPECT_EQ((int)d2->wpr_ctl_a, (int)0x12340000u);
+  EXPECT_EQ(d2->gsp_stage, 1);
+}
+
+/* A fenced engine is a real engine that has not been initialised.  Reporting
+ * it as "absent" is the mistake this test exists to prevent: the reference dump
+ * shows SEC2 fenced before init and falcon-shaped after. */
+static void test_nv_falcon_fenced_vs_absent(void) {
+  uart_puts("  Running test_nv_falcon_fenced_vs_absent...\n");
+  tests_run++;
+  struct nv_dev *d = fake_attach();
+  /* SEC2 answers the fence word everywhere: present must be 0, fenced must be
+   * 1, and the overall probe must still succeed because PMU/GSP are fine. */
+  fg.falcon_caps[NV_FALCON_IDX_SEC2] = 0xBADF5620u;
+  fg.falcon_caps2[NV_FALCON_IDX_SEC2] = 0xBADF5620u;
+  fg.uctl[NV_FALCON_IDX_SEC2] = 0xBADF5620u;
+  ASSERT(nv_falcon_probe_all(d) == 0);
+  EXPECT_EQ(d->falcon[NV_FALCON_IDX_SEC2].present, 0);
+  EXPECT_EQ(d->falcon[NV_FALCON_IDX_SEC2].fenced, 1);
+  EXPECT_EQ((int)d->falcon_mask, 0x3); /* PMU + GSP only */
+  /* A window that reads 0xffffffff is absent, not fenced. */
+  struct nv_dev *d2 = fake_attach();
+  fg.falcon_caps[NV_FALCON_IDX_SEC2] = 0xffffffffu;
+  fg.falcon_caps2[NV_FALCON_IDX_SEC2] = 0xffffffffu;
+  fg.uctl[NV_FALCON_IDX_SEC2] = 0xffffffffu;
+  ASSERT(nv_falcon_probe_all(d2) == 0);
+  EXPECT_EQ(d2->falcon[NV_FALCON_IDX_SEC2].present, 0);
+  EXPECT_EQ(d2->falcon[NV_FALCON_IDX_SEC2].fenced, 0);
 }
 
 /* The boot stage must stop at the first unverified contract and say so, rather
@@ -535,6 +595,8 @@ void nv_test_suite(void) {
   test_nv_falcon_probe();
   test_nv_falcon_probe_rejects_unknown_version();
   test_nv_gsp_probe_reports_wpr2();
+  test_nv_gsp_probe_wpr_verdicts();
+  test_nv_falcon_fenced_vs_absent();
   test_nv_gsp_boot_stops_at_gate();
   test_nv_bringup_stages();
   test_nv_dmem_pio_roundtrip();

@@ -47,6 +47,8 @@ struct nv_falcon {
   uint32_t busy;     /* STATUS_BUSY raw */
   int version;       /* UC_CAPS2.VERSION, 0 when the window refused to decode */
   int present;
+  int fenced;        /* window answered 0xBADF5620: real, but not ours until a
+                      * driver initialises it (docs/nv-gsp-reference.md 3.1) */
   const char *name;
 };
 
@@ -81,7 +83,8 @@ struct nv_dev {
   /* GSP firmware stage observations (nv_gsp.c).  Read-only facts the card
    * reports about its own firmware state; they are in nv_info so a userspace
    * tool can see them without a second ioctl. */
-  uint32_t wpr2_lo, wpr2_hi; /* write-protected region base/size (PFB) */
+  uint32_t wpr2_lo, wpr2_hi; /* legacy WPR2 pair: measured NOT to move */
+  uint32_t wpr_ctl_a, wpr_ctl_b; /* PFB 0x1FA804/08: the pair that moves */
   uint32_t gsp_msg0, gsp_msg1; /* falcon mailbox pair (boot handshake) */
   uint32_t gsp_ucctl;          /* RISC-V core status word */
   int state;
@@ -218,7 +221,8 @@ struct nv_info {
   uint32_t falcon_busy[3];
   uint32_t timer_hz;   /* measured PTIMER ticks per second (0 = unmeasured) */
   uint32_t gsp_stage;
-  uint32_t wpr2_lo, wpr2_hi;  /* PFB write-protected region: base and size */
+  uint32_t wpr2_lo, wpr2_hi;  /* legacy WPR2 pair (does not move) */
+  uint32_t wpr_ctl_a, wpr_ctl_b; /* PFB 0x1FA804/08, the pair that moves */
   uint32_t gsp_msg0, gsp_msg1; /* GSP falcon mailbox pair */
   uint32_t gsp_ucctl;          /* GSP RISC-V status word */
 };

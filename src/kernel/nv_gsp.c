@@ -42,13 +42,37 @@ extern void uart_puts(const char *s);
 extern void uart_print_hex(uint64_t v);
 extern void print_int(int v);
 
-/* PFB: the write-protected region registers, measured address (0x1FA824/28 on
- * AD102; see docs/nv-gsp-firmware.md section 6).  Read-only here. */
-#define NV_PFB_WPR2_LO 0x1FA824
-#define NV_PFB_WPR2_HI 0x1FA828
-#define NV_PFB_MMU_LOCK_ADDR_LO 0x1FA82C
-#define NV_PFB_MMU_LOCK_ADDR_HI 0x1FA830
+/* PFB: the write-protected-region block.  MEASURED against a reference driver
+ * on the same card (docs/nv-gsp-reference.md section 3.6) -- and the first two
+ * guesses were wrong, which is why this comment is long:
+ *
+ *   0x1FA804  0x041B3000 -> 0x1FFFF000 across init   <- moves, this is the pair
+ *   0x1FA808  0x05CF3000 -> 0x00000000 across init   <-   that tracks WPR
+ *   0x1FA82C  0x00100000 -> 0x1FFFFFF0 across init
+ *   0x1FA830  0x05CF3FF0 -> 0x00000000 across init
+ *   0x1FA824  0x1FFFFE00 -> 0x1FFFFE00  (does NOT move)
+ *   0x1FA828  0x00000000 -> 0x00000000  (does NOT move -- so the old
+ *                                        "nonzero hi means firmware is up"
+ *                                        check was measuring a dead word)
+ *
+ * Values are card-specific (they are VRAM extent arithmetic); what generalises
+ * is which signature pair appears before and after init.  The probe reports the
+ * values and the "matches nobody" case rather than pretending to know. */
+#define NV_PFB_WPR_CTL_A 0x1FA804 /* pre 0x041B3000, post 0x1FFFF000 */
+#define NV_PFB_WPR_CTL_B 0x1FA808 /* pre 0x05CF3000, post 0x00000000 */
+#define NV_PFB_WPR_MMU_LO 0x1FA82C /* pre 0x00100000, post 0x1FFFFFF0 */
+#define NV_PFB_WPR_MMU_HI 0x1FA830 /* pre 0x05CF3FF0, post 0x00000000 */
+#define NV_PFB_WPR2_LO 0x1FA824    /* legacy claim: does not move */
+#define NV_PFB_WPR2_HI 0x1FA828    /* legacy claim: always 0, even with GSP up */
 #define NV_PFB_MMU_LOCK_CTRL 0x1FA7C8
+
+/* The two signatures measured on one AD102 (24 GiB).  A different card or a
+ * different VRAM size can legitimately differ, so a mismatch is reported as
+ * "unknown", never as "firmware is/isn't running". */
+#define NV_WPR_SIG_PRE_A 0x041B3000u
+#define NV_WPR_SIG_PRE_B 0x05CF3000u
+#define NV_WPR_SIG_POST_A 0x1FFFF000u
+#define NV_WPR_SIG_POST_B 0x00000000u
 
 /* GSP-specific words inside the falcon window (BAR0 0x110000 + offset). */
 #define NV_GSP_ENGINE_RESET (NV_FALCON_GSP_BASE + 0x3C0)
@@ -81,8 +105,10 @@ int nv_gsp_probe(struct nv_dev *d) {
   }
   uint32_t wpr_lo = nv_rd32(d, NV_PFB_WPR2_LO);
   uint32_t wpr_hi = nv_rd32(d, NV_PFB_WPR2_HI);
-  uint32_t lock_lo = nv_rd32(d, NV_PFB_MMU_LOCK_ADDR_LO);
-  uint32_t lock_hi = nv_rd32(d, NV_PFB_MMU_LOCK_ADDR_HI);
+  uint32_t lock_lo = nv_rd32(d, NV_PFB_WPR_MMU_LO);
+  uint32_t lock_hi = nv_rd32(d, NV_PFB_WPR_MMU_HI);
+  uint32_t ctl_a = nv_rd32(d, NV_PFB_WPR_CTL_A);
+  uint32_t ctl_b = nv_rd32(d, NV_PFB_WPR_CTL_B);
   uint32_t lock_ctl = nv_rd32(d, NV_PFB_MMU_LOCK_CTRL);
   uint32_t maskw = nv_rd32(d, NV_GSP_MASK_WORD);
   uint32_t mb0 = nv_rd32(d, NV_GSP_MAILBOX0);
@@ -90,15 +116,19 @@ int nv_gsp_probe(struct nv_dev *d) {
   uint32_t ucctl = nv_rd32(d, NV_GSP_RISCV_CPUCTL);
   uint32_t eng_reset = nv_rd32(d, NV_GSP_ENGINE_RESET);
 
-  uart_puts("[NV-GSP] probe wpr2_lo=");
-  uart_print_hex(wpr_lo);
-  uart_puts(" wpr2_hi=");
-  uart_print_hex(wpr_hi);
-  uart_puts(" lock=");
+  uart_puts("[NV-GSP] probe wpr a=");
+  uart_print_hex(ctl_a);
+  uart_puts(" b=");
+  uart_print_hex(ctl_b);
+  uart_puts(" mmu=");
   uart_print_hex(lock_lo);
   uart_puts(":");
   uart_print_hex(lock_hi);
-  uart_puts(" lockctl=");
+  uart_puts(" (legacy lo/hi=");
+  uart_print_hex(wpr_lo);
+  uart_puts("/");
+  uart_print_hex(wpr_hi);
+  uart_puts(") lockctl=");
   uart_print_hex(lock_ctl);
   uart_puts("\n[NV-GSP] probe mask1668=");
   uart_print_hex(maskw);
@@ -112,19 +142,24 @@ int nv_gsp_probe(struct nv_dev *d) {
   uart_print_hex(eng_reset);
   uart_puts("\n");
 
-  /* A non-zero WPR2 high word means *something* has already programmed a
-   * write-protected region -- normally the previous owner of the card (a
-   * firmware boot before the VM reset, or the VBIOS).  Saying so out loud
-   * matters: it changes what the next run must do first. */
-  if (wpr_hi != 0 && wpr_hi != 0xffffffffu) {
-    uart_puts("[NV-GSP] probe wpr2 already programmed (hi nonzero): the region "
-              "must be torn down or reused, not re-based blind\n");
+  /* Which signature does the block carry?  This is the live check the old
+   * "nonzero hi" test was supposed to be, measured rather than assumed. */
+  if (ctl_a == NV_WPR_SIG_POST_A && ctl_b == NV_WPR_SIG_POST_B) {
+    uart_puts("[NV-GSP] probe verdict=programmed (post-init signature): a "
+              "firmware boot has already owned VRAM -- tear down or reuse, "
+              "never re-base blind\n");
+  } else if (ctl_a == NV_WPR_SIG_PRE_A && ctl_b == NV_WPR_SIG_PRE_B) {
+    uart_puts("[NV-GSP] probe verdict=untouched (pre-init signature): the "
+              "region is ours to lay out\n");
   } else {
-    uart_puts("[NV-GSP] probe wpr2 clear\n");
+    uart_puts("[NV-GSP] probe verdict=unknown (neither measured signature): "
+              "values are card-specific, so treat as programmed until proven\n");
   }
 
   d->wpr2_lo = wpr_lo;
   d->wpr2_hi = wpr_hi;
+  d->wpr_ctl_a = ctl_a;
+  d->wpr_ctl_b = ctl_b;
   d->gsp_msg0 = mb0;
   d->gsp_msg1 = mb1;
   d->gsp_ucctl = ucctl;

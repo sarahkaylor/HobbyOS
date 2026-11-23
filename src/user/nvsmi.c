@@ -142,10 +142,15 @@ int main(void) {
 
   print("nv: gsp stage   ");
   print_dec((long)info.gsp_stage);
-  print("  wpr2 ");
+  print("  wpr ");
+  print_hex((long)info.wpr_ctl_a);
+  print(" ");
+  print_hex((long)info.wpr_ctl_b);
+  print(" (legacy ");
   print_hex((long)info.wpr2_lo);
-  print(" size ");
+  print(" ");
   print_hex((long)info.wpr2_hi);
+  print(")");
   print("\n");
   print("nv: gsp mailbox ");
   print_hex((long)info.gsp_msg0);

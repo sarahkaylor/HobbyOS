@@ -48,23 +48,44 @@
  * pre-G80 chips and trusts the counter itself (see nv_pmc_enable_timer). */
 #define NV_PMC_ENABLE_TIMER (1u << 16)
 
-/* NVIDIA poison value: a read of a register the firmware/hardware will not
- * answer (e.g. PMC_INTR before a driver owns interrupts) returns 0xBADF5040
- * rather than a real status.  Observed on AD102 at PMC_INTR_0 and
- * PBUS_INTR_0 on 2026-11-22; reported as "poison" rather than treated as a
- * live interrupt state. */
-#define NV_PMC_INTR_POISON 0xBADF5040u
+/* 0xBADF_xxxx is not one value and not proof of absence.  MEASURED against a
+ * reference driver on the same card (docs/nv-gsp-reference.md section 3.1):
+ *
+ *   0xBADF5040  the chip's answer for a register this host may not read, OR one
+ *               that does not exist on this part.  It PERSISTS with a working
+ *               driver: PMC_INTR_0 (0x000100), PMC_INTR_EN_0 (0x000140),
+ *               PBUS_INTR_0 (0x100100), 0x001668 and 0x1FA838 all read it while
+ *               the card renders Vulkan.  So a BADF read here is NORMAL, not a
+ *               fault to report.
+ *   0xBADF5620  a window that is fenced / not yet initialised -- the whole
+ *               0x110000, 0x111000 and 0x840000 windows read it before a driver
+ *               initialises them (299 of 326 sampled offsets).
+ *   0xBADF5720  "exists but not readable here", after the fence lifted.
+ *
+ * Consequence for this driver: a fenced window means "do not touch it yet", not
+ * "no engine here", and it is never a reason to fail a probe. */
+#define NV_REG_UNREADABLE 0xBADF5040u
+#define NV_REG_FENCED 0xBADF5620u
 
 /* A poisoned READ has 0xBADF in the high half (0xBADF5040 for PMC_INTR,
  * 0xBADF5620 measured on AD102 at BAR0+0x840000, a window that is NOT the SEC2
  * engine on this chip).  Anything that decodes to a poison value is treated as
  * "no engine here": a driver that probes a window by shape must not accept a
  * sentinel as a falcon version. */
-static inline int nv_is_poison(uint32_t v) {
+static inline int nv_is_badf(uint32_t v) {
   return v != 0xffffffffu && (v >> 16) == 0xBADFu;
 }
+/* Fenced specifically: the window has never been initialised.  Distinct from
+ * "unreadable" because a fenced window is the state our own boot writes into,
+ * while an unreadable register is simply not ours to read. */
+static inline int nv_is_fenced(uint32_t v) { return v == NV_REG_FENCED; }
 
-/* ---- PBUS: host/bus glue, BAR0 + 0x100000 (pbus.rst) ------------------- */
+/* ---- PBUS: host/bus glue, BAR0 + 0x100000 (pbus.rst) -------------------
+ * CONTRADICTED on AD102 (measured): 0x100100 and 0x100140 both read the
+ * unreadable-register word 0xBADF5040 with a working driver, i.e. PBUS is not
+ * at block 0x100000 on this part, or those registers are privileged.  The
+ * constants stay because the driver only ever reads them for a log row -- do
+ * not build anything on them until a usable PBUS base is established. */
 #define NV_PBUS_INTR_0 0x100100
 #define NV_PBUS_INTR_EN_0 0x100140
 

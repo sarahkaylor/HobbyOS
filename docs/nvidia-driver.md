@@ -64,7 +64,9 @@ partially.
 | `src/kernel/nv.c` | Card-independent core: identify, PMC, PTIMER, falcon probe, staged bring-up, `/dev/nvctl` ABI, `read(2)` snapshot. |
 | `src/kernel/nv_pci.c` | Hardware half: pick the GPU, map BAR0 + a bounded BAR1 window, set MEM\|MASTER, run bring-up, program MSI-X (function-masked until GSP owns interrupts). |
 | `src/kernel/nv_falcon.c` | Falcon engine: DMEM/IMEM windows, the DMA ("xfer") request encoder, start/halt with bounded waits, self-test. |
-| `src/kernel/nv_test.c` | 18 kernel unit-tier tests driving the shipped code against a fake register file. |
+| `src/kernel/nv_gsp.c` | GSP firmware stage: a read-only probe (WPR block, mailboxes, RISC-V status) and the staged boot machine, which stops at the first contract the reference dump has not settled. |
+| `src/include/nv_fw.h`, `src/kernel/nv_fw.c` | Firmware handling, pure and MMIO-free: `0x10DE` container, HS-v2 + load headers with the sum check, RISC-V ELF section walk, WPR metadata codec, SHA-256, and a `/NVIDIA/GSP` file loader. |
+| `src/kernel/nv_test.c`, `src/kernel/nv_fw_test.c` | 22 + 14 kernel unit-tier tests driving the shipped code against a fake register file and synthetic firmware blobs. |
 | `src/user/nvsmi.c` → `/NVSMI.BIN` | Userspace report tool. |
 
 Wiring: `main.c` calls `nv_init()` on x64 once the timer is live; `fs.c` creates
@@ -78,6 +80,7 @@ hands `NV_IOC_*` to `nv_ioctl()`.
 | `read(/dev/nvctl)` | native HobbyOS programs | one `struct nv_info` snapshot per read (native programs have no `ioctl(2)` row; `SYS_MAX` is frozen) |
 | `ioctl(..., NV_IOC_INFO)` | Linux-ABI consumers | the same struct, copy-in/copy-out |
 | `ioctl(..., NV_IOC_REG_READ)` | diagnostics | one register **inside a whitelist** (PMC, PTIMER, PBUS, the three falcon windows) — never a blanket BAR0 read |
+| `ioctl(..., NV_IOC_PEEK)` | diagnostics | up to 256 words in one call, inside the same whitelist (extended to PFB for the WPR block and the GSP window out to `+0x3000` for the RISC-V core). A per-word ioctl cannot dump an engine window, and a blanket read is the primitive it must not become. |
 | `ioctl(..., NV_IOC_SELFTEST)` | diagnostics | falcon scratch + DMEM round-trip; destructive to running ucode, so never automatic |
 
 ### 2.2 Design rules this driver was built to
@@ -108,6 +111,7 @@ register documentation, cited per block in `nv_regs.h`:
 | Falcon IO space, `UC_CTRL`/`UC_CAPS2` bits, `XFER_*` encoding, CODE/DATA windows | `docs/hw/falcon/{io,proc,xfer}.rst`, `rnndb/falcon.xml` |
 | 9-bit chipset field | `(boot0 & 0x1ff00000) >> 20`, cross-checked against the published GPU-id ↔ name table |
 | GSP window at `0x110000` | stated in the public kernel driver's GSP constructor; **not trusted** — a window is accepted only if `UC_CAPS2` decodes to a falcon version 3..6 |
+| every offset the GSP stage needs | **measured** on this card against NVIDIA's own driver in a reference guest (`docs/nv-gsp-reference.md`); §5.5 lists what that corrected |
 
 Where a value is inferred rather than documented, the comment says so and the
 driver logs the raw register so the inference is checkable on hardware. Three
@@ -215,12 +219,12 @@ without the GPU and under both TCG/KVM and the Proxmox VM.
    stopped at stage `pmc`, so it never probed a single processor. Now the bit is
    only written on pre-G80 parts and the counter itself (999 MHz, advancing) is
    the proof. *A read is evidence; an unverifiable write is not.*
-2. **NVIDIA poison values decode as plausible register contents.** A read of a
-   window that is not the engine answers `0xBADF....` (`0xBADF5040` at
-   `PMC_INTR_0`, `0xBADF5620` at BAR0+0x840000). `0xCA101136 & 0xF == 6`, so a
-   version-based probe accepted the poisoned window as a falcon v6. Poison is
-   now rejected for `BOOT_0`, `UC_CAPS`, `UC_CAPS2` and `UC_CTRL`, and reported
-   as such.
+2. **NVIDIA sentinel values decode as plausible register contents.** A read of
+   a window that is not the engine answers `0xBADF....`, and `0xCA101136 & 0xF
+   == 6`, so a version-based probe accepted a sentinel as a falcon v6. Sentinels
+   are now rejected for `BOOT_0`, `UC_CAPS`, `UC_CAPS2` and `UC_CTRL`. The
+   *meaning* of the two sentinels was wrong at the time and is corrected in
+   §5.5: `0xBADF5040` is normal on this chip, `0xBADF5620` means fenced.
 3. **A test reporter that fails unconditionally looks exactly like a broken
    driver.** `pci_test`'s hex row helper printed `FAIL` for every comparison,
    including `got == want`; five suites read as red on a green build. It is an
@@ -238,6 +242,54 @@ checksum). The fallback therefore declines it rather than guessing, and logs the
 size. **Open item** — see §8.5; the experiment is a direct-kernel/BIOS boot of
 the same kernel, where the entry should be the address form, plus a look at what
 firmware this OVMF build actually publishes.
+
+### 5.5 The reference driver on the same card, and what it corrected
+
+A reference guest (VM 301, Ubuntu 24.04, `0000:01:00` passed through, driver
+**580.178.04**, GSP-RM running, `vulkaninfo` rendering, 25 °C / 19 W idle)
+dumped BAR0 read-only twice — before any driver bound and again with the stack
+up. Full tables: `docs/nv-gsp-reference.md`; raw dumps in
+`docs/nv-gsp-reference-evidence/`. Four of this driver's assumptions died there:
+
+| assumption | measured | correction now in the code |
+|---|---|---|
+| `0xBADF....` = engine absent | `0xBADF5040` persists at `PMC_INTR_0`/`PMC_INTR_EN_0`/`PBUS_INTR_0` **while the card renders Vulkan** | three sentinels with three meanings (`NV_REG_UNREADABLE`, `NV_REG_FENCED`, `NV_REG_…720`); `pmc intr=…` no longer prints "poison" for a healthy card |
+| a sentinel window has no engine | SEC2 at `0x840000` reads the fence word pre-init and falcon-shaped afterwards (`0,0,0x10,0x01000000`) | `struct nv_falcon.fenced`; the log says `fenced`, and only `0xffffffff` still says `absent` |
+| `0x111388` bit 7 = RISC-V ACTIVE | `0x00000010` with GSP-RM running — **bit 4**, same bit as falcon `UC_CTRL.STOPPED` | nothing gates on bit 7; the probe logs the raw word |
+| WPR2 live check at `0x1FA824/28`, "nonzero hi" | hi is `0` in **both** states — a dead word | live check moved to `0x1FA804/08`, the pair that actually moves, with a three-way verdict |
+
+Two further facts worth having: `0x001668` is **not** a BAR0 register (it reads
+the unreadable word in both states, so the "post-reset mask write" cannot be
+done at that address), and the write-protected region is **torn down when the
+owner goes away** — see the cross-check below.
+
+Cross-check, two independent stacks on one card:
+
+| register (BAR0) | reference, pre-init | HobbyOS `nv`, after that guest stopped |
+|---|---|---|
+| `0x1FA804` | `0x041B3000` | `0x041B3000` |
+| `0x1FA808` | `0x05CF3000` | `0x05CF3000` |
+| `0x1FA82C` / `0x1FA830` | `0x00100000` / `0x05CF3FF0` | `0x00100000` / `0x05CF3FF0` |
+| `0x1FA824` / `0x1FA828` | `0x1FFFFE00` / `0` | `0x1FFFFE00` / `0` |
+| `0x110108` `UC_CAPS` | `0x80420100` | `0x80420100` |
+| `0x11012C` `UC_CAPS2` | `0xCA101136` | `0xCA101136` |
+| `0x110100` `UC_CTRL` | `0x10` | `0x10` |
+| `0x111388` | fenced | fenced (`0xBADF5620`) |
+| `0x840000` SEC2 | fenced | fenced (`0xBADF5620`) |
+
+That agreement is the useful part: our reader and NVIDIA's stack see the same
+words, so a later disagreement is a bug in *our* code, not in the map. It also
+answers a question the boot stage needed — a card handed over after a working
+driver ran comes back with the WPR block at its **pre-init** signature, so
+"tear down someone else's region" is the rare path and "lay out the region" is
+the normal one.
+
+One open discrepancy: the reference's pre-init dump had the whole `0x110000`
+window fenced, while `nv` reads real `UC_CAPS/CAPS2` there. The likely cause is
+a PCI function-level reset on VM start (QEMU does one with `pcie=1`) which
+deasserts the fence for the host-visible falcon window, but that has not been
+isolated. It does not block anything: `nv` treats a fenced window as untouchable
+either way.
 
 ## 6. Games: what the 4090 does for RimWorld and Cyberpunk today
 

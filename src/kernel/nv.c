@@ -107,7 +107,7 @@ int nv_identify(struct nv_dev *d) {
   if (!d) return -EINVAL;
   d->boot0 = nv_rd32(d, NV_PMC_BOOT_0);
   d->boot1 = nv_rd32(d, NV_PMC_BOOT_1);
-  if (d->boot0 == 0 || d->boot0 == 0xffffffffu || nv_is_poison(d->boot0)) {
+  if (d->boot0 == 0 || d->boot0 == 0xffffffffu || nv_is_badf(d->boot0)) {
     uart_puts("[NV] identify failed: BOOT_0=");
     uart_print_hex(d->boot0);
     uart_puts(" (no register window)\n");
@@ -168,7 +168,10 @@ int nv_pmc_enable_timer(struct nv_dev *d) {
   uart_print_hex(d->pmc_enable);
   uart_puts(" intr=");
   uart_print_hex(intr);
-  if (intr == NV_PMC_INTR_POISON) uart_puts("(poison)");
+  /* 0xBADF5040 here is NORMAL on this part, not a fault: the reference driver
+   * (same card, GSP-RM running, Vulkan rendering) reads the same word from the
+   * same address.  Saying "poison" made a healthy card look broken. */
+  if (intr == NV_REG_UNREADABLE) uart_puts("(unreadable-by-design)");
   uart_puts(" pbus_intr=");
   uart_print_hex(pbus);
   uart_puts(wrote ? " (timer enable bit written)\n"
@@ -259,11 +262,19 @@ static int nv_falcon_probe_one(struct nv_dev *d, int idx, uint32_t base,
    * block that is not a falcon; >= 7 is a generation the register layout in
    * nv_regs.h does not describe, and pretending otherwise would corrupt
    * memory the moment ucode is loaded. */
-  if (f->caps2 != 0xffffffffu && !nv_is_poison(f->caps) &&
-      !nv_is_poison(f->caps2) && !nv_is_poison(f->ctl) && f->version >= 3 &&
+  if (f->caps2 != 0xffffffffu && !nv_is_badf(f->caps) &&
+      !nv_is_badf(f->caps2) && !nv_is_badf(f->ctl) && f->version >= 3 &&
       f->version <= 6) {
     f->present = 1;
     d->falcon_mask |= 1u << idx;
+  } else if (nv_is_badf(f->caps) || nv_is_badf(f->caps2) ||
+             nv_is_badf(f->ctl)) {
+    /* A fenced window is a real engine that has never been initialised -- the
+     * reference dump shows SEC2 exactly this way before init and falcon-shaped
+     * afterwards.  "Fenced" is not "absent": it means do not touch it, which is
+     * the same action but a different fact, and the next stage depends on
+     * knowing which one it is. */
+    f->fenced = 1;
   }
   uart_puts("[NV] falcon ");
   uart_puts(name);
@@ -279,7 +290,7 @@ static int nv_falcon_probe_one(struct nv_dev *d, int idx, uint32_t base,
   uart_print_hex(f->ctl);
   uart_puts(" busy=");
   uart_print_hex(f->busy);
-  uart_puts(f->present ? " present\n" : " absent\n");
+  uart_puts(f->present ? " present\n" : (f->fenced ? " fenced\n" : " absent\n"));
   return f->present ? 0 : -ENODEV;
 }
 
@@ -421,6 +432,8 @@ void nv_fill_info(struct nv_dev *d, struct nv_info *out) {
   out->gsp_stage = (uint32_t)d->gsp_stage;
   out->wpr2_lo = d->wpr2_lo;
   out->wpr2_hi = d->wpr2_hi;
+  out->wpr_ctl_a = d->wpr_ctl_a;
+  out->wpr_ctl_b = d->wpr_ctl_b;
   out->gsp_msg0 = d->gsp_msg0;
   out->gsp_msg1 = d->gsp_msg1;
   out->gsp_ucctl = d->gsp_ucctl;
