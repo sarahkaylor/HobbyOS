@@ -81,6 +81,7 @@ void linux_compat_pi_test_suite(void); /* PI futex word state machine */
 #ifdef __x86_64__
 void pci_test_suite(void); /* PCIe bus layer: MCFG/BAR/capability decode */
 void nv_test_suite(void);  /* nv: NVIDIA driver core + falcon (fake MMIO) */
+void nv_fw_test_suite(void); /* nv_fw: firmware container/HS/ELF/WPR/SHA-256 */
 #endif
 
 #endif // UNIT_TEST_H
