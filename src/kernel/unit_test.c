@@ -60,6 +60,7 @@ void run_all_unit_tests(void) {
   nv_flcn_test_suite(); /* nv_flcn: XFER command, signature index, FRTS patch */
 #endif
   nv_shim_test_suite(); /* WP-F: /dev/nvshim ABI over the mock RM (both arches) */
+  nv_shim_drm_test_suite(); /* WP-F2: nouveau's real 'd' surface over the same mock RM */
   virtio_input_test_suite();
   fb_ioctl_test_suite();
   vdisplay_test_suite();

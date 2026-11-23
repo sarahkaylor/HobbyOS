@@ -71,6 +71,7 @@
 #define ECONNRESET   104
 #define ENOTCONN     107 /* P4/P5 designs (D13/D2); Linux value */
 #define ETIMEDOUT    110
+#define ETIME        62 /* Linux value; DRM's drm_syncobj_wait timeout answer */
 #define ECONNREFUSED 111
 #define EHOSTUNREACH 113
 #define EINPROGRESS  115

@@ -23,36 +23,31 @@
  *  PROVENANCE OF EACH REQUEST.  Where a row has a nouveau uAPI counterpart,
  *  the counterpart is named by its DRM request (include/uapi/drm/nouveau_drm.h
  *  and the struct/constant names are the public contract).  The numbers below
- *  are OURS -- magic 'N' in the Linux _IOC encoding, numbered 1.. so a reader
- *  can diff the set against nouveau's -- and they are deliberately NOT nouveau
- *  numbers with nouveau structs, because HobbyOS has no DRM and serves a
- *  strict subset with its own smaller structs.  A client cannot mistake one
- *  for the other: magic, numbers and struct sizes all differ.
+ *  are OURS -- magic 'N' in the Linux _IOC encoding, numbered 1.. -- and they
+ *  were written when HobbyOS had no DRM.
  *
- *    nr  request                 nouveau counterpart
+ *  DEPRECATED SINCE ROUND 2.  The same node now serves nouveau's REAL surface
+ *  on magic 'd' (DRM_IOCTL_NOUVEAU_*, real numbers, real struct sizes) in
+ *  src/kernel/nv_shim.c with the contract in nv_drm_uapi.h.  That is what a
+ *  stock nouveau winsys speaks and it is the surface to extend.  The 'N' rows
+ *  below are kept working so round 1's probe and its five suites stay green,
+ *  and because they carry two things the uAPI has no row for (an explicit
+ *  device-identify request and a direct fence wait).  Nothing new may be added
+ *  here; a HobbyOS-only client is expected to retire with the 'N' face.
+ *
+ *    nr  request                 nouveau counterpart (DRM face, 'd')
  *    --  ----------------------  ------------------------------------------
- *     1  DEVICE_ALLOC            DRM_IOCTL_NOUVEAU_GETPARAM (identity) +
- *                                the implicit device from opening the node
- *     2  DEVICE_FREE             DRM_IOCTL_NOUVEAU_GETPARAM's teardown side
- *     3  GET_PARAM               DRM_IOCTL_NOUVEAU_GETPARAM (struct
- *                                drm_nouveau_getparam); the param numbers are
- *                                nouveau's own uAPI values (see NVSHIM_PARAM_*)
- *     4  ALLOC                   DRM_IOCTL_NOUVEAU_GEM_NEW, shrunk to what the
- *                                probe needs: size/domain in, handle/offset
- *                                (bus) out, mirroring drm_nouveau_gem_info
- *     5  FREE                    DRM_IOCTL_NOUVEAU_GPUOBJ_FREE
- *     6  VM_INIT                 DRM_IOCTL_NOUVEAU_VM_INIT (struct
- *                                drm_nouveau_vm_init)
- *     7  VM_BIND                 DRM_IOCTL_NOUVEAU_VM_BIND (op/addr/range of
- *                                struct drm_nouveau_vm_bind_op)
- *     8  CHANNEL_ALLOC           DRM_IOCTL_NOUVEAU_CHANNEL_ALLOC (channel,
- *                                engine, pushbuf of drm_nouveau_channel_alloc)
+ *     1  DEVICE_ALLOC            none: DRM's fd IS the device (no chunk)
+ *     2  DEVICE_FREE             none: closing the fd tears the client down
+ *     3  GET_PARAM               DRM_IOCTL_NOUVEAU_GETPARAM
+ *     4  ALLOC                   DRM_IOCTL_NOUVEAU_GEM_NEW (+ GEM_INFO)
+ *     5  FREE                    DRM_IOCTL_GEM_CLOSE
+ *     6  VM_INIT                 DRM_IOCTL_NOUVEAU_VM_INIT
+ *     7  VM_BIND                 DRM_IOCTL_NOUVEAU_VM_BIND
+ *     8  CHANNEL_ALLOC           DRM_IOCTL_NOUVEAU_CHANNEL_ALLOC
  *     9  CHANNEL_FREE            DRM_IOCTL_NOUVEAU_CHANNEL_FREE
- *    10  SUBMIT                  DRM_IOCTL_NOUVEAU_EXEC, one push per call
- *    11  FENCE_WAIT              no nouveau ioctl: nouveau signals through
- *                                syncobjs.  This row and the fence id SUBMIT
- *                                returns follow docs/gpu-abi.md §5/§10.5
- *                                (validate an id, retire, -ETIMEDOUT on poll).
+ *    10  SUBMIT                  DRM_IOCTL_NOUVEAU_EXEC
+ *    11  FENCE_WAIT              DRM_IOCTL_SYNCOBJ_WAIT (binary syncobj)
  *
  *  DELIBERATELY REFUSED, each with -ENOSYS and a named serial row (never a
  *  silent no-op -- the project rule).  These are the parts of nouveau's uAPI
@@ -118,6 +113,13 @@
 #define NVSHIM_IOWR(type, nr, size) NVSHIM_IOC(NVSHIM_IOC_WRITE | NVSHIM_IOC_READ, type, nr, sizeof(size))
 #define NVSHIM_IONR(type, nr)       NVSHIM_IOC(NVSHIM_IOC_NONE, type, nr, 0)
 
+/* Field decoders.  The kernel validates that the size a request encodes is the
+ * struct the request pairs with (round 2), so both surfaces need these. */
+#define NVSHIM_IOC_NR(req)   ((uint32_t)((req) & 0xFFu))
+#define NVSHIM_IOC_TYPE(req) ((uint32_t)(((req) >> NVSHIM_IOC_TYPESHIFT) & 0xFFu))
+#define NVSHIM_IOC_SIZE(req) ((uint32_t)(((req) >> NVSHIM_IOC_SIZESHIFT) & 0x3FFFu))
+#define NVSHIM_IOC_DIR(req)  ((uint32_t)(((req) >> NVSHIM_IOC_DIRSHIFT) & 0x3u))
+
 /* ---- 1. device identify ------------------------------------------------- */
 
 /* out.features: what this device can actually do.  A consumer must ask rather
@@ -175,8 +177,12 @@ struct nvshim_param {
 /* ---- 3. memory objects ------------------------------------------------- */
 
 /* domain takes nouveau's GEM domain bits verbatim. */
-#define NVSHIM_DOMAIN_VRAM (1u << 1) /* NOUVEAU_GEM_DOMAIN_VRAM */
-#define NVSHIM_DOMAIN_GART (1u << 2) /* NOUVEAU_GEM_DOMAIN_GART */
+#define NVSHIM_DOMAIN_CPU      (1u << 0) /* NOUVEAU_GEM_DOMAIN_CPU */
+#define NVSHIM_DOMAIN_VRAM     (1u << 1) /* NOUVEAU_GEM_DOMAIN_VRAM */
+#define NVSHIM_DOMAIN_GART     (1u << 2) /* NOUVEAU_GEM_DOMAIN_GART */
+#define NVSHIM_DOMAIN_MAPPABLE (1u << 3) /* NOUVEAU_GEM_DOMAIN_MAPPABLE */
+#define NVSHIM_DOMAIN_COHERENT (1u << 4) /* NOUVEAU_GEM_DOMAIN_COHERENT */
+#define NVSHIM_DOMAIN_NO_SHARE (1u << 5) /* NOUVEAU_GEM_DOMAIN_NO_SHARE */
 
 struct nvshim_alloc {
   uint32_t dev_id;  /* in */
@@ -290,6 +296,15 @@ void nv_shim_release_fd(struct process *p, int fd);
 /* 1 = the node is served (always today: the mock needs no hardware). */
 int nv_shim_present(void);
 
+/* The DRM face (nv_drm_uapi.h): nouveau's real 'd' request numbers over the
+ * same client table and the same RM.  nv_shim_ioctl() routes magic 'd' here. */
+int nv_shim_drm_ioctl(struct process *p, int fd, unsigned long req, uint64_t arg);
+/* Expected struct size for a request number: -1 unknown, 0 refused, >0 the
+ * size the number must encode. */
+int nv_shim_drm_req_size(unsigned long req);
+/* NULL unless the number is a named refusal. */
+const char *nv_shim_drm_refusal_name(unsigned long req);
+
 /* Pure helpers, exported for the kernel unit suite. */
 int nv_shim_req_size(unsigned long req);          /* -1 = not a request */
 const char *nv_shim_refusal_name(unsigned long req); /* NULL = not refused */
@@ -300,5 +315,6 @@ int nv_shim_bind_ok(const struct nvshim_vm_bind *b);
 int nv_shim_submit_ok(const struct nvshim_submit *s);
 
 void nv_shim_test_suite(void);
+void nv_shim_drm_test_suite(void);
 
 #endif /* NV_SHIM_H */
