@@ -1,0 +1,4 @@
+01:00.0 VGA compatible controller [0300]: NVIDIA Corporation AD102 [GeForce RTX 4090] [10de:2684] (rev a1)
+	Subsystem: Micro-Star International Co., Ltd. [MSI] AD102 [GeForce RTX 4090] [1462:5104]
+	Kernel driver in use: nvidia
+	Kernel modules: nvidiafb, nvidia_drm, nvidia

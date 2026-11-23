@@ -1,0 +1,11 @@
+[  598.336608] nvidia: loading out-of-tree module taints kernel.
+[  598.336617] nvidia: module license 'NVIDIA' taints kernel.
+[  598.336621] nvidia: module verification failed: signature and/or required key missing - tainting kernel
+[  598.336622] nvidia: module license taints kernel.
+[  598.425483] nvidia-nvlink: Nvlink Core is being initialized, major device number 237
+[  598.431000] nvidia 0000:01:00.0: vgaarb: VGA decodes changed: olddecodes=io+mem,decodes=none:owns=none
+[  598.475258] NVRM: loading NVIDIA UNIX x86_64 Kernel Module  580.178.04  Tue Jul  7 12:38:21 UTC 2026
+[  598.489623] nvidia-modeset: Loading NVIDIA Kernel Mode Setting Driver for UNIX platforms  580.178.04  Tue Jul  7 12:03:04 UTC 2026
+[  598.493935] [drm] [nvidia-drm] [GPU ID 0x00000100] Loading driver
+[  598.494052] [drm] Initialized nvidia-drm 0.0.0 20160202 for 0000:01:00.0 on minor 0
+[  598.508696] nvidia_uvm: module uses symbols nvUvmInterfaceDisableAccessCntr from proprietary module nvidia, inheriting taint.
