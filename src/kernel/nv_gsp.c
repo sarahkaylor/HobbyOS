@@ -368,52 +368,49 @@ static int sec2_unfence(struct nv_dev *d) {
     uart_puts("\n");
     return 0;
   }
-  uint32_t en0 = nv_rd32(d, NV_PMC_ENABLE);
+  /* THE FENCE EXPERIMENT (docs/nv-pmu-acr-contract.md 6 step 3).
+   *
+   * Two writes and two reads: pulse the engine-reset word, then see whether the
+   * window stops answering the inaccessibility signature.  This is the single
+   * most informative test on this card, because it separates "the fence is
+   * reset state, so the pulse is enough" from "the fence is privilege state, so
+   * FWSEC must run first" -- and those two answers lead to completely different
+   * amounts of work.
+   *
+   * PMC_ENABLE is NOT part of this any more: a full single-bit sweep of it
+   * lifted nothing (measured), and the register reads one bit on this part. */
   uart_puts("[NV-SEC2] pmc_enable=");
-  uart_print_hex(en0);
-  uart_puts(" while the window is fenced\n");
+  uart_print_hex(nv_rd32(d, NV_PMC_ENABLE));
+  uart_puts(" (not the gate: a 32-bit sweep lifted nothing)\n");
 
-  /* Is the window only unreadable, or also unwritable?  A write whose read-back
-   * is unchanged tells us the whole block is fenced; a read-back carrying the
-   * value tells us we simply may not see it yet. */
-  nv_wr32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL,
-          NV_FALCON_UC_CTRL_RESET_TLB);
-  uint32_t wr = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL);
-  uart_puts("[NV-SEC2] probe write-then-read ctl=");
-  uart_print_hex(wr);
-  uart_puts(wr == NV_REG_FENCED ? " (write ignored as well: fully fenced)\n"
-                                : "\n");
-
-  /* Sweep the engine-enable bits one at a time.  Setting a bit that is already
-   * set is a no-op, so this only ever *adds* an enable, and the original word is
-   * restored at the end.  The log names the bit if one of them lifts the fence;
-   * if none does, the fence is not a PMC_ENABLE bit on this part. */
-  int found = -1;
-  uint32_t found_ctl = 0;
-  for (int b = 0; b < 32; b++) {
-    if (en0 & (1u << b)) continue; /* already enabled: cannot be the gate */
-    nv_wr32(d, NV_PMC_ENABLE, en0 | (1u << b));
-    ctl = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL);
-    if (ctl != NV_REG_FENCED && ctl != 0xffffffffu) {
-      found = b;
-      found_ctl = ctl;
-      break;
-    }
+  /* Read-only dump of the FWSEC status block: whether it is even readable
+   * pre-boot is itself unknown, and the answer is free. */
+  uart_puts("[NV-SEC2] block1400:");
+  for (uint32_t off = 0x1400; off < 0x1440; off += 4) {
+    uart_puts(" ");
+    uart_print_hex(nv_rd32(d, off));
   }
-  nv_wr32(d, NV_PMC_ENABLE, en0); /* never leave an engine enabled that we set */
-  if (found >= 0) {
-    uart_puts("[NV-SEC2] unfence by pmc_bit=");
-    print_int(found);
-    uart_puts(" ctl=");
-    uart_print_hex(found_ctl);
-    uart_puts(" LIVE\n");
-    /* Re-enable it for real now that it is known. */
-    nv_wr32(d, NV_PMC_ENABLE, en0 | (1u << found));
+  uart_puts("\n");
+
+  /* The pulse.  0x3C0 has no published name on this part; a wrong write there
+   * resets a live engine, which is exactly why it is done only when the window
+   * is fenced (nothing can be running behind a fence we cannot read). */
+  nv_wr32(d, 0x8403C0, 1);
+  for (volatile int spin = 0; spin < 200; spin++) {
+  }
+  nv_wr32(d, 0x8403C0, 0);
+  ctl = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL);
+  uint32_t addr2 = nv_rd32(d, NV_SEC2_ADDR2);
+  uart_puts("[NV-SEC2] after pulse ctl=");
+  uart_print_hex(ctl);
+  uart_puts(" addr2=");
+  uart_print_hex(addr2);
+  if (ctl != NV_REG_FENCED && ctl != 0xffffffffu) {
+    uart_puts(" LIVE -> the fence was reset state\n");
     return 0;
   }
-  uart_puts("[NV-SEC2] unfence FAILED: no single PMC_ENABLE bit lifts the fence, "
-            "so SEC2 is gated by something this driver has not done yet "
-            "(the secure-boot handshake is the remaining candidate).\n");
+  uart_puts(" still fenced -> the fence is privilege state, so FWSEC must run on "
+            "the GSP falcon first\n");
   return -ENODEV;
 }
 

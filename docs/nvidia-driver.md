@@ -315,9 +315,31 @@ That is four facts, each of which took a register read to establish:
    metadata block sits in a DMA-able frame (`block_phys=0x2054e2000`), the
    radix3 root is `0x2054cd000`, the ad10x signature address resolved.
 
-So stage 5 cannot be completed by talking to SEC2 first. The next rung is the
-PMU command handshake, and the register/mailbox contract for that is the thing
-to write down before any of it is coded.
+The PMU contract (`docs/nv-pmu-acr-contract.md`) then answered this properly —
+and it said the PMU is *not* in the boot path on AD102 at all: FWSEC runs on the
+**GSP falcon**, and the boot order is
+`reset GSP → FWSEC-FRTS → reset GSP → 0x111668=0x111 → SEC2 booter → RPC`.
+`UC_CTRL=0x20` on the PMU decodes as bit 5 = SLEEPING: firmware resident, idle,
+nothing to upload. So the PMU reads are a red herring that the log now labels as
+such.
+
+The contract also named a two-write experiment that separates the two possible
+causes of the fence, so it was run:
+
+```
+[NV-SEC2] block1400: 0x5 0x20040004 0x0 … 0x2000 0x8000 0x81000 … 0x7 0x0
+[NV-SEC2] after pulse ctl=0xBADF5620 addr2=0xBADF5620 still fenced
+          -> the fence is privilege state, so FWSEC must run on the GSP falcon first
+```
+
+Two results for two writes: the fence is **privilege-gated, not reset-state**, so
+the engine-reset pulse alone will never open `0x840000`; and the `0x1400` block
+*is* readable pre-boot, with `0x1438 = 0` (no FWSEC status recorded yet), which
+gives the next stage its success oracle. FWSEC-FRTS — on the GSP falcon, with
+`frtsOffset>>12`/`frtsSize>>12`/`type=2` and `init_cmd = 0x15` — is the next
+stage, and it needs the card's VBIOS for its ucode (AppID `0x85`, found through
+the `FF B8 "BIT\0"` token scan). Reading the VBIOS read-only is therefore the
+next concrete step, before any more writes.
 
 ### 5.6 What the two contract docs settled (and one plan they killed)
 
