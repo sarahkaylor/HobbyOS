@@ -96,9 +96,22 @@ static void fw_put64(uint8_t *p, uint64_t v) {
   fw_put32(p + 4, (uint32_t)(v >> 32));
 }
 
+static void fw_put16(uint8_t *p, uint16_t v) {
+  p[0] = (uint8_t)v;
+  p[1] = (uint8_t)(v >> 8);
+}
+
 static void fw_zero(void *p, uint32_t n) {
   uint8_t *b = (uint8_t *)p;
   for (uint32_t i = 0; i < n; i++) b[i] = 0;
+}
+
+/* Byte-wise, because the destination is a wire buffer and the source is a
+ * struct: alignment must not enter into it. */
+static void fw_copy(void *dst, const void *src, uint32_t n) {
+  uint8_t *d = (uint8_t *)dst;
+  const uint8_t *s = (const uint8_t *)src;
+  for (uint32_t i = 0; i < n; i++) d[i] = s[i];
 }
 
 /* ---- 1. container ------------------------------------------------------ */
@@ -371,36 +384,55 @@ int nv_fw_elf_sig_for_chipset(const struct nv_fw_elf *e, uint32_t chipset,
 
 /* ---- 4. WPR metadata -------------------------------------------------- */
 
-/* Layout (see the UNKNOWNS block): magic +0x00, revision +0x08, then the
- * fields listed in nv_fw.h.  Everything not named is zero on encode and
- * ignored on decode. */
+/* Offsets from docs/nv-gsp-wpr-contract.md section 3.3 (the V1 block).  Named
+ * individually rather than computed from a struct: these are wire offsets into
+ * a buffer the firmware reads, so a compiler's padding must never be able to
+ * move them. */
 #define WPR_OFF_MAGIC 0x00u
 #define WPR_OFF_REV 0x08u
-#define WPR_OFF_FB_SIZE 0x10u
-#define WPR_OFF_WPR_START 0x18u
-#define WPR_OFF_WPR_SIZE 0x20u
-#define WPR_OFF_NREGION 0x24u
-#define WPR_OFF_REGION 0x28u
+#define WPR_OFF_VERIFIED 0xF8u
 
+/* Explicit offset/value pairs rather than a struct walk: the destination is a
+ * wire buffer the firmware reads, so compiler padding must never be able to
+ * move a field. */
 int nv_fw_wpr_meta_encode_n(const struct nv_wpr_meta_in *in, uint8_t *out,
                             uint32_t len) {
   if (!in || !out) return -EINVAL;
   if (len < NV_WPR_META_SIZE) return -ENOSPC;
-  if (in->num_regions > NV_WPR_META_MAX_REGIONS) return -EINVAL;
 
   fw_zero(out, NV_WPR_META_SIZE);
   fw_put64(out + WPR_OFF_MAGIC, NV_WPR_META_MAGIC);
   fw_put32(out + WPR_OFF_REV, NV_WPR_META_REVISION);
-  fw_put64(out + WPR_OFF_FB_SIZE, in->fb_size);
-  fw_put64(out + WPR_OFF_WPR_START, in->wpr_start);
-  fw_put32(out + WPR_OFF_WPR_SIZE, in->wpr_size);
-  fw_put32(out + WPR_OFF_NREGION, in->num_regions);
-  for (uint32_t i = 0; i < in->num_regions; i++) {
-    uint8_t *r = out + WPR_OFF_REGION + i * 16u;
-    fw_put64(r + 0x00, in->region[i].start_offset);
-    fw_put32(r + 0x08, in->region[i].size);
-    fw_put32(r + 0x0C, in->region[i].reserved);
-  }
+  fw_put64(out + 0x10, in->sysmem_addr_radix3_elf);
+  fw_put64(out + 0x18, in->size_radix3_elf);
+  fw_put64(out + 0x20, in->sysmem_addr_bootloader);
+  fw_put64(out + 0x28, in->size_bootloader);
+  fw_put64(out + 0x30, in->bootloader_code_offset);
+  fw_put64(out + 0x38, in->bootloader_data_offset);
+  fw_put64(out + 0x40, in->bootloader_manifest_offset);
+  fw_put64(out + 0x48, in->sysmem_addr_signature);
+  fw_put64(out + 0x50, in->size_signature);
+  fw_put64(out + 0x58, in->gsp_fw_rsvd_start);
+  fw_put64(out + 0x60, in->non_wpr_heap_offset);
+  fw_put64(out + 0x68, in->non_wpr_heap_size);
+  fw_put64(out + 0x70, in->gsp_fw_wpr_start);
+  fw_put64(out + 0x78, in->gsp_fw_heap_offset);
+  fw_put64(out + 0x80, in->gsp_fw_heap_size);
+  fw_put64(out + 0x88, in->gsp_fw_offset);
+  fw_put64(out + 0x90, in->boot_bin_offset);
+  fw_put64(out + 0x98, in->frts_offset);
+  fw_put64(out + 0xA0, in->frts_size);
+  fw_put64(out + 0xA8, in->gsp_fw_wpr_end);
+  fw_put64(out + 0xB0, in->fb_size);
+  fw_put64(out + 0xB8, in->vga_workspace_offset);
+  fw_put64(out + 0xC0, in->vga_workspace_size);
+  fw_put64(out + 0xC8, in->boot_count);
+  fw_put64(out + 0xE0, in->sysmem_addr_crash_queue);
+  fw_put32(out + 0xE8, in->size_crash_queue);
+  out[0xF0] = in->heap_vf_partition_count;
+  out[0xF1] = in->flags;
+  fw_put16(out + 0xF2, in->paging_config);
+  fw_put64(out + WPR_OFF_VERIFIED, in->verified);
   return 0;
 }
 
@@ -413,24 +445,40 @@ int nv_fw_wpr_meta_decode_n(const uint8_t *in, uint32_t len,
                             struct nv_wpr_meta_in *out) {
   if (!in || !out) return -EINVAL;
   if (len < NV_WPR_META_SIZE) return -ENOSPC;
-
   if (fw_le64(in + WPR_OFF_MAGIC) != NV_WPR_META_MAGIC) return -EINVAL;
   if (fw_le32(in + WPR_OFF_REV) != NV_WPR_META_REVISION) return -EINVAL;
 
-  struct nv_wpr_meta_in m;
-  fw_zero(&m, sizeof m);
-  m.fb_size = fw_le64(in + WPR_OFF_FB_SIZE);
-  m.wpr_start = fw_le64(in + WPR_OFF_WPR_START);
-  m.wpr_size = fw_le32(in + WPR_OFF_WPR_SIZE);
-  m.num_regions = fw_le32(in + WPR_OFF_NREGION);
-  if (m.num_regions > NV_WPR_META_MAX_REGIONS) return -EINVAL;
-  for (uint32_t i = 0; i < m.num_regions; i++) {
-    const uint8_t *r = in + WPR_OFF_REGION + i * 16u;
-    m.region[i].start_offset = fw_le64(r + 0x00);
-    m.region[i].size = fw_le32(r + 0x08);
-    m.region[i].reserved = fw_le32(r + 0x0C);
-  }
-  *out = m;
+  fw_zero(out, sizeof *out);
+  out->sysmem_addr_radix3_elf = fw_le64(in + 0x10);
+  out->size_radix3_elf = fw_le64(in + 0x18);
+  out->sysmem_addr_bootloader = fw_le64(in + 0x20);
+  out->size_bootloader = fw_le64(in + 0x28);
+  out->bootloader_code_offset = fw_le64(in + 0x30);
+  out->bootloader_data_offset = fw_le64(in + 0x38);
+  out->bootloader_manifest_offset = fw_le64(in + 0x40);
+  out->sysmem_addr_signature = fw_le64(in + 0x48);
+  out->size_signature = fw_le64(in + 0x50);
+  out->gsp_fw_rsvd_start = fw_le64(in + 0x58);
+  out->non_wpr_heap_offset = fw_le64(in + 0x60);
+  out->non_wpr_heap_size = fw_le64(in + 0x68);
+  out->gsp_fw_wpr_start = fw_le64(in + 0x70);
+  out->gsp_fw_heap_offset = fw_le64(in + 0x78);
+  out->gsp_fw_heap_size = fw_le64(in + 0x80);
+  out->gsp_fw_offset = fw_le64(in + 0x88);
+  out->boot_bin_offset = fw_le64(in + 0x90);
+  out->frts_offset = fw_le64(in + 0x98);
+  out->frts_size = fw_le64(in + 0xA0);
+  out->gsp_fw_wpr_end = fw_le64(in + 0xA8);
+  out->fb_size = fw_le64(in + 0xB0);
+  out->vga_workspace_offset = fw_le64(in + 0xB8);
+  out->vga_workspace_size = fw_le64(in + 0xC0);
+  out->boot_count = fw_le64(in + 0xC8);
+  out->sysmem_addr_crash_queue = fw_le64(in + 0xE0);
+  out->size_crash_queue = fw_le32(in + 0xE8);
+  out->heap_vf_partition_count = in[0xF0];
+  out->flags = in[0xF1];
+  out->paging_config = fw_le16(in + 0xF2);
+  out->verified = fw_le64(in + WPR_OFF_VERIFIED);
   return 0;
 }
 
@@ -439,11 +487,8 @@ int nv_fw_wpr_meta_decode(const uint8_t in[NV_WPR_META_SIZE],
   return nv_fw_wpr_meta_decode_n(in, NV_WPR_META_SIZE, out);
 }
 
-uint64_t nv_fw_wpr_base(uint64_t fb_size, uint64_t wpr_size) {
-  if (wpr_size == 0 || wpr_size > fb_size) return 0;
-  uint64_t base = (fb_size - wpr_size) & ~(NV_WPR_ALIGN - 1);
-  if (base + wpr_size > fb_size) return 0; /* alignment cost does not fit */
-  return base;
+int nv_fw_wpr_meta_verified(const struct nv_wpr_meta_in *m) {
+  return m && m->verified == NV_WPR_META_VERIFIED;
 }
 
 /* ---- 5. SHA-256 (FIPS 180-4) ----------------------------------------- */

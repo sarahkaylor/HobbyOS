@@ -193,43 +193,72 @@ int nv_fw_elf_sig_for_chipset(const struct nv_fw_elf *e, uint32_t chipset,
 #define NV_WPR_META_SIZE 256u
 #define NV_WPR_META_MAX_REGIONS 3
 
-/* Offset from the base of VRAM, 128 KiB aligned (unverified: the alignment
- * rule comes from docs/nv-gsp-firmware.md §6, not from a measurement). */
-struct nv_wpr_region {
-  uint64_t start_offset;
-  uint32_t size;
-  uint32_t reserved;
-};
-
+/* Field-by-field layout of the 256-byte V1 block, from the contract in
+ * docs/nv-gsp-wpr-contract.md section 3.3 (authoritative source: the V1
+ * structure the booter consumes, NOT the newer revision).  This REPLACES the
+ * earlier hypothesis here, which was wrong in shape: there is no region array
+ * and no WPR-size field -- the region's end is a field of its own.
+ *
+ * The block is written by the HOST into system memory, handed to the booter by
+ * physical address, and DMA'd by the booter to the top of VRAM where it is
+ * locked inside the WPR block.  The host never writes WPR2 itself.
+ *
+ * Fields marked "policy"/"inferred" in the contract are documented as such
+ * there; this struct only carries them. */
 struct nv_wpr_meta_in {
-  uint64_t fb_size;   /* unverified: total VRAM in bytes */
-  uint64_t wpr_start; /* unverified: WPR2 base, offset from VRAM base */
-  uint32_t wpr_size;  /* unverified: WPR2 size in bytes */
-  uint32_t num_regions;
-  struct nv_wpr_region region[NV_WPR_META_MAX_REGIONS];
+  uint64_t sysmem_addr_radix3_elf;
+  uint64_t size_radix3_elf;
+  uint64_t sysmem_addr_bootloader;
+  uint64_t size_bootloader;
+  uint64_t bootloader_code_offset;
+  uint64_t bootloader_data_offset;
+  uint64_t bootloader_manifest_offset;
+  uint64_t sysmem_addr_signature;
+  uint64_t size_signature;
+  uint64_t gsp_fw_rsvd_start;
+  uint64_t non_wpr_heap_offset;
+  uint64_t non_wpr_heap_size;
+  uint64_t gsp_fw_wpr_start;
+  uint64_t gsp_fw_heap_offset;
+  uint64_t gsp_fw_heap_size;
+  uint64_t gsp_fw_offset;
+  uint64_t boot_bin_offset;
+  uint64_t frts_offset;
+  uint64_t frts_size;
+  uint64_t gsp_fw_wpr_end;
+  uint64_t fb_size;
+  uint64_t vga_workspace_offset;
+  uint64_t vga_workspace_size;
+  uint64_t boot_count;
+  uint64_t sysmem_addr_crash_queue;
+  uint32_t size_crash_queue;         /* 0 when no CrashCat queue */
+  uint8_t heap_vf_partition_count;   /* 0 on bare metal */
+  uint8_t flags;                     /* named bits beyond IN_PM_TRANSITION unknown */
+  uint16_t paging_config;            /* registry passthrough; 0 = default */
+  /* Written by the HOST as 0.  The booter overwrites it with
+   * NV_WPR_META_VERIFIED once it accepts the block -- that is the cheap,
+   * protocol-free proof that the meta was consumed. */
+  uint64_t verified;
 };
 
-/* Encode into exactly NV_WPR_META_SIZE bytes; the buffer is fully written
- * (reserved bytes zeroed).  -EINVAL on a bad argument or num_regions >
- * NV_WPR_META_MAX_REGIONS. */
+/* The value the booter writes into `verified`. */
+#define NV_WPR_META_VERIFIED 0xA0A0A0A0A0A0A0A0ULL
+
+/* Encode into exactly NV_WPR_META_SIZE bytes; reserved bytes are zeroed. */
 int nv_fw_wpr_meta_encode(const struct nv_wpr_meta_in *in,
                           uint8_t out[NV_WPR_META_SIZE]);
-/* The same with a length, so a short buffer is -ENOSPC instead of a write
- * past the end.  nv_fw_wpr_meta_encode() is this with len = 256. */
+/* The same with a length, so a short buffer is -ENOSPC instead of a write past
+ * the end.  nv_fw_wpr_meta_encode() is this with len = 256. */
 int nv_fw_wpr_meta_encode_n(const struct nv_wpr_meta_in *in, uint8_t *out,
                             uint32_t len);
-/* -EINVAL on a null argument, or magic/revision that is not ours. */
+/* -EINVAL on a null argument, an unknown magic, or a revision that is not 1. */
 int nv_fw_wpr_meta_decode(const uint8_t in[NV_WPR_META_SIZE],
                           struct nv_wpr_meta_in *out);
 int nv_fw_wpr_meta_decode_n(const uint8_t *in, uint32_t len,
                             struct nv_wpr_meta_in *out);
-
-/* Where the WPR2 block goes: top-down from the end of VRAM, 128 KiB aligned
- * (docs/nv-gsp-firmware.md §6).  Unverified; pure so it can be checked
- * before it is trusted with real VRAM.  Returns 0 when the request cannot
- * fit. */
-#define NV_WPR_ALIGN 0x20000ULL
-uint64_t nv_fw_wpr_base(uint64_t fb_size, uint64_t wpr_size);
+/* True when the booter has accepted the block.  Decoding does not check this:
+ * an unverified block is a valid block that nobody has consumed yet. */
+int nv_fw_wpr_meta_verified(const struct nv_wpr_meta_in *m);
 
 /* ---- 5. digests and the file loader ----------------------------------- */
 

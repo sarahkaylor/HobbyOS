@@ -8,6 +8,13 @@
  *  region of VRAM, describes them in a 256-byte metadata block, starts the
  *  processor, and then talks to RM over shared-memory RPC queues.
  *
+ *  THE CORRECTION THAT MATTERS (docs/nv-gsp-wpr-contract.md section 2): the host
+ *  does NOT program the write-protected region on AD102/535.  The booter, run
+ *  on SEC2, builds WPR2 from the 256-byte metadata block; the host only writes
+ *  that block into system memory and hands over its address.  Every earlier plan
+ *  here that said "lay out the region, then program it" was wrong in the first
+ *  step, and the region registers are read-protected anyway (see the probe).
+ *
  *  What this file does TODAY, and what it refuses to do:
  *
  *    nv_gsp_probe()   reads and logs the registers the boot path depends on
@@ -21,15 +28,17 @@
  *                     region and then reports "GSP boot failed" has told you
  *                     nothing, and may have wedged the card for the next run.
  *
- *  The measurable stages, in order (docs/nv-gsp-firmware.md sections 4 and 6):
- *    1 halt the processor             -- documented (UC_CTRL reset triggers)
- *    2 read WPR2 (0x1FA824/0x1FA828)  -- read-only, tells us if firmware is up
- *    3 firmware on disk (nv_fw_load)  -- container parse + checksums
- *    4 WPR2 layout + metadata encode  -- needs the verified field layout
- *    5 place the image in VRAM        -- needs BAR1 windowing (present)
- *    6 DMA the booter into IMEM       -- needs the secure-engine xfer contract
- *    7 start + mailbox                -- needs the bootargs layout
- *    8 RPC handshake                  -- needs the message format
+ *  The stages, in the order the measured contract says they happen
+ *  (docs/nv-gsp-wpr-contract.md section 8, docs/nv-gsp-rpc-contract.md):
+ *    1 firmware on disk: read + parse + hash      DONE on silicon
+ *    2 halt SEC2 and the GSP                       DONE (falcon halt)
+ *    3 build the radix3 tree for the RM image     not started (needs page tables)
+ *    4 write the 256-byte metadata block          codec done, write not started
+ *    5 DMA the booter into SEC2 IMEM+DMEM         not started (xfer engine is)
+ *    6 start SEC2, wait for MAILBOX0 == 0         not started
+ *    7 metadata `verified` == 0xA0A0...           not started
+ *    8 build the RPC queues + bootargs, start GSP not started
+ *    9 GSP_INIT_DONE over RPC                     not started
  * ========================================================================== */
 
 #ifdef __x86_64__
@@ -51,47 +60,46 @@ static void nv_hex_byte(uint8_t b) {
   uart_puts(s);
 }
 
-/* PFB: the write-protected-region block.  MEASURED against a reference driver
- * on the same card (docs/nv-gsp-reference.md section 3.6) -- and the first two
- * guesses were wrong, which is why this comment is long:
+/* PFB: the write-protected-region block.  MEASURED (docs/nv-gsp-reference.md)
+ * and RE-DERIVED from sources (docs/nv-gsp-wpr-contract.md section 2.1):
  *
- *   0x1FA804  0x041B3000 -> 0x1FFFF000 across init   <- this pair MOVES across
- *   0x1FA808  0x05CF3000 -> 0x00000000 across init   <- init; that is all we
- *        know.  If they are a base/size pair the post values describe a 4 KiB
- *        region, which cannot hold a 38 MB image, so their meaning (and whether
- *        they are WPR2 at all) is NOT established -- see
- *        docs/nv-gsp-wpr-contract.md.
- *   0x1FA82C  0x00100000 -> 0x1FFFFFF0 across init
- *   0x1FA830  0x05CF3FF0 -> 0x00000000 across init
- *   0x1FA824  0x1FFFFE00 -> 0x1FFFFE00  (does NOT move)
- *   0x1FA828  0x00000000 -> 0x00000000  (does NOT move -- so the old
- *                                        "nonzero hi means firmware is up"
- *                                        check was measuring a dead word)
+ *   0x1FA824 / 0x1FA828 are WPR2_ADDR_LO / WPR2_ADDR_HI, and they are a
+ *   (start, END) pair in **4 KiB units** -- not low/high halves of an address,
+ *   and not base/size.  The region's size is (HI - LO) * 4 KiB, if it were
+ *   readable.
  *
- * Values are card-specific (they are VRAM extent arithmetic); what generalises
- * is which signature pair appears before and after init.  The probe reports the
- * values and the "matches nobody" case rather than pretending to know. */
-#define NV_PFB_WPR_CTL_A 0x1FA804 /* pre 0x041B3000, post 0x1FFFF000 */
-#define NV_PFB_WPR_CTL_B 0x1FA808 /* pre 0x05CF3000, post 0x00000000 */
-#define NV_PFB_WPR_MMU_LO 0x1FA82C /* pre 0x00100000, post 0x1FFFFFF0 */
-#define NV_PFB_WPR_MMU_HI 0x1FA830 /* pre 0x05CF3FF0, post 0x00000000 */
-#define NV_PFB_WPR2_LO 0x1FA824    /* legacy claim: does not move */
-#define NV_PFB_WPR2_HI 0x1FA828    /* legacy claim: always 0, even with GSP up */
-#define NV_PFB_MMU_LOCK_CTRL 0x1FA7C8
-
-/* The two signatures measured on one AD102 (24 GiB).  A different card or a
- * different VRAM size can legitimately differ, so a mismatch is reported as
- * "unknown", never as "firmware is/isn't running". */
-#define NV_WPR_SIG_PRE_A 0x041B3000u
-#define NV_WPR_SIG_PRE_B 0x05CF3000u
-#define NV_WPR_SIG_POST_A 0x1FFFF000u
-#define NV_WPR_SIG_POST_B 0x00000000u
+ *   On this card they are NOT readable: 0x1FA7C8 bit 0 (READ_PROTECTION_LEVEL0)
+ *   reads 1, and the words decode to 0x1FFFFE00/0 -- a start of 128 GiB minus
+ *   2 MiB on a 24 GiB card.  A live 24 GiB card cannot be that, so the values
+ *   are the protected-window answer, not state.  The reference driver running
+ *   GSP-RM and rendering Vulkan reads the same words.
+ *
+ *   Therefore: these are a NAME for WPR2 and a NOT a state oracle, and the host
+ *   must never write them -- on AD102/535 the SEC2 booter programs the region
+ *   from the metadata block. */
+#define NV_PFB_WPR2_ADDR_LO 0x1FA824
+#define NV_PFB_WPR2_ADDR_HI 0x1FA828
+#define NV_PFB_READ_PROTECTION 0x1FA7C8
+#define NV_PFB_RP_LEVEL0 (1u << 0)
+/* The pair that DOES move across init, identity unexplained (contract 2.4c). */
+#define NV_PFB_MOVES_A 0x1FA804
+#define NV_PFB_MOVES_B 0x1FA808
+#define NV_PFB_MOVES_C 0x1FA82C
+#define NV_PFB_MOVES_D 0x1FA830
 
 /* GSP-specific words inside the falcon window (BAR0 0x110000 + offset). */
 #define NV_GSP_ENGINE_RESET (NV_FALCON_GSP_BASE + 0x3C0)
 #define NV_GSP_MAILBOX0 (NV_FALCON_GSP_BASE + 0x040)
 #define NV_GSP_MAILBOX1 (NV_FALCON_GSP_BASE + 0x044)
-#define NV_GSP_MASK_WORD (NV_FALCON_GSP_BASE + 0x1668)
+/* Was written down as a BAR0 word at 0x001668 -- wrong: 0x001668 reads the
+ * unreadable-register answer in every state.  The live word is falcon-relative,
+ * 0x111668 = BCR_CTRL, and 0x111 = VALID | RISCV | BRFETCH, i.e. "run the
+ * RISC-V core, fetch from the boot ROM".  Measured 0x1 post-init, 0xBADF5620
+ * (fenced) before it. */
+#define NV_GSP_BCR_CTRL (NV_FALCON_GSP_BASE + 0x1668)
+#define NV_GSP_BCR_VALID (1u << 0)
+#define NV_GSP_BCR_RISCV (1u << 4)
+#define NV_GSP_BCR_BRFETCH (1u << 8)
 #define NV_GSP_QUEUE_HEAD0 (NV_FALCON_GSP_BASE + 0xC00)
 /* RISC-V core window inside the GSP block. */
 #define NV_GSP_RISCV_BASE (NV_FALCON_GSP_BASE + 0x1000)
@@ -116,36 +124,59 @@ int nv_gsp_probe(struct nv_dev *d) {
     uart_puts("[NV-GSP] no gsp window: firmware stage not reachable\n");
     return -ENODEV;
   }
-  uint32_t wpr_lo = nv_rd32(d, NV_PFB_WPR2_LO);
-  uint32_t wpr_hi = nv_rd32(d, NV_PFB_WPR2_HI);
-  uint32_t lock_lo = nv_rd32(d, NV_PFB_WPR_MMU_LO);
-  uint32_t lock_hi = nv_rd32(d, NV_PFB_WPR_MMU_HI);
-  uint32_t ctl_a = nv_rd32(d, NV_PFB_WPR_CTL_A);
-  uint32_t ctl_b = nv_rd32(d, NV_PFB_WPR_CTL_B);
-  uint32_t lock_ctl = nv_rd32(d, NV_PFB_MMU_LOCK_CTRL);
-  uint32_t maskw = nv_rd32(d, NV_GSP_MASK_WORD);
+  uint32_t lo = nv_rd32(d, NV_PFB_WPR2_ADDR_LO);
+  uint32_t hi = nv_rd32(d, NV_PFB_WPR2_ADDR_HI);
+  uint32_t rp = nv_rd32(d, NV_PFB_READ_PROTECTION);
+  uint32_t mv_a = nv_rd32(d, NV_PFB_MOVES_A);
+  uint32_t mv_b = nv_rd32(d, NV_PFB_MOVES_B);
+  uint32_t bcr = nv_rd32(d, NV_GSP_BCR_CTRL);
   uint32_t mb0 = nv_rd32(d, NV_GSP_MAILBOX0);
   uint32_t mb1 = nv_rd32(d, NV_GSP_MAILBOX1);
   uint32_t ucctl = nv_rd32(d, NV_GSP_RISCV_CPUCTL);
   uint32_t eng_reset = nv_rd32(d, NV_GSP_ENGINE_RESET);
 
-  uart_puts("[NV-GSP] probe wpr a=");
-  uart_print_hex(ctl_a);
+  uart_puts("[NV-GSP] probe wpr2 lo=");
+  uart_print_hex(lo);
+  uart_puts(" hi=");
+  uart_print_hex(hi);
+  uart_puts(" readprot=");
+  uart_print_hex(rp);
+  uart_puts(" (LO/HI are a start/END pair in 4 KiB units)\n");
+
+  /* Say what the words mean and what they cannot mean.  On this card they are
+   * protected, and the decoded start lands outside a 24 GiB FB -- so the
+   * honest report is "these are not state", not a verdict about the firmware. */
+  uint64_t start_kib = (uint64_t)lo * 4u;
+  uint64_t end_kib = (uint64_t)hi * 4u;
+  uart_puts("[NV-GSP] probe wpr2 span_kib=");
+  uart_print_hex(end_kib > start_kib ? end_kib - start_kib : 0);
+  if ((rp & NV_PFB_RP_LEVEL0) && hi != 0) {
+    uart_puts(" verdict=not-a-state-oracle (read-protected; decode would put the "
+              "region above any real FB). The SEC2 booter builds WPR2; the host "
+              "only supplies the metadata.\n");
+  } else if (hi == 0) {
+    uart_puts(" verdict=hi-is-zero (region not established); still: the booter "
+              "builds it, the host never writes these.\n");
+  } else {
+    uart_puts(" verdict=span decodes inside FB, but the meaning of the pair is "
+              "not established -- do not write these.\n");
+  }
+
+  uart_puts("[NV-GSP] probe moves a=");
+  uart_print_hex(mv_a);
   uart_puts(" b=");
-  uart_print_hex(ctl_b);
-  uart_puts(" mmu=");
-  uart_print_hex(lock_lo);
-  uart_puts(":");
-  uart_print_hex(lock_hi);
-  uart_puts(" (legacy lo/hi=");
-  uart_print_hex(wpr_lo);
-  uart_puts("/");
-  uart_print_hex(wpr_hi);
-  uart_puts(") lockctl=");
-  uart_print_hex(lock_ctl);
-  uart_puts("\n[NV-GSP] probe mask1668=");
-  uart_print_hex(maskw);
-  uart_puts(" mb0=");
+  uart_print_hex(mv_b);
+  uart_puts(" (this pair changes across init; identity unexplained)\n");
+  uart_puts("[NV-GSP] probe bcr_ctrl=");
+  uart_print_hex(bcr);
+  if (bcr == NV_REG_FENCED) {
+    uart_puts(" (fenced)");
+  } else {
+    uart_puts((bcr & NV_GSP_BCR_VALID) ? " VALID" : " !valid");
+    if (bcr & NV_GSP_BCR_RISCV) uart_puts("|RISCV");
+    if (bcr & NV_GSP_BCR_BRFETCH) uart_puts("|BRFETCH");
+  }
+  uart_puts("\n[NV-GSP] probe mb0=");
   uart_print_hex(mb0);
   uart_puts(" mb1=");
   uart_print_hex(mb1);
@@ -155,24 +186,10 @@ int nv_gsp_probe(struct nv_dev *d) {
   uart_print_hex(eng_reset);
   uart_puts("\n");
 
-  /* Which signature does the block carry?  This is the live check the old
-   * "nonzero hi" test was supposed to be, measured rather than assumed. */
-  if (ctl_a == NV_WPR_SIG_POST_A && ctl_b == NV_WPR_SIG_POST_B) {
-    uart_puts("[NV-GSP] probe verdict=programmed (post-init signature): a "
-              "firmware boot has already owned VRAM -- tear down or reuse, "
-              "never re-base blind\n");
-  } else if (ctl_a == NV_WPR_SIG_PRE_A && ctl_b == NV_WPR_SIG_PRE_B) {
-    uart_puts("[NV-GSP] probe verdict=untouched (pre-init signature): the "
-              "region is ours to lay out\n");
-  } else {
-    uart_puts("[NV-GSP] probe verdict=unknown (neither measured signature): "
-              "values are card-specific, so treat as programmed until proven\n");
-  }
-
-  d->wpr2_lo = wpr_lo;
-  d->wpr2_hi = wpr_hi;
-  d->wpr_ctl_a = ctl_a;
-  d->wpr_ctl_b = ctl_b;
+  d->wpr2_lo = lo;
+  d->wpr2_hi = hi;
+  d->wpr_ctl_a = mv_a;
+  d->wpr_ctl_b = mv_b;
   d->gsp_msg0 = mb0;
   d->gsp_msg1 = mb1;
   d->gsp_ucctl = ucctl;
@@ -320,8 +337,14 @@ int nv_gsp_boot(struct nv_dev *d) {
   /* Stage 2 is pure file I/O and runs on every boot (see nv_gsp_firmware_check);
    * here we only record that it is not the blocker any more. */
   uart_puts("[NV-GSP] stage2 firmware: read+parsed at bring-up (see fw rows)\n");
-  uart_puts("[NV-GSP] stage3+ blocked on the WPR2/bootargs contracts; the "
-            "reference dump (docs/nv-gsp-reference.md) is what unblocks them\n");
+  /* The remaining stages are named by the contracts rather than by a guess:
+   * radix3 tree -> metadata block -> booter DMA on SEC2 -> MAILBOX0 -> meta
+   * `verified` -> RPC queues -> GSP_INIT_DONE.  Each has a read-back that
+   * proves it, and none of them may be written before its predecessor's
+   * read-back passes. */
+  uart_puts("[NV-GSP] stage3+ not started: next is the radix3 tree, then the "
+            "metadata block (codec ready), then the SEC2 booter "
+            "(docs/nv-gsp-wpr-contract.md section 8)\n");
   return -ENOTSUP;
 }
 

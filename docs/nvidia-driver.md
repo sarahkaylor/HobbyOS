@@ -284,6 +284,35 @@ driver ran comes back with the WPR block at its **pre-init** signature, so
 "tear down someone else's region" is the rare path and "lay out the region" is
 the normal one.
 
+### 5.6 What the two contract docs settled (and one plan they killed)
+
+`docs/nv-gsp-wpr-contract.md` and `docs/nv-gsp-rpc-contract.md` were built from
+public sources after the hardware dump, and they changed the plan:
+
+- **The host does not program the write-protected region on AD102/535.** The
+  SEC2-run booter builds WPR2 from the 256-byte metadata block; the host
+  writes that block into *system* memory and hands over its physical address.
+  Every earlier step here that said "lay out the region, then program it" was
+  wrong at the first move.
+- **`0x1FA824/828` are `WPR2_ADDR_LO/HI`, a (start, END) pair in 4 KiB units** —
+  and on this card they are read-protected (`0x1FA7C8` bit 0 = 1, measured
+  `0x45CB8F` through this driver). The words decode to a start above any real
+  24 GiB FB, so they are a *name* for the region, **not a state oracle**. The
+  probe now says exactly that instead of printing a verdict.
+- **`0x1668` was falcon-relative all along**: the live word is `0x111668` =
+  `BCR_CTRL`, value `0x111` = VALID | RISCV | BRFETCH (run the RISC-V core, fetch
+  from boot ROM). Measured `0x1` with GSP-RM up, `0xBADF5620` (fenced) before.
+- **The 256-byte metadata block is now implemented field by field** (33 offsets,
+  V1 layout), replacing the earlier hypothesis that had a region array and a
+  size field which do not exist. `verified` (`0xA0A0…`) is written by the
+  booter — a protocol-free proof that the block was accepted, and the test
+  asserts a host-written block never reads as verified.
+- **The transport, when we get there**: queues in host system memory described
+  by a 129-entry table of GPU bus addresses; 48-byte element header; `VRPC`
+  messages with `length` including the 32-byte header; `SET_SYSTEM_INFO` /
+  `SET_REGISTRY` queued *before* the processor starts; first round trip is
+  `GET_GSP_STATIC_INFO`; doorbell `PGSP_QUEUE_HEAD(0) = 0x110C00`.
+
 One open discrepancy: the reference's pre-init dump had the whole `0x110000`
 window fenced, while `nv` reads real `UC_CAPS/CAPS2` there. The likely cause is
 a PCI function-level reset on VM start (QEMU does one with `pcie=1`) which
@@ -344,12 +373,13 @@ Mesa stack, or the virtio-gpu path, and a machine with no NVIDIA card costs one
 1. **P3 — GSP-RM boot.** The gate. Blob inventory, container formats and the
    step-by-step sequence with observables: `docs/nv-gsp-firmware.md`. Stages 1-2
    are done on silicon; 3+ are waiting on two contracts.
-1a. **Which registers are WPR2 on AD102.** Open, and it blocks stage 3. The
-   measured pair that moves across init (`0x1FA804/08`) cannot hold a 38 MB
-   image if it is a base/size pair, and `0x1FA824/828` never move at all. Two
-   readings are on the table (wrong address, or wrong units) and neither is
-   proven. `docs/nv-gsp-wpr-contract.md` is where this gets settled, with a list
-   of candidate addresses a read-only dump can test.
+1a. **Which registers are WPR2 on AD102 — settled, with a caveat.**
+   `0x1FA824/828` are `WPR2_ADDR_LO/HI` as a (start, END) pair in 4 KiB units,
+   per `docs/nv-gsp-wpr-contract.md` §2.1; the words themselves are
+   read-protected on this card, so they never answer usefully. Reading them as
+   base/size was our earlier mistake. Their *identity* is established from
+   sources, their *value* is not observable — which is fine, because the host
+   never writes them.
 1b. **The GSP RPC transport.** Queues, element format, message format and the
    init handshake: `docs/nv-gsp-rpc-contract.md`. Nothing on the transport may be
    written before the queue-address question is answered — a wrong address hangs

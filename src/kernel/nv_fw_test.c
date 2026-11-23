@@ -42,6 +42,14 @@ static void put64(uint8_t *p, uint64_t v) {
   put32(p + 4, (uint32_t)(v >> 32));
 }
 
+static uint32_t le32(const uint8_t *p) {
+  return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
+         ((uint32_t)p[3] << 24);
+}
+static uint64_t le64(const uint8_t *p) {
+  return (uint64_t)le32(p) | ((uint64_t)le32(p + 4) << 32);
+}
+
 static void zero(void *p, uint32_t n) {
   uint8_t *b = (uint8_t *)p;
   for (uint32_t i = 0; i < n; i++) b[i] = 0;
@@ -451,44 +459,94 @@ static void test_nv_fw_elf_reject(void) {
 static void test_nv_fw_wpr_meta_roundtrip(void) {
   uart_puts("  Running test_nv_fw_wpr_meta_roundtrip...\n");
   tests_run++;
+  /* Values from the AD102 / 535.113.01 case in the contract (section 3.3), so
+   * the test fails if a field is written to the wrong offset. */
   struct nv_wpr_meta_in in, out;
   zero(&in, sizeof in);
   zero(&out, sizeof out);
-  in.fb_size = 0x600000000ULL; /* 24 GiB */
-  in.wpr_start = 0x5FFC00000ULL;
-  in.wpr_size = 0x400000;
-  in.num_regions = 2;
-  in.region[0].start_offset = 0x100000;
-  in.region[0].size = 0x300000;
-  in.region[1].start_offset = 0x400000;
-  in.region[1].size = 0x80000;
-  in.region[1].reserved = 0x12345678;
+  in.sysmem_addr_radix3_elf = 0x0000000123400000ULL;
+  in.size_radix3_elf = 0x2448000;
+  in.sysmem_addr_bootloader = 0x0000000123500000ULL;
+  in.size_bootloader = 0x8000;
+  in.bootloader_code_offset = 0x4800;
+  in.bootloader_data_offset = 0x800;
+  in.sysmem_addr_signature = 0x0000000123600000ULL;
+  in.size_signature = 0x1000;
+  in.gsp_fw_rsvd_start = 0x5F8600000ULL;
+  in.non_wpr_heap_offset = 0x5F8600000ULL;
+  in.non_wpr_heap_size = 0x100000;
+  in.gsp_fw_wpr_start = 0x5F8700000ULL;
+  in.gsp_fw_heap_offset = 0x5F8800000ULL;
+  in.gsp_fw_heap_size = 0x3600000;
+  in.gsp_fw_offset = 0x5FBEB0000ULL;
+  in.boot_bin_offset = 0x5FE2F8000ULL;
+  in.frts_offset = 0x5FE300000ULL;
+  in.frts_size = 0x100000;
+  in.gsp_fw_wpr_end = 0x5FE400000ULL;
+  in.fb_size = 0x5FF400000ULL;
+  in.vga_workspace_offset = 0x5FE400000ULL;
+  in.vga_workspace_size = in.fb_size - in.vga_workspace_offset;
+  in.boot_count = 3;
+  in.sysmem_addr_crash_queue = 0x0000000123700000ULL;
+  in.size_crash_queue = 0x4000;
+  in.heap_vf_partition_count = 1;
+  in.flags = 2;
+  in.paging_config = 0x1234;
 
   uint8_t meta[NV_WPR_META_SIZE];
   fill(meta, sizeof meta, 0xEE); /* encode must write every byte */
   ASSERT(nv_fw_wpr_meta_encode(&in, meta) == 0);
 
-  /* The two fields that ARE established, checked at their offsets. */
-  for (int i = 0; i < 8; i++) {
-    uint8_t want = (uint8_t)(NV_WPR_META_MAGIC >> (8 * i));
-    ASSERT(meta[i] == want);
-  }
-  EXPECT_EQ((int)meta[8], (int)NV_WPR_META_REVISION);
-  EXPECT_EQ((int)meta[9], 0);
+  /* Spot-check the wire offsets that matter most, independently of decode. */
+  ASSERT(le64(meta + 0x10) == in.sysmem_addr_radix3_elf);
+  ASSERT(le64(meta + 0x70) == in.gsp_fw_wpr_start);
+  ASSERT(le64(meta + 0xA8) == in.gsp_fw_wpr_end);
+  ASSERT(le64(meta + 0xB0) == in.fb_size);
+  ASSERT(le64(meta + 0xC8) == 3);
+  ASSERT(le32(meta + 0xE8) == 0x4000);
+  EXPECT_EQ((int)meta[0xF0], 1);
+  EXPECT_EQ((int)meta[0xF1], 2);
+  ASSERT(le32(meta + 0xF2) == 0x1234);
+  /* verified is HOST-written as 0: the booter owns that word. */
+  ASSERT(le64(meta + 0xF8) == 0);
   /* Reserved space is zeroed, not left as the caller's stack. */
   EXPECT_EQ((int)meta[0x0C], 0);
   EXPECT_EQ((int)meta[0xFF], 0);
 
   ASSERT(nv_fw_wpr_meta_decode(meta, &out) == 0);
-  ASSERT(out.fb_size == in.fb_size);
-  ASSERT(out.wpr_start == in.wpr_start);
-  EXPECT_EQ((int)out.wpr_size, (int)in.wpr_size);
-  EXPECT_EQ((int)out.num_regions, 2);
-  ASSERT(out.region[0].start_offset == in.region[0].start_offset);
-  EXPECT_EQ((int)out.region[0].size, 0x300000);
-  ASSERT(out.region[1].start_offset == 0x400000);
-  EXPECT_EQ((int)out.region[1].size, 0x80000);
-  EXPECT_EQ((int)out.region[1].reserved, 0x12345678);
+  ASSERT(out.size_radix3_elf == 0x2448000);
+  ASSERT(out.gsp_fw_wpr_start == 0x5F8700000ULL);
+  ASSERT(out.gsp_fw_wpr_end == 0x5FE400000ULL);
+  ASSERT(out.fb_size == 0x5FF400000ULL);
+  ASSERT(out.frts_size == 0x100000);
+  ASSERT(out.boot_count == 3);
+  EXPECT_EQ((int)out.size_crash_queue, 0x4000);
+  EXPECT_EQ((int)out.heap_vf_partition_count, 1);
+  EXPECT_EQ((int)out.flags, 2);
+  EXPECT_EQ((int)out.paging_config, 0x1234);
+}
+
+/* The booter's acceptance proof: it overwrites `verified` with 0xA0A0...  A
+ * host-written block must never read as verified, or a boot that never started
+ * would look like one that succeeded. */
+static void test_nv_fw_wpr_meta_verified(void) {
+  uart_puts("  Running test_nv_fw_wpr_meta_verified...\n");
+  tests_run++;
+  struct nv_wpr_meta_in in, out;
+  zero(&in, sizeof in);
+  in.fb_size = 0x5FF400000ULL;
+  uint8_t meta[NV_WPR_META_SIZE];
+  ASSERT(nv_fw_wpr_meta_encode(&in, meta) == 0);
+  ASSERT(nv_fw_wpr_meta_decode(meta, &out) == 0);
+  EXPECT_EQ(nv_fw_wpr_meta_verified(&out), 0);
+  put64(meta + 0xF8, NV_WPR_META_VERIFIED);
+  ASSERT(nv_fw_wpr_meta_decode(meta, &out) == 0);
+  EXPECT_EQ(nv_fw_wpr_meta_verified(&out), 1);
+  /* Almost the magic value is not acceptance. */
+  put64(meta + 0xF8, NV_WPR_META_VERIFIED ^ 1u);
+  ASSERT(nv_fw_wpr_meta_decode(meta, &out) == 0);
+  EXPECT_EQ(nv_fw_wpr_meta_verified(&out), 0);
+  EXPECT_EQ(nv_fw_wpr_meta_verified(0), 0);
 }
 
 static void test_nv_fw_wpr_meta_errors(void) {
@@ -496,8 +554,7 @@ static void test_nv_fw_wpr_meta_errors(void) {
   tests_run++;
   struct nv_wpr_meta_in in, out;
   zero(&in, sizeof in);
-  in.num_regions = 1;
-  in.region[0].size = 0x1000;
+  in.fb_size = 0x5FF400000ULL;
 
   uint8_t meta[NV_WPR_META_SIZE];
   /* A short buffer is refused before a byte is written. */
@@ -520,30 +577,8 @@ static void test_nv_fw_wpr_meta_errors(void) {
   EXPECT_EQ(nv_fw_wpr_meta_decode(meta, &out), -EINVAL);
   meta[8] = (uint8_t)NV_WPR_META_REVISION;
 
-  /* A region count beyond the array must not be walked. */
-  put32(meta + 0x24, NV_WPR_META_MAX_REGIONS + 1);
-  EXPECT_EQ(nv_fw_wpr_meta_decode(meta, &out), -EINVAL);
-  put32(meta + 0x24, 1);
-
-  /* Encode refuses what decode refuses. */
-  in.num_regions = NV_WPR_META_MAX_REGIONS + 1;
-  EXPECT_EQ(nv_fw_wpr_meta_encode(&in, meta), -EINVAL);
   EXPECT_EQ(nv_fw_wpr_meta_encode(0, meta), -EINVAL);
   EXPECT_EQ(nv_fw_wpr_meta_decode(meta, 0), -EINVAL);
-}
-
-static void test_nv_fw_wpr_base(void) {
-  uart_puts("  Running test_nv_fw_wpr_base...\n");
-  tests_run++;
-  /* Top-down from the end of VRAM, 128 KiB aligned. */
-  ASSERT(nv_fw_wpr_base(0x600000000ULL, 0x400000) == 0x5FFC00000ULL);
-  /* An unaligned size costs the alignment, and the result stays inside. */
-  uint64_t b = nv_fw_wpr_base(0x600000000ULL, 0x400001);
-  ASSERT((b & (NV_WPR_ALIGN - 1)) == 0);
-  ASSERT(b + 0x400001 <= 0x600000000ULL);
-  /* Impossible requests are refused rather than wrapped. */
-  ASSERT(nv_fw_wpr_base(0x1000, 0x2000) == 0);
-  ASSERT(nv_fw_wpr_base(0x100000, 0) == 0);
 }
 
 /* ---- SHA-256 ---------------------------------------------------------- */
@@ -628,7 +663,7 @@ void nv_fw_test_suite(void) {
   test_nv_fw_elf_reject();
   test_nv_fw_wpr_meta_roundtrip();
   test_nv_fw_wpr_meta_errors();
-  test_nv_fw_wpr_base();
+  test_nv_fw_wpr_meta_verified();
   test_nv_fw_sha256_nist();
   test_nv_fw_load_missing();
 }
