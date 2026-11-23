@@ -160,6 +160,9 @@ int nv_gsp_probe(struct nv_dev *d);
  * it (docs/nv-pmu-acr-contract.md section 1).  No writes to the card beyond the
  * PROM-shadow toggle, which is restored. */
 int nv_vbios_probe(struct nv_dev *d);
+/* Copy `len` bytes out of the VBIOS PROM aperture into `dst`.  Byte-wise over
+ * the dword path, because that is the only way the aperture is readable here. */
+int nv_vbios_read(struct nv_dev *d, uint32_t off, void *dst, uint32_t len);
 int nv_gsp_boot(struct nv_dev *d);
 /* FWSEC step 1-3: reset the GSP falcon, then route its DMA at system memory.
  * Needs no ucode, so it is verifiable on its own (docs/nv-pmu-acr-contract.md). */

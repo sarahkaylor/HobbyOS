@@ -136,6 +136,14 @@ static uint32_t vb_dword(struct nv_dev *d, uint32_t off) {
 #define NV_PROM_BASE 0x300000u /* BAR0-relative PROM aperture */
 #define NV_PROM_SIZE 0x100000u /* 1 MiB, the aperture's own bound */
 
+int nv_vbios_read(struct nv_dev *d, uint32_t off, void *dst, uint32_t len) {
+  if (!d || !d->bar0 || !dst) return -EINVAL;
+  if (off + len > NV_PROM_SIZE) return -EINVAL;
+  uint8_t *o = (uint8_t *)dst;
+  for (uint32_t i = 0; i < len; i++) o[i] = vb_byte(d, NV_PROM_BASE + off + i);
+  return 0;
+}
+
 int nv_vbios_probe(struct nv_dev *d) {
   if (!d || !d->bar0) return -EINVAL;
   /* Config-space helpers want a pci_device; nv_dev only keeps the address. */

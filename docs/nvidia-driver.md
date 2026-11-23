@@ -411,6 +411,39 @@ Two findings, both of which changed the code:
    the driver simply cannot read them back. That removes the last blocker before
    FWSEC: there is nothing to unfence, and nothing to replay.
 
+### 5.9 FWSEC launched, and it did not run — caught by a prefill
+
+The driver now stages FWSEC's ucode out of the card's ROM (65,408 bytes, IMEM
+`0xF200` as secret pages then DMEM `0xD80`), writes the boot parameters, and
+starts the core. The first attempt reported success. It was wrong:
+
+```
+[NV-FWSEC] variant A: no dmem descriptor
+[NV-FWSEC] variant A mailbox0=0x0 status1438=0x0
+[NV-FWSEC] FWSEC reports success          <-- FALSE: 0 means success, and an
+                                               unstarted core also reads 0
+```
+
+`MAILBOX0` is the verdict *and* the default value, so the two were
+indistinguishable. Pre-filling it with a sentinel the ucode must overwrite — the
+step `docs/nv-pmu-acr-contract.md` explicitly recommends, and the step I skipped —
+turns the same run into a real answer:
+
+```
+[NV-FWSEC] variant A: mailbox never overwritten -- the ucode did not run
+[NV-FWSEC] variant B: bl-dmem descriptor written (INFERRED layout)
+[NV-FWSEC] variant B: mailbox never overwritten -- the ucode did not run
+```
+
+So: the DMA transfers are accepted (they no longer abort), the start does not
+take, and both the plain and the descriptor boot shapes behave identically. The
+next hypothesis is the boot ROM's own parameters: for the GSP they live in the
+RISC-V block at `0x111210`-odd addresses, which the accessibility map shows
+inside the fenced span, so the core may be refusing to start because its
+signature parameters were never written. That is the next thing to test, and it
+needs a write-lands probe for a register whose read is masked — the same trick
+that resolved the last two questions.
+
 ### 5.6 What the two contract docs settled (and one plan they killed)
 
 `docs/nv-gsp-wpr-contract.md` and `docs/nv-gsp-rpc-contract.md` were built from

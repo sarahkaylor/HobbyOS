@@ -46,6 +46,7 @@
 #include "nv.h"
 #include "nv_regs.h"
 #include "nv_fw.h"
+#include "frame.h"
 #include "kmem.h"
 #include "errno.h"
 
@@ -345,10 +346,19 @@ static int sec2_dma_block(struct nv_dev *d, uint64_t src_phys, uint32_t src_end,
   uint32_t ctrl = XF_SIZE(6) | XF_SEC(sec);
   if (is_imem) ctrl |= XF_IMEM;
   nv_wr32(d, NV_FALCON_SEC2_BASE + NV_XFER_CTRL, ctrl);
-  /* Idle means the request left the queue; the writes landed. */
+  /* Idle means the request left the queue; the writes landed.  But the status
+   * register is INSIDE the read-fenced span (measured), so on a fenced window
+   * there is nothing to poll: the transfer still happens, we simply cannot watch
+   * it.  Failing here would abort a transfer that is fine -- the lesson the
+   * mailbox probe taught.  So: if the status reads the fence word, pace the
+   * blocks with a short delay and let the final verdict judge the stage. */
   for (int i = 0; i < 200000; i++) {
     uint32_t st = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_XFER_STATUS);
-    if (st == 0xffffffffu || (st >> 16) == 0xBADFu) return -5;
+    if (st == 0xffffffffu || (st >> 16) == 0xBADFu) {
+      for (volatile int spin = 0; spin < 50; spin++) {
+      }
+      return 0;
+    }
     if (st & XF_IDLE) return 0;
   }
   return -110;
@@ -576,6 +586,142 @@ int nv_gsp_fwsec_reset(struct nv_dev *d) {
   uart_print_hex(nv_rd32(d, NV_GSP_U + 0x600));
   uart_puts("\n");
   return 0;
+}
+
+/* ---- stage 6b: launch FWSEC ---------------------------------------------
+ *
+ * docs/nv-pmu-acr-contract.md 3.3 steps 4-11, now that the measurement says the
+ * falcon page accepts writes.  The ucode comes out of the card's own VBIOS
+ * (nv_vbios_probe located it), is staged into contiguous frames, and is handed
+ * over by DMA: IMEM as secret pages, DMEM as normal pages.
+ *
+ * Two variants are attempted, in order, because one field layout is not
+ * established: (A) boot with no DMEM descriptor -- the shape a plain falcon
+ * image takes; (B) write the 44-byte bl-dmem descriptor first.  Each fails
+ * cleanly into MAILBOX0, so trying both costs one boot and answers the question.
+ * The descriptor byte layout below is INFERRED from the field list in the
+ * contract; if variant B is the one that works, that inference gets a note.
+ */
+int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size) {
+  if (!d) return -EINVAL;
+  if (!d->ucode_desc || !d->ucode_imem || !d->ucode_dmem) {
+    uart_puts("[NV-FWSEC] no ucode located: nothing to launch\n");
+    return -ENOENT;
+  }
+  uint32_t total = d->ucode_imem + d->ucode_dmem;
+  uint32_t pages = (total + FRAME_SIZE - 1) / FRAME_SIZE;
+  uint64_t phys = frame_alloc_contig((int)pages);
+  if (!phys) {
+    uart_puts("[NV-FWSEC] no contiguous run for the ucode\n");
+    return -ENOMEM;
+  }
+  uint8_t *buf = (uint8_t *)phys_to_virt(phys);
+  int rc = nv_vbios_read(d, d->ucode_payload, buf, total);
+  if (rc != 0) {
+    uart_puts("[NV-FWSEC] could not copy the ucode out of the ROM\n");
+    for (uint32_t i = 0; i < pages; i++) frame_free(phys + (uint64_t)i * FRAME_SIZE);
+    return rc;
+  }
+  uart_puts("[NV-FWSEC] ucode staged phys=");
+  uart_print_hex(phys);
+  uart_puts(" imem=");
+  uart_print_hex(d->ucode_imem);
+  uart_puts(" dmem=");
+  uart_print_hex(d->ucode_dmem);
+  uart_puts(" (from ROM ");
+  uart_print_hex(d->ucode_payload);
+  uart_puts(")\n");
+
+  /* 128-byte blocks: both sizes divide by 128 and not by 256 (3456 = 27*128),
+   * and a falcon accepts 16..256 in powers of two. */
+  const uint32_t blk = 128;
+  for (uint32_t off = 0; off < d->ucode_imem; off += blk) {
+    rc = sec2_dma_block(d, phys, off, 0, 1, 1);
+    if (rc != 0) {
+      uart_puts("[NV-FWSEC] IMEM dma failed at ");
+      uart_print_hex(off);
+      uart_puts("\n");
+      goto out;
+    }
+  }
+  uart_puts("[NV-FWSEC] IMEM loaded\n");
+  for (uint32_t off = 0; off < d->ucode_dmem; off += blk) {
+    rc = sec2_dma_block(d, phys, d->ucode_imem + off, 0, 0, 0);
+    if (rc != 0) {
+      uart_puts("[NV-FWSEC] DMEM dma failed at ");
+      uart_print_hex(off);
+      uart_puts("\n");
+      goto out;
+    }
+  }
+  uart_puts("[NV-FWSEC] DMEM loaded\n");
+
+  nv_wr32(d, NV_GSP_U + 0x104, 0);
+  for (int variant = 0; variant < 2; variant++) {
+    if (variant == 1) {
+      /* bl-dmem descriptor, 11 dwords, INFERRED layout. */
+      uint32_t desc[11];
+      uint32_t im = d->ucode_imem, dm = d->ucode_dmem;
+      desc[0] = 5;                 /* ctx_dma = PHYS_SYS_NCOH */
+      desc[1] = (uint32_t)phys;    /* code_dma_base lo */
+      desc[2] = (uint32_t)(phys >> 32);
+      desc[3] = 0;                 /* non_sec_code_off */
+      desc[4] = 0;                 /* non_sec_code_size */
+      desc[5] = 0;                 /* sec_code_off */
+      desc[6] = im;                /* sec_code_size */
+      desc[7] = 0;                 /* entry */
+      desc[8] = (uint32_t)(phys + im);
+      desc[9] = (uint32_t)((phys + im) >> 32);
+      desc[10] = dm;               /* data_size */
+      for (uint32_t i = 0; i < 11; i++)
+        nv_wr32(d, NV_GSP_U + 0x180 + i * 4, desc[i]);
+      uart_puts("[NV-FWSEC] variant B: bl-dmem descriptor written (INFERRED layout)\n");
+    } else {
+      uart_puts("[NV-FWSEC] variant A: no dmem descriptor\n");
+    }
+    /* PREFILL WITH A SENTINEL.  0 means success, so a core that never ran would
+     * also read as success: the only way to tell them apart is to put a value
+     * there that the ucode must overwrite.  (First attempt at this pre-filled 0
+     * and "passed" without waiting for anything -- exactly the false positive
+     * the contract warned about.) */
+    const uint32_t kSentinel = 0xFEEDFACEu;
+    nv_wr32(d, NV_GSP_U + 0x040, kSentinel);
+    nv_wr32(d, NV_GSP_U + 0x044, kSentinel);
+    nv_wr32(d, NV_GSP_U + NV_FALCON_UC_CTRL, NV_FALCON_UC_CTRL_START);
+    uint32_t mb = kSentinel;
+    for (int i = 0; i < 400000; i++) {
+      mb = nv_rd32(d, NV_GSP_U + 0x040);
+      if (mb != kSentinel) break;
+    }
+    if (mb == kSentinel) {
+      uart_puts("[NV-FWSEC] variant ");
+      uart_puts(variant == 0 ? "A" : "B");
+      uart_puts(": mailbox never overwritten -- the ucode did not run, so this is "
+                "not a verdict\n");
+      continue;
+    }
+    uint32_t st = nv_rd32(d, 0x1438);
+    uart_puts("[NV-FWSEC] variant ");
+    uart_puts(variant == 0 ? "A" : "B");
+    uart_puts(" mailbox0=");
+    uart_print_hex(mb);
+    uart_puts(" status1438=");
+    uart_print_hex(st);
+    uart_puts("\n");
+    if (mb == 0 && (st >> 16) == 0) {
+      uart_puts("[NV-FWSEC] FWSEC reports success (mailbox0=0, frts status 0)\n");
+      rc = 0;
+      goto out;
+    }
+  }
+  rc = -EPERM;
+  uart_puts("[NV-FWSEC] both variants returned a non-zero verdict; the code "
+            "values are unpublished, so they are logged and not interpreted\n");
+out:
+  for (uint32_t i = 0; i < pages; i++) frame_free(phys + (uint64_t)i * FRAME_SIZE);
+  (void)frts_off;
+  (void)frts_size;
+  return rc;
 }
 
 int nv_gsp_sec2_start_booter(struct nv_dev *d, const uint8_t *booter,
@@ -984,6 +1130,13 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
    * reset the GSP and route its DMA at system memory. */
   if (bldrc == 0) {
     int frc = nv_gsp_fwsec_reset(d);
+    if (frc == 0 && lay.frts_offset) {
+      int lrc3 = nv_gsp_fwsec_launch(d, (uint32_t)(lay.frts_offset >> 12),
+                                     (uint32_t)(lay.frts_size >> 12));
+      uart_puts("[NV-GSP] stage6b (fwsec) result=");
+      print_int(lrc3);
+      uart_puts("\n");
+    }
     uart_puts("[NV-GSP] stage6a (gsp reset) result=");
     print_int(frc);
     uart_puts("\n");
