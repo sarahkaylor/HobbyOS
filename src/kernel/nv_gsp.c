@@ -1440,10 +1440,22 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
    * has to run before the load. */
   imem_scratch = frame_alloc_contig(1);
   {
-    /* IMEM: is it writable/readable at all, and by which path?   Patterns are
-     * left in place -- the load must overwrite them, which is a statement about
-     * the load in its own right. */
-    if (!imem_scratch) {
+    /* IMEM: is it writable/readable at all, and by which path?
+     *
+     * MEASURED r2c/r2d: the answer is "no, and the asking costs the load".  A
+     * pattern written through the code port does not read back (the port answers
+     * 0xDEAD5EC1), and in both runs where this probe ran the *next* DMA request
+     * -- the FWSEC image load -- timed out on its first block (r2c: the queue was
+     * left FULL, 0x118=0x637; r2d: 0x118 read 0x2 and never DONE).  Writing the
+     * code port is therefore not inert: it leaves the engine unable to collect a
+     * DMA request.  The probe is off; the read-only port rows below (harmless in
+     * r2a/r2b, where the load succeeded) report what can be reported. */
+    const int kImemWriteProbe = 0;
+    if (!kImemWriteProbe) {
+      uart_puts("[NV-IMEMW] write probe OFF: measured (r2c, r2d) that a "
+                "code-port write stops the engine collecting the next DMA "
+                "request, and the port cannot read the pattern back anyway\n");
+    } else if (!imem_scratch) {
       uart_puts("[NV-IMEMW] skipped: no contiguous scratch frame\n");
     } else {
       int pio_ok = 0, eng_ok = 0;
@@ -2406,7 +2418,10 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
   print_int(halted);
   uart_puts(" mailbox0=");
   uart_print_hex(mb0);
-  uart_puts("\n");
+  uart_puts(" mailbox1=");
+  uart_print_hex(nv_rd32(d, NV_FALCON_SEC2_BASE + 0x044));
+  uart_puts(" (the mailboxes READ on this window even when the rest answers "
+            "the fence word, so a booter status would be visible here)\n");
 
   /* The verdict that does not need the fenced window: did the booter write its
    * own acknowledgement into the metadata block?  Polled for a bounded time,
