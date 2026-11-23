@@ -34,10 +34,14 @@
  *  the probe in this branch uses -- the point is to be reachable by that code,
  *  not by a HobbyOS-shaped imitation of it.
  *
- *  WHAT IS NOT HERE: mmap of an allocation, dma-buf/PRIME, sync files, the
- *  timeline half of syncobj, NVIF (every RM class object), SVM, relocations
- *  and the legacy pushbuf path.  Each is a named refusal (-ENOSYS with a
- *  console row), never a silent no-op: see nv_shim_drm_refusal_name().
+ *  WHAT IS NOT HERE: dma-buf/PRIME, sync files, the timeline half of syncobj,
+ *  NVIF (every RM class object), SVM, relocations and the legacy pushbuf path.
+ *  Each is a named refusal (-ENOSYS with a console row), never a silent no-op:
+ *  see nv_shim_drm_refusal_name().
+ *
+ *  WHAT IS HERE SINCE WP-F3: a CPU mapping of a GEM object, through mmap(2) on
+ *  the node rather than through a request row (DRM has never had a mmap ioctl;
+ *  the object is named by the offset -- see "mmap contract" below).
  *
  *  House rules that apply to these structs (hobbyos-kernel-constraints):
  *  naturally aligned, no bitfields, byte-wise copies through vm_kuser_read()/
@@ -160,15 +164,18 @@ struct nvshim_drm_getparam {
 /* ---- memory objects ---------------------------------------------------- */
 
 /* struct drm_nouveau_gem_info.  `offset` is the object's address in the GPU
- * address space (its bus address on this port -- the mock's arena), which is
- * what a client writes into a push buffer.  map_handle is 0: there is no mmap
- * of an allocation in this subset. */
+ * address space (its bus address on this port -- the RM's real frames, so it is
+ * also the object's physical address while DMA translation is off), which is
+ * what a client writes into a push buffer.  `map_handle` is the fake mmap offset
+ * (handle << 12) when this object's domain asked for a CPU mapping, and 0 when
+ * it did not -- nouveau's own spelling (drm_vma_node_offset_addr()) for the same
+ * two cases.  See "mmap contract" at the bottom of this header. */
 struct nvshim_drm_gem_info {
   uint32_t handle;
   uint32_t domain;     /* in: NOUVEAU_GEM_DOMAIN_* on GEM_NEW; out on GEM_INFO */
   uint64_t size;       /* in (GEM_NEW): requested; out: granted */
   uint64_t offset;     /* out: bus address */
-  uint64_t map_handle; /* out: 0 */
+  uint64_t map_handle; /* out: fake mmap offset, or 0 (no CPU mapping) */
   uint32_t tile_mode;
   uint32_t tile_flags;
 };                     /* 40 bytes */
@@ -410,5 +417,37 @@ struct nvshim_drm_exec {
 #define NVSHIM_DRM_MAX_SYNCS 8      /* wait/sig entries per EXEC or VM_BIND */
 #define NVSHIM_DRM_MAX_SYNCOBJS 64
 #define NVSHIM_DRM_PUSHBUF_SIZE (64u * 1024u)
+
+/* ---- mmap contract (WP-F3) ---------------------------------------------
+ *
+ * There is no request number for this: a GEM object is mapped with
+ * mmap(2) on the node, exactly as nouveau's clients do it.
+ *
+ *   fd       an open /dev/nvshim that owns the object
+ *   offset   the object's map_handle (handle << 12, page aligned).  Any other
+ *            offset is -EINVAL: the offset is the only way a bare mmap names
+ *            WHICH object it means.
+ *   length   1..object size, page aligned; shorter than the object is legal and
+ *            maps the first `length` bytes only
+ *   prot     PROT_READ, with or without PROT_WRITE.  PROT_EXEC is -EINVAL: a
+ *            command buffer is not code the CPU runs.
+ *   flags    MAP_SHARED only.  MAP_PRIVATE would mean "a copy", and the point
+ *            of the mapping is that it is the object.
+ *
+ * The pages ARE the object's memory (the RM's frames), so:
+ *   - a store through the mapping is visible to the next EXEC with no flush and
+ *     no write-back request -- there is nothing to flush, the bytes are here;
+ *   - GEM_CLOSE takes the mapping down before the frames are freed (Linux keeps
+ *     the object alive while a VMA refers to it; this node has no object
+ *     refcount, so the object must not outlive its client instead);
+ *   - a page is faulted in on first touch, and a page with no frame is a hole
+ *     (BUS), never a fresh zero page.
+ *
+ * Refusals, each named on the console: offset 0 or unaligned, length 0 or
+ * unaligned or past the object, prot without READ or with EXEC, flags other
+ * than MAP_SHARED, a handle this client does not own, a domain that never
+ * offered a CPU mapping (VRAM/GART alone, or MAPPABLE without CPU), and an
+ * object the RM has no pool memory for.
+ * ---------------------------------------------------------------------- */
 
 #endif /* NV_DRM_UAPI_H */
