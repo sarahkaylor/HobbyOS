@@ -1573,7 +1573,25 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
               "0x114, so the IMEM destination cannot be read back even in "
               "principle\n");
   } else {
-    for (uint32_t off = 0; off < d->ucode_imem; off += NV_FLCN_BLOCK) {
+    /* ---- the ablation (round 2, run r2f) --------------------------------
+     *
+     * "The status word went to 0 and the core halted" is only evidence that
+     * FWSEC ran if the same thing does NOT happen without the code.  IMEM
+     * content cannot be read back on this part (the code port answers
+     * 0xDEAD5EC1 for every address, and a port write stops the DMA engine), so
+     * the load's IMEM half has never been verified.  Set this to 0 to launch
+     * with DMEM only: the core then executes whatever IMEM holds.  If 0x1438
+     * still goes to 0 and the core still halts, the observation was never about
+     * the code; if it does not, the code is what produced it.
+     */
+    const int kFwsecLoadImem = 0;
+    if (!kFwsecLoadImem) {
+      uart_puts("[NV-FWSEC] ABLATION: IMEM is NOT loaded this run (DMEM only): "
+                "the status/halt signature is being tested against its own "
+                "absence\n");
+    }
+    for (uint32_t off = 0; kFwsecLoadImem && off < d->ucode_imem;
+         off += NV_FLCN_BLOCK) {
       rc = falcon_dma_block(d, NV_GSP_U, phys, off, off, 1, 1);
       if (rc != 0) goto out;
     }
@@ -1586,6 +1604,11 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
      * whether the register can answer at all -- on this card it cannot, which
      * is itself the result: the plan's F1 oracle (0x114) is inside the
      * read-fenced span. */
+    if (!kFwsecLoadImem) {
+      uart_puts("[NV-FWSEC] f1 not applicable: no IMEM request was issued this "
+                "run\n");
+      goto after_f1;
+    }
     uart_puts("[NV-FWSEC] f1 requested imem dst first=");
     uart_print_hex(g_dma_dst_first);
     uart_puts(" last=");
@@ -1617,6 +1640,7 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
                   "above\n");
       }
     }
+  after_f1:
     for (uint32_t off = 0; off < d->ucode_dmem; off += NV_FLCN_BLOCK) {
       rc = falcon_dma_block(d, NV_GSP_U, phys, d->ucode_imem + off, off, 0, 0);
       if (rc != 0) goto out;
