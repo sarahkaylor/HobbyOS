@@ -1,0 +1,1278 @@
+/* ============================================================================
+ *  nv_rpc_test: kernel unit-tier coverage for the GSP-RPC transport
+ *  (src/kernel/nv_rpc.c), one TEST per case of
+ *  docs/nv-rpc-implementation-spec.md section 7: T-01..T-22 plus T-23/T-24.
+ *
+ *  The "firmware" here is a helper that writes a producer header into the
+ *  status queue and appends reply elements exactly as section 2 describes --
+ *  which is what real hardware does by DMA.  Two consequences are handled
+ *  honestly:
+ *
+ *  - If that helper and nv_rpc_elem_build() shared the checksum code the test
+ *    would be circular, so T-05 builds three fixtures BYTE BY BYTE from the
+ *    table in section 2.3 and compares against the spec's own golden vectors
+ *    (40505277 / 40505f01 / 40507132).  Those three numbers were computed from
+ *    the rule, not lifted from a driver, so they are an independent anchor:
+ *    they pin both that elem_check() ACCEPTS the spec's numbers and that
+ *    elem_build() PRODUCES them.
+ *  - The block is a static array with a synthetic `bus`.  The transport never
+ *    needs block_bus to be a real address (it only copies it into PTE[i]), and
+ *    T-01 additionally does the same build over a real 129-page contiguous
+ *    allocation so the frame-pool path is exercised too.
+ *
+ *  What this tier cannot prove (spec section 8): that the firmware walks the
+ *  PTEs, that SWAP_RX is really 1 on this firmware, that the checksum domain
+ *  matches the receiver exactly, or that 0x110C00 is the right register on
+ *  AD102.  Those need the card; every one of them fails with a different
+ *  symptom, and the reason enum is what names it when it does.
+ * ========================================================================== */
+
+#ifdef __x86_64__
+#ifdef KERNEL_MODE_UNIT_TEST
+
+#include "unit_test.h"
+#include "nv_rpc.h"
+#include "nv.h" /* struct nv_mmio_ops nv_dev / nv_wr32: the doorbell's real path */
+#include "errno.h"
+#include "frame.h"
+#include "kmem.h"
+
+#include <stddef.h>
+
+/* ---- byte helpers (test-local; the spec says build fixtures by hand) ---- */
+
+static void put32(uint8_t *p, uint32_t v) {
+  p[0] = (uint8_t)v;
+  p[1] = (uint8_t)(v >> 8);
+  p[2] = (uint8_t)(v >> 16);
+  p[3] = (uint8_t)(v >> 24);
+}
+
+static void put64(uint8_t *p, uint64_t v) {
+  put32(p, (uint32_t)v);
+  put32(p + 4, (uint32_t)(v >> 32));
+}
+
+static uint32_t get32(const uint8_t *p) {
+  return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
+         ((uint32_t)p[3] << 24);
+}
+
+static uint64_t get64(const uint8_t *p) {
+  return (uint64_t)get32(p) | ((uint64_t)get32(p + 4) << 32);
+}
+
+static void zero_bytes(void *p, uint32_t n) {
+  volatile uint8_t *b = p;
+  for (uint32_t i = 0; i < n; i++) b[i] = 0;
+}
+
+static void copy_bytes(void *dst, const void *src, uint32_t n) {
+  volatile uint8_t *d = dst;
+  const uint8_t *s = src;
+  for (uint32_t i = 0; i < n; i++) d[i] = s[i];
+}
+
+static int str_eq(const char *a, const char *b) {
+  if (!a || !b) return 0;
+  while (*a && *a == *b) {
+    a++;
+    b++;
+  }
+  return *a == *b;
+}
+
+/* ---- the block and the scratch buffers --------------------------------- */
+
+/* A synthetic GPU-visible base.  The transport only ever copies this value
+ * into PTE[i]; T-01 repeats the build over a real frame allocation. */
+#define TEST_BUS 0x20000000ull
+
+static uint8_t blk[NV_RPC_BLOCK_SIZE] __attribute__((aligned(4096)));
+static uint8_t tx_stage[NV_RPC_ELEM_MAX * NV_RPC_SLOT] __attribute__((aligned(4096)));
+static uint8_t rx_stage[NV_RPC_ELEM_MAX * NV_RPC_SLOT] __attribute__((aligned(4096)));
+static uint8_t rx_out[NV_RPC_LEN_MAX + 64] __attribute__((aligned(8)));
+
+/* ---- the hardware seam: counters, so ordering is asserted ------------- */
+
+struct fake_hw {
+  int db_calls;
+  uint32_t db_last;
+  int fence_calls;
+  uint64_t now;
+  uint64_t step;
+};
+
+static struct fake_hw fh;
+
+static void fh_doorbell(void *ctx, uint32_t idx) {
+  struct fake_hw *h = ctx;
+  h->db_calls++;
+  h->db_last = idx;
+}
+
+static void fh_fence(void *ctx) {
+  struct fake_hw *h = ctx;
+  h->fence_calls++;
+}
+
+static uint64_t fh_now(void *ctx) {
+  struct fake_hw *h = ctx;
+  uint64_t v = h->now;
+  h->now += h->step;
+  return v;
+}
+
+static void hw_reset(struct nv_rpc_hw *hw) {
+  zero_bytes(&fh, sizeof(fh));
+  fh.step = 1000;
+  fh.now = 1000000;
+  hw->doorbell = fh_doorbell;
+  hw->fence = fh_fence;
+  hw->now_us = fh_now;
+  hw->ctx = &fh;
+}
+
+/* ---- the "firmware" side ---------------------------------------------- */
+
+/* A producer header exactly as section 2.1 describes it, with a chosen flag
+ * word (so both SWAP_RX polarities can be negotiated). */
+static void fw_header(uint8_t *statq, uint32_t flags) {
+  put32(statq + NV_RPC_Q_VERSION, 0);
+  put32(statq + NV_RPC_Q_SIZE, NV_RPC_QUEUE_BYTES);
+  put32(statq + NV_RPC_Q_MSG_SIZE, NV_RPC_SLOT);
+  put32(statq + NV_RPC_Q_MSG_COUNT, NV_RPC_MSG_COUNT);
+  put32(statq + NV_RPC_Q_WRITE_PTR, 0);
+  put32(statq + NV_RPC_Q_FLAGS, flags);
+  put32(statq + NV_RPC_Q_RX_HDR_OFF, NV_RPC_Q_READ_PTR);
+  put32(statq + NV_RPC_Q_ENTRY_OFF, NV_RPC_SLOT);
+  put32(statq + NV_RPC_Q_READ_PTR, 0);
+}
+
+/* Fresh block + queue.  Every test starts here so no state leaks between them
+ * (a cached pointer that drifted from memory is exactly the bug T-21 hunts). */
+static int fresh_queue(struct nv_rpc_queue *q) {
+  int rc = nv_rpc_block_build(blk, TEST_BUS);
+  if (rc != 0) return rc;
+  return nv_rpc_queue_init(q, blk, TEST_BUS, rx_stage);
+}
+
+static int link_queue(struct nv_rpc_queue *q, struct nv_rpc_hw *hw,
+                      uint32_t peer_flags) {
+  int rc = fresh_queue(q);
+  if (rc != 0) return rc;
+  fw_header(blk + q->stat_off, peer_flags);
+  (void)hw;
+  return nv_rpc_link_apply(q, 0);
+}
+
+static void fw_set_wp(struct nv_rpc_queue *q, uint32_t wp) {
+  put32(q->block + q->stat_off + NV_RPC_Q_WRITE_PTR, wp);
+}
+
+/* Write one element into the status ring at slot `idx` (no wrap: every test
+ * that uses this keeps its messages away from the end of the ring except T-11,
+ * which builds its stream itself).  Payload bytes are a repeated value so a
+ * test can tell two replies apart.  Returns the elemCount used. */
+static uint32_t fw_put(struct nv_rpc_queue *q, uint32_t idx, uint32_t fn,
+                       uint32_t seq, uint32_t len, uint8_t fill) {
+  uint32_t ec = 0;
+  if (nv_rpc_elem_count(len, &ec) != 0) return 0;
+  uint8_t *slot = q->block + q->stat_off + NV_RPC_SLOT + (uint64_t)idx * NV_RPC_SLOT;
+  zero_bytes(slot, ec * NV_RPC_SLOT);
+  (void)nv_rpc_req_init(slot, fn, len);
+  put32(slot + NV_RPC_R_RESULT, 0); /* this is a reply, not a pending request */
+  for (uint32_t i = NV_RPC_RPC_HDR; i < len; i++) slot[NV_RPC_ELEM_HDR + i] = fill;
+  (void)nv_rpc_elem_build(slot, len, seq);
+  return ec;
+}
+
+/* A request in the staging buffer with a recognisable payload, finished the way
+ * the send path expects: RPC header, payload, then elem_build's element header
+ * and whole-slot checksum.  Returns the elemCount. */
+static int build_request(uint32_t fn, uint32_t len, uint8_t fill, uint32_t seq) {
+  zero_bytes(tx_stage, NV_RPC_ELEM_MAX * NV_RPC_SLOT);
+  (void)nv_rpc_req_init(tx_stage, fn, len);
+  for (uint32_t i = NV_RPC_RPC_HDR; i < len; i++)
+    tx_stage[NV_RPC_ELEM_HDR + i] = fill;
+  return nv_rpc_elem_build(tx_stage, len, seq);
+}
+
+/* Count bytes in a ring slot that are not `want` (used for "no slot written"). */
+static uint32_t slot_bytes_not(struct nv_rpc_queue *q, uint32_t idx, uint8_t want) {
+  const uint8_t *slot = q->block + q->cmd_off + NV_RPC_SLOT + (uint64_t)idx * NV_RPC_SLOT;
+  uint32_t n = 0;
+  for (uint32_t i = 0; i < NV_RPC_SLOT; i++)
+    if (slot[i] != want) n++;
+  return n;
+}
+
+static void fill_cmd_slot(struct nv_rpc_queue *q, uint32_t idx, uint8_t v) {
+  uint8_t *slot = q->block + q->cmd_off + NV_RPC_SLOT + (uint64_t)idx * NV_RPC_SLOT;
+  for (uint32_t i = 0; i < NV_RPC_SLOT; i++) slot[i] = v;
+}
+
+/* ======================================================================== */
+/* T-01 block geometry                                                       */
+/* ======================================================================== */
+
+static void test_t01_block_geometry(void) {
+  uart_puts("  Running test_t01_block_geometry...\n");
+  tests_run++;
+
+  struct nv_rpc_geom g;
+  ASSERT(nv_rpc_queue_geom(&g) == 0);
+  EXPECT_EQ((int)g.pte_count, 129);
+  EXPECT_EQ((int)g.cmd_off, 0x1000);
+  EXPECT_EQ((int)g.stat_off, 0x41000);
+  EXPECT_EQ((int)g.block_size, 0x81000);
+  EXPECT_EQ((int)g.msg_size, 0x1000);
+  EXPECT_EQ((int)g.msg_count, 63);
+  /* The two sums the layout stands on, computed here rather than asserted in
+   * prose (spec 3 invariants). */
+  EXPECT_EQ((int)(0x40000 / 0x1000 - 1), 63);
+  EXPECT_EQ((int)(g.cmd_off + 0x40000 == g.stat_off), 1);
+  EXPECT_EQ((int)(g.stat_off + 0x40000 == g.block_size), 1);
+
+  ASSERT(nv_rpc_block_build(blk, TEST_BUS) == 0);
+
+  int bad = -1;
+  for (uint32_t i = 0; i < NV_RPC_PTE_COUNT; i++) {
+    if (get64(blk + (uint64_t)i * 8) != TEST_BUS + (uint64_t)i * NV_RPC_SLOT) {
+      bad = (int)i;
+      break;
+    }
+  }
+  EXPECT_EQ(bad, -1);
+  EXPECT_EQ((int)(get64(blk) == TEST_BUS), 1);                       /* pte[0] */
+  EXPECT_EQ((int)(get64(blk + 128 * 8) == TEST_BUS + 0x80000), 1);   /* pte[128] */
+  /* 128 * 0x1000 == 0x80000: the arithmetic, not a comment. */
+  EXPECT_EQ((int)(128u * NV_RPC_SLOT == 0x80000u), 1);
+
+  /* A misaligned or zero bus is refused: PTE[i] is a page address, and zero is
+   * "no address" (never a success value). */
+  EXPECT_EQ(nv_rpc_block_build(blk, TEST_BUS + 0x100), -EINVAL);
+  EXPECT_EQ(nv_rpc_block_build(blk, 0), -EINVAL);
+
+  /* The same build over a REAL 129-page contiguous allocation (spec 5.5
+   * option 1): the version that validates the pool, not just the arithmetic. */
+  uint64_t pa = frame_alloc_contig((int)NV_RPC_PTE_COUNT);
+  ASSERT(pa != 0);
+  uint8_t *va = phys_to_virt(pa);
+  ASSERT(nv_rpc_block_build(va, pa) == 0);
+  EXPECT_EQ((int)(get64(va) == pa), 1);
+  EXPECT_EQ((int)(get64(va + 128 * 8) == pa + 0x80000), 1);
+  EXPECT_EQ((int)(get64(va + 129 * 8) == 0), 1); /* the table stops at 129 */
+  for (uint32_t i = 0; i < NV_RPC_PTE_COUNT; i++)
+    frame_free(pa + (uint64_t)i * NV_RPC_SLOT);
+
+  /* Restore the static block for the tests that follow. */
+  ASSERT(nv_rpc_block_build(blk, TEST_BUS) == 0);
+}
+
+/* ======================================================================== */
+/* T-02 the command queue's producer header                                  */
+/* ======================================================================== */
+
+static void test_t02_cmdq_header(void) {
+  uart_puts("  Running test_t02_cmdq_header...\n");
+  tests_run++;
+
+  ASSERT(nv_rpc_block_build(blk, TEST_BUS) == 0);
+  const uint8_t *q = blk + NV_RPC_CMD_OFF;
+  EXPECT_EQ((int)get32(q + 0x00), 0);
+  EXPECT_EQ((int)get32(q + 0x04), 0x40000);
+  EXPECT_EQ((int)get32(q + 0x08), 0x1000);
+  EXPECT_EQ((int)get32(q + 0x0C), 63);
+  EXPECT_EQ((int)get32(q + 0x10), 0);
+  EXPECT_EQ((int)get32(q + 0x14), 1); /* SWAP_RX */
+  EXPECT_EQ((int)get32(q + 0x18), 0x20);
+  EXPECT_EQ((int)get32(q + 0x1C), 0x1000);
+  EXPECT_EQ((int)get32(q + 0x20), 0);
+  /* rxHdrOff + 4 <= entryOff, and entryOff page-aligned: msgqTxCreate's own
+   * two conditions, re-checked here so a header that links locally cannot fail
+   * remotely. */
+  EXPECT_EQ((int)(get32(q + 0x18) + 4 <= get32(q + 0x1C)), 1);
+  EXPECT_EQ((int)((get32(q + 0x1C) & 0xFFF) == 0), 1);
+  /* Nothing beyond the 36 defined bytes was written. */
+  uint32_t dirty = 0;
+  for (uint32_t i = 0x24; i < NV_RPC_SLOT; i++)
+    if (q[i]) dirty++;
+  EXPECT_EQ((int)dirty, 0);
+}
+
+/* ======================================================================== */
+/* T-03 the status header is NOT pre-written                                 */
+/* ======================================================================== */
+
+static void test_t03_statq_not_written(void) {
+  uart_puts("  Running test_t03_statq_not_written...\n");
+  tests_run++;
+
+  ASSERT(nv_rpc_block_build(blk, TEST_BUS) == 0);
+  uint32_t dirty = 0;
+  for (uint32_t i = 0; i < NV_RPC_Q_USED_BYTES; i++)
+    if (blk[NV_RPC_STAT_OFF + i]) dirty++;
+  EXPECT_EQ((int)dirty, 0);
+
+  enum nv_rpc_link_field bad = NV_RPC_LINK_OK;
+  struct nv_rpc_peer peer;
+  /* -EAGAIN, not -EINVAL: "the firmware never found the block" and "the
+   * firmware disagrees with our offsets" are different bugs. */
+  EXPECT_EQ(nv_rpc_link_validate(blk + NV_RPC_STAT_OFF, NV_RPC_QUEUE_BYTES,
+                                 NV_RPC_SLOT, &peer, &bad),
+            -EAGAIN);
+  EXPECT_EQ((int)bad, (int)NV_RPC_LINK_OK);
+
+  struct nv_rpc_queue q;
+  ASSERT(nv_rpc_queue_init(&q, blk, TEST_BUS, rx_stage) == 0);
+  EXPECT_EQ(nv_rpc_link_apply(&q, &bad), -EAGAIN);
+  EXPECT_EQ(q.linked, 0);
+}
+
+/* ======================================================================== */
+/* T-04 RMARGS cross-check                                                   */
+/* ======================================================================== */
+
+static void test_t04_args_crosscheck(void) {
+  uart_puts("  Running test_t04_args_crosscheck...\n");
+  tests_run++;
+
+  struct nv_rpc_geom g;
+  ASSERT(nv_rpc_queue_geom(&g) == 0);
+  struct nv_rpc_rmargs a;
+  zero_bytes(&a, sizeof(a));
+  a.shared_mem_phys = TEST_BUS;
+  a.pte_count = 129;
+  a.cmd_queue_off = 0x1000;
+  a.stat_queue_off = 0x41000;
+  a.elem_hdr_size = 0x30;
+  a.elem_size_min = 0x1000;
+  a.elem_size_max = 0x10000;
+  a.header_align = 4;
+  a.elem_align = 12;
+
+  EXPECT_EQ(nv_rpc_args_crosscheck(&g, TEST_BUS, &a), 0);
+
+  /* The drift this catches: the RMARGS page saying the status queue starts
+   * where the command queue does. */
+  a.stat_queue_off = 0x40000;
+  int f = nv_rpc_args_crosscheck(&g, TEST_BUS, &a);
+  EXPECT_EQ((int)f, (int)NV_RPC_ARG_STAT_OFF);
+  EXPECT_EQ((int)str_eq(nv_rpc_arg_field_name((enum nv_rpc_arg_field)f),
+                        "statQueueOffset"),
+            1);
+
+  /* Every other field is checked too, so the report names the right one. */
+  a.stat_queue_off = 0x41000;
+  a.shared_mem_phys = TEST_BUS + 0x1000;
+  EXPECT_EQ(nv_rpc_args_crosscheck(&g, TEST_BUS, &a), (int)NV_RPC_ARG_SHARED_MEM);
+  a.shared_mem_phys = TEST_BUS;
+  a.pte_count = 128;
+  EXPECT_EQ(nv_rpc_args_crosscheck(&g, TEST_BUS, &a), (int)NV_RPC_ARG_PTE_COUNT);
+  a.pte_count = 129;
+  a.elem_hdr_size = 0x40;
+  EXPECT_EQ(nv_rpc_args_crosscheck(&g, TEST_BUS, &a), (int)NV_RPC_ARG_HDR_SIZE);
+  a.elem_hdr_size = 0x30;
+  a.elem_align = 11;
+  EXPECT_EQ(nv_rpc_args_crosscheck(&g, TEST_BUS, &a), (int)NV_RPC_ARG_ELEM_ALIGN);
+}
+
+/* ======================================================================== */
+/* T-05 checksum golden vectors                                              */
+/* ======================================================================== */
+
+/* Build one element byte by byte from the tables in section 2.3/2.4: every byte
+ * zero except the fields named, and the checksum word set to `csum`. */
+static void hand_build(uint8_t *slot, uint32_t ec, uint32_t fn, uint32_t length,
+                       uint32_t seq, uint32_t csum, uint8_t payload_fill,
+                       uint32_t payload_bytes) {
+  zero_bytes(slot, ec * NV_RPC_SLOT);
+  put32(slot + NV_RPC_E_CKSUM, csum);
+  put32(slot + NV_RPC_E_SEQ, seq);
+  put32(slot + NV_RPC_E_ELEMCOUNT, ec);
+  put32(slot + NV_RPC_E_PAD, 0);
+  put32(slot + NV_RPC_R_HDRVER, 0x03000000u);
+  put32(slot + NV_RPC_R_SIG, 0x43505256u);
+  put32(slot + NV_RPC_R_LENGTH, length);
+  put32(slot + NV_RPC_R_FUNCTION, fn);
+  put32(slot + NV_RPC_R_RESULT, 0xFFFFFFFFu);
+  put32(slot + NV_RPC_R_RESULT_PRIV, 0xFFFFFFFFu);
+  put32(slot + NV_RPC_R_SEQUENCE, 0);
+  put32(slot + NV_RPC_R_SPARE, 0);
+  for (uint32_t i = 0; i < payload_bytes; i++)
+    slot[NV_RPC_ELEM_HDR + NV_RPC_RPC_HDR + i] = payload_fill;
+}
+
+static void test_t05_cksum_vectors(void) {
+  uart_puts("  Running test_t05_cksum_vectors...\n");
+  tests_run++;
+
+  struct {
+    uint32_t ec, fn, length, seq, csum, payload_bytes;
+    uint8_t fill;
+  } v[3] = {
+      {1, 0, 32, 0, 0x40505277u, 0, 0x00},   /* (a) NOP */
+      {1, 65, 0xD10, 7, 0x40505F01u, 0, 0x00}, /* (b) GET_GSP_STATIC_INFO */
+      {3, 76, 9000, 3, 0x40507132u, 8968, 0x11}, /* (c) RM_CONTROL, 3 slots */
+  };
+
+  for (int i = 0; i < 3; i++) {
+    /* (1) The spec's number must make the checker ACCEPT the element. */
+    hand_build(tx_stage, v[i].ec, v[i].fn, v[i].length, v[i].seq, v[i].csum,
+               v[i].fill, v[i].payload_bytes);
+    enum nv_rpc_reason why = NV_RPC_OK;
+    EXPECT_EQ(nv_rpc_elem_check(tx_stage, v[i].ec, &why), 0);
+    EXPECT_EQ((int)why, (int)NV_RPC_OK);
+
+    /* (2) ... and the builder must PRODUCE it from the same bytes with the
+     * checksum word cleared.  This is the non-circular half: the expected
+     * value comes from the spec, not from this build. */
+    put32(tx_stage + NV_RPC_E_CKSUM, 0);
+    EXPECT_EQ(nv_rpc_elem_build(tx_stage, v[i].length, v[i].seq), (int)v[i].ec);
+    EXPECT_EQ((int)(get32(tx_stage + NV_RPC_E_CKSUM) == v[i].csum), 1);
+  }
+
+  /* (c) really is three slots, i.e. 48 + 9000 does not fit in two. */
+  EXPECT_EQ((int)(9000 / 4096), 2);
+  EXPECT_EQ((int)((48 + 9000) <= 2 * 4096), 0);
+}
+
+/* ======================================================================== */
+/* T-06 checksum self-zero                                                   */
+/* ======================================================================== */
+
+static int bytes_equal(const uint8_t *a, const uint8_t *b, uint32_t n) {
+  for (uint32_t i = 0; i < n; i++)
+    if (a[i] != b[i]) return 0;
+  return 1;
+}
+
+static void test_t06_cksum_self_zero(void) {
+  uart_puts("  Running test_t06_cksum_self_zero...\n");
+  tests_run++;
+
+  /* Fill the slot with a pattern that is not a valid element, build over it,
+   * then re-hash.  A fold that is self-consistent but backwards shows up in the
+   * accumulator's halves, which is why they are exposed. */
+  for (uint32_t i = 0; i < NV_RPC_SLOT; i++) tx_stage[i] = (uint8_t)(i * 7 + 3);
+  (void)nv_rpc_req_init(tx_stage, 72, 128); /* clobbers the header, keeps noise */
+  for (uint32_t i = NV_RPC_RPC_HDR; i < 128; i++)
+    tx_stage[NV_RPC_ELEM_HDR + i] = (uint8_t)(0xA0 + i);
+  ASSERT(nv_rpc_elem_build(tx_stage, 128, 9) == 1);
+
+  uint64_t a = nv_rpc_cksum_acc(tx_stage, NV_RPC_SLOT);
+  /* The fold is zero ... */
+  EXPECT_EQ((int)nv_rpc_cksum(tx_stage, NV_RPC_SLOT), 0);
+  /* ... and the halves are equal, which is the stronger statement: they are
+   * generally NOT both zero (acc_lo = A.lo ^ csum = A.hi). */
+  EXPECT_EQ((int)((uint32_t)a == (uint32_t)(a >> 32)), 1);
+
+  /* Fold over the same bytes, one word at a time, must equal the fold of the
+   * whole: XOR is order-independent, which is what makes hashing ring slots in
+   * ring order the same as hashing the reassembled stream (spec 4.3 note). */
+  uint64_t split = nv_rpc_cksum_acc(tx_stage, 2048) ^
+                   nv_rpc_cksum_acc(tx_stage + 2048, NV_RPC_SLOT - 2048);
+  EXPECT_EQ((int)(split == a), 1);
+
+  /* And the checksum word is not zero by accident (a builder that wrote 0
+   * would "pass" the re-fold on an all-zero slot). */
+  EXPECT_EQ((int)(get32(tx_stage + NV_RPC_E_CKSUM) != 0), 1);
+
+  /* S4's tail rule, positively: everything after 48 + 128 is zero even though
+   * the buffer arrived full of noise. */
+  uint32_t dirty = 0;
+  for (uint32_t i = NV_RPC_ELEM_HDR + 128; i < NV_RPC_SLOT; i++)
+    if (tx_stage[i]) dirty++;
+  EXPECT_EQ((int)dirty, 0);
+}
+
+/* ======================================================================== */
+/* T-07 a stale byte in the padding is rejected (spec 0.1's correction)      */
+/* ======================================================================== */
+
+static void test_t07_stale_tail(void) {
+  uart_puts("  Running test_t07_stale_tail...\n");
+  tests_run++;
+
+  hand_build(tx_stage, 1, 0, 32, 0, 0x40505277u, 0, 0);
+  /* 48 + 32 = 80 is the end of the message; 0xAA lands inside the slot, past
+   * it -- exactly the byte the contract's short-range hash would not cover. */
+  tx_stage[48 + 32] = 0xAA;
+
+  enum nv_rpc_reason why = NV_RPC_OK;
+  EXPECT_EQ(nv_rpc_elem_check(tx_stage, 1, &why), -EIO);
+  EXPECT_EQ((int)why, (int)NV_RPC_CHECKSUM);
+
+  /* The observation could have been negative: under the contract's old rule
+   * (hash "through the 8-byte boundary at or after 48 + length") this same
+   * fixture still folds to zero.  So the failure above is the whole-slot rule
+   * doing its job, not a broken fixture. */
+  EXPECT_EQ((int)nv_rpc_cksum(tx_stage, 48 + 32), 0);
+
+  /* Clearing the byte restores it: the fixture is otherwise valid. */
+  tx_stage[48 + 32] = 0;
+  EXPECT_EQ(nv_rpc_elem_check(tx_stage, 1, &why), 0);
+}
+
+/* ======================================================================== */
+/* T-08 SWAP_RX in both polarities                                           */
+/* ======================================================================== */
+
+static void test_t08_swap_rx(void) {
+  uart_puts("  Running test_t08_swap_rx...\n");
+  tests_run++;
+
+  struct nv_rpc_hw hw;
+  hw_reset(&hw);
+
+  uint32_t own = 0, peer = 0;
+  EXPECT_EQ(nv_rpc_negotiate(NV_RPC_FLAGS_SWAP_RX, NV_RPC_FLAGS_SWAP_RX, &own,
+                             &peer),
+            1);
+  EXPECT_EQ((int)own, 0x1020);  /* we store in the COMMAND block */
+  EXPECT_EQ((int)peer, 0x41020); /* we load from the STATUS block */
+  /* statq is published at 0x41000, so statq + 0x20 is 0x41020 -- spec 2.5's
+   * table prints 0x4120 and has dropped a digit.  The arithmetic, once: */
+  EXPECT_EQ((int)(0x41000 + 0x20), 0x41020);
+  EXPECT_EQ((int)(0x41000 + 0x10), 0x41010);
+  EXPECT_EQ(nv_rpc_negotiate(NV_RPC_FLAGS_SWAP_RX, 0, &own, &peer), 0);
+  EXPECT_EQ((int)own, 0x41020);
+  EXPECT_EQ((int)peer, 0x1020);
+  /* The AND, not "our bit is 1 so take the peer's": with our flag cleared the
+   * layout must not be swapped whatever the peer says. */
+  EXPECT_EQ(nv_rpc_negotiate(0, NV_RPC_FLAGS_SWAP_RX, &own, &peer), 0);
+  EXPECT_EQ((int)own, 0x41020);
+
+  /* Swapped, in memory: after one consumed message the read index appears in
+   * the COMMAND block at +0x20 and the status block's +0x20 is untouched. */
+  struct nv_rpc_queue q;
+  ASSERT(link_queue(&q, &hw, NV_RPC_FLAGS_SWAP_RX) == 0);
+  EXPECT_EQ(q.swapped, 1);
+  ASSERT(fw_put(&q, 0, 65, 0, 64, 0x11) == 1);
+  fw_set_wp(&q, 1);
+  q.want_fn = 65;
+  enum nv_rpc_reason why = NV_RPC_OK;
+  ASSERT(nv_rpc_rx_take(&q, &hw, rx_out, sizeof(rx_out), &why) == 64);
+  ASSERT(nv_rpc_rx_release(&q) == 0);
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_READ_PTR), 1);
+  EXPECT_EQ((int)get32(blk + NV_RPC_STAT_OFF + NV_RPC_Q_READ_PTR), 0);
+
+  /* Not swapped: the same consume moves the STATUS block's word. */
+  ASSERT(link_queue(&q, &hw, 0) == 0);
+  EXPECT_EQ(q.swapped, 0);
+  ASSERT(fw_put(&q, 0, 65, 0, 64, 0x22) == 1);
+  fw_set_wp(&q, 1);
+  q.want_fn = 65;
+  ASSERT(nv_rpc_rx_take(&q, &hw, rx_out, sizeof(rx_out), &why) == 64);
+  ASSERT(nv_rpc_rx_release(&q) == 0);
+  EXPECT_EQ((int)get32(blk + NV_RPC_STAT_OFF + NV_RPC_Q_READ_PTR), 1);
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_READ_PTR), 0);
+}
+
+/* ======================================================================== */
+/* T-09 commit does not notify                                               */
+/* ======================================================================== */
+
+static void test_t09_commit_not_notify(void) {
+  uart_puts("  Running test_t09_commit_not_notify...\n");
+  tests_run++;
+
+  struct nv_rpc_hw hw;
+  hw_reset(&hw);
+  struct nv_rpc_queue q;
+  ASSERT(link_queue(&q, &hw, NV_RPC_FLAGS_SWAP_RX) == 0);
+
+  ASSERT(build_request(65, 100, 0x33, 0) == 1);
+  uint32_t ec = 0;
+  enum nv_rpc_reason why = NV_RPC_OK;
+  ASSERT(nv_rpc_tx_prepare(&q, 100, &ec, &why) == 0);
+  EXPECT_EQ((int)ec, 1);
+  uint32_t wp0 = get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_WRITE_PTR);
+  ASSERT(nv_rpc_tx_commit(&q, tx_stage, &hw) == 0);
+
+  /* The ring is byte-correct and the pointer moved ... */
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_WRITE_PTR), (int)(wp0 + ec));
+  EXPECT_EQ(nv_rpc_elem_check(blk + NV_RPC_CMD_OFF + NV_RPC_SLOT, ec, &why), 0);
+  /* ... and nobody has been notified.  This is the whole point of the three
+   * calls: "written but not rung" is a test, not an incident. */
+  EXPECT_EQ(fh.db_calls, 0);
+  EXPECT_EQ((int)q.tx_seq, 0);
+
+  EXPECT_EQ(nv_rpc_kick(&q, &hw), 0);
+  EXPECT_EQ(fh.db_calls, 1);
+  EXPECT_EQ((int)fh.db_last, 0);
+  EXPECT_EQ((int)q.tx_seq, 1); /* S11: consumed by a message that went out */
+
+  /* No seam at all is a failure, not a silent success. */
+  EXPECT_EQ(nv_rpc_kick(&q, 0), -EINVAL);
+  EXPECT_EQ(fh.db_calls, 1);
+}
+
+/* ======================================================================== */
+/* T-10 the doorbell's offset and value, through the real nv_mmio_ops path  */
+/* ======================================================================== */
+
+struct fake_regs {
+  int wr_n;
+  uint32_t off[8];
+  uint32_t val[8];
+  int rd_n;
+};
+
+static struct fake_regs fr;
+
+static uint32_t fr_rd32(void *ctx, uint32_t off) {
+  (void)ctx;
+  (void)off;
+  fr.rd_n++;
+  return 0;
+}
+
+static void fr_wr32(void *ctx, uint32_t off, uint32_t val) {
+  (void)ctx;
+  if (fr.wr_n < 8) {
+    fr.off[fr.wr_n] = off;
+    fr.val[fr.wr_n] = val;
+  }
+  fr.wr_n++;
+}
+
+static void test_t10_doorbell_value(void) {
+  uart_puts("  Running test_t10_doorbell_value...\n");
+  tests_run++;
+
+  zero_bytes(&fr, sizeof(fr));
+  struct nv_dev dev;
+  zero_bytes(&dev, sizeof(dev));
+  dev.ops.rd32 = fr_rd32;
+  dev.ops.wr32 = fr_wr32;
+  dev.ops_ctx = &fr;
+
+  /* The REAL adapter: doorbell -> nv_wr32(d, NV_RPC_DOORBELL_OFF, 0). */
+  struct nv_rpc_hw hw;
+  nv_rpc_hw_dev(&dev, &hw);
+  ASSERT(hw.doorbell != 0);
+
+  struct nv_rpc_queue q;
+  ASSERT(fresh_queue(&q) == 0);
+  ASSERT(nv_rpc_kick(&q, &hw) == 0);
+
+  EXPECT_EQ(fr.wr_n, 1); /* exactly one write */
+  EXPECT_EQ((int)fr.off[0], 0x110C00);
+  EXPECT_EQ((int)fr.val[0], 0); /* the value, not a queue index mistaken for a
+                                 * pointer */
+  /* And a queue index other than 0 is refused rather than written to the wrong
+   * place (the offset for queue n > 0 is not established). */
+  hw.doorbell(hw.ctx, 1);
+  EXPECT_EQ(fr.wr_n, 1);
+}
+
+/* ======================================================================== */
+/* T-11 wrap-around, and the spec 0.3 arithmetic                            */
+/* ======================================================================== */
+
+static void test_t11_wrap(void) {
+  uart_puts("  Running test_t11_wrap...\n");
+  tests_run++;
+
+  struct nv_rpc_hw hw;
+  hw_reset(&hw);
+  struct nv_rpc_queue q;
+  ASSERT(link_queue(&q, &hw, NV_RPC_FLAGS_SWAP_RX) == 0);
+
+  /* Start at slot 61 with exactly three free slots: free = (2 + 63 - 61 - 1) %
+   * 63 = 3. */
+  put32(blk + NV_RPC_STAT_OFF + NV_RPC_Q_READ_PTR, 2); /* peer's read index */
+  put32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_WRITE_PTR, 61);
+  enum nv_rpc_reason why = NV_RPC_OK;
+  EXPECT_EQ(nv_rpc_free_slots(&q, &why), 3);
+
+  /* 8145 = 48 + 8145 = 8193 bytes: three slots, the last one one byte long. */
+  const uint32_t len = 8145;
+  zero_bytes(tx_stage, 3 * NV_RPC_SLOT);
+  ASSERT(nv_rpc_req_init(tx_stage, 76, len) == 0);
+  /* Payload byte j holds j & 0xFF, so a byte's value IS its payload offset and
+   * the section 0.3 arithmetic can be checked without a comment. */
+  for (uint32_t j = 0; j < len - NV_RPC_RPC_HDR; j++)
+    tx_stage[NV_RPC_ELEM_HDR + NV_RPC_RPC_HDR + j] = (uint8_t)(j & 0xFF);
+  ASSERT(nv_rpc_elem_build(tx_stage, len, 0) == 3);
+
+  uint32_t ec = 0;
+  ASSERT(nv_rpc_tx_prepare(&q, len, &ec, &why) == 0);
+  EXPECT_EQ((int)ec, 3);
+  ASSERT(nv_rpc_tx_commit(&q, tx_stage, &hw) == 0);
+
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_WRITE_PTR), 1); /* 61+3 -> 1 */
+
+  const uint8_t *s61 = blk + NV_RPC_CMD_OFF + NV_RPC_SLOT + 61 * NV_RPC_SLOT;
+  const uint8_t *s62 = blk + NV_RPC_CMD_OFF + NV_RPC_SLOT + 62 * NV_RPC_SLOT;
+  const uint8_t *s0 = blk + NV_RPC_CMD_OFF + NV_RPC_SLOT + 0;
+  EXPECT_EQ((int)bytes_equal(s61, tx_stage, 64), 1);
+  EXPECT_EQ((int)bytes_equal(s62, tx_stage + 4096, 64), 1);
+  EXPECT_EQ((int)bytes_equal(s0, tx_stage + 8192, 8), 1);
+
+  /* The third slot begins at STREAM offset 8192, which is RPC offset 8144 and
+   * PAYLOAD offset 8112 (spec 0.3: the contract's prose says 8188 and is off by
+   * 44).  The payload byte there is 8112 & 0xFF = 0xB0; the wrong figure would
+   * have pointed at 8188 & 0xFF = 0xFC. */
+  EXPECT_EQ((int)(8192 - NV_RPC_ELEM_HDR), 8144);
+  EXPECT_EQ((int)(8192 - NV_RPC_ELEM_HDR - NV_RPC_RPC_HDR), 8112);
+  EXPECT_EQ((int)s0[0], 0xB0);
+  EXPECT_EQ((int)(s0[0] == (uint8_t)(8188 & 0xFF)), 0);
+
+  /* The reader reassembles the same bytes across the wrap and verifies them. */
+  q.want_fn = 76;
+  int n = nv_rpc_rx_take(&q, &hw, rx_out, sizeof(rx_out), &why);
+  /* The peer's write pointer is still 0 (it is the consumer of the cmdq, not the
+   * producer of the statq), so there is nothing to receive yet -- the point
+   * here is only that the ring read did not trip over the wrap. */
+  EXPECT_EQ(n, -EAGAIN);
+  EXPECT_EQ((int)why, (int)NV_RPC_NOTHING);
+
+  /* A receiver sees the same element if the firmware-side header is moved to
+   * publish it: build the identical stream in the status ring at 61..62,0. */
+  uint8_t *statq = blk + NV_RPC_STAT_OFF;
+  for (uint32_t k = 0; k < 3; k++)
+    copy_bytes(statq + NV_RPC_SLOT + ((61 + k) % 63) * NV_RPC_SLOT,
+               tx_stage + k * NV_RPC_SLOT, NV_RPC_SLOT);
+  put32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_READ_PTR, 61); /* our read index: swapped */
+  put32(statq + NV_RPC_Q_WRITE_PTR, 1);
+  q.want_fn = 76;
+  n = nv_rpc_rx_take(&q, &hw, rx_out, sizeof(rx_out), &why);
+  EXPECT_EQ(n, (int)len);
+  EXPECT_EQ((int)get32(rx_out + NV_RPC_H_FUNCTION), 76);
+  EXPECT_EQ((int)rx_out[NV_RPC_RPC_HDR + 8112], 0xB0);
+}
+
+/* ======================================================================== */
+/* T-12 a full queue is refused, and nothing is written                      */
+/* ======================================================================== */
+
+static void test_t12_full_queue(void) {
+  uart_puts("  Running test_t12_full_queue...\n");
+  tests_run++;
+
+  struct nv_rpc_hw hw;
+  hw_reset(&hw);
+  struct nv_rpc_queue q;
+  ASSERT(link_queue(&q, &hw, NV_RPC_FLAGS_SWAP_RX) == 0);
+
+  /* free = (3 + 63 - 0 - 1) % 63 = 2, so a 3-slot message cannot go. */
+  put32(blk + NV_RPC_STAT_OFF + NV_RPC_Q_READ_PTR, 3);
+  enum nv_rpc_reason why = NV_RPC_OK;
+  int free_slots = nv_rpc_free_slots(&q, &why);
+  EXPECT_EQ(free_slots, 2);
+  EXPECT_EQ((int)why, (int)NV_RPC_OK);
+
+  /* Mark the three candidate slots so "nothing was written" is observable. */
+  fill_cmd_slot(&q, 0, 0x5A);
+  fill_cmd_slot(&q, 1, 0x5A);
+  fill_cmd_slot(&q, 2, 0x5A);
+
+  ASSERT(build_request(76, 8145, 0x44, 0) == 3); /* a real 3-slot message */
+  uint32_t ec = 0;
+  EXPECT_EQ(nv_rpc_tx_prepare(&q, 8145, &ec, &why), -ENOSPC);
+  EXPECT_EQ((int)why, (int)NV_RPC_NO_SPACE);
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_WRITE_PTR), 0);
+  EXPECT_EQ((int)slot_bytes_not(&q, 0, 0x5A), 0);
+  EXPECT_EQ((int)slot_bytes_not(&q, 1, 0x5A), 0);
+  EXPECT_EQ((int)slot_bytes_not(&q, 2, 0x5A), 0);
+
+  /* The one-outstanding rule is a different refusal with its own name. */
+  q.tx_busy = 1;
+  EXPECT_EQ(nv_rpc_tx_prepare(&q, 64, &ec, &why), -EBUSY);
+  EXPECT_EQ((int)why, (int)NV_RPC_BUSY);
+  q.tx_busy = 0;
+}
+
+/* ======================================================================== */
+/* T-13 the one-empty-slot rule                                              */
+/* ======================================================================== */
+
+static void test_t13_empty_queue(void) {
+  uart_puts("  Running test_t13_empty_queue...\n");
+  tests_run++;
+
+  struct nv_rpc_hw hw;
+  hw_reset(&hw);
+  struct nv_rpc_queue q;
+  ASSERT(fresh_queue(&q) == 0);
+
+  /* Fresh: writePtr == readPtr == 0.  Free is 62, not 63: a full ring must
+   * never be distinguishable from an empty one. */
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_WRITE_PTR), 0);
+  enum nv_rpc_reason why = NV_RPC_OK;
+  EXPECT_EQ(nv_rpc_free_slots(&q, &why), 62);
+  EXPECT_EQ((int)(NV_RPC_MSG_COUNT - 1), 62);
+
+  /* An empty queue is not an error: a quiet boot must stay quiet. */
+  EXPECT_EQ(nv_rpc_rx_take(&q, &hw, rx_out, sizeof(rx_out), &why), -EAGAIN);
+  EXPECT_EQ((int)why, (int)NV_RPC_NOTHING);
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_READ_PTR), 0);
+
+  /* Linked, the arithmetic is the ring's.  Empty means read == write, and the
+   * answer is 62: (0 + 63 - 0 - 1) % 63. */
+  ASSERT(link_queue(&q, &hw, NV_RPC_FLAGS_SWAP_RX) == 0);
+  put32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_WRITE_PTR, 0);
+  put32(blk + NV_RPC_STAT_OFF + NV_RPC_Q_READ_PTR, 0);
+  EXPECT_EQ(nv_rpc_free_slots(&q, &why), 62);
+  /* ... and a ring with one slot physically free reports ZERO usable slots:
+   * that is the rule, and the reason a full ring can never look empty. */
+  put32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_WRITE_PTR, 62);
+  put32(blk + NV_RPC_STAT_OFF + NV_RPC_Q_READ_PTR, 0);
+  EXPECT_EQ(nv_rpc_free_slots(&q, &why), 0);
+  uint32_t ec = 0;
+  EXPECT_EQ(nv_rpc_tx_prepare(&q, 64, &ec, &why), -ENOSPC);
+  EXPECT_EQ((int)why, (int)NV_RPC_NO_SPACE);
+  /* 61 messages queued (slots 2..62) reports 1 usable slot. */
+  put32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_WRITE_PTR, 0);
+  put32(blk + NV_RPC_STAT_OFF + NV_RPC_Q_READ_PTR, 2);
+  EXPECT_EQ(nv_rpc_free_slots(&q, &why), 1);
+}
+
+/* ======================================================================== */
+/* T-14 the 16-slot ceiling                                                  */
+/* ======================================================================== */
+
+static void test_t14_oversize(void) {
+  uart_puts("  Running test_t14_oversize...\n");
+  tests_run++;
+
+  struct nv_rpc_queue q;
+  ASSERT(fresh_queue(&q) == 0);
+
+  uint32_t ec = 0;
+  enum nv_rpc_reason why = NV_RPC_OK;
+  EXPECT_EQ(nv_rpc_elem_count(65488, &ec), 0);
+  EXPECT_EQ((int)ec, 16);
+  EXPECT_EQ((int)(48 + 65488 == 16 * 4096), 1);
+  EXPECT_EQ(nv_rpc_tx_prepare(&q, 65488, &ec, &why), 0);
+  EXPECT_EQ((int)ec, 16);
+
+  EXPECT_EQ(nv_rpc_elem_count(65489, &ec), -EMSGSIZE);
+  EXPECT_EQ(nv_rpc_tx_prepare(&q, 65489, &ec, &why), -EMSGSIZE);
+  EXPECT_EQ((int)why, (int)NV_RPC_TOO_BIG);
+  /* A message shorter than its own RPC header cannot be framed at all. */
+  EXPECT_EQ(nv_rpc_elem_count(31, &ec), -EINVAL);
+  EXPECT_EQ(nv_rpc_tx_prepare(&q, 31, &ec, &why), -EINVAL);
+}
+
+/* ======================================================================== */
+/* T-15 elemCount arithmetic at the slot boundary                            */
+/* ======================================================================== */
+
+static void test_t15_elemcount(void) {
+  uart_puts("  Running test_t15_elemcount...\n");
+  tests_run++;
+
+  struct {
+    uint32_t len, ec;
+  } v[] = {
+      {32, 1}, {4047, 1}, {4048, 1}, {4049, 2}, {8144, 2}, {8145, 3}, {12240, 3},
+  };
+  for (unsigned i = 0; i < sizeof(v) / sizeof(v[0]); i++) {
+    uint32_t ec = 0;
+    ASSERT(nv_rpc_elem_count(v[i].len, &ec) == 0);
+    EXPECT_EQ((int)ec, (int)v[i].ec);
+  }
+  /* The boundary is strict: 48 + 4048 == 4096 exactly, so it is one slot. */
+  EXPECT_EQ((int)(48 + 4048), 4096);
+  EXPECT_EQ((int)(48 + 4049), 4097);
+  EXPECT_EQ((int)(48 + 8144), 8192);
+}
+
+/* ======================================================================== */
+/* T-16 a bad checksum on receive: refused, not consumed                     */
+/* ======================================================================== */
+
+static void test_t16_bad_cksum(void) {
+  uart_puts("  Running test_t16_bad_cksum...\n");
+  tests_run++;
+
+  struct nv_rpc_hw hw;
+  hw_reset(&hw);
+  struct nv_rpc_queue q;
+  ASSERT(link_queue(&q, &hw, NV_RPC_FLAGS_SWAP_RX) == 0);
+
+  ASSERT(fw_put(&q, 0, 65, 0, 64, 0x55) == 1);
+  fw_set_wp(&q, 1);
+  /* Flip one byte of the pad word: inside the hashed range, outside the
+   * message.  This is the byte the short-range rule would not have covered. */
+  uint8_t *slot = blk + NV_RPC_STAT_OFF + NV_RPC_SLOT;
+  slot[NV_RPC_E_PAD] ^= 0xFF;
+
+  enum nv_rpc_reason why = NV_RPC_OK;
+  q.want_fn = 65;
+  EXPECT_EQ(nv_rpc_rx_take(&q, &hw, rx_out, sizeof(rx_out), &why), -EIO);
+  EXPECT_EQ((int)why, (int)NV_RPC_CHECKSUM);
+  EXPECT_EQ((int)q.rx_retries, 3);   /* retried, then gave up */
+  EXPECT_EQ((int)q.rx_cksum_fails, 1);
+  /* Not consumed: the read pointer never moved. */
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_READ_PTR), 0);
+
+  /* The next call sees the same element, and still refuses it. */
+  EXPECT_EQ(nv_rpc_rx_take(&q, &hw, rx_out, sizeof(rx_out), &why), -EIO);
+  EXPECT_EQ((int)why, (int)NV_RPC_CHECKSUM);
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_READ_PTR), 0);
+
+  /* Repair the byte: now it is the element that was there all along. */
+  slot[NV_RPC_E_PAD] ^= 0xFF;
+  EXPECT_EQ(nv_rpc_rx_take(&q, &hw, rx_out, sizeof(rx_out), &why), 64);
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_READ_PTR), 0);
+  ASSERT(nv_rpc_rx_release(&q) == 0);
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_READ_PTR), 1);
+}
+
+/* ======================================================================== */
+/* T-17 mismatched sequence: a gap is refused, a stale element is dropped     */
+/* ======================================================================== */
+
+static void test_t17_sequence(void) {
+  uart_puts("  Running test_t17_sequence...\n");
+  tests_run++;
+
+  struct nv_rpc_hw hw;
+  hw_reset(&hw);
+  struct nv_rpc_queue q;
+  ASSERT(link_queue(&q, &hw, NV_RPC_FLAGS_SWAP_RX) == 0);
+  q.want_fn = 65;
+  q.rx_seq = 5;
+
+  /* Gap: sequence 7 when 5 was expected.  Refused, not consumed -- the queue
+   * has lost a message we can never reconstruct. */
+  ASSERT(fw_put(&q, 0, 65, 7, 64, 0x66) == 1);
+  fw_set_wp(&q, 1);
+  enum nv_rpc_reason why = NV_RPC_OK;
+  EXPECT_EQ(nv_rpc_rx_take(&q, &hw, rx_out, sizeof(rx_out), &why), -EIO);
+  EXPECT_EQ((int)why, (int)NV_RPC_SEQ_GAP);
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_READ_PTR), 0);
+
+  /* Stale: sequence 3.  Consumed and dropped, and "nothing" is not an error. */
+  ASSERT(fw_put(&q, 0, 65, 3, 64, 0x77) == 1);
+  fw_set_wp(&q, 1);
+  EXPECT_EQ(nv_rpc_rx_take(&q, &hw, rx_out, sizeof(rx_out), &why), -EAGAIN);
+  EXPECT_EQ((int)why, (int)NV_RPC_SEQ_STALE);
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_READ_PTR), 1);
+  EXPECT_EQ((int)q.rx_stale, 1);
+  /* A stale element does not advance the expectation. */
+  EXPECT_EQ((int)q.rx_seq, 5);
+}
+
+/* ======================================================================== */
+/* T-18 the sequence number wraps as a u32                                   */
+/* ======================================================================== */
+
+static void test_t18_seq_wrap(void) {
+  uart_puts("  Running test_t18_seq_wrap...\n");
+  tests_run++;
+
+  struct nv_rpc_hw hw;
+  hw_reset(&hw);
+  struct nv_rpc_queue q;
+  ASSERT(link_queue(&q, &hw, NV_RPC_FLAGS_SWAP_RX) == 0);
+
+  q.tx_seq = 0xFFFFFFFFu;
+  ASSERT(build_request(65, 64, 0x11, q.tx_seq) == 1);
+  uint32_t ec = 0;
+  enum nv_rpc_reason why = NV_RPC_OK;
+  ASSERT(nv_rpc_tx_prepare(&q, 64, &ec, &why) == 0);
+  ASSERT(nv_rpc_tx_commit(&q, tx_stage, &hw) == 0);
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_SLOT + NV_RPC_E_SEQ),
+            0xFFFFFFFF);
+  ASSERT(nv_rpc_kick(&q, &hw) == 0);
+  /* A 64-bit counter would have "fixed" this and broken the wire format. */
+  EXPECT_EQ((int)q.tx_seq, 0);
+}
+
+/* ======================================================================== */
+/* T-19 continuation split (the two-level split of spec 0.2)                 */
+/* ======================================================================== */
+
+static void test_t19_split(void) {
+  uart_puts("  Running test_t19_split...\n");
+  tests_run++;
+
+  uint32_t chunks[8];
+  int n = nv_rpc_split_plan(70000, chunks, 8);
+  EXPECT_EQ(n, 2);
+  EXPECT_EQ((int)chunks[0], 65456);
+  EXPECT_EQ((int)chunks[1], 4544);
+  EXPECT_EQ((int)(chunks[0] + chunks[1]), 70000);
+  EXPECT_EQ((int)(NV_RPC_RPC_HDR + chunks[0] <= NV_RPC_LEN_MAX), 1);
+  EXPECT_EQ((int)(NV_RPC_RPC_HDR + chunks[1] <= NV_RPC_LEN_MAX), 1);
+
+  /* Each chunk is its OWN message: own header, own seqNum, own checksum, own
+   * elemCount.  Chunk 0 carries the real opcode; the rest carry 71. */
+  zero_bytes(tx_stage, NV_RPC_ELEM_MAX * NV_RPC_SLOT);
+  ASSERT(nv_rpc_req_init(tx_stage, 76, NV_RPC_RPC_HDR + chunks[0]) == 0);
+  int ec0 = nv_rpc_elem_build(tx_stage, NV_RPC_RPC_HDR + chunks[0], 10);
+  EXPECT_EQ(ec0, 16);
+  EXPECT_EQ((int)get32(tx_stage + NV_RPC_R_FUNCTION), 76);
+  EXPECT_EQ((int)get32(tx_stage + NV_RPC_E_SEQ), 10);
+  EXPECT_EQ((int)get32(tx_stage + NV_RPC_E_ELEMCOUNT), 16);
+
+  zero_bytes(tx_stage, NV_RPC_ELEM_MAX * NV_RPC_SLOT);
+  ASSERT(nv_rpc_req_init(tx_stage, NV_RPC_FN_CONTINUATION,
+                        NV_RPC_RPC_HDR + chunks[1]) == 0);
+  int ec1 = nv_rpc_elem_build(tx_stage, NV_RPC_RPC_HDR + chunks[1], 11);
+  EXPECT_EQ(ec1, 2);
+  EXPECT_EQ((int)get32(tx_stage + NV_RPC_R_FUNCTION), 71);
+  EXPECT_EQ((int)get32(tx_stage + NV_RPC_E_SEQ), 11);
+  EXPECT_EQ((int)get32(tx_stage + NV_RPC_E_ELEMCOUNT), 2);
+  /* Distinct seqNums: one per MESSAGE, not one per logical operation. */
+  EXPECT_EQ((int)(11 != 10), 1);
+
+  /* Boundaries: a payload that already fits is one message. */
+  EXPECT_EQ(nv_rpc_split_plan(65456, chunks, 8), 1);
+  EXPECT_EQ((int)chunks[0], 65456);
+  EXPECT_EQ(nv_rpc_split_plan(0, chunks, 8), 1); /* count >= 1 */
+  EXPECT_EQ((int)chunks[0], 0);
+  EXPECT_EQ(nv_rpc_split_plan(70000, chunks, 1), -EMSGSIZE); /* no room */
+}
+
+/* ======================================================================== */
+/* T-20 short publish: avail < elemCount is not "read anyway"                */
+/* ======================================================================== */
+
+static void test_t20_short_publish(void) {
+  uart_puts("  Running test_t20_short_publish...\n");
+  tests_run++;
+
+  struct nv_rpc_hw hw;
+  hw_reset(&hw);
+  struct nv_rpc_queue q;
+  ASSERT(link_queue(&q, &hw, NV_RPC_FLAGS_SWAP_RX) == 0);
+
+  ASSERT(fw_put(&q, 0, 76, 0, 8145, 0x88) == 3); /* a 3-slot element */
+  fw_set_wp(&q, 2); /* the producer published only two of the three slots */
+
+  enum nv_rpc_reason why = NV_RPC_OK;
+  EXPECT_EQ(nv_rpc_rx_take(&q, &hw, rx_out, sizeof(rx_out), &why), -EAGAIN);
+  EXPECT_EQ((int)why, (int)NV_RPC_SHORT_PUBLISH);
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_READ_PTR), 0);
+
+  /* elemCount itself is bounded before the availability check can be fooled. */
+  put32(blk + NV_RPC_STAT_OFF + NV_RPC_SLOT + NV_RPC_E_ELEMCOUNT, 17);
+  EXPECT_EQ(nv_rpc_rx_take(&q, &hw, rx_out, sizeof(rx_out), &why), -EINVAL);
+  EXPECT_EQ((int)why, (int)NV_RPC_BIG_ELEM);
+  put32(blk + NV_RPC_STAT_OFF + NV_RPC_SLOT + NV_RPC_E_ELEMCOUNT, 0);
+  EXPECT_EQ(nv_rpc_rx_take(&q, &hw, rx_out, sizeof(rx_out), &why), -EINVAL);
+  EXPECT_EQ((int)why, (int)NV_RPC_BAD_EC);
+}
+
+/* ======================================================================== */
+/* T-21 the read pointer advances only on release                            */
+/* ======================================================================== */
+
+static void test_t21_no_advance_without_release(void) {
+  uart_puts("  Running test_t21_no_advance_without_release...\n");
+  tests_run++;
+
+  struct nv_rpc_hw hw;
+  hw_reset(&hw);
+  struct nv_rpc_queue q;
+  ASSERT(link_queue(&q, &hw, NV_RPC_FLAGS_SWAP_RX) == 0);
+  ASSERT(fw_put(&q, 0, 65, 0, 64, 0xA1) == 1);
+  ASSERT(fw_put(&q, 1, 65, 1, 64, 0xB2) == 1);
+  fw_set_wp(&q, 2);
+  q.want_fn = 65;
+
+  enum nv_rpc_reason why = NV_RPC_OK;
+  uint32_t avail0 = (2u + NV_RPC_MSG_COUNT -
+                     get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_READ_PTR)) %
+                    NV_RPC_MSG_COUNT;
+  EXPECT_EQ((int)avail0, 2);
+
+  /* Take, do not release: the queue still holds two messages. */
+  EXPECT_EQ(nv_rpc_rx_take(&q, &hw, rx_out, sizeof(rx_out), &why), 64);
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_READ_PTR), 0);
+  EXPECT_EQ((int)rx_out[NV_RPC_RPC_HDR], 0xA1);
+
+  /* Second take returns the SAME element.  This is row 11 modelled as a test:
+   * taking is a copy, releasing is the commitment. */
+  uint8_t first[64];
+  for (uint32_t i = 0; i < 64; i++) first[i] = rx_out[i];
+  EXPECT_EQ(nv_rpc_rx_take(&q, &hw, rx_out, sizeof(rx_out), &why), 64);
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_READ_PTR), 0);
+  EXPECT_EQ((int)bytes_equal(rx_out, first, 64), 1);
+
+  /* Releasing advances by exactly one message ... */
+  ASSERT(nv_rpc_rx_release(&q) == 0);
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_READ_PTR), 1);
+  EXPECT_EQ((int)q.rx_seq, 1);
+  /* ... and the third take is the next message. */
+  EXPECT_EQ(nv_rpc_rx_take(&q, &hw, rx_out, sizeof(rx_out), &why), 64);
+  EXPECT_EQ((int)rx_out[NV_RPC_RPC_HDR], 0xB2);
+  /* A release with nothing taken is refused rather than advancing blind. */
+  ASSERT(nv_rpc_rx_release(&q) == 0);
+  EXPECT_EQ(nv_rpc_rx_release(&q), -EINVAL);
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_READ_PTR), 2);
+}
+
+/* ======================================================================== */
+/* T-22 a reply must not be answered by an event                             */
+/* ======================================================================== */
+
+static void test_t22_event_vs_reply(void) {
+  uart_puts("  Running test_t22_event_vs_reply...\n");
+  tests_run++;
+
+  struct nv_rpc_hw hw;
+  hw_reset(&hw);
+  struct nv_rpc_queue q;
+  ASSERT(link_queue(&q, &hw, NV_RPC_FLAGS_SWAP_RX) == 0);
+
+  /* GSP_INIT_DONE first, then the reply to 65.  Both carry result 0, so only
+   * the function code distinguishes them -- which is the point of row 5. */
+  ASSERT(fw_put(&q, 0, NV_RPC_FN_INIT_DONE, 0, 32, 0x00) == 1);
+  ASSERT(fw_put(&q, 1, 65, 1, 32, 0x00) == 1);
+  fw_set_wp(&q, 2);
+  q.want_fn = 65;
+
+  enum nv_rpc_reason why = NV_RPC_OK;
+  int n = nv_rpc_rx_take(&q, &hw, rx_out, sizeof(rx_out), &why);
+  EXPECT_EQ(n, 32);
+  EXPECT_EQ((int)why, (int)NV_RPC_OK);
+  EXPECT_EQ((int)get32(rx_out + NV_RPC_H_FUNCTION), 65);
+  EXPECT_EQ((int)q.rx_events, 1);
+  /* The event was consumed; the reply was not. */
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_READ_PTR), 1);
+  /* Both opcodes are in the log, so a serial log names what was skipped. */
+  EXPECT_EQ((int)q.dispatch_log_n, 2);
+  EXPECT_EQ((int)q.dispatch_log[0], (int)NV_RPC_FN_INIT_DONE);
+  EXPECT_EQ((int)q.dispatch_log[1], 65);
+}
+
+/* ======================================================================== */
+/* T-23 a wrong size is -EINVAL and names `size`                             */
+/* ======================================================================== */
+
+static void test_t23_link_size(void) {
+  uart_puts("  Running test_t23_link_size...\n");
+  tests_run++;
+
+  uint8_t *statq = blk + NV_RPC_STAT_OFF;
+  ASSERT(nv_rpc_block_build(blk, TEST_BUS) == 0);
+  fw_header(statq, NV_RPC_FLAGS_SWAP_RX);
+  put32(statq + NV_RPC_Q_SIZE, 0x20000);
+
+  enum nv_rpc_link_field bad = NV_RPC_LINK_OK;
+  struct nv_rpc_peer peer;
+  EXPECT_EQ(nv_rpc_link_validate(statq, NV_RPC_QUEUE_BYTES, NV_RPC_SLOT, &peer,
+                                 &bad),
+            -EINVAL);
+  EXPECT_EQ((int)bad, (int)NV_RPC_LINK_SIZE);
+  EXPECT_EQ((int)str_eq(nv_rpc_link_field_name(bad), "size"), 1);
+
+  /* A written-but-wrong header is terminal: waiting does not fix it, so the
+   * poll returns at once rather than burning the 4 s. */
+  struct nv_rpc_hw hw;
+  hw_reset(&hw);
+  struct nv_rpc_queue q;
+  ASSERT(nv_rpc_queue_init(&q, blk, TEST_BUS, rx_stage) == 0);
+  enum nv_rpc_reason why = NV_RPC_OK;
+  EXPECT_EQ(nv_rpc_link(&q, &hw, 4000000, &why), -EINVAL);
+  EXPECT_EQ((int)why, (int)NV_RPC_PEER_GEOM);
+  EXPECT_EQ((int)q.linked, 0);
+
+  /* A peer with an unknown flag bit is an unknown protocol, not a queue. */
+  put32(statq + NV_RPC_Q_SIZE, NV_RPC_QUEUE_BYTES);
+  put32(statq + NV_RPC_Q_FLAGS, NV_RPC_FLAGS_SWAP_RX | 0x2);
+  EXPECT_EQ(nv_rpc_link_validate(statq, NV_RPC_QUEUE_BYTES, NV_RPC_SLOT, &peer,
+                                 &bad),
+            -EINVAL);
+  EXPECT_EQ((int)bad, (int)NV_RPC_LINK_FLAGS);
+
+  /* And the timeout is honoured: a header that is still all zero never links,
+   * and the fake clock is what ends it -- no sleeping. */
+  zero_bytes(statq, NV_RPC_SLOT);
+  fh.now = 0;
+  fh.step = 100000;
+  EXPECT_EQ(nv_rpc_link(&q, &hw, 400000, &why), -ETIMEDOUT);
+  EXPECT_EQ((int)why, (int)NV_RPC_NOT_LINKED);
+  EXPECT_EQ((int)q.linked, 0);
+  EXPECT_EQ((int)(fh.now >= 400000), 1);
+
+  /* Then the firmware shows up and the same call links. */
+  fw_header(statq, NV_RPC_FLAGS_SWAP_RX);
+  EXPECT_EQ(nv_rpc_link(&q, &hw, 400000, &why), 0);
+  EXPECT_EQ((int)q.linked, 1);
+  EXPECT_EQ((int)q.swapped, 1);
+  EXPECT_EQ((int)q.peer.msg_count, 63);
+  EXPECT_EQ((int)q.peer.entry_off, 0x1000);
+}
+
+/* ======================================================================== */
+/* T-24 msgCount recomputed from size and entryOff                           */
+/* ======================================================================== */
+
+static void test_t24_link_msgcount(void) {
+  uart_puts("  Running test_t24_link_msgcount...\n");
+  tests_run++;
+
+  ASSERT(nv_rpc_block_build(blk, TEST_BUS) == 0);
+  uint8_t *statq = blk + NV_RPC_STAT_OFF;
+  fw_header(statq, NV_RPC_FLAGS_SWAP_RX);
+  put32(statq + NV_RPC_Q_MSG_COUNT, 62); /* 63 is what (size-entryOff)/msgSize says */
+
+  enum nv_rpc_link_field bad = NV_RPC_LINK_OK;
+  struct nv_rpc_peer peer;
+  EXPECT_EQ(nv_rpc_link_validate(statq, NV_RPC_QUEUE_BYTES, NV_RPC_SLOT, &peer,
+                                 &bad),
+            -EINVAL);
+  EXPECT_EQ((int)bad, (int)NV_RPC_LINK_MSG_COUNT);
+  /* The arithmetic this recomputation IS, in a test rather than a comment. */
+  EXPECT_EQ((int)((0x40000 - 0x1000) / 0x1000), 63);
+
+  put32(statq + NV_RPC_Q_MSG_COUNT, 63);
+  EXPECT_EQ(nv_rpc_link_validate(statq, NV_RPC_QUEUE_BYTES, NV_RPC_SLOT, &peer,
+                                 &bad),
+            0);
+
+  /* entryOff must be page-aligned and past rxHdrOff; msgSize must be ours. */
+  put32(statq + NV_RPC_Q_ENTRY_OFF, 0x1100);
+  EXPECT_EQ(nv_rpc_link_validate(statq, NV_RPC_QUEUE_BYTES, NV_RPC_SLOT, &peer,
+                                 &bad),
+            -EINVAL);
+  EXPECT_EQ((int)bad, (int)NV_RPC_LINK_ENTRY_OFF);
+  put32(statq + NV_RPC_Q_ENTRY_OFF, NV_RPC_SLOT);
+  put32(statq + NV_RPC_Q_MSG_SIZE, 0x800);
+  EXPECT_EQ(nv_rpc_link_validate(statq, NV_RPC_QUEUE_BYTES, NV_RPC_SLOT, &peer,
+                                 &bad),
+            -EINVAL);
+  EXPECT_EQ((int)bad, (int)NV_RPC_LINK_MSG_SIZE);
+}
+
+/* ======================================================================== */
+
+void nv_rpc_test_suite(void) {
+  uart_puts("[NV-RPC] unit suite (spec section 7: T-01..T-24)\n");
+  test_t01_block_geometry();
+  test_t02_cmdq_header();
+  test_t03_statq_not_written();
+  test_t04_args_crosscheck();
+  test_t05_cksum_vectors();
+  test_t06_cksum_self_zero();
+  test_t07_stale_tail();
+  test_t08_swap_rx();
+  test_t09_commit_not_notify();
+  test_t10_doorbell_value();
+  test_t11_wrap();
+  test_t12_full_queue();
+  test_t13_empty_queue();
+  test_t14_oversize();
+  test_t15_elemcount();
+  test_t16_bad_cksum();
+  test_t17_sequence();
+  test_t18_seq_wrap();
+  test_t19_split();
+  test_t20_short_publish();
+  test_t21_no_advance_without_release();
+  test_t22_event_vs_reply();
+  test_t23_link_size();
+  test_t24_link_msgcount();
+}
+
+#endif /* KERNEL_MODE_UNIT_TEST */
+#endif /* __x86_64__ */
