@@ -64,7 +64,7 @@ partially.
 | `src/kernel/nv.c` | Card-independent core: identify, PMC, PTIMER, falcon probe, staged bring-up, `/dev/nvctl` ABI, `read(2)` snapshot. |
 | `src/kernel/nv_pci.c` | Hardware half: pick the GPU, map BAR0 + a bounded BAR1 window, set MEM\|MASTER, run bring-up, program MSI-X (function-masked until GSP owns interrupts). |
 | `src/kernel/nv_falcon.c` | Falcon engine: DMEM/IMEM windows, the DMA ("xfer") request encoder, start/halt with bounded waits, self-test. |
-| `src/kernel/nv_test.c` | 20 kernel unit-tier tests driving the shipped code against a fake register file. |
+| `src/kernel/nv_test.c` | 18 kernel unit-tier tests driving the shipped code against a fake register file. |
 | `src/user/nvsmi.c` → `/NVSMI.BIN` | Userspace report tool. |
 
 Wiring: `main.c` calls `nv_init()` on x64 once the timer is live; `fs.c` creates
@@ -117,7 +117,7 @@ places where the *hardware* corrected the documentation are recorded in §5.3.
 
 ```bash
 make ARCH=intel -j8 hobbyos.elf        # the ARM build compiles this subsystem out
-./run_unit_tests_intel.sh              # x64 unit tier, nv's 20 tests included
+./run_unit_tests_intel.sh              # x64 unit tier, nv's 18 tests included
 nvsmi                                  # inside the guest: the driver's report
 ```
 
@@ -203,7 +203,7 @@ Tests failed: 0
 ```
 
 The 490 include `pci_test`'s MCFG/BAR/capability/multi-function/IRQ cases and
-`nv_test`'s 20, which drive the real `nv.c`/`nv_falcon.c` through a fake
+`nv_test`'s 18, which drive the real `nv.c`/`nv_falcon.c` through a fake
 register file. The same kernel booted on the physical card also reports
 `Tests run: 483` / `0 failed` in `MODE=unit_tests` — the suite is green with and
 without the GPU and under both TCG/KVM and the Proxmox VM.
