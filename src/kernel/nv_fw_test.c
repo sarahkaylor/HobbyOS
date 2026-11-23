@@ -581,6 +581,87 @@ static void test_nv_fw_wpr_meta_errors(void) {
   EXPECT_EQ(nv_fw_wpr_meta_decode(meta, 0), -EINVAL);
 }
 
+/* ---- radix3 ----------------------------------------------------------- */
+
+/* The arithmetic of the tree, against the real image size (38,061,600 B =
+ * 9297 pages) and against the boundary where a second level-1 page appears. */
+static void test_nv_radix3_pages(void) {
+  uart_puts("  Running test_nv_radix3_pages...\n");
+  tests_run++;
+  /* 38,061,600 B -> 9297 image pages -> 19 level-2 pages, 1 level-1, 1 root. */
+  EXPECT_EQ((int)nv_radix3_pages(38061600), 21);
+  /* One page, and exactly 512 pages (one full level-2 page). */
+  EXPECT_EQ((int)nv_radix3_pages(4096), 3);   /* 1 img -> 1 l2 -> 1 l1 + 1 */
+  EXPECT_EQ((int)nv_radix3_pages(512ull * 4096), 3);
+  /* 513 pages needs a second level-2 page. */
+  EXPECT_EQ((int)nv_radix3_pages(512ull * 4096 + 1), 4);
+  /* A size that is not a page multiple still rounds up. */
+  EXPECT_EQ((int)nv_radix3_pages(4097), 3);
+  /* Nothing to describe, and more than three levels can address. */
+  EXPECT_EQ((int)nv_radix3_pages(0), 0);
+  EXPECT_EQ((int)nv_radix3_pages(0x10000000000ull), 0); /* 1 TiB of pages */
+}
+
+/* A tree that points at the right physical pages, in the right order, with the
+ * holes marked absent rather than left as garbage. */
+static void test_nv_radix3_build(void) {
+  uart_puts("  Running test_nv_radix3_build...\n");
+  tests_run++;
+  static uint8_t tree[4 * 4096];
+  const uint64_t tree_phys = 0x20000000ULL;
+  const uint64_t img_phys = 0x30000000ULL;
+  const uint64_t img_size = 512ull * 4096; /* exactly one level-2 page */
+
+  fill(tree, sizeof tree, 0xEE);
+  ASSERT(nv_radix3_build_into(tree, 4, tree_phys, img_phys, img_size) == 0);
+
+  /* Root: one entry, pointing at the level-1 page (the second page). */
+  ASSERT(le64(tree + 0) == tree_phys + 4096);
+  EXPECT_EQ((int)le64(tree + 8), 0); /* no second level-1 page */
+  /* Level 1: one entry, pointing at the level-2 page (the third page). */
+  ASSERT(le64(tree + 4096 + 0) == tree_phys + 8192);
+  EXPECT_EQ((int)le64(tree + 4096 + 8), 0);
+  /* Level 2: 512 PTEs, ascending, contiguous. */
+  for (int i = 0; i < 512; i++)
+    ASSERT(le64(tree + 8192 + i * 8) == img_phys + (uint64_t)i * 4096);
+
+  /* A partial last level-2 page leaves the tail zeroed, not stale. */
+  fill(tree, sizeof tree, 0xEE);
+  ASSERT(nv_radix3_build_into(tree, 4, tree_phys, img_phys, 4096) == 0);
+  ASSERT(le64(tree + 8192 + 0) == img_phys);
+  EXPECT_EQ((int)le64(tree + 8192 + 8), 0);
+  EXPECT_EQ((int)le64(tree + 8192 + 511 * 8), 0);
+
+  /* Refusals: short tree, unaligned addresses, zero size, null. */
+  EXPECT_EQ(nv_radix3_build_into(tree, 2, tree_phys, img_phys, img_size),
+            -EINVAL);
+  EXPECT_EQ(nv_radix3_build_into(tree, 4, tree_phys + 8, img_phys, img_size),
+            -EINVAL);
+  EXPECT_EQ(nv_radix3_build_into(tree, 4, tree_phys, img_phys + 1, img_size),
+            -EINVAL);
+  EXPECT_EQ(nv_radix3_build_into(tree, 4, tree_phys, img_phys, 0), -EINVAL);
+  EXPECT_EQ(nv_radix3_build_into(0, 4, tree_phys, img_phys, img_size), -EINVAL);
+}
+
+/* The slide that page-aligns .fwimage: overalloc-safe on overlap, and a refusal
+ * (not a wrap) when the request does not fit the buffer. */
+static void test_nv_fw_slide_down(void) {
+  uart_puts("  Running test_nv_fw_slide_down...\n");
+  tests_run++;
+  uint8_t buf[64];
+  for (int i = 0; i < 64; i++) buf[i] = (uint8_t)i;
+  /* Move the 32 bytes at +16 down to 0: overlap of 16 bytes. */
+  nv_fw_slide_down(buf, sizeof buf, 16, 32);
+  for (int i = 0; i < 32; i++) EXPECT_EQ((int)buf[i], i + 16);
+  /* Off 0 is a no-op, and an impossible request changes nothing. */
+  for (int i = 0; i < 64; i++) buf[i] = 0xAA;
+  nv_fw_slide_down(buf, sizeof buf, 0, 8);
+  EXPECT_EQ((int)buf[0], 0xAA);
+  nv_fw_slide_down(buf, sizeof buf, 60, 8); /* runs off the end */
+  EXPECT_EQ((int)buf[0], 0xAA);
+  nv_fw_slide_down(0, 64, 16, 8); /* null */
+}
+
 /* ---- SHA-256 ---------------------------------------------------------- */
 
 static void sha_hex(const uint8_t *buf, uint32_t len, char *out) {
@@ -664,6 +745,9 @@ void nv_fw_test_suite(void) {
   test_nv_fw_wpr_meta_roundtrip();
   test_nv_fw_wpr_meta_errors();
   test_nv_fw_wpr_meta_verified();
+  test_nv_radix3_pages();
+  test_nv_radix3_build();
+  test_nv_fw_slide_down();
   test_nv_fw_sha256_nist();
   test_nv_fw_load_missing();
 }

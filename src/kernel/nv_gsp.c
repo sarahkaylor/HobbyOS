@@ -301,8 +301,107 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
   }
   uint32_t lsize = 0;
   (void)nv_gsp_load_one(d, NV_FW_LOADER, 0, &lsize, sha);
-  uint32_t rsize = 0;
-  (void)nv_gsp_load_one(d, NV_FW_RM, 0, &rsize, sha);
+  /* The RM image is not loaded as a blob and handed over: the booter reads it
+   * through a radix3 tree, and the tree must describe the .fwimage SECTION, not
+   * the whole ELF (the meta wants 0x2448000 bytes, the file is larger).  So:
+   * load, parse the ELF, then build the tree over the section.  Pure memory
+   * work -- no MMIO -- which is why it runs on every boot and reports numbers a
+   * reviewer can check against the file. */
+  struct nv_fw_blob rm;
+  int lrc = nv_fw_load_blob(NV_FW_RM, &rm);
+  uart_puts("[NV-GSP] fw ");
+  uart_puts(NV_FW_RM);
+  if (lrc != 0) {
+    uart_puts(" load FAILED rc=");
+    print_int(lrc);
+    uart_puts("\n");
+    return rc;
+  }
+  uart_puts(" bytes=");
+  print_int((int)rm.size);
+  uart_puts(" phys=");
+  uart_print_hex(rm.phys);
+
+  /* Integrity before anything mutates the buffer: head and tail of the file,
+   * the same check the small blobs get. */
+  {
+    uint8_t sha[32];
+    uint32_t n = rm.size < NV_FW_SAMPLE_BYTES ? rm.size : NV_FW_SAMPLE_BYTES;
+    if (nv_fw_sha256(rm.buf, n, sha) == 0) {
+      uart_puts(" head=");
+      for (uint32_t i = 0; i < 4; i++) nv_hex_byte(sha[i]);
+      if (rm.size > NV_FW_SAMPLE_BYTES &&
+          nv_fw_sha256(rm.buf + rm.size - NV_FW_SAMPLE_BYTES,
+                       NV_FW_SAMPLE_BYTES, sha) == 0) {
+        uart_puts(" tail=");
+        for (uint32_t i = 0; i < 4; i++) nv_hex_byte(sha[i]);
+      }
+    }
+  }
+
+  struct nv_fw_elf elf;
+  if (nv_fw_elf_sections(rm.buf, rm.size, &elf) != 0) {
+    uart_puts(" elf FAILED (not a relocatable image)\n");
+    nv_fw_release(&rm);
+    return rc;
+  }
+  uart_puts(" fwimage off=");
+  uart_print_hex(elf.fwimage.off);
+  uart_puts(" size=");
+  uart_print_hex(elf.fwimage.size);
+  uart_puts(" sigs=");
+  print_int((int)elf.nsig);
+  /* Where the signature sections actually live: the metadata block needs the
+   * system-physical address of the .fwsignature_<engine> bytes, and whether they
+   * sit before or after .fwimage decides whether the slide above destroyed them. */
+  for (uint32_t i = 0; i < elf.nsig && i < NV_FW_SIG_MAX; i++) {
+    uart_puts("\n[NV-GSP] sig[");
+    print_int((int)i);
+    uart_puts("] ");
+    uart_puts(elf.sig[i].name);
+    uart_puts(" off=");
+    uart_print_hex(elf.sig[i].off);
+    uart_puts(" size=");
+    uart_print_hex(elf.sig[i].size);
+  }
+
+  /* The tree describes 4 KiB pages, so the image must START on a page. On this
+   * firmware .fwimage sits at file offset 0x40 -- inside the ELF header page --
+   * and pointing the tree at rm.phys would hand the booter 0x40 bytes of ELF
+   * header in front of the image it expects.
+   *
+   * Fix without a second 38 MB buffer: slide the section down inside the frames
+   * we already own (a backwards byte move, so overlapping is safe). The blob's
+   * base is page-aligned by construction, so afterwards [phys, phys+size) is the
+   * image, exactly page-aligned, and nothing was allocated twice. */
+  if (elf.fwimage.off != 0) {
+    uart_puts("\n[NV-GSP] radix3 slide .fwimage down by ");
+    uart_print_hex(elf.fwimage.off);
+    uart_puts(" inside its own frames (no second 38 MB buffer)\n");
+    nv_fw_slide_down(rm.buf, rm.size, elf.fwimage.off, elf.fwimage.size);
+  }
+  uint64_t img_phys = rm.phys;
+  uint64_t root = 0;
+  uint32_t tpages = 0;
+  int brc = nv_radix3_build(img_phys, elf.fwimage.size, &root, &tpages);
+  uart_puts("\n[NV-GSP] radix3 ");
+  if (brc != 0) {
+    uart_puts("build FAILED rc=");
+    print_int(brc);
+    uart_puts(brc == -ENOMEM ? " (no contiguous run for the tree)\n" : "\n");
+  } else {
+    uart_puts("root=");
+    uart_print_hex(root);
+    uart_puts(" pages=");
+    print_int((int)tpages);
+    uart_puts(" maps ");
+    print_int((int)((elf.fwimage.size + NV_RADIX3_PAGE - 1) / NV_RADIX3_PAGE));
+    uart_puts(" image pages at ");
+    uart_print_hex(img_phys);
+    uart_puts(" (stage 3; freed here, kept by the boot path)\n");
+    nv_radix3_release(root, tpages);
+  }
+  nv_fw_release(&rm);
   return rc;
 }
 

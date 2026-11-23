@@ -588,6 +588,99 @@ int nv_fw_sha256(const uint8_t *buf, uint32_t len, uint8_t out[32]) {
   return 0;
 }
 
+/* ---- 4b. radix3 -------------------------------------------------------- */
+
+void nv_fw_slide_down(uint8_t *buf, uint32_t buf_len, uint32_t off,
+                      uint32_t len) {
+  if (!buf || off == 0 || len == 0) return;
+  if (off > buf_len || len > buf_len - off) return; /* refuse rather than wrap */
+  /* ASCENDING, because the destination is below the source: a high-to-low loop
+   * would read bytes the previous iteration already overwrote.  (Got this
+   * backwards first; the unit test caught it with buf[0] == 32 instead of 16.) */
+  for (uint32_t i = 0; i < len; i++) buf[i] = buf[off + i];
+}
+
+uint32_t nv_radix3_pages(uint64_t size) {
+  if (size == 0) return 0;
+  uint64_t img_pages = (size + NV_RADIX3_PAGE - 1) / NV_RADIX3_PAGE;
+  /* Three levels of 512 entries each: 512^3 pages is the ceiling. */
+  if (img_pages > (uint64_t)NV_RADIX3_ENTRIES * NV_RADIX3_ENTRIES *
+                      NV_RADIX3_ENTRIES)
+    return 0;
+  uint64_t l2 = (img_pages + NV_RADIX3_ENTRIES - 1) / NV_RADIX3_ENTRIES;
+  uint64_t l1 = (l2 + NV_RADIX3_ENTRIES - 1) / NV_RADIX3_ENTRIES;
+  uint64_t total = 1 + l1 + l2;
+  if (total > 0xFFFFu) return 0; /* a tree this large is a bug, not a card */
+  return (uint32_t)total;
+}
+
+int nv_radix3_build_into(uint8_t *tree, uint32_t tree_pages, uint64_t tree_phys,
+                         uint64_t image_phys, uint64_t image_size) {
+  if (!tree || image_size == 0) return -EINVAL;
+  if ((tree_phys & (NV_RADIX3_PAGE - 1)) ||
+      (image_phys & (NV_RADIX3_PAGE - 1)))
+    return -EINVAL;
+  uint32_t need = nv_radix3_pages(image_size);
+  if (need == 0 || tree_pages < need) return -EINVAL;
+
+  uint64_t img_pages = (image_size + NV_RADIX3_PAGE - 1) / NV_RADIX3_PAGE;
+  uint32_t l2 = (uint32_t)((img_pages + NV_RADIX3_ENTRIES - 1) /
+                           NV_RADIX3_ENTRIES);
+  uint32_t l1 = (l2 + NV_RADIX3_ENTRIES - 1) / NV_RADIX3_ENTRIES;
+
+  /* The tree is zeroed first: an entry beyond the image is 0 ("not present"),
+   * never a stale pointer into whatever the frame held before. */
+  fw_zero(tree, need * NV_RADIX3_PAGE);
+
+  uint8_t *lvl0 = tree;
+  uint8_t *lvl1 = tree + NV_RADIX3_PAGE;
+  uint8_t *lvl2p = lvl1 + (uint64_t)l1 * NV_RADIX3_PAGE;
+
+  /* Level 2 first: one PTE per image page, ascending, because the image is a
+   * single contiguous run. */
+  for (uint64_t i = 0; i < img_pages; i++) {
+    uint32_t page = (uint32_t)(i / NV_RADIX3_ENTRIES);
+    uint32_t slot = (uint32_t)(i % NV_RADIX3_ENTRIES);
+    fw_put64(lvl2p + (uint64_t)page * NV_RADIX3_PAGE + slot * 8,
+             image_phys + i * NV_RADIX3_PAGE);
+  }
+  /* Level 1 points at the level-2 pages, level 0 at the level-1 pages. */
+  for (uint32_t j = 0; j < l2; j++)
+    fw_put64(lvl1 + (uint64_t)(j / NV_RADIX3_ENTRIES) * NV_RADIX3_PAGE +
+                 (j % NV_RADIX3_ENTRIES) * 8,
+             (uint64_t)(lvl2p - tree) + tree_phys + (uint64_t)j * NV_RADIX3_PAGE);
+  for (uint32_t k = 0; k < l1; k++)
+    fw_put64(lvl0 + (uint64_t)k * 8,
+             (uint64_t)NV_RADIX3_PAGE + tree_phys + (uint64_t)k * NV_RADIX3_PAGE);
+  return 0;
+}
+
+#ifdef __x86_64__
+int nv_radix3_build(uint64_t image_phys, uint64_t image_size,
+                    uint64_t *root_phys, uint32_t *tree_pages) {
+  if (!root_phys || !tree_pages) return -EINVAL;
+  uint32_t need = nv_radix3_pages(image_size);
+  if (need == 0) return -EINVAL;
+  uint64_t phys = frame_alloc_contig((int)need);
+  if (!phys) return -ENOMEM;
+  int rc = nv_radix3_build_into((uint8_t *)phys_to_virt(phys), need, phys,
+                                image_phys, image_size);
+  if (rc != 0) {
+    for (uint32_t i = 0; i < need; i++)
+      frame_free(phys + (uint64_t)i * FRAME_SIZE);
+    return rc;
+  }
+  *root_phys = phys;
+  *tree_pages = need;
+  return 0;
+}
+
+void nv_radix3_release(uint64_t root_phys, uint32_t tree_pages) {
+  for (uint32_t i = 0; i < tree_pages; i++)
+    frame_free(root_phys + (uint64_t)i * FRAME_SIZE);
+}
+#endif
+
 /* ---- 6. the file loader (x86_64 only) --------------------------------- */
 
 #ifdef __x86_64__

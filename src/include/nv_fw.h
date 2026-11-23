@@ -260,6 +260,53 @@ int nv_fw_wpr_meta_decode_n(const uint8_t *in, uint32_t len,
  * an unverified block is a valid block that nobody has consumed yet. */
 int nv_fw_wpr_meta_verified(const struct nv_wpr_meta_in *m);
 
+/* ---- 4b. the radix3 tree that describes the RM image to the booter -----
+ *
+ * The metadata block carries a SYSTEM PHYSICAL address of a tree root, not of
+ * the image (docs/nv-gsp-wpr-contract.md section 4.3).  Three levels of 512
+ * 64-bit entries: level 0 points at level-1 pages, level-1 at level-2 pages,
+ * and level-2 holds one PTE per 4 KiB image page -- the system physical
+ * address, ascending.  Our loader hands back one contiguous run, so the tree is
+ * arithmetic: no mapping, no scatter list.
+ *
+ * Pages needed for the tree itself: 1 level-0 page + L1 level-1 pages + L2
+ * level-2 pages, where L2 = ceil(image_pages / 512) and L1 = ceil(L2 / 512).
+ * The 38 MB image needs 9297 image pages, 19 level-2 pages and 1 level-1 page,
+ * so 21 pages = 84 KiB. */
+#define NV_RADIX3_PAGE 4096u
+#define NV_RADIX3_ENTRIES 512u
+
+/* Tree pages required to describe `size` bytes, or 0 when the request cannot be
+ * described (zero size, or more image pages than the three levels can hold:
+ * 512^3 pages = 512 GiB). */
+uint32_t nv_radix3_pages(uint64_t size);
+
+/* Fill a caller-provided contiguous tree.
+ *   tree       base of the tree, `tree_pages` * 4096 bytes, physically
+ *              contiguous, `tree_phys` its physical address
+ *   image_phys page-aligned physical base of the RM image
+ * Returns 0, or -EINVAL on a bad argument (sizes that disagree, unaligned
+ * addresses, a tree too small for the image). */
+int nv_radix3_build_into(uint8_t *tree, uint32_t tree_pages, uint64_t tree_phys,
+                         uint64_t image_phys, uint64_t image_size);
+
+/* Slide `len` bytes at `buf + off` down to `buf`, inside the same buffer, for
+ * a firmware section that does not start on a page boundary.  Byte-wise and
+ * backwards, so an overlapping move is safe and no second buffer is needed --
+ * the alternative is a 38 MB copy while the original is still allocated. */
+void nv_fw_slide_down(uint8_t *buf, uint32_t buf_len, uint32_t off,
+                      uint32_t len);
+
+#ifdef __x86_64__
+/* Allocate the tree from contiguous frames and fill it.  On success
+ * `*root_phys` is the value the metadata block wants, and `*tree_pages` is how
+ * many frames to free later.  -ENOMEM when the frame pool cannot supply a
+ * contiguous run. */
+int nv_radix3_build(uint64_t image_phys, uint64_t image_size,
+                    uint64_t *root_phys, uint32_t *tree_pages);
+void nv_radix3_release(uint64_t root_phys, uint32_t tree_pages);
+#endif
+
 /* ---- 5. digests and the file loader ----------------------------------- */
 
 /* SHA-256 (FIPS 180-4), byte-oriented: no wide loads, no SIMD.  Returns 0,
