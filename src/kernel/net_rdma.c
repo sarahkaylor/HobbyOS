@@ -1197,6 +1197,10 @@ void net_rdma_init(void) {
     uint32_t my_ip = net_get_ip();
 
     rdma_socket = net_socket_create(IP_PROTO_UDP);
+    if (!rdma_socket) { /* frame-backed PCB table unavailable (see net.c) */
+      uart_puts("[RDMA] no socket -- RDMA disabled\n");
+      return;
+    }
     rdma_socket->local_port = RDMA_PORT;
     rdma_socket->local_ip = my_ip;
     rdma_socket->state = SOCKET_ESTABLISHED;
@@ -1298,6 +1302,10 @@ void net_rdma_init(void) {
     // Bind UDP socket to Guest IP and connect to Host
     net_set_ip(htonl(RDMA_GUEST_IP), htonl(0xFFFFFF00), htonl(0x0A000202));
     rdma_socket = net_socket_create(IP_PROTO_UDP);
+    if (!rdma_socket) { /* frame-backed PCB table unavailable (see net.c) */
+      uart_puts("[RDMA] no socket -- RDMA receiver disabled\n");
+      return;
+    }
     rdma_socket->local_port = 49152;
     rdma_socket->local_ip = htonl(RDMA_GUEST_IP);
     rdma_socket->remote_ip = htonl(RDMA_HOST_IP);
