@@ -98,7 +98,13 @@ struct nv_rm_if {
   void (*kick)(void);
 };
 
-extern const struct nv_rm_if nv_rm_mock;
+/* The mock backend's table.  A function, not an `extern const struct`: a static
+ * initializer would be folded into .rodata as LINK addresses, and the AArch64
+ * image runs at Limine's slide, so the first call through it would branch into
+ * nothing (measured: EL1 synchronous exception EC=0 at the entry of
+ * mock_device_open).  nv_rm_mock_if() builds the table once at runtime; see the
+ * block comment in nv_rm_mock.c. */
+const struct nv_rm_if *nv_rm_mock_if(void);
 
 /* ---- mock-only observation seams (kernel unit tier; not ABI) ------------
  * nv_rm_mock_hold(1) makes kick() a no-op, which is how a test observes a

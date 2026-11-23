@@ -512,19 +512,57 @@ int nv_rm_mock_pending(void) {
   return n;
 }
 
-const struct nv_rm_if nv_rm_mock = {
-    "mock",
-    mock_device_open,
-    mock_device_close,
-    mock_mem_alloc,
-    mock_mem_free,
-    mock_vm_create,
-    mock_vm_destroy,
-    mock_vm_bind,
-    mock_channel_create,
-    mock_channel_destroy,
-    mock_submit,
-    mock_submit_va,
-    mock_fence_test,
-    mock_kick,
-};
+/* ---- the RM table ------------------------------------------------------
+ *
+ * This is NOT a `const struct nv_rm_if nv_rm_mock = { "mock", mock_device_open,
+ * ... };` initializer, and the reason is a property of this kernel rather than
+ * of this file: a static initializer holding function addresses (and a
+ * `const char *`) is folded into .rodata as the LINK address, and the kernel
+ * applies no load-time relocations to static data.  That is the same hazard
+ * blk_cache_press_test.c documents for `const char *` members and unix_test.c
+ * works around with RT_ADDR.  x86_64 happens to load the image at its link
+ * address, so a folded table is right there; AArch64 boots at Limine's slide
+ * (measured: 0x3FA400000 in the unit tier), so a folded function address names
+ * nothing.  Measured before this fix: the first call through the table branched
+ * to 0x401485C0 -- the link address of mock_device_open -- and took an EL1
+ * synchronous exception (EC=0, ISS=0, IL=1: the CPU fetched zeros, an
+ * unallocated encoding, and reported "unknown reason").
+ *
+ * So the table is built once, at runtime, by assignment.  Assignment to a
+ * non-const object cannot be folded into .rodata, so every address in it is
+ * computed PC-relative by the compiler and carries the slide.
+ */
+static struct nv_rm_if g_rm_if;
+static spinlock_t g_rm_if_lock = {0};
+static int g_rm_if_ready;
+
+static void mock_if_fill(void) {
+  g_rm_if.name = "mock";
+  g_rm_if.device_open = mock_device_open;
+  g_rm_if.device_close = mock_device_close;
+  g_rm_if.mem_alloc = mock_mem_alloc;
+  g_rm_if.mem_free = mock_mem_free;
+  g_rm_if.vm_create = mock_vm_create;
+  g_rm_if.vm_destroy = mock_vm_destroy;
+  g_rm_if.vm_bind = mock_vm_bind;
+  g_rm_if.channel_create = mock_channel_create;
+  g_rm_if.channel_destroy = mock_channel_destroy;
+  g_rm_if.submit = mock_submit;
+  g_rm_if.submit_va = mock_submit_va;
+  g_rm_if.fence_test = mock_fence_test;
+  g_rm_if.kick = mock_kick;
+}
+
+const struct nv_rm_if *nv_rm_mock_if(void) {
+  /* One word, monotonic 0 -> 1, written after the table is complete: a caller
+   * that sees 1 sees the whole table (the atomics are the lock; the fast path
+   * exists so an ioctl does not take a second lock it never contends). */
+  if (g_rm_if_ready) return &g_rm_if;
+  spinlock_acquire(&g_rm_if_lock);
+  if (!g_rm_if_ready) {
+    mock_if_fill();
+    g_rm_if_ready = 1;
+  }
+  spinlock_release(&g_rm_if_lock);
+  return &g_rm_if;
+}
