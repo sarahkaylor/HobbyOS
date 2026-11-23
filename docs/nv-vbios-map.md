@@ -325,7 +325,7 @@ and replace the "structural scan for a V1 table" with "walk `EntryCount` slots, 
 |---|---|---|
 | §1.4: token `0x70` payload is "offset of the falcon ucode table, relative to `expansionRomOffset`" | `expansionRomOffset` is `0` here (no IFR), yet `0x80DE8` lands nowhere | the base is the *logical* image with the EFI image removed: `flash = logical + 0x14E00` for `logical >= 0x0FC00` |
 | §1.4 caveat row: "the token offset does not account for the EFI image … the `+ expansionRomOffset` above is the resolution" | right instinct, wrong resolution | the EFI image *is* the missing 0x14E00 bytes; `expansionRomOffset` does not help when it is 0 |
-| §1.5: "expect V3, size 44" and checklist #8 "`vDesc` size ≥ 44" | `Hdr.size` is **812**, not the 44-byte struct | `Hdr.size` is the *payload offset*, and it includes the 2×384-byte signature block; use it, never `sizeof` |
+| §1.5: "expect V3, size 44" and checklist #8 "`vDesc` size ≥ 44" | `Hdr.size` is **812**, not the 44-byte struct | `Hdr.size` is the *payload offset*: `44 + SignatureCount*384 = 44 + 2*384 = 812` here. Use the field, never `sizeof` |
 | §1.5 `FALCON_UCODE_TABLE_HDR_V1` row: `DescVersion`, `DescSize` | header is `01 06 06 10 01 30`, i.e. `DescSize = 0x30` while the descriptors are 812-byte V3 headers | `DescSize` is not usable for these descriptors; take the version/size from each descriptor's own `Hdr` |
 | §1.6 checklist #6: `EntryCount` 3..20 and (implicitly) non-zero app ids | `EntryCount = 16` with 9 zero-filled slots | walk every slot and skip `app == 0`; a "non-zero app ids" filter rejects the real table (§4.2) |
 | §1.6 checklist #10: "`UcodeId` in 1..8" | `UcodeId = 9` | widen to 1..16 (or just `!= 0` and `< 32`) |
