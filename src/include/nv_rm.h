@@ -85,6 +85,12 @@ struct nv_rm_if {
    * sequence number.  No execution happens in the mock: the stream bytes are
    * accepted, counted and dropped. */
   int (*submit)(uint32_t ch_id, const void *cs, uint32_t len, uint64_t *fence);
+  /* The DRM_EXEC path: the same enqueue, but the stream is named by GPU VA and
+   * the RM resolves it through the channel's VA space.  A range that is not
+   * fully covered by mapped objects is -EINVAL -- that check is the whole
+   * reason this is a separate op from submit(): the ABI layer cannot see the
+   * mappings, and a mock that accepted any VA would make EXEC untestable. */
+  int (*submit_va)(uint32_t ch_id, uint64_t va, uint32_t len, uint64_t *fence);
   /* 0 = retired, -EAGAIN = still pending, -EINVAL = this channel never issued
    * that fence. */
   int (*fence_test)(uint32_t ch_id, uint64_t fence);

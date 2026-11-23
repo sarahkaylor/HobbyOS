@@ -43,6 +43,11 @@
  * test. */
 #define MOCK_VRAM_SIZE (4ull << 30)
 #define MOCK_VRAM_BUS  0x100000000ull /* first bus address handed out */
+/* A VA space is bookkeeping, not memory, so its size is independent of the
+ * arena.  1 TiB because that is the total a stock nouveau client asks for
+ * (drm_nouveau_vm_init {1<<39, 1<<39}); the objects mapped into it still get
+ * their bus addresses from the 4 GiB arena above. */
+#define MOCK_VA_LIMIT (1ull << 40)
 
 #define MOCK_DEV_ID 1u
 
@@ -254,7 +259,7 @@ static struct mock_vm *mock_vm_find(uint32_t dev, uint32_t id) {
 
 static int mock_vm_create(uint32_t dev, uint64_t size, uint32_t *vm_id) {
   if (!vm_id) return -EINVAL;
-  if (size == 0 || (size & (MOCK_PAGE - 1)) || size > MOCK_VRAM_SIZE) return -EINVAL;
+  if (size == 0 || (size & (MOCK_PAGE - 1)) || size > MOCK_VA_LIMIT) return -EINVAL;
   int rc = 0;
   spinlock_acquire(&g_mock.lock);
   if (!g_mock.ready) { rc = -ENODEV; goto out; }
@@ -388,6 +393,19 @@ static void mock_channel_destroy(uint32_t dev, uint32_t ch_id) {
 
 /* ---- submit and fences ------------------------------------------------- */
 
+/* Enqueue one fence on a live channel.  Caller holds g_mock.lock. */
+static int mock_enqueue_locked(struct mock_channel *c, uint64_t *fence) {
+  if (g_mock.pend_n == MOCK_MAX_PENDING) return -ENOSPC;
+  /* The stream is accepted, counted and dropped: there is no engine. */
+  c->issued++;
+  g_mock.pend[g_mock.pend_tail].ch = c->id;
+  g_mock.pend[g_mock.pend_tail].fence = c->issued;
+  g_mock.pend_tail = (g_mock.pend_tail + 1) % MOCK_MAX_PENDING;
+  g_mock.pend_n++;
+  *fence = c->issued;
+  return 0;
+}
+
 static int mock_submit(uint32_t ch_id, const void *cs, uint32_t len,
                        uint64_t *fence) {
   if (!cs || !fence || len == 0) return -EINVAL;
@@ -395,14 +413,45 @@ static int mock_submit(uint32_t ch_id, const void *cs, uint32_t len,
   spinlock_acquire(&g_mock.lock);
   struct mock_channel *c = mock_ch_find(ch_id);
   if (!c) { rc = -EINVAL; goto out; }
-  if (g_mock.pend_n == MOCK_MAX_PENDING) { rc = -ENOSPC; goto out; }
-  /* The stream is accepted, counted and dropped: there is no engine. */
-  c->issued++;
-  g_mock.pend[g_mock.pend_tail].ch = ch_id;
-  g_mock.pend[g_mock.pend_tail].fence = c->issued;
-  g_mock.pend_tail = (g_mock.pend_tail + 1) % MOCK_MAX_PENDING;
-  g_mock.pend_n++;
-  *fence = c->issued;
+  rc = mock_enqueue_locked(c, fence);
+out:
+  spinlock_release(&g_mock.lock);
+  return rc;
+}
+
+/* Is [va, va+len) entirely inside the VM's mapped ranges?  Ranges never
+ * overlap (bind refuses an overlap), so walking from the range that covers the
+ * current offset is enough; a gap anywhere in the run is a refusal. */
+static int mock_va_covered(const struct mock_vm *v, uint64_t va, uint32_t len) {
+  if (va >= v->size || (uint64_t)len > v->size - va) return 0;
+  uint64_t off = 0;
+  while (off < (uint64_t)len) {
+    uint64_t at = va + off;
+    uint64_t best = 0;
+    for (int i = 0; i < MOCK_MAX_RANGE; i++) {
+      const struct mock_range *r = &v->r[i];
+      if (!r->used) continue;
+      if (at >= r->va && at < r->va + r->range) {
+        uint64_t end = r->va + r->range;
+        if (end > best) best = end;
+      }
+    }
+    if (best == 0) return 0;
+    off = best - va; /* best > at >= va, so this always advances */
+  }
+  return 1;
+}
+
+static int mock_submit_va(uint32_t ch_id, uint64_t va, uint32_t len,
+                          uint64_t *fence) {
+  if (!fence || len == 0) return -EINVAL;
+  int rc = 0;
+  spinlock_acquire(&g_mock.lock);
+  struct mock_channel *c = mock_ch_find(ch_id);
+  struct mock_vm *v = c ? mock_vm_find(c->dev, c->vm) : 0;
+  if (!c || !v) { rc = -EINVAL; goto out; }
+  if (!mock_va_covered(v, va, len)) { rc = -EINVAL; goto out; }
+  rc = mock_enqueue_locked(c, fence);
 out:
   spinlock_release(&g_mock.lock);
   return rc;
@@ -475,6 +524,7 @@ const struct nv_rm_if nv_rm_mock = {
     mock_channel_create,
     mock_channel_destroy,
     mock_submit,
+    mock_submit_va,
     mock_fence_test,
     mock_kick,
 };

@@ -92,5 +92,6 @@ void nv_flcn_test_suite(void); /* nv_flcn: XFER cmd, sig index, FRTS patch */
 /* WP-F: /dev/nvshim over the mock RM.  Not arch-gated: the mock needs no
  * hardware, so the ABI is exercised on both arches. */
 void nv_shim_test_suite(void);
+void nv_shim_drm_test_suite(void); /* WP-F2: /dev/nvshim DRM ('d') face */
 
 #endif // UNIT_TEST_H
