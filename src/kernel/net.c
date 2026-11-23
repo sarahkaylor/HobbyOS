@@ -1,5 +1,6 @@
 #include "net.h"
 #include "frame.h" /* net_sockets_reserve(): the PCB table is frame-backed */
+#include "kmem.h"  /* phys_to_virt(): AArch64 identity, x86_64 DMAP */
 #include "kline.h"
 #include "virtio_net.h"
 #include "lock.h"
@@ -205,7 +206,16 @@ static int net_sockets_reserve(void) {
     uint64_t base = frame_alloc_contig(nframes);
     if (base) {
       extern void *memset(void *dst, int c, size_t n);
-      struct socket_pcb *tab = (struct socket_pcb *)base;
+      /* phys_to_virt, not a cast: pool frames are identity-mapped only on
+         AArch64; on x86_64 the direct map lives at DMAP_BASE and the only
+         identity window is the image itself, [KIMG_BASE, CP_KHOLE_HI) =
+         [0x70000000, 0x78000000) (src/include/kmem.h) -- and the pool may
+         not hand out frames there (they are reserved for the image).  Every
+         other frame_alloc_contig() caller in the tree converts the same way
+         (blk_cache, elf_loader, nfs).  Measured: without this the x86_64
+         unit tier hangs at the first net_socket_create()
+         (test_net_socket_fd_table); with it, 561 tests / 0 failed. */
+      struct socket_pcb *tab = (struct socket_pcb *)phys_to_virt(base);
       /* Zero each PCB's control fields, NOT the 4 MiB RX ring: the ring is
          only ever read between rx_head and rx_tail (both zeroed below), so
          its stale pool contents are unreachable.  A 64 MiB memset here runs
