@@ -66,6 +66,13 @@
  * "no engine here", and it is never a reason to fail a probe. */
 #define NV_REG_UNREADABLE 0xBADF5040u
 #define NV_REG_FENCED 0xBADF5620u
+/* MEASURED r2a: the falcon's PIO *code* port answers this at every IMEM
+ * address, secure bit set or not, on a card whose DMEM port answers real data
+ * in the same run.  "DEAD SEC1" is the same class of answer as 0xBADF5620 --
+ * a refusal with a signature, not memory -- so a read that returns it says
+ * nothing about what the page holds.  Reading IMEM content needs a different
+ * path (the XFER engine's store direction). */
+#define NV_REG_IMEM_MARKER 0xDEAD5EC1u
 
 /* A poisoned READ has 0xBADF in the high half (0xBADF5040 for PMC_INTR,
  * 0xBADF5620 measured on AD102 at BAR0+0x840000, a window that is NOT the SEC2

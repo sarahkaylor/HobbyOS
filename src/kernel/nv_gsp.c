@@ -322,6 +322,7 @@ static int nv_gsp_load_one(struct nv_dev *d, const char *name, int parse_hs,
 #define XF_SIZE(log2) (((log2) & 0x7) << 8)
 #define XF_FULL (1u << 0) /* 0x118: the previous request is still queued */
 #define XF_DONE (1u << 1) /* 0x118: the engine collected the request */
+#define XF_STORE (1u << 5) /* 0x118: DIR=1 -- falcon memory -> system memory */
 #define XF_IDLE (1u << 1) /* 0x120 bit 1: a DIFFERENT status word, not completion */
 #define NV_SEC2_ADDR2 0x841000
 #define NV_BROM_PARAADDR0 (NV_SEC2_ADDR2 + 0x210)
@@ -715,6 +716,175 @@ static void nv_landing_verdict(const char *what, const struct nv_landing *st) {
   else
     uart_puts(" verdict=MIXED (some words are the staged ones, some are not: "
               "a partial or interleaved load)\n");
+}
+
+/* ---- reading the code port, and reading IMEM through the engine --------
+ *
+ * The PIO code port answered 0xDEAD5EC1 at every IMEM address in run r2a --
+ * seven addresses, one value, a word that is in no staged image.  That is a
+ * signature, not data (the same class as 0xBADF5620 on the MMIO side), so
+ * "the code landed" cannot be asked through the port.  Two other ways exist
+ * and both are cheap:
+ *
+ *   1. the code port with the SECRET bit clear, and with CODE_VIRT_ADDR
+ *      written first, which is the one difference between this read and the
+ *      write path that is known to land;
+ *   2. the XFER engine in its STORE direction: falcon memory -> system memory.
+ *      A different path to the same bytes, and the only way to compare what
+ *      IMEM holds against what was staged.
+ */
+static void nv_imem_read_row(struct nv_dev *d, struct nv_falcon *f, uint32_t off,
+                             const uint8_t *img, uint32_t img_len,
+                             int sec, int virt, struct nv_landing *st) {
+  uint32_t got = 0, want = 0;
+  if (virt) nv_wr32(d, f->base + NV_FALCON_CODE_VIRT_ADDR, 0);
+  int rc = nv_falcon_imem_read_ex(d, f, off, &got, 1, sec);
+  uart_puts("[NV-IMEM] @");
+  uart_print_hex(off);
+  uart_puts(" sec=");
+  print_int(sec);
+  uart_puts(" virt=");
+  print_int(virt);
+  uart_puts(" got=");
+  uart_print_hex(got);
+  if (rc != 0) {
+    uart_puts(" READ-FAILED rc=");
+    print_int(rc);
+    uart_puts("\n");
+    st->failed++;
+    return;
+  }
+  if (!nv_img_word(img, img_len, off, &want)) {
+    uart_puts(" (past the staged image)\n");
+    return;
+  }
+  uart_puts(" want=");
+  uart_print_hex(want);
+  st->probes++;
+  if (got == want) {
+    uart_puts(" MATCH\n");
+    st->match++;
+  } else if (got == NV_REG_IMEM_MARKER) {
+    uart_puts(" MASKED (0xdead5ec1: the port's answer for a secure page, not "
+              "data)\n");
+    st->failed++;
+  } else {
+    uart_puts(" DIFF (value-in-image-at:");
+    uint32_t found = nv_flcn_find_word(img, img_len, got);
+    if (found == NV_FLCN_IDX_NONE)
+      uart_puts(" NOWHERE)\n");
+    else {
+      uart_print_hex(found);
+      uart_puts(")\n");
+    }
+    st->displaced++;
+  }
+}
+
+/* falcon memory -> system memory, one 256-byte block, through the XFER engine.
+ * Same four registers as the load, with DIR (0x118 bit 5) set.  Returns 0 when
+ * the engine reported the request collected, -ETIMEDOUT otherwise; the caller
+ * still compares the buffer, because "collected" is not "copied". */
+static int falcon_dma_store_block(struct nv_dev *d, uint32_t fbase,
+                                  uint64_t dst_phys, uint32_t dst_off,
+                                  uint32_t src_falcon, int is_imem, int sec) {
+  for (int i = 0; i < 200000; i++) {
+    if (!(nv_rd32(d, fbase + NV_XFER_CTRL) & XF_FULL)) break;
+    if (i == 199999) return -110;
+  }
+  nv_wr32(d, fbase + NV_XFER_EXT_BASE, (uint32_t)(dst_phys >> 8));
+  nv_wr32(d, fbase + NV_XFER_EXT_BASE1, (uint32_t)((dst_phys >> 40) & 0x1FF));
+  nv_wr32(d, fbase + NV_XFER_FALCON_ADDR, src_falcon);
+  nv_wr32(d, fbase + NV_XFER_EXT_ADDR, dst_off);
+  uint32_t ctrl = nv_flcn_xfer_cmd(NV_FLCN_BLOCK, is_imem, sec);
+  if (ctrl == 0xffffffffu) return -EINVAL;
+  nv_wr32(d, fbase + NV_XFER_CTRL, ctrl | XF_STORE);
+  for (int i = 0; i < 200000; i++) {
+    if (nv_rd32(d, fbase + NV_XFER_CTRL) & XF_DONE) return 0;
+  }
+  return -110;
+}
+
+/* Copy one IMEM block back through the engine and compare it with the staged
+ * bytes.  One row per block; `*matched` counts fully-matching blocks so the
+ * caller can print one verdict. */
+static void nv_imem_store_row(struct nv_dev *d, uint32_t fbase,
+                              const uint8_t *img, uint32_t img_len, uint32_t off,
+                              uint64_t scratch_phys, int *matched, int *tried) {
+  uint8_t *bb = (uint8_t *)phys_to_virt(scratch_phys);
+  for (uint32_t i = 0; i < NV_FLCN_BLOCK; i++) bb[i] = 0xA5; /* prefill: an
+    * engine that copies nothing leaves this, and "prefill with something whose
+    * zero would look like success" is the rule this is applying */
+  int rc = falcon_dma_store_block(d, fbase, scratch_phys, 0, off, 1, 1);
+  uint32_t ctl = nv_rd32(d, fbase + NV_XFER_CTRL);
+  int bad = -1;
+  uint32_t got = 0, want = 0;
+  if (off + NV_FLCN_BLOCK <= img_len) {
+    for (uint32_t i = 0; i < NV_FLCN_BLOCK; i += 4) {
+      uint32_t g = (uint32_t)bb[i] | ((uint32_t)bb[i + 1] << 8) |
+                   ((uint32_t)bb[i + 2] << 16) | ((uint32_t)bb[i + 3] << 24);
+      uint32_t w = (uint32_t)img[off + i] | ((uint32_t)img[off + i + 1] << 8) |
+                   ((uint32_t)img[off + i + 2] << 16) |
+                   ((uint32_t)img[off + i + 3] << 24);
+      if (g != w && bad < 0) {
+        bad = (int)i;
+        got = g;
+        want = w;
+      }
+    }
+  }
+  uart_puts("[NV-IMEM] store @");
+  uart_print_hex(off);
+  uart_puts(" rc=");
+  print_int(rc);
+  uart_puts(" 118=");
+  uart_print_hex(ctl);
+  (*tried)++;
+  if (rc != 0) {
+    uart_puts(" ENGINE DID NOT COLLECT (no copy to compare)\n");
+    return;
+  }
+  if (bad < 0) {
+    uart_puts(" MATCH (256 bytes copied back are the staged bytes)\n");
+    (*matched)++;
+  } else {
+    uart_puts(" DIFF first@+0x");
+    uart_print_hex((uint32_t)bad);
+    uart_puts(" got=");
+    uart_print_hex(got);
+    uart_puts(" want=");
+    uart_print_hex(want);
+    uart_puts("\n");
+  }
+}
+
+/* ---- the 0x1400 status block as a read-only control ---------------------
+ *
+ * "Was 0x1438 written, or was the region cleared?" is answered by the
+ * neighbours: snapshot the block before the launch and after it, and compare.
+ * Nothing is written to registers whose meaning is unknown, and a change in any
+ * other word is itself a finding (it names what the ucode touched).
+ */
+#define NV_SEC_STATUS_BLOCK 0x1400u
+#define NV_SEC_STATUS_WORDS 16u
+
+static void nv_snapshot_block(struct nv_dev *d,
+                              uint32_t out[NV_SEC_STATUS_WORDS]) {
+  for (uint32_t i = 0; i < NV_SEC_STATUS_WORDS; i++)
+    out[i] = nv_rd32(d, NV_SEC_STATUS_BLOCK + i * 4u);
+}
+
+/* Count words that differ, fill `first` with the first differing index. */
+static int nv_compare_block(const uint32_t *a, const uint32_t *b, int *first) {
+  int n = 0;
+  if (first) *first = -1;
+  for (uint32_t i = 0; i < NV_SEC_STATUS_WORDS; i++) {
+    if (a[i] != b[i]) {
+      if (n == 0 && first) *first = (int)i;
+      n++;
+    }
+  }
+  return n;
 }
 
 /* The five words that describe the last DMA request this host programmed.
@@ -1325,23 +1495,64 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
       struct nv_landing dm = {0, 0, 0, 0}, im = {0, 0, 0, 0};
       static const uint32_t dm_probe[] = {0x000, 0x100, 0x400, 0x800,
                                           0xAE0, 0xB0C, 0xB24, 0xD40, 0xD00};
-      static const uint32_t im_probe[] = {0x000, 0x100, 0x1000, 0x8000,
-                                          0xA000, 0xF000, 0xF100};
+      static const uint32_t im_probe[] = {0x000, 0x1000, 0x8000};
       for (uint32_t i = 0; i < sizeof dm_probe / sizeof dm_probe[0]; i++)
         nv_landing_row(d, gspf, 0, dm_probe[i], dmem_img, d->ucode_dmem, &dm);
-      for (uint32_t i = 0; i < sizeof im_probe / sizeof im_probe[0]; i++)
-        nv_landing_row(d, gspf, 1, im_probe[i], buf, d->ucode_imem, &im);
       nv_landing_verdict("dmem", &dm);
-      nv_landing_verdict("imem", &im);
+
+      /* The code port, three ways.  r2a answered 0xDEAD5EC1 for every address
+       * with SECRET set; if the plain page (SECRET clear) or the CODE_VIRT_ADDR
+       * pre-write changes that, IMEM becomes verifiable through the port. */
+      for (uint32_t i = 0; i < sizeof im_probe / sizeof im_probe[0]; i++)
+        nv_imem_read_row(d, gspf, im_probe[i], buf, d->ucode_imem, 1, 0, &im);
+      for (uint32_t i = 0; i < sizeof im_probe / sizeof im_probe[0]; i++)
+        nv_imem_read_row(d, gspf, im_probe[i], buf, d->ucode_imem, 1, 1, &im);
+      for (uint32_t i = 0; i < sizeof im_probe / sizeof im_probe[0]; i++)
+        nv_imem_read_row(d, gspf, im_probe[i], buf, d->ucode_imem, 0, 0, &im);
+      nv_landing_verdict("imem-port", &im);
+
+      /* And the engine's store direction: falcon memory -> system memory.  This
+       * is the only path to IMEM content that is not the refused port. */
+      int imem_ok = 0;
+      {
+        uint64_t bp = frame_alloc_contig(1);
+        int sm = 0, st = 0;
+        if (!bp) {
+          uart_puts("[NV-IMEM] store-block skipped: no contiguous frame\n");
+        } else {
+          static const uint32_t st_probe[] = {0x000, 0x1000, 0xF000};
+          for (uint32_t i = 0; i < sizeof st_probe / sizeof st_probe[0]; i++)
+            nv_imem_store_row(d, NV_GSP_U, buf, d->ucode_imem, st_probe[i], bp,
+                              &sm, &st);
+          frame_free(bp);
+        }
+        uart_puts("[NV-IMEM] verdict=");
+        if (st == 0)
+          uart_puts("NO-STORE-PATH (the engine never took a store request)\n");
+        else if (sm == st) {
+          imem_ok = 1;
+          uart_puts("IMEM VERIFIED VIA THE ENGINE (the bytes the engine copies "
+                    "back are the staged bytes: the code landed)\n");
+        } else
+          uart_puts("IMEM COPY DISAGREES WITH THE STAGED BYTES (the rows above "
+                    "name the first word)\n");
+      }
+      /* A port read that matched would be just as good as the engine copy. */
+      if (im.probes > 0 && im.match == im.probes) imem_ok = 1;
+
       uart_puts("[NV-LAND] verdict=");
       if (!dmem_read_trustworthy) {
         uart_puts("UNTRUSTWORTHY (the DMEM port failed its own write/read "
                   "round-trip in this run, so no read-back row above is "
                   "evidence)\n");
-      } else if (dm.match == dm.probes && im.match == im.probes &&
-                 dm.probes > 0 && im.probes > 0) {
-        uart_puts("IMAGE IS IN THE FALCON'S MEMORY (both halves: every probed "
-                  "word is the staged word, through a port proved in this run)\n");
+      } else if (dm.match == dm.probes && dm.probes > 0 && imem_ok) {
+        uart_puts("IMAGE IS IN THE FALCON'S MEMORY (DMEM word for word through a "
+                  "port proved in this run; IMEM either read back or copied back "
+                  "byte for byte)\n");
+      } else if (dm.match == dm.probes && dm.probes > 0) {
+        uart_puts("DMEM IS THE IMAGE, IMEM IS NOT VERIFIED (the code port refused "
+                  "the read and the engine copy did not match; the load's IMEM "
+                  "half rests on the DMA's effect only)\n");
       } else {
         uart_puts("IMAGE IS NOT WHERE IT WAS STAGED FOR (see the DIFF rows: the "
                   "answered values say which unit is wrong)\n");
@@ -1394,35 +1605,62 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
    *   - the transition is timestamped and correlated with the core state, the
    *     PC and 0x111668, instead of being read once at the end.
    */
-  const uint32_t kStale = 0x5EC20000u; /* round-2 sentinel: hi16 = 0x5EC2 */
-  const uint32_t kCtl = 0x5EC30000u;   /* the control word's own sentinel */
+  const uint32_t kStale = 0x5EC25A5Au; /* round-2 sentinel: hi16 = 0x5EC2,
+                                        * low half non-zero so a write that
+                                        * touches only bits 31:16 (which would
+                                        * leave 0x00005A5A) is distinguishable
+                                        * from a full-word write of 0 */
   nv_wr32(d, 0x1438, kStale);
-  nv_wr32(d, NV_GSP_U + NV_FALCON_MAILBOX0_FLCN, kCtl);
+  /* MAILBOX0 is FWSEC's error channel with 0 meaning "no error"
+   * (docs/nv-devinit-contract.md section 3: 0x040 <- 0, then 0x040 == 0 is part
+   * of completion).  It is therefore NOT usable as a sentinel control: a
+   * non-zero value there is indistinguishable from an error code.  Round 2's
+   * first run paid for that lesson; the control is now a read-only snapshot of
+   * the whole 0x1400 block, taken before and after, which answers "region
+   * clear?" without writing into any register whose meaning is unknown. */
+  nv_wr32(d, NV_GSP_U + NV_FALCON_MAILBOX0_FLCN, 0);
   uint32_t pre_1438 = nv_rd32(d, 0x1438);
   uint32_t pre_mb0 = nv_rd32(d, NV_GSP_U + NV_FALCON_MAILBOX0_FLCN);
   uint32_t bcr_pre = nv_rd32(d, NV_GSP_BCR_CTRL);
+  uint32_t blk_pre[NV_SEC_STATUS_WORDS];
+  nv_snapshot_block(d, blk_pre);
   uart_puts("[NV-FWSEC] guard 1438=");
   uart_print_hex(pre_1438);
   uart_puts("/");
   uart_print_hex(kStale);
   uart_puts(" mb0=");
   uart_print_hex(pre_mb0);
-  uart_puts("/");
-  uart_print_hex(kCtl);
   uart_puts(" bcr_before=");
   uart_print_hex(bcr_pre);
-  uart_puts((pre_1438 == kStale && pre_mb0 == kCtl)
-                ? " BOTH-SENTINELS-STICK (a no-write is now distinguishable "
-                  "from a write)\n"
+  uart_puts(pre_1438 == kStale
+                ? " SENTINEL-STICKS (a no-write is distinguishable from a write)\n"
                 : " NOT-STICKY (a word that will not hold a sentinel cannot "
                   "report a write either)\n");
 
   /* Did the core change its own memory?  A core that never executed cannot; a
    * core that executed anything leaves a stack, a scratch word or a result
    * behind.  Sixteen words of DMEM read now, read again after the wait: an
-   * oracle that is about the effect of running, not about a status register. */
+   * oracle that is about the effect of running, not about a status register.
+   *
+   * And because the window re-fenced within ~1 ms of START in run r2a, the
+   * "after" read alone can only ever say UNOBSERVABLE.  So four words spread
+   * across DMEM (two of them past the 0xD80-byte image, where a running ucode's
+   * stack or bss would be) are also sampled in the wait loop itself, from the
+   * first microsecond after START until the port stops answering. */
   uint32_t dm_pre[16];
   int dm_pre_ok = (nv_falcon_dmem_read(d, gspf, 0x000, dm_pre, 16) == 0);
+  static const uint32_t samp_addr[4] = {0x000, 0x800, 0x1000, 0x2000};
+  uint32_t samp_pre[4] = {0, 0, 0, 0};
+  int samp_pre_ok = 1;
+  for (int i = 0; i < 4; i++) {
+    if (nv_falcon_dmem_read(d, gspf, samp_addr[i], &samp_pre[i], 1) != 0)
+      samp_pre_ok = 0;
+  }
+  int samp_changed = 0, samp_which = -1;
+  uint32_t samp_now = 0;
+  uint64_t samp_at_ns = 0;
+  int samp_fenced = 0;
+  uint64_t samp_fenced_ns = 0;
 
   /* START accepted, or refused?  Two samples a decade apart in time: 0x10 at
    * both is a refused start (nothing ran); clear at 1 us and 0x10 at 10 ms is a
@@ -1458,6 +1696,24 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
     for (int i = 0; i < 4000000; i++) {
       st = nv_rd32(d, 0x1438);
       ctl_10ms = nv_rd32(d, NV_GSP_U + NV_FALCON_UC_CTRL);
+      /* Sample DMEM while the window is still ours: the first change is the
+       * core executing, the first fence word is the moment the window closes. */
+      if (samp_pre_ok && !samp_fenced && i < 2000) {
+        int k = i & 3;
+        uint32_t v = 0;
+        if (nv_falcon_dmem_read(d, gspf, samp_addr[k], &v, 1) == 0) {
+          if (v == NV_REG_FENCED) {
+            samp_fenced = 1;
+            if (have_t && nv_timer_read(d, &now) == 0)
+              samp_fenced_ns = now - t0;
+          } else if (v != samp_pre[k] && !samp_changed) {
+            samp_changed = 1;
+            samp_which = k;
+            samp_now = v;
+            if (have_t && nv_timer_read(d, &now) == 0) samp_at_ns = now - t0;
+          }
+        }
+      }
       if ((st >> 16) != (kStale >> 16)) {          /* somebody wrote 0x1438 */
         changed = 1;
         if (have_t && nv_timer_read(d, &now) == 0) changed_ns = now - t0;
@@ -1509,6 +1765,33 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
     uart_puts(" mb0=");
     uart_print_hex(mb_at_change);
   }
+  uart_puts("[NV-FWSEC] dmem-samples ");
+  if (!samp_pre_ok) {
+    uart_puts("UNOBSERVABLE (the pre-START read did not answer)\n");
+  } else {
+    uart_puts("changed=");
+    print_int(samp_changed);
+    if (samp_changed) {
+      uart_puts(" first@0x");
+      uart_print_hex(samp_addr[samp_which]);
+      uart_puts(" was=");
+      uart_print_hex(samp_pre[samp_which]);
+      uart_puts(" now=");
+      uart_print_hex(samp_now);
+      uart_puts(" at +");
+      uart_print_hex(samp_at_ns);
+      uart_puts(" ns");
+    }
+    uart_puts(" fenced=");
+    print_int(samp_fenced);
+    if (samp_fenced) {
+      uart_puts(" at +");
+      uart_print_hex(samp_fenced_ns);
+      uart_puts(" ns");
+    }
+    uart_puts("\n");
+  }
+
   uart_puts("[NV-FWSEC] after start ctl_1us=");
   uart_print_hex(ctl_1us);
   uart_puts(" ctl_late=");
@@ -1643,14 +1926,21 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
   }
   /* ---- classify the verdict word ----------------------------------------
    *
-   * The control word decides which of the two readings of a zero applies; the
-   * DMEM effect oracle and SEC2's own window decide whether the core did
-   * FWSEC's work.  Both are printed even when they disagree, because a "wrote
-   * 0" with no SEC2 effect is exactly the case this round exists to name.
+   * Two questions, both answered by measurement rather than by a code value:
+   *   (1) was 0x1438 written, or was the region cleared?  The 0x1400 block
+   *       snapshot taken before the launch is the control -- if a neighbour
+   *       changed too, it was a clear, and the zero carries no verdict.
+   *   (2) did the ucode do its work?  SEC2 unfencing, the halt, and the DMEM
+   *       sample rows are the effect oracles; this row prints them as they are,
+   *       including the case where they are unobservable.
    */
   {
     uint32_t mb0_end = nv_rd32(d, NV_GSP_U + NV_FALCON_MAILBOX0_FLCN);
     uint32_t sec2 = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL);
+    uint32_t blk_post[NV_SEC_STATUS_WORDS];
+    nv_snapshot_block(d, blk_post);
+    int first_diff = -1;
+    int ndiff = nv_compare_block(blk_pre, blk_post, &first_diff);
     int wrote_specific = 0;
     uart_puts("[NV-FWSEC] status1438=");
     uart_print_hex(st);
@@ -1658,31 +1948,58 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
     uart_print_hex(mb0_end);
     uart_puts(" sec2_ctl=");
     uart_print_hex(sec2);
+    uart_puts("\n[NV-FWSEC] block1400 after:");
+    for (uint32_t i = 0; i < NV_SEC_STATUS_WORDS; i++) {
+      uart_puts(" ");
+      uart_print_hex(blk_post[i]);
+    }
+    uart_puts(" changed_words=");
+    print_int(ndiff);
+    if (ndiff) {
+      uart_puts(" first@0x");
+      uart_print_hex(NV_SEC_STATUS_BLOCK + (uint32_t)first_diff * 4u);
+      uart_puts(" was=");
+      uart_print_hex(blk_pre[first_diff]);
+    }
+    uart_puts("\n");
+
     if (st == kStale) {
-      uart_puts("\n[NV-FWSEC] verdict=NEVER WRITTEN (the 0x5ec2 sentinel is "
+      uart_puts("[NV-FWSEC] verdict=NEVER WRITTEN (the 0x5ec25a5a sentinel is "
                 "still there: nothing wrote this word, so there is no code to "
                 "read)\n");
     } else if ((st >> 16) != 0) {
-      uart_puts("\n[NV-FWSEC] verdict=ERROR CODE WRITTEN (hi16=");
+      uart_puts("[NV-FWSEC] verdict=ERROR CODE WRITTEN (hi16=");
       uart_print_hex(st >> 16);
       uart_puts(": the ucode reported a failure; the code values are not "
                 "published)\n");
-    } else if (mb0_end == kCtl) {
+    } else if (st == 0x00005A5Au) {
+      uart_puts("[NV-FWSEC] verdict=HI16 WRITTEN, LOW HALF KEPT (0x5a5a "
+                "survived: the writer set bits 31:16 to 0 and did not clear the "
+                "word -- a status write, not a clear)\n");
       wrote_specific = 1;
-      uart_puts("\n[NV-FWSEC] verdict=WROTE 0x1438=0 SPECIFICALLY (the control "
-                "word still holds 0x5ec30000, so this was a write to this word "
-                "and not a region clear; a success code of 0 and a deliberate "
-                "clear of that word still look identical, and only the effect "
-                "oracles -- SEC2 unfencing, the DMEM change row -- separate "
-                "them)\n");
-    } else if (mb0_end == NV_REG_FENCED || mb0_end == 0xffffffffu) {
-      uart_puts("\n[NV-FWSEC] verdict=0x1438 CLEARED, CONTROL UNREADABLE (the "
-                "mailbox now reads the fence word, so 'the control kept its "
-                "sentinel' cannot be asserted in this run)\n");
+    } else if (st == 0) {
+      int only_1438 = (ndiff == 1 && first_diff == 14); /* 0x1400 + 14*4 */
+      if (only_1438) {
+        uart_puts("[NV-FWSEC] verdict=FULL-WORD WRITE TO 0x1438 (the value went "
+                  "to 0 and no other word of the 0x1400 block changed: a "
+                  "targeted write, not a region clear).  A success code of 0 and "
+                  "a deliberate clear of that word are the same value; the effect "
+                  "oracles are what separates them\n");
+        wrote_specific = 1;
+      } else if (ndiff == 0) {
+        uart_puts("[NV-FWSEC] verdict=INCONSISTENT (0x1438 now reads 0 but the "
+                  "block matches the pre-launch snapshot word for word: re-read "
+                  "before believing either)\n");
+      } else {
+        uart_puts("[NV-FWSEC] verdict=MORE THAN ONE WORD OF 0x1400 CHANGED (the "
+                  "zero arrived with other writes in the same block, so 'a clear "
+                  "of that word' and 'the ucode writing a status' are not "
+                  "separated by this row: see changed_words above)\n");
+        wrote_specific = 1; /* a targeted write is still a write; the row says which */
+      }
     } else {
-      uart_puts("\n[NV-FWSEC] verdict=BOTH WORDS LOST THEIR SENTINELS (a "
-                "region-wide clear, so the zero in 0x1438 carries no verdict "
-                "about the ucode at all)\n");
+      uart_puts("[NV-FWSEC] verdict=UNEXPECTED VALUE (neither the sentinel, an "
+                "error code, nor 0: judge by the raw rows)\n");
     }
     uart_puts(sec2 != NV_REG_FENCED ? "[NV-FWSEC] SEC2=UNFENCED (privilege "
                                       "dropped: FWSEC did its job)\n"
