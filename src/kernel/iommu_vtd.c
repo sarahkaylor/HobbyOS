@@ -100,156 +100,18 @@ static inline void vtd_write64(uint32_t offset, uint64_t val) {
 }
 
 /* ---------------------------------------------------------------------------
- *  ACPI RSDP Discovery
+ *  ACPI table lookup
  *
- *  Scans the BIOS read-only memory area (0xE0000 - 0xFFFFF) on 16-byte
- *  boundaries for the "RSD PTR " signature. This is the standard ACPI
- *  method for bare-metal OS to locate the Root System Description Pointer.
- * ------------------------------------------------------------------------ */
-
-static int str_match(const char *a, const char *b, int len) {
-  for (int i = 0; i < len; i++) {
-    if (a[i] != b[i]) return 0;
-  }
-  return 1;
-}
-
-static struct acpi_rsdp *find_rsdp(void) {
-  uart_puts("[VT-d] Scanning BIOS area for ACPI RSDP...\n");
-
-  /* Map the BIOS ROM area so we can read it */
-  mmu_map_mmio_range(RSDP_SCAN_START,
-                     RSDP_SCAN_END - RSDP_SCAN_START + 1);
-
-  /* RSDP must be aligned on a 16-byte boundary */
-  for (uint64_t addr = RSDP_SCAN_START; addr < RSDP_SCAN_END; addr += 16) {
-    volatile uint8_t *ptr = (volatile uint8_t *)phys_to_virt(addr);
-
-    if (str_match((const char *)ptr, RSDP_SIGNATURE, 8)) {
-      /* Validate checksum over first 20 bytes */
-      uint8_t sum = 0;
-      for (int i = 0; i < 20; i++) {
-        sum += ptr[i];
-      }
-      if (sum == 0) {
-        uart_puts("[VT-d] RSDP found at ");
-        uart_print_hex(addr);
-        uart_puts("\n");
-        return (struct acpi_rsdp *)phys_to_virt(addr);
-      }
-    }
-  }
-
-  uart_puts("[VT-d] ERROR: ACPI RSDP not found in BIOS area!\n");
-  return 0;
-}
-
-/* ---------------------------------------------------------------------------
- *  ACPI Table Search
+ *  The RSDP scan and the RSDT/XSDT walk live in src/kernel/acpi.c now: this
+ *  driver is one of several consumers (the PCIe bus layer needs MCFG) and the
+ *  private copy had already drifted from the rules -- it read an SDT header
+ *  through a packed struct and ignored mmu_map_mmio_range's return value, so
+ *  a table above 4 GiB was read through the wrong pointer.
  *
- *  Given the RSDP, follows the XSDT (64-bit) or RSDT (32-bit) pointer
- *  to enumerate all ACPI tables, searching for one matching the given
- *  4-character signature (e.g., "DMAR").
+ *  Behaviour is unchanged: acpi_init() scans low memory for the RSDP (a
+ *  superset of the old 0xE0000-0xFFFFF window), verifies its checksum, and
+ *  prefers the XSDT over the RSDT when the RSDP is revision 2 or newer.
  * ------------------------------------------------------------------------ */
-
-static struct acpi_sdt_header *find_acpi_table(struct acpi_rsdp *rsdp,
-                                                const char *sig) {
-  if (!rsdp) return 0;
-
-  /* Prefer XSDT (revision >= 2) over RSDT for 64-bit address support */
-  if (rsdp->revision >= 2 && rsdp->xsdt_address != 0) {
-    uint64_t xsdt_phys = rsdp->xsdt_address;
-    uart_puts("[VT-d] Using XSDT at ");
-    uart_print_hex(xsdt_phys);
-    uart_puts("\n");
-
-    /* Map the XSDT region */
-    mmu_map_mmio_range(xsdt_phys, 0x1000);
-
-    struct acpi_sdt_header *xsdt = (struct acpi_sdt_header *)phys_to_virt(xsdt_phys);
-    uint32_t num_entries = (xsdt->length - sizeof(struct acpi_sdt_header))
-    / sizeof(uint64_t);
-
-    uart_puts("[VT-d] XSDT has ");
-    print_int(num_entries);
-    uart_puts(" entries\n");
-
-    uint64_t *entries = (uint64_t *)((uint8_t *)xsdt
-                        + sizeof(struct acpi_sdt_header));
-
-    for (uint32_t i = 0; i < num_entries; i++) {
-      uint64_t table_phys = entries[i];
-      if (table_phys == 0) continue;
-
-      /* Map this table's header so we can read signature */
-      mmu_map_mmio_range(table_phys, 0x1000);
-
-      struct acpi_sdt_header *hdr =
-          (struct acpi_sdt_header *)phys_to_virt(table_phys);
-
-      if (str_match(hdr->signature, sig, 4)) {
-        uart_puts("[VT-d] Found '");
-        uart_puts(sig);
-        uart_puts("' table at ");
-        uart_print_hex(table_phys);
-        uart_puts("\n");
-
-        /* Map entire table if it's larger than one page */
-        if (hdr->length > 0x1000) {
-          mmu_map_mmio_range(table_phys, hdr->length);
-        }
-        return hdr;
-      }
-    }
-  } else {
-    /* Fallback to RSDT (32-bit addresses) */
-    uint64_t rsdt_phys = (uint64_t)rsdp->rsdt_address;
-    uart_puts("[VT-d] Using RSDT at ");
-    uart_print_hex(rsdt_phys);
-    uart_puts("\n");
-
-    mmu_map_mmio_range(rsdt_phys, 0x1000);
-
-    struct acpi_sdt_header *rsdt = (struct acpi_sdt_header *)phys_to_virt(rsdt_phys);
-    uint32_t num_entries = (rsdt->length - sizeof(struct acpi_sdt_header))
-    / sizeof(uint32_t);
-
-    uart_puts("[VT-d] RSDT has ");
-    print_int(num_entries);
-    uart_puts(" entries\n");
-
-    uint32_t *entries = (uint32_t *)((uint8_t *)rsdt
-                        + sizeof(struct acpi_sdt_header));
-
-    for (uint32_t i = 0; i < num_entries; i++) {
-      uint64_t table_phys = (uint64_t)entries[i];
-      if (table_phys == 0) continue;
-
-      mmu_map_mmio_range(table_phys, 0x1000);
-
-      struct acpi_sdt_header *hdr =
-          (struct acpi_sdt_header *)phys_to_virt(table_phys);
-
-      if (str_match(hdr->signature, sig, 4)) {
-        uart_puts("[VT-d] Found '");
-        uart_puts(sig);
-        uart_puts("' table at ");
-        uart_print_hex(table_phys);
-        uart_puts("\n");
-
-        if (hdr->length > 0x1000) {
-          mmu_map_mmio_range(table_phys, hdr->length);
-        }
-        return hdr;
-      }
-    }
-  }
-
-  uart_puts("[VT-d] ERROR: ACPI table '");
-  uart_puts(sig);
-  uart_puts("' not found!\n");
-  return 0;
-}
 
 /* ---------------------------------------------------------------------------
  *  DMAR Table Parsing
@@ -258,10 +120,11 @@ static struct acpi_sdt_header *find_acpi_table(struct acpi_rsdp *rsdp,
  *  (DMA Remapping Hardware Unit Definition) and extracts its MMIO base.
  * ------------------------------------------------------------------------ */
 
-static int parse_dmar_table(struct acpi_sdt_header *dmar_hdr) {
+static int parse_dmar_table(const struct acpi_sdt_header *dmar_hdr) {
   if (!dmar_hdr) return -1;
 
-  struct acpi_dmar_header *dmar = (struct acpi_dmar_header *)dmar_hdr;
+  const struct acpi_dmar_header *dmar =
+      (const struct acpi_dmar_header *)dmar_hdr;
 
   uart_puts("[VT-d] DMAR table: host_address_width=");
   print_int(dmar->host_address_width);
@@ -270,11 +133,11 @@ static int parse_dmar_table(struct acpi_sdt_header *dmar_hdr) {
   uart_puts("\n");
 
   /* Walk variable-length remapping structures after the fixed header */
-  uint8_t *ptr = (uint8_t *)dmar + sizeof(struct acpi_dmar_header);
-  uint8_t *end = (uint8_t *)dmar + dmar->header.length;
+  const uint8_t *ptr = (const uint8_t *)dmar + sizeof(struct acpi_dmar_header);
+  const uint8_t *end = (const uint8_t *)dmar + dmar->header.length;
 
   while (ptr < end) {
-    struct dmar_remap_header *rh = (struct dmar_remap_header *)ptr;
+    const struct dmar_remap_header *rh = (const struct dmar_remap_header *)ptr;
 
     if (rh->length == 0) {
       uart_puts("[VT-d] ERROR: Zero-length DMAR remapping structure!\n");
@@ -282,7 +145,7 @@ static int parse_dmar_table(struct acpi_sdt_header *dmar_hdr) {
     }
 
     if (rh->type == DMAR_DRHD_TYPE) {
-      struct dmar_drhd *drhd = (struct dmar_drhd *)ptr;
+      const struct dmar_drhd *drhd = (const struct dmar_drhd *)ptr;
 
       uart_puts("[VT-d] DRHD found: flags=");
       uart_print_hex(drhd->flags);
@@ -484,18 +347,20 @@ int iommu_vtd_init(void) {
   }
   context_bus_count = 0;
 
-  /* --- Step 1: ACPI Discovery --- */
-  struct acpi_rsdp *rsdp = find_rsdp();
-  if (!rsdp) {
+  /* --- Step 1: ACPI Discovery (shared locator, src/kernel/acpi.c) --- */
+  if (acpi_init() != 0) {
     uart_puts("[VT-d] INIT FAILED: No RSDP\n");
     return -1;
   }
 
-  struct acpi_sdt_header *dmar_hdr = find_acpi_table(rsdp, "DMAR");
+  const struct acpi_sdt_header *dmar_hdr = acpi_find_table("DMAR", 0);
   if (!dmar_hdr) {
     uart_puts("[VT-d] INIT FAILED: No DMAR table (intel-iommu not present?)\n");
     return -1;
   }
+  uart_puts("[VT-d] Found 'DMAR' table at ");
+  uart_print_hex(virt_to_phys(dmar_hdr));
+  uart_puts("\n");
 
   /* --- Step 2: Parse DMAR for DRHD base --- */
   if (parse_dmar_table(dmar_hdr) != 0) {

@@ -12,6 +12,7 @@
 #include "arch/cpu.h"
 #include "arch/mmu.h"
 #include "syscall.h"
+#include "irq.h" /* MSI/MSI-X vector registry (0xA0..0xBF) */
 
 /* GB-027: /dev/input/event* ioctl (EVIOCGVERSION/GNAME/GBIT/GABS) + the
  * Linux-ABI event read that translates the virtio_input ring into
@@ -5380,6 +5381,13 @@ static void general_interrupt_inner(struct trap_frame *tf) {
     extern void gb207_ipi_handler(void);
     gb207_ipi_handler();
 #endif
+  } else if (tf->vector >= IRQ_VEC_FIRST && tf->vector <= IRQ_VEC_LAST) {
+    // PCIe MSI/MSI-X (src/include/irq.h).  LAPIC-delivered, so release the
+    // APIC first; irq_dispatch() is a no-op for a vector nobody claimed, so
+    // a stray or released vector is swallowed here instead of falling into
+    // the exception path.
+    lapic_send_eoi();
+    irq_dispatch((int)tf->vector);
   } else if (tf->vector < 32) {
     // Exception
     struct process *cur = current_process();
@@ -6861,6 +6869,18 @@ EXCEPTION_NO_ERR(129); // 0x81
 EXCEPTION_NO_ERR(130); // 0x82
 // C1-k6: high-resolution one-shot (LAPIC timer)
 EXCEPTION_NO_ERR(132); // 0x84
+// MSI/MSI-X device vectors 0xA0..0xBF (src/include/irq.h).  PCIe devices
+// deliver here through the LAPIC; general_interrupt_inner() forwards the
+// vector to irq_dispatch().  One stub per vector, from the same macro as the
+// PIC/IPI gates above.
+EXCEPTION_NO_ERR(160); EXCEPTION_NO_ERR(161); EXCEPTION_NO_ERR(162); EXCEPTION_NO_ERR(163);
+EXCEPTION_NO_ERR(164); EXCEPTION_NO_ERR(165); EXCEPTION_NO_ERR(166); EXCEPTION_NO_ERR(167);
+EXCEPTION_NO_ERR(168); EXCEPTION_NO_ERR(169); EXCEPTION_NO_ERR(170); EXCEPTION_NO_ERR(171);
+EXCEPTION_NO_ERR(172); EXCEPTION_NO_ERR(173); EXCEPTION_NO_ERR(174); EXCEPTION_NO_ERR(175);
+EXCEPTION_NO_ERR(176); EXCEPTION_NO_ERR(177); EXCEPTION_NO_ERR(178); EXCEPTION_NO_ERR(179);
+EXCEPTION_NO_ERR(180); EXCEPTION_NO_ERR(181); EXCEPTION_NO_ERR(182); EXCEPTION_NO_ERR(183);
+EXCEPTION_NO_ERR(184); EXCEPTION_NO_ERR(185); EXCEPTION_NO_ERR(186); EXCEPTION_NO_ERR(187);
+EXCEPTION_NO_ERR(188); EXCEPTION_NO_ERR(189); EXCEPTION_NO_ERR(190); EXCEPTION_NO_ERR(191);
 #ifdef PANIC_IPI_TEST
 EXCEPTION_NO_ERR(131); // 0x83 (GB-207 two-CPU panic-injection vehicle)
 #endif
@@ -7424,6 +7444,19 @@ void trap_init(void) {
   // GB-207: test vehicle vector 0x83 (kernel-only gate, 0x8E).
   idt_set_gate(131, (uint64_t)exception_131, 0x08, 0x8E);
 #endif
+
+  // MSI/MSI-X: the whole 0xA0..0xBF range belongs to PCIe devices (see
+  // src/include/irq.h), so every gate in it is installed here once.  Same
+  // kernel-only interrupt gate (0x8E) as the PIC/IPI vectors above.
+SET_EXCEPTION(160); SET_EXCEPTION(161); SET_EXCEPTION(162); SET_EXCEPTION(163);
+SET_EXCEPTION(164); SET_EXCEPTION(165); SET_EXCEPTION(166); SET_EXCEPTION(167);
+SET_EXCEPTION(168); SET_EXCEPTION(169); SET_EXCEPTION(170); SET_EXCEPTION(171);
+SET_EXCEPTION(172); SET_EXCEPTION(173); SET_EXCEPTION(174); SET_EXCEPTION(175);
+SET_EXCEPTION(176); SET_EXCEPTION(177); SET_EXCEPTION(178); SET_EXCEPTION(179);
+SET_EXCEPTION(180); SET_EXCEPTION(181); SET_EXCEPTION(182); SET_EXCEPTION(183);
+SET_EXCEPTION(184); SET_EXCEPTION(185); SET_EXCEPTION(186); SET_EXCEPTION(187);
+SET_EXCEPTION(188); SET_EXCEPTION(189); SET_EXCEPTION(190); SET_EXCEPTION(191);
+#undef SET_MSI_VECTOR
 }
 
 #ifdef KERNEL_MODE_UNIT_TEST

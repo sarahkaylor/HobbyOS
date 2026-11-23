@@ -5,6 +5,8 @@
 
 #include <stdint.h>
 
+#include "acpi.h" /* shared RSDP/RSDT/XSDT locator: acpi_find_table() */
+
 /* ============================================================================
  *  Intel VT-d (DMA Remapping) IOMMU Driver for HobbyOS
  *
@@ -152,46 +154,12 @@
 #define VTD_CTX_AW_48BIT    2   /* 4-level page table, 48-bit IOVA space     */
 
 /* ---------------------------------------------------------------------------
- *  ACPI RSDP (Root System Description Pointer) Signature
- * ------------------------------------------------------------------------ */
-#define RSDP_SIGNATURE      "RSD PTR "
-#define RSDP_SCAN_START     0x000E0000
-#define RSDP_SCAN_END       0x000FFFFF
-
-/* ---------------------------------------------------------------------------
- *  ACPI Table Structures
+ *  ACPI
  *
- *  We define these as simple structs for parsing. Per HobbyOS design rules,
- *  multi-byte fields at potentially unaligned offsets must be read byte-by-byte.
- *  However, ACPI tables are well-aligned in practice (guaranteed by firmware),
- *  so we use volatile reads with packed structs here.
+ *  The RSDP/RSDT/XSDT walk is shared (src/include/acpi.h, src/kernel/acpi.c):
+ *  the VT-d driver asks acpi_find_table("DMAR", 0) like every other consumer.
+ *  Only the DMAR payload below is VT-d specific.
  * ------------------------------------------------------------------------ */
-
-/* ACPI RSDP (revision 2.0, XSDT variant) */
-struct acpi_rsdp {
-  char     signature[8];      /* "RSD PTR "                                */
-  uint8_t  checksum;          /* Checksum over first 20 bytes              */
-  char     oem_id[6];         /* OEM identification string                 */
-  uint8_t  revision;          /* 0 = ACPI 1.0, 2 = ACPI 2.0+              */
-  uint32_t rsdt_address;      /* 32-bit physical address of RSDT           */
-  uint32_t length;            /* Length of this table (revision 2+)        */
-  uint64_t xsdt_address;      /* 64-bit physical address of XSDT           */
-  uint8_t  extended_checksum; /* Checksum over entire table                */
-  uint8_t  reserved[3];
-} __attribute__((packed));
-
-/* Standard ACPI SDT header (shared by RSDT, XSDT, DMAR, etc.) */
-struct acpi_sdt_header {
-  char     signature[4];      /* Table signature (e.g. "DMAR")             */
-  uint32_t length;            /* Total table length including header       */
-  uint8_t  revision;
-  uint8_t  checksum;
-  char     oem_id[6];
-  char     oem_table_id[8];
-  uint32_t oem_revision;
-  uint32_t creator_id;
-  uint32_t creator_revision;
-} __attribute__((packed));
 
 /* ACPI DMAR table header (DMA Remapping Reporting) */
 struct acpi_dmar_header {

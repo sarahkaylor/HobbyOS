@@ -66,6 +66,7 @@ void abi_t2_test_suite(void);
 void fpu_sig_test_suite(void); /* M6/L63: signal-frame FP image guard */
 void trap_user_class_test_suite(void); /* GB-243: GB-101 user-CS classifier */
 void trap_badvec_arm_test_suite(void); /* GB-244: pid-1 kernel-CS DR0 arming */
+void pci_test_suite(void); /* PCIe bus layer: MCFG/BAR/caps/MSI-X/scan */
 #endif
 void timer_test_suite(void);
 void smp_test_suite(void);
