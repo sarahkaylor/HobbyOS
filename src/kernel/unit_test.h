@@ -77,5 +77,9 @@ void net_rdma_test_suite(void);
 void nfs_test_suite(void);
 void elf_loader_test_suite(void); /* docs/shared-libs.md lane B */
 void linux_compat_pi_test_suite(void); /* PI futex word state machine */
+#ifdef __x86_64__
+void pci_test_suite(void); /* PCIe bus layer: MCFG/BAR/capability decode */
+void nv_test_suite(void);  /* nv: NVIDIA driver core + falcon (fake MMIO) */
+#endif
 
 #endif // UNIT_TEST_H

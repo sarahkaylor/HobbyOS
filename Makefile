@@ -877,6 +877,9 @@ SHELL_TEST_BIN = $(OBJ_DIR)/shtest.bin
 PS_BIN = $(OBJ_DIR)/ps.bin
 FREE_BIN = $(OBJ_DIR)/free.bin
 UPTIME_BIN = $(OBJ_DIR)/uptime.bin
+# nv (docs/nvidia-driver.md): the native NVIDIA driver's report tool.  Reads
+# /dev/nvctl like a file (one struct nv_info record per read).
+NVSMI_BIN = $(OBJ_DIR)/nvsmi.bin
 KILL_BIN = $(OBJ_DIR)/kill.bin
 BASENAME_BIN = $(OBJ_DIR)/basename.bin
 DIRNAME_BIN = $(OBJ_DIR)/dirname.bin
@@ -1849,6 +1852,18 @@ $(OBJ_DIR)/uptime.o: src/user/uptime.c $(USER_LIBC) $(USER_HDRS)
 $(UPTIME_BIN): $(OBJ_DIR)/uptime.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/uptime.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/uptime.elf $(UPTIME_BIN)
+
+# nv: NVSMI.BIN reports the native NVIDIA driver's state (/dev/nvctl).
+$(OBJ_DIR)/nvsmi.o: src/user/nvsmi.c $(USER_LIBC) $(USER_HDRS) src/include/nv.h
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(NVSMI_BIN): $(OBJ_DIR)/nvsmi.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/nvsmi.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/nvsmi.elf $(NVSMI_BIN)
+
+$(NVSMI_BIN): .EXTRA_PREREQS += src/user/linker.ld
+disk.img: $(NVSMI_BIN)
 
 $(OBJ_DIR)/kill.o: src/user/kill.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
@@ -3053,6 +3068,7 @@ ifneq ($(LO_ON_DISK),)
 	$(MCOPY) -i disk.img $(SBASE_BIN) ::/SBASE.BIN
 endif
 	$(MCOPY) -i disk.img $(UPTIME_BIN) ::/UPTIME.BIN
+	$(MCOPY) -i disk.img $(NVSMI_BIN) ::/NVSMI.BIN
 	$(MCOPY) -i disk.img $(KILL_BIN) ::/KILL.BIN
 	$(MCOPY) -i disk.img $(BASENAME_BIN) ::/BASENAME.BIN
 	$(MCOPY) -i disk.img $(DIRNAME_BIN) ::/DIRNAME.BIN

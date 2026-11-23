@@ -71,6 +71,15 @@ int file_is_devfb(struct process *p, int fd);
  * close path calls gpu_abi_release_fd() so a client's context/resources die
  * with its fd.  0 for every other fd (including an absent one). */
 int file_is_devgpu(struct process *p, int fd);
+
+/* --- /dev/nvctl (nv driver, implemented in fs.c) ------------------------
+ * 1 when `fd` is the node opened from /dev/nvctl.  The compat ioctl route
+ * dispatches NV_IOC_* through nv_ioctl() when this is true.  The node exists
+ * whether or not a card does: a request on a machine with no NVIDIA GPU
+ * answers -ENODEV, which is a fact the caller can print, rather than ENOENT,
+ * which is indistinguishable from a missing driver. */
+int file_is_devnv(struct process *p, int fd);
+
 /* C4-audio: the ALSA node's minor when `fd` is one (linux_snd.h), else -1. */
 int file_devsnd_minor(struct process *p, int fd);
 

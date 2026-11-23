@@ -80,6 +80,10 @@ typedef enum {
      requests through gpu_abi.c.  mmap is refused in M1 (no blob resources).
      Appended last: no values shift. */
   FILE_TYPE_DEVGPU,
+  /* nv (docs/nvidia-driver.md): /dev/nvctl -- the native NVIDIA driver's
+     control node.  read/write refuse it; the compat ioctl(16) route answers
+     the NV_IOC_* requests through nv.c.  Appended last: no values shift. */
+  FILE_TYPE_DEVNV,
   /* cp/ext2 (docs/cp-ext2.md): a regular file / a directory on the ext2 data
      disk mounted at /EXT (src/kernel/ext2_vfs.c).  The file keeps the inode
      number and a 64-bit cursor; the inode is referenced (ext2_iget) for the

@@ -53,6 +53,9 @@ void run_all_unit_tests(void) {
   blk_cache_press_suite();
   virtio_gpu_test_suite();
   gpu_abi_m2_test_suite(); /* P6: Venus ABI (docs/gpu-abi.md §10) */
+#ifdef __x86_64__
+  nv_test_suite(); /* nv: NVIDIA driver core + falcon, against a fake MMIO */
+#endif
   virtio_input_test_suite();
   fb_ioctl_test_suite();
   vdisplay_test_suite();

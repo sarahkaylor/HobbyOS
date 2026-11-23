@@ -594,6 +594,15 @@ void main(void) {
     extern void net_rdma_init(void);
     net_rdma_init();
   }
+
+  /* Native NVIDIA GPU driver (docs/nvidia-driver.md).  Its own PCIe
+     enumeration, so it runs after the timer is live (PTIMER calibration uses
+     timer_get_us) and before the desktop starts.  On a machine with no
+     NVIDIA card it prints exactly one row and returns -ENODEV. */
+  {
+    extern int nv_init(void);
+    nv_init();
+  }
 #endif
 
   // -----------------------------------------------------------------------

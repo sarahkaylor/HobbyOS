@@ -846,6 +846,13 @@ int file_open_mode(struct process *cur, const char *filename, int flags,
        half releases the client's context/resources. */
     int isgpu = (rest[0] == '/' && rest[1] == 'g' && rest[2] == 'p' &&
                  rest[3] == 'u' && rest[4] == '\0');
+    /* nv (docs/nvidia-driver.md): /dev/nvctl -- the native NVIDIA driver's
+       control node.  Like /dev/gpu it owns no data; the ioctl half is
+       nv_ioctl() and it exists even when no card is present (open succeeds,
+       requests answer -ENODEV) so a probe never has to guess from ENOENT. */
+    int isnvctl = (rest[0] == '/' && rest[1] == 'n' && rest[2] == 'v' &&
+                   rest[3] == 'c' && rest[4] == 't' && rest[5] == 'l' &&
+                   rest[6] == '\0');
     /* C2-ntsync: /dev/ntsync (linux_compat_ntsync.c, docs/cp-ntsync.md). */
     int isntsync = (rest[0] == '/' && rest[1] == 'n' && rest[2] == 't' &&
                     rest[3] == 's' && rest[4] == 'y' && rest[5] == 'n' &&
@@ -882,6 +889,9 @@ int file_open_mode(struct process *cur, const char *filename, int flags,
       f->open_flags = (uint32_t)flags;
     } else if (isgpu) {
       f->type = FILE_TYPE_DEVGPU;
+      f->open_flags = (uint32_t)flags;
+    } else if (isnvctl) {
+      f->type = FILE_TYPE_DEVNV;
       f->open_flags = (uint32_t)flags;
     } else if (linux_snd_path_minor(filename) >= 0) {
       /* C4-audio (docs/cp-audio.md): ALSA control / playback PCM node; ENOENT
@@ -2393,6 +2403,7 @@ int64_t file_seek(struct process *p, int fd, int64_t offset, int whence,
     *errp = (f->type == FILE_TYPE_PIPE || f->type == FILE_TYPE_UNIXSOCK ||
              f->type == FILE_TYPE_CONSOLE || f->type == FILE_TYPE_DEVNULL ||
              f->type == FILE_TYPE_DEVFB || f->type == FILE_TYPE_DEVGPU ||
+             f->type == FILE_TYPE_DEVNV ||
              f->type == FILE_TYPE_DEVSND)
                 ? ESPIPE : EINVAL;
     return -1;
@@ -2570,6 +2581,11 @@ int file_stat_fd(struct process *p, int fd, struct k_stat *st, int *errp) {
     /* M1: the 3D ABI node -- character device, root-only in spirit but 0666
        like the other device nodes (there is no uid model on this node). */
     k_stat_fill(st, K_DEV_DEVFS, 5, K_S_IFCHR | 0666, 0);
+    return 0;
+  case FILE_TYPE_DEVNV:
+    /* nv: the native NVIDIA control node -- character device 6, same access
+       model as /dev/gpu. */
+    k_stat_fill(st, K_DEV_DEVFS, 6, K_S_IFCHR | 0666, 0);
     return 0;
   case FILE_TYPE_DEVSND: /* C4-audio: char 116:minor, as Linux's ALSA nodes */
     k_stat_fill(st, K_DEV_DEVFS, 16 + (uint32_t)f->snd.minor, K_S_IFCHR | 0660, 0);
@@ -3839,6 +3855,12 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
     return got * (int)sizeof(struct hb_input_event);
   } else if (f->type == FILE_TYPE_DEVFB) {
     return 0; /* GB-167: no readback of the framebuffer (Linux EINVAL; EOF here) */
+  } else if (f->type == FILE_TYPE_DEVNV) {
+    /* nv (docs/nvidia-driver.md): one struct nv_info snapshot per read.  The
+       node is not a file, so the cursor is ignored and a short buffer gets a
+       short record.  A native tool needs no ioctl(2) row for this. */
+    extern int nv_read_info(void *buf, int len);
+    return nv_read_info(buf, size);
   } else if (f->type == FILE_TYPE_CONSOLE) {
     return 0; /* /dev/console has no input source: EOF, like `< /dev/null` */
   } else if (f->type == FILE_TYPE_TIMERFD) {
@@ -4865,6 +4887,18 @@ int file_is_devgpu(struct process *p, int fd) {
   if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
     return 0;
   return gfile(gfd)->type == FILE_TYPE_DEVGPU;
+}
+
+/* nv (docs/nvidia-driver.md): is `fd` the /dev/nvctl node?  The compat ioctl
+ * route uses this to hand requests to nv_ioctl(). */
+int file_is_devnv(struct process *p, int fd) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS)
+    return 0;
+  int gfd = p->open_fds[fd];
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
+    return 0;
+  return gfile(gfd)->type == FILE_TYPE_DEVNV;
 }
 
 /* ---- C2-ntsync (docs/cp-ntsync.md): the driver's view of its fds ------- */
