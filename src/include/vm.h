@@ -237,6 +237,23 @@
  * munmap/fsync/close), coherent with write()/truncate().  Same demand-fill
  * and exec-gate contract as VM_OBJ_FILE / VM_OBJ_NFS. */
 #define VM_OBJ_EXT2 5
+/* WP-F3 (PLAN.md §3 WP-F, the "CPU-mapped BOs" item): an /dev/nvshim GEM
+ * object, seen as a vm_object so the ordinary fault path can map it.
+ *
+ * Why an object at all: a BO's pages are a run of pool frames the RM owns
+ * (nv_dma_alloc), and a client's mapping must point at THOSE frames -- that
+ * identity is the whole feature (a store through the mapping is the same memory
+ * the submit path reads, with no flush).  The object is the one place that
+ * says "object page N is frame F", and every consumer of it -- demand fault,
+ * fork, teardown -- already exists.
+ *
+ * Two rules make it safe: the object does NOT own the frames (the RM frees them
+ * at GEM_CLOSE; vm_object_free_locked leaves a VM_OBJ_NVBO's frames alone), and
+ * page_locked never zero-fills one (a missing page is a hole, not a fresh
+ * anonymous page -- the frames were installed up front by
+ * vm_object_install_foreign).  Mappings are always MAP_SHARED: there is nothing
+ * to copy on write for a buffer the GPU reads. */
+#define VM_OBJ_NVBO 6
 
 /* fcntl(F_ADD_SEALS/F_GET_SEALS) subset (design section 4.3, Linux
  * numbers; SHRINK/GROW enforced at ftruncate, WRITE recorded advisory). */
@@ -643,6 +660,16 @@ uint32_t vm_object_wgen(struct vm_object *o);
 uint64_t vm_object_install_page_gen(struct vm_object *o, uint64_t off, uint64_t fr,
                                     uint32_t gen, int *stale);
 int vm_object_file_writers(uint16_t cluster, struct vm_object **out, int max);
+
+/* WP-F3: install `fr` as object page `off` WITHOUT taking ownership.
+ *
+ * vm_object_install_page() above takes the frame over (it frees `fr` on any
+ * refusal and the object frees it at the last unref); a VM_OBJ_NVBO's frames
+ * belong to the RM, so that contract would double-free them the moment the
+ * mapping went away.  This form records the frame and leaves its lifetime where
+ * it was.  Returns 1 installed, 0 refused (bad object/page/already installed --
+ * nothing is freed either way). */
+int vm_object_install_foreign(struct vm_object *o, uint64_t off, uint64_t fr);
 
 /* ftruncate for objects: set the byte size.  Grow allocates a bigger
  * frame array; shrink frees materialized pages above the new size.
