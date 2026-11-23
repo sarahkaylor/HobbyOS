@@ -1583,8 +1583,14 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
      * with DMEM only: the core then executes whatever IMEM holds.  If 0x1438
      * still goes to 0 and the core still halts, the observation was never about
      * the code; if it does not, the code is what produced it.
+     *
+     * RESULT (r2f, evidence/nv/r2f-ablation-no-imem.log): with IMEM empty START
+     * is refused -- ctl reads 0x10 at 1 us and at 2 s -- and nothing happens:
+     * 0x1438 keeps its sentinel, the 0x1400 block does not change, the counter
+     * at 0x1418 does not advance.  The signature therefore belongs to the loaded
+     * image.  Restored to 1; the ablation is a one-run instrument.
      */
-    const int kFwsecLoadImem = 0;
+    const int kFwsecLoadImem = 1;
     if (!kFwsecLoadImem) {
       uart_puts("[NV-FWSEC] ABLATION: IMEM is NOT loaded this run (DMEM only): "
                 "the status/halt signature is being tested against its own "
@@ -2784,12 +2790,14 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
     uart_puts("\n");
   }
   if (bldrc == 0 && lrc2 == 0 && d->gsp_meta_phys != 0) {
-    /* FORCED (round 2): the fence gate below is a read-side refusal, and the
-     * booter's own verdict -- the metadata block's `verified` word -- is in host
-     * memory, so the attempt is made and judged there instead of being refused
-     * before it starts.  See nv_gsp_sec2_start_booter_ex. */
+    /* force=0 restores the safe default: SEC2's window refuses to be read, and
+     * the booter's own verdict channel (the metadata's `verified` word, in host
+     * memory) is what the forced attempt was judged by in r2d and r2e -- it
+     * stayed at its sentinel both times, i.e. the booter did not run.  The flag
+     * stays for the next attempt; it is not the default, because writing into a
+     * window whose state cannot be read is a spend, not a habit. */
     int src2 = nv_gsp_sec2_start_booter_ex(d, booter.buf, booter.size,
-                                           d->gsp_meta_phys, 1);
+                                           d->gsp_meta_phys, 0);
     uart_puts("[NV-GSP] stage5 result=");
     print_int(src2);
     uart_puts(src2 == 0 ? " (booter ran and reported success)\n"
