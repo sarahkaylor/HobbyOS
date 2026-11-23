@@ -203,6 +203,7 @@ int acpi_init_from_root(uint64_t rsdp_phys) {
  *  no-op there, which is why it is a fallback and not the primary path.
  * ------------------------------------------------------------------------ */
 
+#ifdef __x86_64__
 /* QEMU's fw_cfg lives on the legacy I/O ports 0x510 (selector) / 0x511 (data)
  * on every x86 machine type.  MEASURED 2026-11-22: the MMIO window at
  * 0x09020000 that an older in-tree probe used reads 0 on this q35 + OVMF
@@ -339,6 +340,9 @@ static int acpi_from_fwcfg(void) {
   uart_puts("\n");
   return 0;
 }
+#else /* !__x86_64__: no fw_cfg I/O ports; the ARM scan path is all there is */
+static int acpi_from_fwcfg(void) { return -1; }
+#endif
 
 int acpi_init(void) {
   if (g_ready) return 0;

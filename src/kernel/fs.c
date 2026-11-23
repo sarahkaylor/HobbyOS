@@ -3858,9 +3858,14 @@ int file_read(struct process *cur, int fd, void *buf, int size, struct trap_fram
   } else if (f->type == FILE_TYPE_DEVNV) {
     /* nv (docs/nvidia-driver.md): one struct nv_info snapshot per read.  The
        node is not a file, so the cursor is ignored and a short buffer gets a
-       short record.  A native tool needs no ioctl(2) row for this. */
+       short record.  A native tool needs no ioctl(2) row for this.  The driver
+       is x86_64-only: on ARM the node opens and reads as EOF. */
+#ifdef __x86_64__
     extern int nv_read_info(void *buf, int len);
     return nv_read_info(buf, size);
+#else
+    return 0;
+#endif
   } else if (f->type == FILE_TYPE_CONSOLE) {
     return 0; /* /dev/console has no input source: EOF, like `< /dev/null` */
   } else if (f->type == FILE_TYPE_TIMERFD) {

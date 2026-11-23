@@ -909,10 +909,12 @@ static int l_fd_ioctl(struct process *p, struct trap_frame *tf) {
    * /dev/gpu -- the handler owns copy-in/copy-out (nv_ioctl takes the user
    * pointer) -- and never parks: every request is a bounded register read or
    * a self-test with its own timeout. */
+#ifdef __x86_64__
   if (file_is_devnv(p, fd)) {
     int nr = nv_ioctl(p, fd, (unsigned long)req, arg);
     return l_ret(tf, nr);
   }
+#endif
   /* C4-audio (docs/cp-audio.md): the ALSA control/PCM request set.  A blocking
      WRITEI/DRAIN parks (LSND_PARKED, never an errno) and restarts on the TX
      completion wake. */
