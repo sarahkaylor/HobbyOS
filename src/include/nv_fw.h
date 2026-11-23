@@ -360,7 +360,12 @@ void nv_fw_slide_down(uint8_t *buf, uint32_t buf_len, uint32_t off,
 #ifdef __x86_64__
 /* Put the metadata block where the GPU can read it: one contiguous frame,
  * encoded in place, phys returned.  The booter DMAs this block, so a stack
- * copy is not good enough even though the bytes are identical. */
+ * copy is not good enough even though the bytes are identical.
+ *
+ * NOT the boot path's allocator any more (WP-G): nv_gsp.c takes that page from
+ * nv_dma, because SEC2 receives the block's address in MAILBOX0/1 and a GPU
+ * address must come from nv_dma_bus(), not from frame_alloc_contig.  This
+ * helper remains for callers that only need encode-in-place RAM. */
 int nv_fw_meta_alloc(const struct nv_wpr_meta_in *m, uint64_t *phys_out);
 void nv_fw_meta_release(uint64_t phys);
 

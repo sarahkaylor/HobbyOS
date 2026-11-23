@@ -32,12 +32,16 @@
  *  (docs/nv-gsp-wpr-contract.md section 8, docs/nv-gsp-rpc-contract.md):
  *    1 firmware on disk: read + parse + hash      DONE on silicon
  *    2 halt SEC2 and the GSP                       DONE (falcon halt)
- *    3 build the radix3 tree for the RM image     not started (needs page tables)
- *    4 write the 256-byte metadata block          codec done, write not started
- *    5 DMA the booter into SEC2 IMEM+DMEM         not started (xfer engine is)
- *    6 start SEC2, wait for MAILBOX0 == 0         not started
- *    7 metadata `verified` == 0xA0A0...           not started
- *    8 build the RPC queues + bootargs, start GSP not started
+ *    3 build the radix3 tree for the RM image     DONE (nv_radix3_build, 9288 pages)
+ *    4 write the 256-byte metadata block          block built + DMA-able via
+ *                                                 nv_dma; SEC2 reads it, host
+ *                                                 does not write it into VRAM
+ *    5 DMA the booter into SEC2 IMEM+DMEM         DONE (SEC2 xfer; row per half)
+ *    6 start SEC2, wait for MAILBOX0 == 0         attempted every boot
+ *    7 metadata `verified` == 0xA0A0...           not reached (booter stops)
+ *    8 build the RPC block (nv_dma + nv_rpc)      block built + published; the
+ *                                                 link waits for RM's header,
+ *                                                 and the send/doorbell with it
  *    9 GSP_INIT_DONE over RPC                     not started
  * ========================================================================== */
 
@@ -47,6 +51,9 @@
 #include "nv_regs.h"
 #include "nv_fw.h"
 #include "nv_flcn.h"
+#include "nv_dma.h"
+#include "nv_rpc.h"
+#include "nv_gsp_glue.h"
 #include "frame.h"
 #include "kmem.h"
 #include "errno.h"
@@ -61,6 +68,259 @@ static void nv_hex_byte(uint8_t b) {
   static const char *d = "0123456789abcdef";
   char s[3] = {d[b >> 4], d[b & 0xF], 0};
   uart_puts(s);
+}
+
+/* ============================================================================
+ *  stage 8 glue: nv_dma -> nv_rpc (src/include/nv_gsp_glue.h)
+ *
+ *  WHAT THIS REPLACES.  The RPC block used to be a plan and nothing else: the
+ *  doorbell existed as a local define nobody wrote, and the only addresses the
+ *  boot path handed to a device were bare frame_alloc_contig() physical
+ *  addresses.  A GPU does not dereference those; it dereferences whatever its
+ *  IOMMU context says they mean, so the two are the same number only while
+ *  VT-d translation is off (nv_dma.h says the rest).  The block below is the
+ *  only place the two facilities meet, and it takes the GPU-visible base from
+ *  nv_dma_bus() and from nowhere else.
+ *
+ *  THE TWO PROPERTIES THE UNIT TIER PINS (nv_gsp_glue_test.c):
+ *    G-02  PTE[0] of the built block == nv_dma_bus() of the mapping
+ *    G-04  one nv_rpc_kick() per message -- one write, offset 0x110C00, value 0
+ * ========================================================================== */
+
+/* Byte-wise little-endian readers, the same rule the transport uses: the block
+ * is written by a device, so nothing here may be a wide load at an offset the
+ * compiler chose (skills/hobbyos-kernel-constraints rule 3). */
+static uint32_t glue_ld32(const uint8_t *p) {
+  const volatile uint8_t *b = p;
+  return (uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) |
+         ((uint32_t)b[3] << 24);
+}
+
+static uint64_t glue_ld64(const uint8_t *p) {
+  const volatile uint8_t *b = p;
+  uint64_t v = 0;
+  for (int i = 7; i >= 0; i--) v = (v << 8) | b[i];
+  return v;
+}
+
+int nv_gsp_rpc_build(struct nv_gsp_rpc *r) {
+  if (!r) return -EINVAL;
+  if (!r->block.phys || !r->block.pages) {
+    uart_puts("[NV-RPC] stage=block FAIL no mapping: nv_dma_alloc must come "
+              "first\n");
+    return -EINVAL;
+  }
+  if ((uint64_t)r->block.pages * NV_DMA_PAGE != NV_RPC_BLOCK_SIZE ||
+      r->block.len != NV_RPC_BLOCK_SIZE) {
+    /* pages and len are the same number twice (PLAN.md section 6 rule 3): a
+     * block whose mapping is not exactly 129 pages is a block whose last PTEs
+     * point at somebody else's memory. */
+    uart_puts("[NV-RPC] stage=block FAIL mapping is not the block: len=");
+    uart_print_hex(r->block.len);
+    uart_puts(" pages=");
+    print_int((int)r->block.pages);
+    uart_puts("\n");
+    return -EINVAL;
+  }
+
+  /* THE SEAM.  Not r->block.phys, not a literal: the accessor, which answers
+   * NV_DMA_BUS_INVALID while translation is live.  A build from `phys` here is
+   * the bug the facility exists to prevent (a page table full of addresses the
+   * GPU cannot resolve), so it fails here rather than at the firmware. */
+  uint64_t bus = nv_dma_bus(&r->block);
+  if (bus == NV_DMA_BUS_INVALID) {
+    uart_puts("[NV-RPC] stage=block FAIL nv_dma_bus refused for phys=");
+    uart_print_hex(r->block.phys);
+    uart_puts(": no bus address exists, so no PTE table is written\n");
+    return -ENOTSUP;
+  }
+
+  uint8_t *block = (uint8_t *)phys_to_virt(r->block.phys);
+  int rc = nv_rpc_block_build(block, bus);
+  if (rc != 0) {
+    uart_puts("[NV-RPC] stage=block FAIL nv_rpc_block_build rc=");
+    print_int(rc);
+    uart_puts("\n");
+    return rc;
+  }
+
+  rc = nv_rpc_queue_init(&r->q, block, bus, r->rx_stage);
+  if (rc != 0) {
+    uart_puts("[NV-RPC] stage=queue FAIL nv_rpc_queue_init rc=");
+    print_int(rc);
+    uart_puts("\n");
+    return rc;
+  }
+  r->built = 1;
+
+  /* Read the PTE back out of the bytes rather than trusting the call: the
+   * claim is about what the firmware will walk, and only the block itself
+   * answers that. */
+  uint64_t pte0 = glue_ld64(block);
+  uint64_t pte_last = glue_ld64(block + (uint64_t)(NV_RPC_PTE_COUNT - 1u) * 8u);
+  uart_puts("[NV-RPC] stage=block bus=");
+  uart_print_hex(bus);
+  uart_puts(" phys=");
+  uart_print_hex(r->block.phys);
+  uart_puts(" pages=");
+  print_int((int)r->block.pages);
+  uart_puts(" pte0=");
+  uart_print_hex(pte0);
+  uart_puts(" pte128=");
+  uart_print_hex(pte_last);
+  uart_puts(" identity=");
+  print_int(bus == r->block.phys ? 1 : 0);
+  uart_puts("\n");
+  if (pte0 != bus ||
+      pte_last != bus + (uint64_t)(NV_RPC_PTE_COUNT - 1u) * NV_RPC_SLOT) {
+    uart_puts("[NV-RPC] stage=block FAIL PTE table does not describe the "
+              "mapping's bus address\n");
+    r->built = 0;
+    return -EIO;
+  }
+  return 0;
+}
+
+int nv_gsp_rpc_setup(struct nv_gsp_rpc *r, uint8_t *rx_stage) {
+  if (!r || !rx_stage) return -EINVAL;
+
+  r->block.phys = 0;
+  r->block.bus = 0;
+  r->block.len = 0;
+  r->block.pages = 0;
+  r->sends = 0;
+  r->doorbells = 0;
+  r->built = 0;
+  r->rx_stage = rx_stage; /* before build: queue_init copies it */
+
+  int rc = nv_dma_alloc(NV_RPC_BLOCK_SIZE, &r->block);
+  if (rc != 0) {
+    uart_puts("[NV-RPC] stage=block FAIL nv_dma_alloc rc=");
+    print_int(rc);
+    uart_puts(rc == -ENOMEM ? " (no contiguous 129-page run: fragmentation, not "
+                              "a wrong size)\n"
+                            : "\n");
+    return rc;
+  }
+
+  rc = nv_gsp_rpc_build(r);
+  if (rc != 0) {
+    /* No half-built transport: a block we cannot describe is frames somebody
+     * else needs. */
+    nv_dma_free(&r->block);
+    return rc;
+  }
+  return 0;
+}
+
+void nv_gsp_rpc_teardown(struct nv_gsp_rpc *r) {
+  if (!r) return;
+  nv_dma_free(&r->block);
+  r->q.block = 0;
+  r->q.bus = 0;
+  r->q.linked = 0;
+  r->q.swapped = 0;
+  r->built = 0;
+}
+
+int nv_gsp_rpc_notify(struct nv_gsp_rpc *r, const uint8_t *stage,
+                      const struct nv_rpc_hw *hw) {
+  if (!r || !r->built || !stage || !hw) return -EINVAL;
+
+  /* The length lives in the element's own RPC header (slot + 0x38), because
+   * the staged bytes are the message: an argument that disagreed with them
+   * would describe a different message than the one committed. */
+  uint32_t rpc_len = glue_ld32(stage + NV_RPC_R_LENGTH);
+  enum nv_rpc_reason why = NV_RPC_OK;
+  uint32_t ec = 0;
+  int rc = nv_rpc_tx_prepare(&r->q, rpc_len, &ec, &why);
+  if (rc != 0) {
+    uart_puts("[NV-RPC] stage=send FAIL prepare rc=");
+    print_int(rc);
+    uart_puts(" reason=");
+    uart_puts(nv_rpc_reason_name(why));
+    uart_puts("\n");
+    return rc;
+  }
+  /* S4..S8: copies the slots and advances writePtr.  This does NOT notify --
+   * that separation is T-09's and it is why a commit that fails cannot look
+   * like a delivery. */
+  rc = nv_rpc_tx_commit(&r->q, stage, hw);
+  if (rc != 0) {
+    uart_puts("[NV-RPC] stage=send FAIL commit rc=");
+    print_int(rc);
+    uart_puts("\n");
+    return rc;
+  }
+  r->sends++;
+
+  /* S9/S10: the ONE notification.  fence, then one write of 0 to 0x110C00. */
+  rc = nv_rpc_kick(&r->q, hw);
+  if (rc != 0) {
+    uart_puts("[NV-RPC] stage=send FAIL kick rc=");
+    print_int(rc);
+    uart_puts("\n");
+    return rc;
+  }
+  r->doorbells++;
+  return 0;
+}
+
+/* One card, one GSP: the driver is a singleton (nv_dev()), and the block must
+ * outlive every call that builds it, so it lives here rather than on a stack. */
+static struct nv_gsp_rpc g_gsp_rpc;
+static uint8_t g_rpc_rx_stage[NV_RPC_SLOT * NV_RPC_ELEM_MAX];
+
+const struct nv_gsp_rpc *nv_gsp_rpc_state(void) { return &g_gsp_rpc; }
+
+/* Stage 8 of the boot: publish the block the RM task will walk.  Three rows,
+ * one per stage, and the notification is gated on the peer's own header --
+ * which RM writes when its task starts, so on a card where RM is not running
+ * this stage cannot ring the doorbell and says so instead. */
+int nv_gsp_rpc_stage8_into(struct nv_gsp_rpc *r, struct nv_dev *d) {
+  if (!r || !d) return -EINVAL;
+
+  /* Bring-up may call the firmware stage more than once (probe, then boot).
+   * The block is a 129-page allocation that must outlive every stage, so it is
+   * taken once and reused: a second setup would leak the first run. */
+  int rc = r->built ? 0 : nv_gsp_rpc_setup(r, g_rpc_rx_stage);
+  if (rc != 0) {
+    uart_puts("[NV-RPC] stage=block result=");
+    print_int(rc);
+    uart_puts(" (no block, so no link and no send)\n");
+    return rc;
+  }
+
+  struct nv_rpc_hw hw;
+  nv_rpc_hw_dev(d, &hw);
+
+  enum nv_rpc_link_field bad = NV_RPC_LINK_OK;
+  int lrc = nv_rpc_link_apply(&r->q, &bad);
+  uart_puts("[NV-RPC] stage=link ");
+  if (lrc == 0) {
+    uart_puts("linked=1 (RM published the status header; no message is staged "
+              "here yet, so doorbells=");
+    print_int((int)r->doorbells);
+    uart_puts(")\n");
+  } else if (lrc == -EAGAIN) {
+    /* The honest reading of a zeroed status header: the RM task has not
+     * started, so nothing is listening and the doorbell is withheld rather
+     * than written into a window a reset just fenced. */
+    uart_puts("linked=0 peer=none (status header still zero: RM has not "
+              "started; doorbell withheld, doorbells=");
+    print_int((int)r->doorbells);
+    uart_puts(")\n");
+  } else {
+    uart_puts("linked=0 field=");
+    uart_puts(nv_rpc_link_field_name(bad));
+    uart_puts(" (header written but unusable; waiting will not fix it)\n");
+  }
+  nv_rpc_dump("link", &r->q);
+  return lrc;
+}
+
+int nv_gsp_rpc_stage8(struct nv_dev *d) {
+  return nv_gsp_rpc_stage8_into(&g_gsp_rpc, d);
 }
 
 /* PFB: the write-protected-region block.  MEASURED (docs/nv-gsp-reference.md)
@@ -103,10 +363,14 @@ static void nv_hex_byte(uint8_t b) {
 #define NV_GSP_BCR_VALID (1u << 0)
 #define NV_GSP_BCR_RISCV (1u << 4)
 #define NV_GSP_BCR_BRFETCH (1u << 8)
-#define NV_GSP_QUEUE_HEAD0 (NV_FALCON_GSP_BASE + 0xC00)
 /* RISC-V core window inside the GSP block. */
 #define NV_GSP_RISCV_BASE (NV_FALCON_GSP_BASE + 0x1000)
 #define NV_GSP_RISCV_CPUCTL (NV_GSP_RISCV_BASE + 0x388)
+/* The queue doorbell used to be defined here as NV_GSP_QUEUE_HEAD0 and was
+ * never written: notification is nv_rpc_kick()'s job, and the offset has one
+ * definition (NV_RPC_DOORBELL_OFF in nv_rpc.h).  Keeping a second copy in the
+ * boot path is how a driver ends up with two doorbell writes and no way to say
+ * which one the firmware saw. */
 
 /* Stage numbers, mirrored into nv.gsp_stage so the ABI and the log agree. */
 #define NV_GSP_STAGE_NONE 0
@@ -2728,14 +2992,19 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
       m.vga_workspace_size = lin.fb_size - lay.wpr_end;
       m.verified = 0;
 
-      /* The block has to live where the GPU can read it: one contiguous frame,
-       * encoded in place.  `mbuf` is that frame, not a stack copy. */
-      int erc = nv_fw_meta_alloc(&m, &d->gsp_meta_phys);
+      /* The block has to live where the GPU can read it: one contiguous frame
+       * from nv_dma (one page; the block is 256 bytes), encoded in place.
+       * `mbuf` is that frame, not a stack copy, and the address that reaches
+       * SEC2 is nv_dma_bus() -- never the physical address, which equals it
+       * only while VT-d translation is off (src/include/nv_dma.h). */
+      int erc = nv_dma_alloc(NV_DMA_PAGE, &d->gsp_meta);
       uint8_t *mbuf = 0;
       int drc = erc;
       if (erc == 0) {
-        mbuf = (uint8_t *)phys_to_virt(d->gsp_meta_phys);
-        drc = nv_fw_wpr_meta_decode(mbuf, &back);
+        mbuf = (uint8_t *)phys_to_virt(d->gsp_meta.phys);
+        drc = nv_fw_wpr_meta_encode(&m, mbuf);
+        /* Decode what is in the frames, not what we meant to write. */
+        if (drc == 0) drc = nv_fw_wpr_meta_decode(mbuf, &back);
       }
       uart_puts("[NV-GSP] meta ");
       if (erc != 0 || drc != 0) {
@@ -2756,7 +3025,9 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
         uart_puts(" verified=");
         print_int(nv_fw_wpr_meta_verified(&back));
         uart_puts(" block_phys=");
-        uart_print_hex(d->gsp_meta_phys);
+        uart_print_hex(d->gsp_meta.phys);
+        uart_puts(" block_bus=");
+        uart_print_hex(nv_dma_bus(&d->gsp_meta));
         uart_puts("\n");
       }
       d->radix3_root = root;
@@ -2789,20 +3060,35 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
     print_int(frc);
     uart_puts("\n");
   }
-  if (bldrc == 0 && lrc2 == 0 && d->gsp_meta_phys != 0) {
-    /* force=0 restores the safe default: SEC2's window refuses to be read, and
-     * the booter's own verdict channel (the metadata's `verified` word, in host
-     * memory) is what the forced attempt was judged by in r2d and r2e -- it
-     * stayed at its sentinel both times, i.e. the booter did not run.  The flag
-     * stays for the next attempt; it is not the default, because writing into a
-     * window whose state cannot be read is a spend, not a habit. */
-    int src2 = nv_gsp_sec2_start_booter_ex(d, booter.buf, booter.size,
-                                           d->gsp_meta_phys, 0);
-    uart_puts("[NV-GSP] stage5 result=");
-    print_int(src2);
-    uart_puts(src2 == 0 ? " (booter ran and reported success)\n"
-                        : " (stopped; see the [NV-SEC2] rows above)\n");
+  if (bldrc == 0 && lrc2 == 0 && d->gsp_meta.pages != 0) {
+    /* The booter's only argument is the metadata block's address, and the
+     * address it must receive is the one the GPU uses.  nv_dma_bus() answers
+     * NV_DMA_BUS_INVALID when it cannot honestly name one, and passing that
+     * to SEC2 would send it to 0xFFFFFFFFFFFFFxxx -- so the stage is skipped
+     * with a row naming the reason instead.  force=0 keeps the safe default:
+     * in r2d/r2e a forced attempt behind the fence left the metadata's
+     * `verified` at its sentinel, i.e. the booter did not run. */
+    uint64_t meta_bus = nv_dma_bus(&d->gsp_meta);
+    if (meta_bus == NV_DMA_BUS_INVALID) {
+      uart_puts("[NV-GSP] stage5 skipped: nv_dma_bus refused the metadata "
+                "block (translation is live), so there is no address to give "
+                "SEC2\n");
+    } else {
+      int src2 = nv_gsp_sec2_start_booter_ex(d, booter.buf, booter.size,
+                                             meta_bus, 0);
+      uart_puts("[NV-GSP] stage5 result=");
+      print_int(src2);
+      uart_puts(src2 == 0 ? " (booter ran and reported success)\n"
+                          : " (stopped; see the [NV-SEC2] rows above)\n");
+    }
   }
+
+  /* Stage 8: the RPC transport.  This is memory work plus one read of the
+   * peer's header (nv_gsp_rpc_stage8 logs its own [NV-RPC] rows), so it runs
+   * even when the booter did not: publishing a block nobody has walked is
+   * cheap, and the row that says "peer=none" is the honest state of a boot
+   * that has not reached RM. */
+  if (lrc2 == 0) (void)nv_gsp_rpc_stage8(d);
 
   if (d->radix3_root) {
     nv_radix3_release(d->radix3_root, d->radix3_pages);

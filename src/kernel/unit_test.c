@@ -58,6 +58,10 @@ void run_all_unit_tests(void) {
   nv_fw_test_suite(); /* nv_fw: firmware container/HS/ELF/WPR/SHA-256 parsers */
   nv_rpc_test_suite(); /* nv_rpc: GSP-RPC transport (docs/nv-rpc-implementation-spec.md) */
   nv_flcn_test_suite(); /* nv_flcn: XFER command, signature index, FRTS patch */
+  /* WP-G: the stage-8 seam -- nv_dma -> nv_rpc in the GSP boot path.  Under
+   * __x86_64__ because the glue it tests (nv_gsp.c) is driver-lane code that
+   * compiles to an empty TU on AArch64, not because the facilities are. */
+  nv_gsp_glue_test_suite();
 #endif
   nv_shim_test_suite(); /* WP-F: /dev/nvshim ABI over the mock RM (both arches) */
   nv_shim_drm_test_suite(); /* WP-F2: nouveau's real 'd' surface over the same mock RM */

@@ -88,6 +88,9 @@ void nv_test_suite(void);  /* nv: NVIDIA driver core + falcon (fake MMIO) */
 void nv_fw_test_suite(void); /* nv_fw: firmware container/HS/ELF/WPR/SHA-256 */
 void nv_rpc_test_suite(void); /* nv_rpc: GSP-RPC transport, spec T-01..T-24 */
 void nv_flcn_test_suite(void); /* nv_flcn: XFER cmd, sig index, FRTS patch */
+/* WP-G: the stage-8 seam (nv_dma -> nv_rpc): PTE[0] is nv_dma_bus(), and one
+ * message produces exactly one doorbell.  x86_64-only with nv_gsp.c. */
+void nv_gsp_glue_test_suite(void);
 #endif
 /* WP-F: /dev/nvshim over the mock RM.  Not arch-gated: the mock needs no
  * hardware, so the ABI is exercised on both arches. */

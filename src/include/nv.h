@@ -23,6 +23,12 @@
 
 #include <stdint.h>
 
+/* nv_dma.h only (struct nv_dma_map): the metadata block the boot path hands to
+ * SEC2 is an nv_dma mapping, not a physical address.  nv_rpc.h is NOT pulled in
+ * here -- the transport's state lives in nv_gsp_glue.h, so TUs that include
+ * nv.h do not grow a 129-page queue description. */
+#include "nv_dma.h"
+
 /* Bring-up state, in the order the driver reaches it.  A failed stage names
  * itself: nv.state is left at the last stage that completed. */
 enum nv_state {
@@ -101,7 +107,11 @@ struct nv_dev {
   /* Boot-path addresses that must stay valid across stages. */
   uint64_t booter_phys;   /* the booter blob's contiguous frames */
   uint32_t booter_size;
-  uint64_t gsp_meta_phys; /* the 256-byte metadata block, DMA-able */
+  /* The 256-byte WPR metadata block: one nv_dma page, because SEC2 receives its
+   * address in MAILBOX0/1 and that address is the one the GPU uses, not the CPU
+   * physical one (nv_dma_bus()).  phys members are for the log and for the
+   * frame pool; the BUS address is what any device-facing store gets. */
+  struct nv_dma_map gsp_meta;
   uint64_t radix3_root;   /* the RM image's radix3 tree */
   uint32_t radix3_pages;
   /* FWSEC ucode as located in the card's VBIOS (nv_vbios_probe). */
