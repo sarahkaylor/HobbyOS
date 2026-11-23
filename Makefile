@@ -455,6 +455,17 @@ else ifeq ($(MODE),desktop_test)
   USER_CFLAGS += -DDESKTOP_TEST_AUTO_LAUNCH
 else ifeq ($(MODE),apps_test)
   CFLAGS += -DKERNEL_MODE_APPS_TEST
+else ifeq ($(MODE),fb_test)
+  # WP-E (N0 present gate): single-program boot of the /dev/fb0 probe, no
+  # desktop.  Nothing else touches the framebuffer, so a QMP screendump of
+  # the 1920x1080 scanout can only show what the probe painted.
+  CFLAGS += -DKERNEL_MODE_FB_TEST
+else ifeq ($(MODE),fb_compat_test)
+  # WP-E: the same /dev/fb0 mmap from a LINUX-ABI (compat) process.
+  # SDLTEST.ELF is the committed musl static-PIE probe that opens /dev/fb0,
+  # mmap()s a full frame and prints "fb unavailable (errno=N)" when it is
+  # refused -- the shape docs/nv-games-state.md §7 recorded as -ENOMEM.
+  CFLAGS += -DKERNEL_MODE_FB_COMPAT_TEST
 else ifeq ($(MODE),pong_test)
   CFLAGS += -DKERNEL_MODE_PONG_TEST
   USER_CFLAGS += -DDESKTOP_TEST_AUTO_LAUNCH
@@ -996,6 +1007,10 @@ MKDIR_BIN = $(OBJ_DIR)/mkdir.bin
 SHELL_TEST3_BIN = $(OBJ_DIR)/shtest3.bin
 PONG_BIN = $(OBJ_DIR)/pong.bin
 MILLIPEDE_BIN = $(OBJ_DIR)/millipede.bin
+# WP-E (N0 present gate): the /dev/fb0 full-frame probe.  MODE=fb_test boots
+# ONLY this program (main.c), so nothing paints over the frame between the
+# probe's write and the QMP screendump.
+FBPROBE_BIN = $(OBJ_DIR)/fbprobe.bin
 DOOM_BIN = $(OBJ_DIR)/doom.bin
 # The IWAD the disk gets: ./doom1.wad if you fetched it, else the verified copy
 # that tools/linux-doom/build-doom10.sh delivers.  Without one, EVERY Doom on the
@@ -2324,6 +2339,15 @@ $(PONG_BIN): $(OBJ_DIR)/pong.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $
 	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/pong.elf $^
 	$(OBJCOPY) -O binary $(OBJ_DIR)/pong.elf $(PONG_BIN)
 
+# WP-E: the N0 present-gate probe (open /dev/fb0 + full-frame mmap).
+$(OBJ_DIR)/fbprobe.o: src/user/fbprobe.c $(USER_LIBC) $(USER_HDRS)
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(FBPROBE_BIN): $(OBJ_DIR)/fbprobe.o $(OBJ_DIR)/user_libc.o $(OBJ_DIR)/user_malloc.o $(OBJ_DIR)/libc_string.o
+	$(LD) -T src/user/linker.ld -o $(OBJ_DIR)/fbprobe.elf $^
+	$(OBJCOPY) -O binary $(OBJ_DIR)/fbprobe.elf $(FBPROBE_BIN)
+
 $(OBJ_DIR)/millipede.o: src/user/millipede.c $(USER_LIBC) $(USER_HDRS)
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(USER_CFLAGS) -c $< -o $@
@@ -2881,6 +2905,11 @@ disk.img: $(MAKE_BIN)
 $(TAR_BIN): .EXTRA_PREREQS += src/user/linker.ld
 disk.img: $(TAR_BIN)
 
+# WP-E (N0 present gate): the /dev/fb0 probe rides every disk (one small
+# native binary) and MODE=fb_test boots it alone.
+$(FBPROBE_BIN): .EXTRA_PREREQS += src/user/linker.ld
+disk.img: $(FBPROBE_BIN)
+
 # [inos-build-kernel] `make run` completeness (2026-10-15): every disk
 # ships a browser and the in-OS build toolchain; each is built here when no
 # cached copy exists (rules above; see the completeness block near the
@@ -3144,6 +3173,7 @@ endif
 	$(MCOPY) -i disk.img $(MKDIR_BIN) ::/MKDIR.BIN
 	$(MCOPY) -i disk.img $(SHELL_TEST3_BIN) ::/SHTEST3.BIN
 	$(MCOPY) -i disk.img $(PONG_BIN) ::/PONG.BIN
+	$(MCOPY) -i disk.img $(FBPROBE_BIN) ::/FBPROBE.BIN
 	$(MCOPY) -i disk.img $(MILLIPEDE_BIN) ::/MILLIPED.BIN
 	$(MCOPY) -i disk.img $(DOOM_BIN) ::/DOOM.BIN
 	$(MCOPY) -i disk.img $(DOOML_BIN) ::/DOOML.BIN

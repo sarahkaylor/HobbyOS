@@ -685,6 +685,20 @@ void main(void) {
 #elif defined(KERNEL_MODE_APPS_TEST)
   uart_puts("Mode: APPS_TEST - Launching desktop app harness...\n");
   load_and_run_program_in_scheduler("APPS_T.BIN", -1, -1, -1, -1);
+#elif defined(KERNEL_MODE_FB_TEST)
+  /* WP-E (N0 present gate): boot ONLY the /dev/fb0 full-frame probe.  No
+   * desktop, so nothing repaints the scanout between the probe's write and
+   * the harness's QMP screendump; fd 1/2 unset -> the console-fd fallback
+   * relays the probe's [FBP] rows to the serial console. */
+  uart_puts("Mode: FB_TEST - /dev/fb0 full-frame present probe...\n");
+  load_and_run_program_in_scheduler("FBPROBE.BIN", -1, -1, -1, -1);
+#elif defined(KERNEL_MODE_FB_COMPAT_TEST)
+  /* WP-E: the compat (Linux-ABI) half of the same measurement.  SDLTEST.ELF
+   * is the committed musl static-PIE that opens /dev/fb0 and mmap()s a full
+   * frame; it prints "fb /dev/fb0 fd=N mode=WxH bpp=32" when the mapping
+   * lands and "fb unavailable (errno=N)" when it is refused. */
+  uart_puts("Mode: FB_COMPAT_TEST - Linux-ABI /dev/fb0 mmap probe...\n");
+  load_and_run_program_in_scheduler("/GAMES/SDLTEST.ELF", -1, -1, -1, -1);
 #elif defined(KERNEL_MODE_PONG_TEST)
   uart_puts("Mode: PONG_TEST - Launching Pong test wrapper...\n");
   load_and_run_program_in_scheduler("PONG_T.BIN", -1, -1, -1, -1);

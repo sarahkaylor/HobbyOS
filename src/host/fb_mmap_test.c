@@ -203,6 +203,63 @@ static void test_route(void) {
         "route: FBIOGET_* request numbers match Linux header");
 }
 
+/* ---- 7. the slot-span clamp (WP-E / N0) -------------------------------
+ * src/kernel/fb_mmap.c's hb_fb_map_len() is what decides how much of the
+ * framebuffer slot a /dev/fb0 mapping may cover.  It is pure arithmetic, so
+ * it is pinned here on the host exactly as vm_map_fb_len() calls it in the
+ * kernel: a frame image, the slot from vm.h (USER_FB_SIZE).
+ *
+ * The numbers are the point: the slot is 10,485,760 B and the image is
+ * 8,294,400 B, so a "map the whole thing" request must come back as the
+ * image (2025 pages), never as the slot (2560 pages).  The old code mapped
+ * 2560 -- 2,191,360 B past the last byte of the real framebuffer. */
+#define HB_FB_SLOT_BYTES 0x00A00000ull /* vm.h USER_FB_SIZE, pinned here */
+
+static void test_map_len(void) {
+  const uint64_t img = hb_fb_smem_len();
+  uint64_t len = 0;
+
+  /* The two constants this whole fix rests on. */
+  check(img == 8294400ull, "clamp: the image is 8,294,400 B");
+  check(HB_FB_SLOT_BYTES == 10485760ull, "clamp: the slot is 10,485,760 B");
+  check(HB_FB_SLOT_BYTES > img, "clamp: the slot has slack over the image");
+
+  /* Whole-frame mmap = the frame. */
+  check(hb_fb_map_len(img, img, HB_FB_SLOT_BYTES, &len) == 0 &&
+            len == img,
+        "clamp: whole-frame request maps exactly the frame");
+
+  /* The row that fails before the fix: asking for the slot is clamped to
+     the image, not granted. */
+  check(hb_fb_map_len(HB_FB_SLOT_BYTES, img, HB_FB_SLOT_BYTES, &len) == 0 &&
+            len == img,
+        "clamp: a slot-sized request is clamped to the image (2025 pages)");
+  check(hb_fb_map_len(HB_FB_SLOT_BYTES, img, HB_FB_SLOT_BYTES, &len) == 0 &&
+            len / 4096 == 2025 && len != 2560ull * 4096ull,
+        "clamp: the result is 2025 pages, never the slot's 2560");
+
+  /* An overlong-but-not-slot request also stops at the image. */
+  check(hb_fb_map_len(img + 4096, img, HB_FB_SLOT_BYTES, &len) == 0 &&
+            len == img,
+        "clamp: one page past the image still maps the image");
+
+  /* Partial windows map only themselves, rounded up to a page. */
+  check(hb_fb_map_len(1u << 20, img, HB_FB_SLOT_BYTES, &len) == 0 &&
+            len == (1u << 20),
+        "clamp: a 1 MiB window maps 1 MiB (not the slot)");
+  check(hb_fb_map_len(1, img, HB_FB_SLOT_BYTES, &len) == 0 && len == 4096,
+        "clamp: a 1-byte window rounds up to one page");
+
+  /* Refusals: nothing to map, no image, an image that cannot fit the slot. */
+  check(hb_fb_map_len(0, img, HB_FB_SLOT_BYTES, &len) == -1,
+        "clamp: want 0 refused");
+  check(hb_fb_map_len(img, 0, HB_FB_SLOT_BYTES, &len) == -1,
+        "clamp: no image refused");
+  check(hb_fb_map_len(img, HB_FB_SLOT_BYTES + 1, HB_FB_SLOT_BYTES, &len) == -1,
+        "clamp: an image larger than the slot refused");
+  check(hb_fb_map_len(img, img, 0, &len) == -1, "clamp: no slot refused");
+}
+
 int main(void) {
   printf("fb_mmap_test_host:\n");
 #ifdef __linux__
@@ -214,6 +271,7 @@ int main(void) {
   test_translate_invalid();
   test_blank_ioctl();
   test_route();
+  test_map_len();
 
   printf("fb_mmap_test_host: %d checks, %d failed\n", checks_run, checks_failed);
   return checks_failed ? 1 : 0;

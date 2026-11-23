@@ -1,0 +1,54 @@
+WP-E / N0 present gate — pixel + serial read-outs
+==================================================
+
+All numbers below are read from files, not from the probe's own printf.
+
+Screendumps (QMP `screendump`, QEMU 9.x, 1920x1080 P6 PPM, 6,220,800 data bytes):
+
+  evidence/nv/n0-postfix-1919x1079.ppm       after the fix, MODE=fb_test
+  evidence/nv/n0-prefix-1919x1079.ppm        before the fix, MODE=fb_test
+  evidence/nv/n0-compat-postfix.ppm          after the fix, MODE=fb_compat_test
+  evidence/nv/n0-postfix-small.png           the same dump at 960x540
+  evidence/nv/n0-postfix-corner-zoom.png     bottom-right 72x72, 8x nearest-neighbour
+  evidence/nv/n0-postfix-corner-zoom2.png    bottom-right 96x96, 4x nearest-neighbour
+
+Pixel reads straight out of n0-postfix-1919x1079.ppm (P6, offset = len-1920*1080*3):
+
+  (1919,1079) = (255,   0,   0)   pure red   <- the gate pixel, the LAST byte of the frame
+  (1918,1079) = (255,   0, 255)   magenta
+  (1919,1078) = (255,   0, 255)   magenta
+  (0,0)       = ( 32,  48,  64)   fill       (kernel word 0xFF203040, B8G8R8A8)
+  (960,540)   = ( 32,  48,  64)   fill
+
+  bottom-right 64x64 region: 4095 x (255,0,255) + 1 x (255,0,0)
+  whole-frame samples (every 37th row, 41st column): 1408 x (32,48,64) + 2 x (255,0,255)
+
+So the corner pixel is the only red pixel in the frame and it sits inside the
+magenta block exactly at the framebuffer's last address — a wrong or short
+mapping cannot produce that pair.
+
+Serial rows, before the fix (evidence/nv/n0-prefix.serial.log):
+  [FBP] want_bytes=8294400
+  [FBP] mmap_va=0x00000016F0000000
+  [FBP] RESULT PASS mmap
+  [FBP] corner_read=0xFFFF0000  inside_read=0xFFFF00FF  far_read=0xFF203040
+  [FBP] RESULT PASS readback
+  [FBP] PAST_FRAME read COMPLETED (defect) value=0x0000000000000000
+  [FBP] past_frame_status=1792
+  [FBP] RESULT FAIL past_frame (slot maps past the frame)
+
+Serial rows, after the fix (evidence/nv/n0-postfix.serial.log):
+  [FBP] want_bytes=8294400
+  [FBP] mmap_va=0x00000016F0000000
+  [FBP] RESULT PASS mmap
+  [FBP] corner_read=0xFFFF0000  inside_read=0xFFFF00FF  far_read=0xFF203040
+  [FBP] RESULT PASS readback
+  [FBP] past_frame_status=11
+  [FBP] RESULT PASS past_frame (page past the frame is unmapped)
+  [FBP] RESULT PASS flush
+
+  status 1792 = 0x700  -> child exited 7  (the read at frame+8,294,400 completed)
+  status 11            -> child killed by signal 11 (SIGSEGV) on that read
+
+Linux-ABI (compat) probe, before and after the fix, identical:
+  sdl test app: fb /dev/fb0 fd=3 mode=1920x1080 bpp=32

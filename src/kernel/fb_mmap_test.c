@@ -3,6 +3,7 @@
 #include "fb_mmap.h"
 #include "unit_test.h"
 #include "display_mode.h"
+#include "vm.h" /* WP-E: the real USER_FB_SIZE slot the clamp is measured against */
 
 /* Kernel in-EL1 unit coverage (T2) for the GB-025 /dev/fb0 mmap
  * translation ABI surface (src/kernel/fb_mmap.c).  The same pure TU is
@@ -80,6 +81,44 @@ static void test_route(void) {
   EXPECT_EQ(hb_fb_ioctl_route(0xDEAD, &v, 0), -1);
 }
 
+/* WP-E (N0): the slot-span clamp.  The slot (vm.h USER_FB_SIZE) is one
+ * 1920x1080 frame plus slack; only the frame may be mapped.  Before the fix
+ * vm_map_fb() inserted and mapped USER_FB_SIZE -- 2025 real framebuffer
+ * pages plus 535 pages of whatever the linker put after the static. */
+static void test_map_len(void) {
+  uart_puts("  Running test_map_len...\n");
+  tests_run++;
+  const uint64_t img = hb_fb_smem_len(); /* 8,294,400 B = 2025 pages */
+  const uint64_t slot = USER_FB_SIZE;    /* 10,485,760 B = 2560 pages */
+  uint64_t len = 0;
+
+  /* The slot really is one frame plus slack (the premise of the clamp). */
+  EXPECT_EQ((int)(slot / 4096), 2560);
+  EXPECT_EQ((int)(img / 4096), 2025);
+
+  /* A whole-frame mmap maps exactly the frame. */
+  EXPECT_EQ(hb_fb_map_len(img, img, slot, &len), 0);
+  EXPECT_EQ((int)(len / 4096), 2025);
+
+  /* Asking for the whole SLOT is clamped to the IMAGE, not to the slot:
+   * this is the row the old mapping failed (it mapped 2560 pages). */
+  EXPECT_EQ(hb_fb_map_len(slot, img, slot, &len), 0);
+  EXPECT_EQ((int)(len == img), 1);
+  EXPECT_EQ((int)(len / 4096), 2025);
+
+  /* A partial window maps only itself (rounded up to a page). */
+  EXPECT_EQ(hb_fb_map_len(1u << 20, img, slot, &len), 0);
+  EXPECT_EQ((int)len, 1 << 20);
+  EXPECT_EQ(hb_fb_map_len(1, img, slot, &len), 0);
+  EXPECT_EQ((int)len, 4096);
+
+  /* Refused: nothing to map, no image, an image bigger than the slot. */
+  EXPECT_EQ(hb_fb_map_len(0, img, slot, &len), -1);
+  EXPECT_EQ(hb_fb_map_len(img, 0, slot, &len), -1);
+  EXPECT_EQ(hb_fb_map_len(img, slot + 1, slot, &len), -1);
+  EXPECT_EQ(hb_fb_map_len(img, img, 0, &len), -1);
+}
+
 void fb_mmap_test_suite(void) {
   uart_puts("fb_mmap_test_suite:\n");
   test_smem_len();
@@ -87,6 +126,7 @@ void fb_mmap_test_suite(void) {
   test_translate_invalid();
   test_blank_ioctl();
   test_route();
+  test_map_len(); /* WP-E: the slot span clamp (N0 present gate) */
 }
 
 #endif // KERNEL_MODE_UNIT_TEST

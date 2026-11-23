@@ -1,0 +1,952 @@
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/abi_t2_test.c -o obj/intel/abi_t2_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/acpi.c -o obj/intel/acpi.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/audio_stub.c -o obj/intel/audio_stub.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/blk_cache.c -o obj/intel/blk_cache.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/blk_cache_press_test.c -o obj/intel/blk_cache_press_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/blk_cache_test.c -o obj/intel/blk_cache_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/dhcp.c -o obj/intel/dhcp.o
+src/kernel/dhcp.c:42:17: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+   42 |   for(int i=0; i<sizeof(buf); i++) buf[i] = 0;
+      |                ~^~~~~~~~~~~~
+src/kernel/dhcp.c:82:17: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+   82 |   for(int i=0; i<sizeof(buf); i++) buf[i] = 0;
+      |                ~^~~~~~~~~~~~
+src/kernel/dhcp.c:135:19: warning: unused variable 'udp' [-Wunused-variable]
+  135 |   struct udp_hdr* udp = (struct udp_hdr*)(packet + sizeof(struct ipv4_hdr));
+      |                   ^~~
+3 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/elf_image.c -o obj/intel/elf_image.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/elf_loader.c -o obj/intel/elf_loader.o
+In file included from src/kernel/elf_loader.c:45:
+src/include/vm.h:229:55: warning: '/*' within block comment [-Wcomment]
+  229 |  * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+      |                                                       ^
+src/kernel/elf_loader.c:233:12: warning: unused function 'el_vaddr_to_offset' [-Wunused-function]
+  233 | static int el_vaddr_to_offset(const struct elf_image *img, uint64_t va,
+      |            ^~~~~~~~~~~~~~~~~~
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/elf_loader_test.c -o obj/intel/elf_loader_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/evdev.c -o obj/intel/evdev.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/evdev_test.c -o obj/intel/evdev_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/ext2.c -o obj/intel/ext2.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/ext2_compat.c -o obj/intel/ext2_compat.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/ext2_obj.c -o obj/intel/ext2_obj.o
+In file included from src/kernel/ext2_obj.c:21:
+src/include/vm.h:229:55: warning: '/*' within block comment [-Wcomment]
+  229 |  * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+      |                                                       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/ext2_vfs.c -o obj/intel/ext2_vfs.o
+In file included from src/kernel/ext2_vfs.c:25:
+src/include/vm.h:229:55: warning: '/*' within block comment [-Wcomment]
+  229 |  * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+      |                                                       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/fat16.c -o obj/intel/fat16.o
+In file included from src/kernel/fat16.c:9:
+src/include/vm.h:229:55: warning: '/*' within block comment [-Wcomment]
+  229 |  * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+      |                                                       ^
+In file included from src/kernel/fat16.c:10:
+src/include/file_obj.h:47:44: warning: '/*' within block comment [-Wcomment]
+   47 |  * XML loader uses MemoryMappedFile on Data/*.xml, and answering -ENOTSUP
+      |                                            ^
+src/kernel/fat16.c:2347:26: warning: result of comparison of constant -27 with expression of type 'unsigned char' is always false [-Wtautological-constant-out-of-range-compare]
+ 2347 |     if (b0 == 0x00 || b0 == (char)0xE5) {
+      |                       ~~ ^  ~~~~~~~~~~
+src/kernel/fat16.c:2529:25: warning: comparison of integers of different signs: 'int' and 'uint32_t' (aka 'unsigned int') [-Wsign-compare]
+ 2529 |       if ((int)old_size > f->fat16.cursor) f->fat16.cursor = (int)old_size;
+      |           ~~~~~~~~~~~~~ ^ ~~~~~~~~~~~~~~~
+src/kernel/fat16.c:2663:46: warning: unused parameter 'flags' [-Wunused-parameter]
+ 2663 |                                     uint64_t flags) {
+      |                                              ^
+5 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -Iobj/intel -c src/kernel/fat16_test.c -o obj/intel/fat16_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/fb_ioctl.c -o obj/intel/fb_ioctl.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/fb_ioctl_test.c -o obj/intel/fb_ioctl_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/fb_mmap.c -o obj/intel/fb_mmap.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/fb_mmap_test.c -o obj/intel/fb_mmap_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/file_obj.c -o obj/intel/file_obj.o
+In file included from src/kernel/file_obj.c:17:
+src/include/file_obj.h:47:44: warning: '/*' within block comment [-Wcomment]
+   47 |  * XML loader uses MemoryMappedFile on Data/*.xml, and answering -ENOTSUP
+      |                                            ^
+In file included from src/kernel/file_obj.c:27:
+src/include/vm.h:229:55: warning: '/*' within block comment [-Wcomment]
+  229 |  * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+      |                                                       ^
+src/kernel/file_obj.c:81:57: warning: result of comparison of constant 4294967296 with expression of type 'uint32_t' (aka 'unsigned int') is always false [-Wtautological-constant-out-of-range-compare]
+   81 |   if (start_cluster == 0 || file_size == 0 || file_size > VM_OBJ_MAX_BYTES)
+      |                                               ~~~~~~~~~ ^ ~~~~~~~~~~~~~~~~
+src/kernel/file_obj.c:405:42: warning: '/*' within block comment [-Wcomment]
+  405 | /* RimWorld's XML loader wraps every Data/*.xml in a MemoryMappedFile and  */
+      |                                          ^
+src/kernel/file_obj.c:457:25: warning: result of comparison of constant 4294967296 with expression of type 'uint32_t' (aka 'unsigned int') is always false [-Wtautological-constant-out-of-range-compare]
+  457 |   if (size == 0 || size > VM_OBJ_MAX_BYTES)
+      |                    ~~~~ ^ ~~~~~~~~~~~~~~~~
+5 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/fpu_user.c -o obj/intel/fpu_user.o
+In file included from src/kernel/fpu_user.c:55:
+src/include/vm.h:229:55: warning: '/*' within block comment [-Wcomment]
+  229 |  * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+      |                                                       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/frame.c -o obj/intel/frame.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/frame_test.c -o obj/intel/frame_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/fs.c -o obj/intel/fs.o
+In file included from src/kernel/fs.c:13:
+src/include/file_obj.h:47:44: warning: '/*' within block comment [-Wcomment]
+   47 |  * XML loader uses MemoryMappedFile on Data/*.xml, and answering -ENOTSUP
+      |                                            ^
+In file included from src/kernel/fs.c:15:
+src/include/vm.h:229:55: warning: '/*' within block comment [-Wcomment]
+  229 |  * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+      |                                                       ^
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/fs_test.c -o obj/intel/fs_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/gpu_abi.c -o obj/intel/gpu_abi.o
+In file included from src/kernel/gpu_abi.c:19:
+src/include/vm.h:229:55: warning: '/*' within block comment [-Wcomment]
+  229 |  * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+      |                                                       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/gpu_abi_m2_test.c -o obj/intel/gpu_abi_m2_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/input_node.c -o obj/intel/input_node.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/input_node_test.c -o obj/intel/input_node_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/iommu_vtd.c -o obj/intel/iommu_vtd.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/ipc_proto.c -o obj/intel/ipc_proto.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/irq_table.c -o obj/intel/irq_table.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/kconsole.c -o obj/intel/kconsole.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/linux_compat.c -o obj/intel/linux_compat.o
+In file included from src/kernel/linux_compat.c:35:
+src/include/vm.h:229:55: warning: '/*' within block comment [-Wcomment]
+  229 |  * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+      |                                                       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/linux_compat_away.c -o obj/intel/linux_compat_away.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/linux_compat_cons.c -o obj/intel/linux_compat_cons.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/linux_compat_fd.c -o obj/intel/linux_compat_fd.o
+In file included from src/kernel/linux_compat_fd.c:50:
+src/include/file_obj.h:47:44: warning: '/*' within block comment [-Wcomment]
+   47 |  * XML loader uses MemoryMappedFile on Data/*.xml, and answering -ENOTSUP
+      |                                            ^
+In file included from src/kernel/linux_compat_fd.c:69:
+src/include/vm.h:229:55: warning: '/*' within block comment [-Wcomment]
+  229 |  * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+      |                                                       ^
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/linux_compat_mem.c -o obj/intel/linux_compat_mem.o
+In file included from src/kernel/linux_compat_mem.c:70:
+src/include/vm.h:229:55: warning: '/*' within block comment [-Wcomment]
+  229 |  * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+      |                                                       ^
+In file included from src/kernel/linux_compat_mem.c:71:
+src/include/file_obj.h:47:44: warning: '/*' within block comment [-Wcomment]
+   47 |  * XML loader uses MemoryMappedFile on Data/*.xml, and answering -ENOTSUP
+      |                                            ^
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/linux_compat_misc.c -o obj/intel/linux_compat_misc.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/linux_compat_netlink.c -o obj/intel/linux_compat_netlink.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/linux_compat_ntsync.c -o obj/intel/linux_compat_ntsync.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/linux_compat_pi_test.c -o obj/intel/linux_compat_pi_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/linux_compat_proc.c -o obj/intel/linux_compat_proc.o
+In file included from src/kernel/linux_compat_proc.c:101:
+src/include/vm.h:229:55: warning: '/*' within block comment [-Wcomment]
+  229 |  * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+      |                                                       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/linux_compat_shm.c -o obj/intel/linux_compat_shm.o
+In file included from src/kernel/linux_compat_shm.c:52:
+src/include/vm.h:229:55: warning: '/*' within block comment [-Wcomment]
+  229 |  * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+      |                                                       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/linux_compat_thr.c -o obj/intel/linux_compat_thr.o
+In file included from src/kernel/linux_compat_thr.c:50:
+src/include/vm.h:229:55: warning: '/*' within block comment [-Wcomment]
+  229 |  * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+      |                                                       ^
+src/kernel/linux_compat_thr.c:55:61: warning: '/*' within block comment [-Wcomment]
+   55 |  * aarch64 kernel still compiles the file because src/kernel/*.c is one glob;
+      |                                                             ^
+src/kernel/linux_compat_thr.c:2155:39: warning: unused parameter 'p' [-Wunused-parameter]
+ 2155 | static int l_thr_exit(struct process *p, struct trap_frame *tf) {
+      |                                       ^
+src/kernel/linux_compat_thr.c:3512:58: warning: unused parameter 'cur' [-Wunused-parameter]
+ 3512 | static int l_sf_plant(struct process *p, struct process *cur,
+      |                                                          ^
+4 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/linux_compat_timers.c -o obj/intel/linux_compat_timers.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/linux_exec.c -o obj/intel/linux_exec.o
+In file included from src/kernel/linux_exec.c:58:
+src/include/vm.h:229:55: warning: '/*' within block comment [-Wcomment]
+  229 |  * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+      |                                                       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/linux_snd.c -o obj/intel/linux_snd.o
+In file included from src/kernel/linux_snd.c:48:
+src/include/vm.h:229:55: warning: '/*' within block comment [-Wcomment]
+  229 |  * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+      |                                                       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/linux_snd_params.c -o obj/intel/linux_snd_params.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/linux_uname.c -o obj/intel/linux_uname.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/lock_order.c -o obj/intel/lock_order.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/locks_test.c -o obj/intel/locks_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/lockscale.c -o obj/intel/lockscale.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/main.c -o obj/intel/main.o
+src/kernel/main.c:52:39: warning: unused parameter 'tf' [-Wunused-parameter]
+   52 | void irq_handler_c(struct trap_frame *tf) {
+      |                                       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/math_test.c -o obj/intel/math_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/mmu_test.c -o obj/intel/mmu_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/net.c -o obj/intel/net.o
+src/kernel/net.c:572:18: warning: variable 'stored' set but not used [-Wunused-but-set-variable]
+  572 |         uint32_t stored = 0;
+      |                  ^
+src/kernel/net.c:1086:21: warning: comparison of integers of different signs: 'int' and 'unsigned long' [-Wsign-compare]
+ 1086 |   for (int i = 0; i < sizeof(struct pseudo_hdr)/2; i++) {
+      |                   ~ ^ ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/net.c:1540:3: warning: '/*' within block comment [-Wcomment]
+ 1540 |   /* L35: poll the NIC ring for the WHOLE wait instead of sleeping until the
+      |   ^
+src/kernel/net.c:677:39: warning: unused function 'safe_print_int' [-Wunused-function]
+  677 | __attribute__((noinline)) static void safe_print_int(int val) {
+      |                                       ^~~~~~~~~~~~~~
+4 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/net_rdma.c -o obj/intel/net_rdma.o
+src/kernel/net_rdma.c:775:12: warning: unused variable 'rx_count' [-Wunused-variable]
+  775 |   uint32_t rx_count = 0;
+      |            ^~~~~~~~
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/net_rdma_test.c -o obj/intel/net_rdma_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/net_test.c -o obj/intel/net_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/nfs.c -o obj/intel/nfs.o
+src/kernel/nfs.c:1670:49: warning: unused parameter 'm' [-Wunused-parameter]
+ 1670 | static int nfs_rd_issue(const struct nfs_mount *m, struct socket_pcb *pcb,
+      |                                                 ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/nfs_proto.c -o obj/intel/nfs_proto.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/nfs_test.c -o obj/intel/nfs_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/nv.c -o obj/intel/nv.o
+In file included from src/kernel/nv.c:36:
+src/include/vm.h:229:55: warning: '/*' within block comment [-Wcomment]
+  229 |  * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+      |                                                       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/nv_falcon.c -o obj/intel/nv_falcon.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/nv_fw.c -o obj/intel/nv_fw.o
+src/kernel/nv_fw.c:111:13: warning: unused function 'fw_copy' [-Wunused-function]
+  111 | static void fw_copy(void *dst, const void *src, uint32_t n) {
+      |             ^~~~~~~
+src/kernel/nv_fw.c:594:17: warning: unused function 'fw_align_up' [-Wunused-function]
+  594 | static uint64_t fw_align_up(uint64_t v, uint64_t a) {
+      |                 ^~~~~~~~~~~
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/nv_fw_test.c -o obj/intel/nv_fw_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/nv_gsp.c -o obj/intel/nv_gsp.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/nv_pci.c -o obj/intel/nv_pci.o
+src/kernel/nv_pci.c:389:1: warning: non-void function does not return a value in all control paths [-Wreturn-type]
+  389 | }
+      | ^
+src/kernel/nv_pci.c:50:27: warning: unused variable 'g_bar0' [-Wunused-variable]
+   50 | static volatile uint32_t *g_bar0;
+      |                           ^~~~~~
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/nv_test.c -o obj/intel/nv_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/pci.c -o obj/intel/pci.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/pci_test.c -o obj/intel/pci_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/pipe.c -o obj/intel/pipe.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/pipe_test.c -o obj/intel/pipe_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/process.c -o obj/intel/process.o
+In file included from src/kernel/process.c:7:
+src/include/vm.h:229:55: warning: '/*' within block comment [-Wcomment]
+  229 |  * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+      |                                                       ^
+src/kernel/process.c:2495:42: warning: unused parameter 'is_yield' [-Wunused-parameter]
+ 2495 | void schedule(struct trap_frame *tf, int is_yield) {
+      |                                          ^
+src/kernel/process.c:4587:22: warning: use of out-of-scope declaration of 'linux_compat_sigmask_get' [-Wout-of-scope-function]
+ 4587 |       uint64_t m48 = linux_compat_sigmask_get(pender);
+      |                      ^
+src/kernel/process.c:4234:19: note: previous declaration is here
+ 4234 |   extern uint64_t linux_compat_sigmask_get(struct process *p);
+      |                   ^
+src/kernel/process.c:5562:9: warning: address of function 'virtio_gpu_health_tick' will always evaluate to 'true' [-Wpointer-bool-conversion]
+ 5562 |     if (virtio_gpu_health_tick) virtio_gpu_health_tick();
+      |     ~~  ^~~~~~~~~~~~~~~~~~~~~~
+src/kernel/process.c:5562:9: note: prefix with the address-of operator to silence this warning
+ 5562 |     if (virtio_gpu_health_tick) virtio_gpu_health_tick();
+      |         ^
+      |         &
+src/kernel/process.c:7984:50: warning: unused parameter 'prot' [-Wunused-parameter]
+ 7984 | int64_t sys_mmap(int64_t addr, uint64_t len, int prot, int flags) {
+      |                                                  ^
+5 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/process_test.c -o obj/intel/process_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/program_loader.c -o obj/intel/program_loader.o
+In file included from src/kernel/program_loader.c:12:
+src/include/vm.h:229:55: warning: '/*' within block comment [-Wcomment]
+  229 |  * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+      |                                                       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/program_loader_test.c -o obj/intel/program_loader_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/rw_watch.c -o obj/intel/rw_watch.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/ssp.c -o obj/intel/ssp.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/ssp_report.c -o obj/intel/ssp_report.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/test_fw_cfg.c -o obj/intel/test_fw_cfg.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/test_smp.c -o obj/intel/test_smp.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/time.c -o obj/intel/time.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/time_test.c -o obj/intel/time_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/timer_test.c -o obj/intel/timer_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/tmpfs.c -o obj/intel/tmpfs.o
+In file included from src/kernel/tmpfs.c:49:
+src/include/vm.h:229:55: warning: '/*' within block comment [-Wcomment]
+  229 |  * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+      |                                                       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/tmpfs_compat.c -o obj/intel/tmpfs_compat.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/trap_test.c -o obj/intel/trap_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/unit_test.c -o obj/intel/unit_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/unix.c -o obj/intel/unix.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/unix_test.c -o obj/intel/unix_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/vdisplay.c -o obj/intel/vdisplay.o
+In file included from src/kernel/vdisplay.c:20:
+src/include/vm.h:229:55: warning: '/*' within block comment [-Wcomment]
+  229 |  * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+      |                                                       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/vdisplay_test.c -o obj/intel/vdisplay_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/vfs.c -o obj/intel/vfs.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/vfs_bind.c -o obj/intel/vfs_bind.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/vfs_compat.c -o obj/intel/vfs_compat.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/vfs_lock.c -o obj/intel/vfs_lock.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/virtio_blk.c -o obj/intel/virtio_blk.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/virtio_blk_test.c -o obj/intel/virtio_blk_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/virtio_gpu.c -o obj/intel/virtio_gpu.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/virtio_gpu_3d.c -o obj/intel/virtio_gpu_3d.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/virtio_gpu_test.c -o obj/intel/virtio_gpu_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/virtio_gpu_x64.c -o obj/intel/virtio_gpu_x64.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/virtio_input.c -o obj/intel/virtio_input.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/virtio_input_test.c -o obj/intel/virtio_input_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/virtio_net.c -o obj/intel/virtio_net.o
+src/kernel/virtio_net.c:664:7: warning: variable 'poll_processed' set but not used [-Wunused-but-set-variable]
+  664 |   int poll_processed = 0;
+      |       ^
+src/kernel/virtio_net.c:137:30: warning: unused variable 'tx_hdr' [-Wunused-variable]
+  137 | static struct virtio_net_hdr tx_hdr __attribute__((aligned(4096)));
+      |                              ^~~~~~
+2 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/virtio_net_test.c -o obj/intel/virtio_net_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/virtio_snd.c -o obj/intel/virtio_snd.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/vm.c -o obj/intel/vm.o
+In file included from src/kernel/vm.c:13:
+src/include/vm.h:229:55: warning: '/*' within block comment [-Wcomment]
+  229 |  * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+      |                                                       ^
+In file included from src/kernel/vm.c:20:
+src/include/file_obj.h:47:44: warning: '/*' within block comment [-Wcomment]
+   47 |  * XML loader uses MemoryMappedFile on Data/*.xml, and answering -ENOTSUP
+      |                                            ^
+src/kernel/vm.c:52:8: warning: '/*' within block comment [-Wcomment]
+   52 |  * Data/**\/*.xml files, each `MemoryMappedFile.CreateViewAccessor` its own
+      |        ^
+src/kernel/vm.c:52:12: warning: '/*' within block comment [-Wcomment]
+   52 |  * Data/**\/*.xml files, each `MemoryMappedFile.CreateViewAccessor` its own
+      |            ^
+src/kernel/vm.c:4215:14: warning: unused variable 'off_dbg' [-Wunused-variable]
+ 4215 |     uint64_t off_dbg = (a - r->base) + r->obj_off;
+      |              ^~~~~~~
+src/kernel/vm.c:5353:62: warning: '/*' within block comment [-Wcomment]
+ 5353 |            MemoryMappedFile (RimWorld's XML loader) maps Data/*.xml; refusing
+      |                                                              ^
+src/kernel/vm.c:5394:35: warning: result of comparison of constant 4294967296 with expression of type 'uint32_t' (aka 'unsigned int') is always false [-Wtautological-constant-out-of-range-compare]
+ 5394 |         if (n_size == 0 || n_size > VM_OBJ_MAX_BYTES)
+      |                            ~~~~~~ ^ ~~~~~~~~~~~~~~~~
+src/kernel/vm.c:5404:35: warning: result of comparison of constant 4294967296 with expression of type 'uint32_t' (aka 'unsigned int') is always false [-Wtautological-constant-out-of-range-compare]
+ 5404 |         if (f_size == 0 || f_size > VM_OBJ_MAX_BYTES)
+      |                            ~~~~~~ ^ ~~~~~~~~~~~~~~~~
+src/kernel/vm.c:232:12: warning: unused function 'vm_zp_others_ready' [-Wunused-function]
+  232 | static int vm_zp_others_ready(int self) {
+      |            ^~~~~~~~~~~~~~~~~~
+9 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/vm_pfstat.c -o obj/intel/vm_pfstat.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/vm_test.c -o obj/intel/vm_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/arch/x64/cpu.c -o obj/intel/cpu.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/arch/x64/fpu.c -o obj/intel/fpu.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/arch/x64/fpu_sig_test.c -o obj/intel/fpu_sig_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/arch/x64/gic.c -o obj/intel/gic.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/arch/x64/locks.c -o obj/intel/locks.o
+src/kernel/arch/x64/locks.c:295:40: warning: calling '__builtin_return_address' with a nonzero argument is unsafe [-Wframe-address]
+  295 |     lock_wait_caller2[cpu] = (uint64_t)__builtin_return_address(1);
+      |                                        ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/arch/x64/locks.c:353:39: warning: calling '__builtin_return_address' with a nonzero argument is unsafe [-Wframe-address]
+  353 |         scream_hex(" pc2=", (uint64_t)__builtin_return_address(1));
+      |                                       ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/arch/x64/locks.c:432:40: warning: calling '__builtin_return_address' with a nonzero argument is unsafe [-Wframe-address]
+  432 |           last_sb.wait_pc2 = (uint64_t)__builtin_return_address(1);
+      |                                        ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/arch/x64/locks.c:470:40: warning: calling '__builtin_return_address' with a nonzero argument is unsafe [-Wframe-address]
+  470 |         plh_pc[cc].h.site3 = (uint64_t)__builtin_return_address(1);
+      |                                        ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/kernel/arch/x64/locks.c:481:44: warning: calling '__builtin_return_address' with a nonzero argument is unsafe [-Wframe-address]
+  481 |         held_lock_pc2[hcpu][d] = (uint64_t)__builtin_return_address(1);
+      |                                            ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+5 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/arch/x64/mmu.c -o obj/intel/mmu.o
+In file included from src/kernel/arch/x64/mmu.c:6:
+src/include/vm.h:229:55: warning: '/*' within block comment [-Wcomment]
+  229 |  * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+      |                                                       ^
+1 warning generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/arch/x64/rtc.c -o obj/intel/rtc.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/arch/x64/smp.c -o obj/intel/smp.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/arch/x64/timer.c -o obj/intel/timer.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/arch/x64/trap.c -o obj/intel/trap.o
+In file included from src/kernel/arch/x64/trap.c:43:
+src/include/vm.h:229:55: warning: '/*' within block comment [-Wcomment]
+  229 |  * MemoryMappedFile (RimWorld's XML loader) mmaps Data/*.xml; NFS files have
+      |                                                       ^
+src/kernel/arch/x64/trap.c:3033:5: warning: use of out-of-scope declaration of 'panic_puts' [-Wout-of-scope-function]
+ 3033 |     panic_puts(pb);
+      |     ^
+src/kernel/arch/x64/trap.c:142:15: note: previous declaration is here
+  142 |   extern void panic_puts(const char *s);
+      |               ^
+src/kernel/arch/x64/trap.c:5220:17: warning: address of function 'virtio_gpu_health_tick' will always evaluate to 'true' [-Wpointer-bool-conversion]
+ 5220 |             if (virtio_gpu_health_tick)
+      |             ~~  ^~~~~~~~~~~~~~~~~~~~~~
+src/kernel/arch/x64/trap.c:5220:17: note: prefix with the address-of operator to silence this warning
+ 5220 |             if (virtio_gpu_health_tick)
+      |                 ^
+      |                 &
+src/kernel/arch/x64/trap.c:118:13: warning: unused function 'dbg_resume' [-Wunused-function]
+  118 | static void dbg_resume(const char *tag, uint64_t v) {
+      |             ^~~~~~~~~~
+src/kernel/arch/x64/trap.c:3581:13: warning: unused function 'safe_print_int' [-Wunused-function]
+ 3581 | static void safe_print_int(int val) {
+      |             ^~~~~~~~~~~~~~
+src/kernel/arch/x64/trap.c:3600:13: warning: unused function 'safe_print_hex' [-Wunused-function]
+ 3600 | static void safe_print_hex(uint64_t val) {
+      |             ^~~~~~~~~~~~~~
+6 warnings generated.
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/arch/x64/trap_badvec_arm_test.c -o obj/intel/trap_badvec_arm_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/arch/x64/trap_user_class_test.c -o obj/intel/trap_user_class_test.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/arch/x64/trapprof.c -o obj/intel/trapprof.o
+clang -O2 -Wall -Wextra -g -Isrc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -fstack-protector-strong -mstack-protector-guard=global -DKERNEL_MODE_FB_TEST -c src/kernel/arch/x64/uart.c -o obj/intel/uart.o
+ld.lld -T linker_x64.ld -o hobbyos.elf obj/intel/boot.o obj/intel/setjmp.o obj/intel/abi_t2_test.o obj/intel/acpi.o obj/intel/audio_stub.o obj/intel/blk_cache.o obj/intel/blk_cache_press_test.o obj/intel/blk_cache_test.o obj/intel/dhcp.o obj/intel/elf_image.o obj/intel/elf_loader.o obj/intel/elf_loader_test.o obj/intel/evdev.o obj/intel/evdev_test.o obj/intel/ext2.o obj/intel/ext2_compat.o obj/intel/ext2_obj.o obj/intel/ext2_vfs.o obj/intel/fat16.o obj/intel/fat16_test.o obj/intel/fb_ioctl.o obj/intel/fb_ioctl_test.o obj/intel/fb_mmap.o obj/intel/fb_mmap_test.o obj/intel/file_obj.o obj/intel/fpu_user.o obj/intel/frame.o obj/intel/frame_test.o obj/intel/fs.o obj/intel/fs_test.o obj/intel/gpu_abi.o obj/intel/gpu_abi_m2_test.o obj/intel/input_node.o obj/intel/input_node_test.o obj/intel/iommu_vtd.o obj/intel/ipc_proto.o obj/intel/irq_table.o obj/intel/kconsole.o obj/intel/linux_compat.o obj/intel/linux_compat_away.o obj/intel/linux_compat_cons.o obj/intel/linux_compat_fd.o obj/intel/linux_compat_mem.o obj/intel/linux_compat_misc.o obj/intel/linux_compat_netlink.o obj/intel/linux_compat_ntsync.o obj/intel/linux_compat_pi_test.o obj/intel/linux_compat_proc.o obj/intel/linux_compat_shm.o obj/intel/linux_compat_thr.o obj/intel/linux_compat_timers.o obj/intel/linux_exec.o obj/intel/linux_snd.o obj/intel/linux_snd_params.o obj/intel/linux_uname.o obj/intel/lock_order.o obj/intel/locks_test.o obj/intel/lockscale.o obj/intel/main.o obj/intel/math_test.o obj/intel/mmu_test.o obj/intel/net.o obj/intel/net_rdma.o obj/intel/net_rdma_test.o obj/intel/net_test.o obj/intel/nfs.o obj/intel/nfs_proto.o obj/intel/nfs_test.o obj/intel/nv.o obj/intel/nv_falcon.o obj/intel/nv_fw.o obj/intel/nv_fw_test.o obj/intel/nv_gsp.o obj/intel/nv_pci.o obj/intel/nv_test.o obj/intel/pci.o obj/intel/pci_test.o obj/intel/pipe.o obj/intel/pipe_test.o obj/intel/process.o obj/intel/process_test.o obj/intel/program_loader.o obj/intel/program_loader_test.o obj/intel/rw_watch.o obj/intel/ssp.o obj/intel/ssp_report.o obj/intel/test_fw_cfg.o obj/intel/test_smp.o obj/intel/time.o obj/intel/time_test.o obj/intel/timer_test.o obj/intel/tmpfs.o obj/intel/tmpfs_compat.o obj/intel/trap_test.o obj/intel/unit_test.o obj/intel/unix.o obj/intel/unix_test.o obj/intel/vdisplay.o obj/intel/vdisplay_test.o obj/intel/vfs.o obj/intel/vfs_bind.o obj/intel/vfs_compat.o obj/intel/vfs_lock.o obj/intel/virtio_blk.o obj/intel/virtio_blk_test.o obj/intel/virtio_gpu.o obj/intel/virtio_gpu_3d.o obj/intel/virtio_gpu_test.o obj/intel/virtio_gpu_x64.o obj/intel/virtio_input.o obj/intel/virtio_input_test.o obj/intel/virtio_net.o obj/intel/virtio_net_test.o obj/intel/virtio_snd.o obj/intel/vm.o obj/intel/vm_pfstat.o obj/intel/vm_test.o obj/intel/cpu.o obj/intel/fpu.o obj/intel/fpu_sig_test.o obj/intel/gic.o obj/intel/locks.o obj/intel/mmu.o obj/intel/rtc.o obj/intel/smp.o obj/intel/timer.o obj/intel/trap.o obj/intel/trap_badvec_arm_test.o obj/intel/trap_user_class_test.o obj/intel/trapprof.o obj/intel/uart.o
+llvm-objcopy -I elf64-x86-64 -O elf32-i386 hobbyos.elf
+clang -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=x86_64-none-elf -ffreestanding -mno-red-zone -nostdinc -isystem /usr/lib/llvm-21/lib/clang/21/include -mcmodel=large -c src/user/console.c -o obj/intel/console.o
+ld.lld -T src/user/linker.ld -o obj/intel/console.elf obj/intel/console.o obj/intel/user_libc.o obj/intel/user_malloc.o obj/intel/libc_string.o
+llvm-objcopy -O binary obj/intel/console.elf obj/intel/console.bin
+[browser] none of /home/sarah/webkit-lanes/wf1b/WebKitBuild/HobbyOS-intel/bin/WebProcess | third_party/webkit-hobbyos/build/intel/browser.bin | third_party/webkit-hobbyos/cache/browser-x64.bin.xz present; BROWSER_SKIP=1 - disk ships without the browser
+[browser] BROWSER_SKIP=1 - no browser staged
+[tools] no LLVM dist staging; TOOLS_SKIP=1 - /TOOLS will lack the LLVM toolchain
+# Startup disk: 1 GiB by default (user-requested floor; FAT16 tops out near
+# 2 GiB).  DISK_MB allows a bigger image without editing this recipe -- the
+# RimWorld staging script needs ~1.5 GiB because the game is 806 MB of
+# apparent size.  mkfs.fat auto-picks the cluster size (32 KiB @ 1 GiB);
+# the kernel fat16.c layout math is BPB data-driven
+# (bpb_sectors_per_cluster), so no driver change is needed for a larger
+# disk.  Stay at or below ~1.5 GiB: past that mkfs.fat has to leave 32 KiB
+# clusters to stay inside FAT16's 65524-cluster limit, which the guest's
+# FAT driver does not describe.
+dd if=/dev/zero of=disk.img bs=1M count=1024
+1024+0 records in
+1024+0 records out
+1073741824 bytes (1.1 GB, 1.0 GiB) copied, 0.350175 s, 3.1 GB/s
+mkfs.fat -F 16 disk.img
+mkfs.fat 4.2 (2021-01-31)
+mmd -i disk.img ::/EFI
+mmd -i disk.img ::/EFI/BOOT
+mmd -i disk.img ::/boot
+mmd -i disk.img ::/home
+# CA roots for the browser's TLS stack (libcurl/mbedTLS): the driver pins
+# /CERTS/CA.PEM (WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp).  Without
+# this every https:// navigation fails at certificate verification and the
+# user sees the previous page with no explanation.
+mmd -i disk.img ::/CERTS
+mcopy -i disk.img certs/cacert.pem ::/CERTS/CA.PEM
+mmd -i disk.img ::/nfs
+mmd -i disk.img ::/mnt
+mmd -i disk.img ::/TESTDIR
+mmd -i disk.img ::/tmp
+# GB-059: the S2 launcher scans /GAMES for titles (.BIN native ports and
+# extension-less/.elf compat ELFs) — games_scan.c / desktop.c:915.  The
+# directory must exist on the image or the scan is a documented no-op and
+# no compat title can ever be launched by name.  Stage one of each kind
+# here so "both a native port and a compat title through the one rig" is
+# measurable from a shipped image rather than a hand-staged copy (which
+# `make run` would wipe).
+mmd -i disk.img ::/GAMES
+mcopy -i disk.img obj/intel/xnibbler.bin ::/GAMES/XNIBBLER.BIN
+mcopy -i disk.img obj/sdl_test_app_pie ::/GAMES/SDLTEST.ELF
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+# build-tools at their frozen /TOOLS/ paths (Makefile.hobbyos sketch).
+mmd -i disk.img ::/TOOLS
+# L3 (selfhost W-A): VFAT long-name build-payload fixture dirs (mtools-written).
+mmd -i disk.img ::/src
+mmd -i disk.img ::/src/kernel
+mmd -i disk.img ::/src/user_include
+mmd -i disk.img ::/src/user_include/graphics
+mmd -i disk.img ::/third_party
+mmd -i disk.img ::/third_party/libcxx-21.1.8
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include
+mcopy -i disk.img tests/fixtures/E2E.TXT ::/E2E.TXT
+mcopy -i disk.img tests/fixtures/DRAGME.TXT ::/DRAGME.TXT
+mcopy -i disk.img bootloader/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
+mcopy -i disk.img bootloader/BOOTAA64.EFI ::/EFI/BOOT/BOOTAA64.EFI
+mcopy -i disk.img obj/intel/limine.conf ::/boot/limine.conf
+# Limine's multiboot1 loader also allocates room for the ELF's section
+# contents and panics ("multiboot1: Cannot allocate elf sections") once the
+# DWARF grows past what it can place -- reached by the icewm.md §9 kernel
+# code.  Boot a debug-stripped copy; hobbyos.elf keeps the symbols for
+# objdump/addr2line (same loadable segments, byte for byte).
+llvm-objcopy --strip-debug hobbyos.elf obj/intel/hobbyos.boot.elf
+mcopy -i disk.img obj/intel/hobbyos.boot.elf ::/boot/hobbyos.elf
+mcopy -i disk.img obj/intel/memtest.bin ::/MEMTEST.BIN
+mcopy -i disk.img obj/intel/fileio_test.bin ::/FILEIO.BIN
+mcopy -i disk.img obj/intel/console.bin ::/CONSOLE.BIN
+mcopy -i disk.img obj/intel/fork_test.bin ::/FORKTEST.BIN
+mcopy -i disk.img obj/intel/heap_test.bin ::/HEAPTEST.BIN
+mcopy -i disk.img obj/intel/spawntest.bin ::/SPAWN.BIN
+mcopy -i disk.img obj/intel/graphics.bin ::/GRAPHICS.BIN
+mcopy -i disk.img obj/intel/wsurf_test.bin ::/WSRF_T.BIN
+mcopy -i disk.img obj/intel/smp_test.bin ::/SMPTEST.BIN
+mcopy -i disk.img obj/intel/pipetest.bin ::/PIPETEST.BIN
+mcopy -i disk.img obj/intel/nettest.bin ::/NETTEST.BIN
+mcopy -i disk.img obj/intel/timeout.bin ::/TIMEOUT.BIN
+mcopy -i disk.img obj/intel/nfstest.bin ::/NFSTEST.BIN
+mcopy -i disk.img obj/intel/desktop.bin ::/DESKTOP.BIN
+browser: no browser.bin resolved (BROWSER_SKIP) - Apps menu ships without browser
+mcopy -i disk.img obj/intel/editor.bin ::/EDITOR.BIN
+mcopy -i disk.img obj/intel/EDITOR_T.BIN ::/EDITOR_T.BIN
+mcopy -i disk.img obj/intel/APPS_T.BIN ::/APPS_T.BIN
+mcopy -i disk.img obj/intel/FILEDIAL.BIN ::/FILEDIAL.BIN
+mcopy -i disk.img obj/intel/DIALOG_T.BIN ::/DIALOG_T.BIN
+mcopy -i disk.img obj/intel/PONG_T.BIN ::/PONG_T.BIN
+mcopy -i disk.img obj/intel/stress.bin ::/STRESS.BIN
+mcopy -i disk.img obj/intel/fpu_test.bin ::/FPU_T.BIN
+mcopy -i disk.img obj/intel/gfxbench.bin ::/GFXBENCH.BIN
+mcopy -i disk.img obj/intel/math_test.bin ::/MATH_T.BIN
+mcopy -i disk.img obj/intel/errtest.bin ::/ERRTEST.BIN
+mcopy -i disk.img obj/intel/SOCK2TST.BIN ::/SOCK2TST.BIN
+mcopy -i disk.img obj/intel/POLLTST.BIN ::/POLLTST.BIN
+mcopy -i disk.img obj/intel/POLLBRK.BIN ::/POLLBRK.BIN
+mcopy -i disk.img obj/intel/BLKTEST.BIN ::/BLKTEST.BIN
+mcopy -i disk.img obj/intel/RANDTST.BIN ::/RANDTST.BIN
+mcopy -i disk.img obj/intel/dns_test.bin ::/DNSTST.BIN
+mcopy -i disk.img obj/intel/netfix.bin ::/NETFIX.BIN
+mcopy -i disk.img obj/intel/cxx_smoke.bin ::/CXXSMOKE.BIN
+mcopy -i disk.img obj/intel/thrd_test.bin ::/THRD_T.BIN
+mcopy -i disk.img obj/intel/tls_test.bin ::/TLS_T.BIN
+mcopy -i disk.img obj/intel/WK1C_T.BIN ::/WK1C_T.BIN
+mcopy -i disk.img obj/intel/cxx_t.bin ::/CXX_T.BIN
+mcopy -i disk.img obj/intel/rtti_t.bin ::/RTTI_T.BIN
+mcopy -i disk.img obj/intel/ipc_test.bin ::/IPC_T.BIN
+mcopy -i disk.img obj/intel/mmtest.bin ::/MMTEST.BIN
+mcopy -i disk.img obj/intel/sqltest.bin ::/SQLTEST.BIN
+mcopy -i disk.img obj/intel/torture_test.bin ::/TORTURE.BIN
+mcopy -i disk.img obj/intel/big.bin ::/BIG.BIN
+mcopy -i disk.img obj/intel/hello.bin ::/HELLO.BIN
+mcopy -i disk.img obj/intel/selfhost.bin ::/SELFHOST.BIN
+mcopy -i disk.img obj/intel/sh.bin ::/SH.BIN
+mcopy -i disk.img obj/intel/ls.bin ::/LS.BIN
+mcopy -i disk.img obj/intel/cat.bin ::/CAT.BIN
+mcopy -i disk.img obj/intel/grep.bin ::/GREP.BIN
+mcopy -i disk.img obj/intel/less.bin ::/LESS.BIN
+mcopy -i disk.img obj/intel/tail.bin ::/TAIL.BIN
+mcopy -i disk.img obj/intel/head.bin ::/HEAD.BIN
+mcopy -i disk.img obj/intel/shtest.bin ::/SHTEST.BIN
+mcopy -i disk.img obj/intel/ps.bin ::/PS.BIN
+mcopy -i disk.img obj/intel/free.bin ::/FREE.BIN
+mcopy -i disk.img obj/intel/uptime.bin ::/UPTIME.BIN
+mcopy -i disk.img obj/intel/nvsmi.bin ::/NVSMI.BIN
+mcopy -i disk.img obj/intel/kill.bin ::/KILL.BIN
+mcopy -i disk.img obj/intel/basename.bin ::/BASENAME.BIN
+mcopy -i disk.img obj/intel/dirname.bin ::/DIRNAME.BIN
+mcopy -i disk.img obj/intel/seq.bin ::/SEQ.BIN
+mcopy -i disk.img obj/intel/expr.bin ::/EXPR.BIN
+mcopy -i disk.img obj/intel/testgnu.bin ::/TEST.BIN
+mcopy -i disk.img obj/intel/cp.bin ::/CP.BIN
+mcopy -i disk.img obj/intel/rm.bin ::/RM.BIN
+mcopy -i disk.img obj/intel/mv.bin ::/MV.BIN
+mcopy -i disk.img obj/intel/touch.bin ::/TOUCH.BIN
+mcopy -i disk.img obj/intel/wc.bin ::/WC.BIN
+mcopy -i disk.img obj/intel/sed.bin ::/SED.BIN
+mcopy -i disk.img obj/intel/make.bin ::/MAKE.BIN
+mcopy -i disk.img obj/intel/hedgnu.bin ::/HEDGNU.BIN
+mcopy -i disk.img obj/intel/tailgnu.bin ::/TAILGN.BIN
+mcopy -i disk.img obj/intel/cut.bin ::/CUT.BIN
+mcopy -i disk.img obj/intel/tr.bin ::/TR.BIN
+mcopy -i disk.img obj/intel/paste.bin ::/PASTE.BIN
+mcopy -i disk.img obj/intel/fold.bin ::/FOLD.BIN
+mcopy -i disk.img obj/intel/nl.bin ::/NL.BIN
+mcopy -i disk.img obj/intel/comm.bin ::/COMM.BIN
+mcopy -i disk.img obj/intel/tsort.bin ::/TSORT.BIN
+mcopy -i disk.img obj/intel/expand.bin ::/EXPAND.BIN
+mcopy -i disk.img obj/intel/unexpand.bin ::/UNEXPAND.BIN
+mcopy -i disk.img obj/intel/cksum.bin ::/CKSUM.BIN
+mcopy -i disk.img obj/intel/md5sum.bin ::/MD5SUM.BIN
+mcopy -i disk.img obj/intel/proc_child.bin ::/PROCCHLD.BIN
+mcopy -i disk.img obj/intel/spawnex_child.bin ::/SPAWNEX.BIN
+mcopy -i disk.img obj/intel/sig_test.bin ::/SIG_T.BIN
+mcopy -i disk.img obj/intel/head_test.bin ::/HEDTEST.BIN
+mcopy -i disk.img obj/intel/tail_test.bin ::/TAILTEST.BIN
+mcopy -i disk.img obj/intel/proc_test.bin ::/PROCTEST.BIN
+mcopy -i disk.img obj/intel/wc_test.bin ::/WCTEST.BIN
+mcopy -i disk.img obj/intel/cut_test.bin ::/CUTTEST.BIN
+mcopy -i disk.img obj/intel/tr_test.bin ::/TRTEST.BIN
+mcopy -i disk.img obj/intel/paste_test.bin ::/PASTE_T.BIN
+mcopy -i disk.img obj/intel/fold_test.bin ::/FOLDTEST.BIN
+mcopy -i disk.img obj/intel/nl_test.bin ::/NLTEST.BIN
+mcopy -i disk.img obj/intel/comm_test.bin ::/COMMTEST.BIN
+mcopy -i disk.img obj/intel/tsort_test.bin ::/TSORT_T.BIN
+mcopy -i disk.img obj/intel/expand_test.bin ::/EXPAND_T.BIN
+mcopy -i disk.img obj/intel/unexpand_test.bin ::/UNEXPAND_T.BIN
+mcopy -i disk.img obj/intel/fatbig_test.bin ::/FATBIG_T.BIN
+mcopy -i disk.img obj/intel/stage4k_test.bin ::/STAGE4K_T.BIN
+# L3 (selfhost W-A): VFAT long-name build-payload fixtures.  Content
+# markers must stay in sync with src/user/lfn_test.c.
+mcopy -i disk.img tests/fixtures/lfn/program_loader.c ::/src/kernel/program_loader.c
+mcopy -i disk.img tests/fixtures/lfn/window.h ::/src/user_include/graphics/window.h
+mcopy -i disk.img tests/fixtures/lfn/llvm-project-21.1.8.src-EXAMPLE.c ::/src/llvm-project-21.1.8.src-EXAMPLE.c
+mcopy -i disk.img tests/fixtures/lfn/upper_bound.h ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include/upper_bound.h
+mcopy -i disk.img tests/fixtures/lfn/longfilename.txt ::/longfilename.txt
+mcopy -i disk.img tests/fixtures/lfn/longfilename2.txt ::/longfilename2.txt
+mcopy -i disk.img tests/fixtures/lfn/longfil~1.txt ::/longfil~1.txt
+mcopy -i disk.img obj/intel/lfn_test.bin ::/LFN_T.BIN
+mcopy -i disk.img obj/intel/cksum_test.bin ::/CKSUM_T.BIN
+mcopy -i disk.img obj/intel/md5sum_test.bin ::/MD5SUM_T.BIN
+mcopy -i disk.img obj/intel/tac.bin ::/TAC.BIN
+mcopy -i disk.img obj/intel/tac_test.bin ::/TACTEST.BIN
+mcopy -i disk.img obj/intel/cmp.bin ::/CMP.BIN
+mcopy -i disk.img obj/intel/cmp_test.bin ::/CMPTEST.BIN
+mcopy -i disk.img obj/intel/regex_test.bin ::/REGTEST.BIN
+mcopy -i disk.img obj/intel/sed_test.bin ::/SEDTEST.BIN
+mcopy -i disk.img obj/intel/grep_test.bin ::/GREPTEST.BIN
+mcopy -i disk.img obj/intel/subprobe.bin ::/SUBPRB.BIN
+mcopy -i disk.img obj/intel/pipeprobe.bin ::/PIPEPRB.BIN
+mcopy -i disk.img obj/intel/lseek_test.bin ::/LKSTEST.BIN
+mcopy -i disk.img obj/intel/sort.bin ::/SORT.BIN
+mcopy -i disk.img obj/intel/uniq.bin ::/UNIQ.BIN
+mcopy -i disk.img obj/intel/ping.bin ::/PING.BIN
+mcopy -i disk.img obj/intel/nc.bin ::/NC.BIN
+mcopy -i disk.img obj/intel/ifconfig.bin ::/IFCONFIG.BIN
+mcopy -i disk.img obj/intel/shtest2.bin ::/SHTEST2.BIN
+mcopy -i disk.img obj/intel/mkdir.bin ::/MKDIR.BIN
+mcopy -i disk.img obj/intel/shtest3.bin ::/SHTEST3.BIN
+mcopy -i disk.img obj/intel/pong.bin ::/PONG.BIN
+mcopy -i disk.img obj/intel/fbprobe.bin ::/FBPROBE.BIN
+mcopy -i disk.img obj/intel/millipede.bin ::/MILLIPED.BIN
+mcopy -i disk.img obj/intel/doom.bin ::/DOOM.BIN
+mcopy -i disk.img obj/intel/dooml.bin ::/DOOML.BIN
+[disk] note: no Linux-ELF Doom (make doom_elf_build) — the Doom menu entry falls back to DOOM.BIN
+[disk] IWAD doom1.wad -> ::/DOOM1.WAD
+mcopy -i disk.img obj/intel/stardust.bin ::/STARDUST.BIN
+mcopy -i disk.img obj/intel/files.bin ::/FILES.BIN
+mcopy -i disk.img obj/intel/calc.bin ::/CALC.BIN
+mcopy -i disk.img obj/intel/xcalc.bin ::/XCALC.BIN
+mcopy -i disk.img obj/intel/antfarm.bin ::/ANTFARM.BIN
+mcopy -i disk.img obj/intel/xeyes.bin ::/XEYES.BIN
+mcopy -i disk.img obj/intel/xnibbler.bin ::/XNIBBLER.BIN
+mcopy -i disk.img obj/intel/clock.bin ::/CLOCK.BIN
+mcopy -i disk.img obj/intel/sysmon.bin ::/SYSMON.BIN
+mcopy -i disk.img obj/intel/hex.bin ::/HEX.BIN
+mcopy -i disk.img obj/intel/tasks.bin ::/TASKS.BIN
+mcopy -i disk.img obj/intel/find.bin ::/FIND.BIN
+mcopy -i disk.img obj/intel/diff.bin ::/DIFF.BIN
+mcopy -i disk.img obj/intel/notes.bin ::/NOTES.BIN
+mcopy -i disk.img obj/intel/unit.bin ::/UNIT.BIN
+mcopy -i disk.img obj/intel/nano.bin ::/NANO.BIN
+mcopy -i disk.img obj/intel/xcrypt.bin ::/XCRYPT.BIN
+mcopy -i disk.img obj/intel/nes.bin ::/NES.BIN
+# Selfhost W2 (mtools port): in-OS /TOOLS copies of the ported
+# build-tools (8.3 names, the frozen F1 layout).
+mcopy -i disk.img obj/intel/mcopy.bin ::/TOOLS/MCOPY.BIN
+mcopy -i disk.img obj/intel/mdel.bin ::/TOOLS/MDEL.BIN
+mcopy -i disk.img obj/intel/mmd.bin ::/TOOLS/MMD.BIN
+# Selfhost W2 (mkfs port): in-OS MKFSFAT (F1 layout).
+mcopy -i disk.img obj/intel/mkfsfat.bin ::/MKFSFAT.BIN
+# Selfhost W3 (tools): the in-OS toolchain on the startup image (frozen
+# F1 layout, selfhost.md §7.3).  tools/selfhost-stage.sh --tools stages
+# CLANG.BIN/LLD.BIN/LLVMAR.BIN/OBJCOPY.BIN from the wave-2 LLVM
+# distribution staging (obj/selfhost/dist-staging, or the persistent
+# third_party/llvm-21.1.8/dist-staging copy that survives `make clean`),
+# the ported build tools (MAKE/MCOPY/MDEL/MMD/MKFSFAT), and the RESDIR
+# header tree under /TOOLS — staged FAITHFULLY with long names (F8
+# decision, see docs/selfhost/llvm-bootstrap.md §6.2).  Soft dependency:
+# an absent dist-staging warns + skips, so trees without the LLVM
+# install still build a bootable image (build_kernel.sh then refuses
+# with instructions).  Override with STAGE_TOOLS=0 to skip.
+tools/selfhost-stage.sh --tools disk.img
+selfhost-stage: staging in-OS toolchain to ::/TOOLS (F1 layout)
+selfhost-stage: WARNING: /TOOLS toolchain not staged: LLVM distribution staging missing at obj/selfhost/dist-staging (build it per docs/selfhost/llvm-bootstrap.md §6 — install-distribution, or restore the persistent copy at third_party/llvm-21.1.8/dist-staging — see docs/selfhost/inos-build-kernel.md and .gitignore)
+selfhost-stage: WARNING: tool not built (obj/arm/make.bin) — ::/TOOLS/MAKE.BIN not staged (make obj/arm/make.bin)
+selfhost-stage: WARNING: tool not built (obj/arm/mcopy.bin) — ::/TOOLS/MCOPY.BIN not staged (make obj/arm/mcopy.bin)
+selfhost-stage: WARNING: tool not built (obj/arm/mdel.bin) — ::/TOOLS/MDEL.BIN not staged (make obj/arm/mdel.bin)
+selfhost-stage: WARNING: tool not built (obj/arm/mmd.bin) — ::/TOOLS/MMD.BIN not staged (make obj/arm/mmd.bin)
+selfhost-stage: WARNING: tool not built (obj/arm/mkfsfat.bin) — ::/TOOLS/MKFSFAT.BIN not staged (make obj/arm/mkfsfat.bin)
+selfhost-stage: WARNING: tool not built (obj/arm/sh.bin) — ::/TOOLS/SH.BIN not staged (make obj/arm/sh.bin)
+selfhost-stage: WARNING: tool not built (obj/arm/rm.bin) — ::/TOOLS/RM.BIN not staged (make obj/arm/rm.bin)
+selfhost-stage: WARNING: tool not built (obj/arm/tar.bin) — ::/TOOLS/TAR.BIN not staged (make obj/arm/tar.bin)
+selfhost-stage: WARNING: clang resource dir missing at obj/selfhost/dist-staging/usr/local/lib/clang/21/include — /TOOLS/RESDIR not staged (stage the LLVM distribution first)
+selfhost-stage: staged 0 files, 0 bytes into ::/TOOLS
+  --- ::/TOOLS (mdir) ---
+MDEL     BIN    222680 2026-11-23  20:07 
+MMD      BIN    222680 2026-11-23  20:07 
+        5 files             668 040 bytes
+                        988 692 480 bytes free
+
+  --- ::/TOOLS/RESDIR/include count ---
+mdir: File "::/TOOLS/RESDIR/include" not found
+selfhost-stage: done
+# Selfhost W4 (src): the in-OS build-required source subset on the
+# startup image (frozen F2 /SRC flavor): kernel+user sources, headers,
+# Makefile.hobbyos, limine/EFI assets, the carried build products, and
+# the SELFHOST.RUN/SELFHOST.SH stage scripts.  tools/selfhost-stage.sh
+# --src; disable together with the tools step via STAGE_TOOLS=0.
+tools/selfhost-stage.sh --src disk.img
+selfhost-stage: STAGE_LIBCXX=0 — skipping C++ libcxx include subset
+selfhost-stage: staging BUILD-REQUIRED source subset to ::/SRC
+selfhost-stage: WARNING: carried build product not built (obj/arm/desktop.bin) — ::/SRC/bin/DESKTOP.BIN not staged (build the tree first)
+selfhost-stage: WARNING: carried build product not built (obj/arm/console.bin) — ::/SRC/bin/CONSOLE.BIN not staged (build the tree first)
+selfhost-stage: WARNING: carried build product not built (obj/arm/sh.bin) — ::/SRC/bin/SH.BIN not staged (build the tree first)
+
+selfhost-stage: staged BUILD-REQUIRED subset into disk.img
+  payload: 370 files, 8077708 bytes
+  --- ::/SRC (mdir) ---
+        3 files             315 392 bytes
+
+Total files listed:
+      450 files           8 077 777 bytes
+                        976 207 872 bytes free
+
+selfhost-stage: done
+# [inos-build-kernel] the source tarball + the in-OS build script:
+# SRC.TAR (ustar, assembled by tools/selfhost-src-tar.sh from the real
+# tree) lands at ::/SRC.TAR; build_kernel.sh at ::/BUILD_KERNEL.SH.
+# In-OS: `SH.BIN /BUILD_KERNEL.SH` extracts the tar and builds the
+# kernel from it (Makefile.hobbyos `all`) + assembles OUT.IMG.
+tools/selfhost-src-tar.sh obj/selfhost/SRC.TAR
+selfhost-src-tar: assembling obj/selfhost/SRC.TAR
+selfhost-src-tar: WARNING: carried build product not built (obj/arm/desktop.bin) — bin/DESKTOP.BIN not in SRC.TAR (build the tree first)
+selfhost-src-tar: WARNING: carried build product not built (obj/arm/console.bin) — bin/CONSOLE.BIN not in SRC.TAR (build the tree first)
+selfhost-src-tar: WARNING: carried build product not built (obj/arm/sh.bin) — bin/SH.BIN not in SRC.TAR (build the tree first)
+selfhost-src-tar: done — obj/selfhost/SRC.TAR
+  entries: 2181 (files+dirs), size: 34887680 bytes
+  spot-checked members: src/kernel/main.c Makefile.hobbyos linker.ld limine.conf build_kernel.sh
+mcopy -i disk.img obj/selfhost/SRC.TAR ::/SRC.TAR
+mcopy -i disk.img src/user/selfhost/build_kernel.sh ::/BUILD_KERNEL.SH
+mcopy -i disk.img obj/intel/monitor.bin ::/MONITOR.BIN
+mcopy -i disk.img obj/intel/monitort.bin ::/MONITORT.BIN
+mcopy -i disk.img obj/intel/icusmk.bin ::/ICUSMK.BIN
+echo "HobbyOS Terminal Test File" > SHTEST.TXT
+echo "This is line number two." >> SHTEST.TXT
+echo "Line three is right here." >> SHTEST.TXT
+echo "Fourth line has some interesting keywords like hello world." >> SHTEST.TXT
+echo "Line five is the last line of this small test document." >> SHTEST.TXT
+touch TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT
+echo "orange" > SORT.TXT
+echo "apple" >> SORT.TXT
+echo "orange" >> SORT.TXT
+mcopy -i disk.img SHTEST.TXT ::/SHTEST.TXT
+mcopy -i disk.img SHTEST.TXT ::/home/SHTEST.TXT
+mcopy -i disk.img TEST1.TXT ::/TEST1.TXT
+mcopy -i disk.img TEST2.TXT ::/TEST2.TXT
+mcopy -i disk.img TEST3.TXT ::/TEST3.TXT
+mcopy -i disk.img TEST4.TXT ::/TEST4.TXT
+mcopy -i disk.img SORT.TXT ::/SORT.TXT
+# GB-067 fixture: 4096 bytes, byte[i] = i % 251 (the pattern STAGE4K_T.BIN
+# byte-compares).  Staged HERE, by the host, because the DoD under test is
+# "a host-staged 4 KiB file reads back byte-exact in the guest" -- if the
+# guest wrote it, the test would be exercising the writer.  Until this
+# landed the fixture came from a hand-run `T3_STAGE` probe, so every CI
+# wave failed `[STAGE4K] FAIL open /STAGE4K.BIN` while passing locally
+# for whoever remembered to stage it.
+perl -e 'print chr($_ % 251) for (0..4095)' > STAGE4K.BIN
+mcopy -i disk.img STAGE4K.BIN ::/STAGE4K.BIN
+# Dynamic linking (docs/shared-libs.md §5): the interpreter, the shared
+# libc, and the pilot program.  All three are 8.3 names on the FAT root.
+mcopy -i disk.img obj/intel/LDHOBBY.SO ::/LDHOBBY.SO
+mcopy -i disk.img obj/intel/libc.so ::/LIBC.SO
+mcopy -i disk.img obj/intel/HDYN.BIN ::/HDYN.BIN
+mcopy -i disk.img obj/intel/LSDYN.BIN ::/LSDYN.BIN
+mcopy -i disk.img obj/intel/CATDYN.BIN ::/CATDYN.BIN
+# Dynamic conversion (docs/shared-libs.md §10): each converted program
+# replaces its static build under the same 8.3 name, so every existing
+# launcher (shell, desktop, wave) exercises the DSO version.
+rm -f SHTEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT SORT.TXT STAGE4K.BIN
+qemu-system-x86_64 -M q35,vmport=on  -smp 8 -m 12288M -pflash /home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd -display gtk -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -device virtio-tablet-pci  -action shutdown=poweroff  -display none -qmp unix:/tmp/wp-e-n0-qmp.sock,server=on,wait=off -no-reboot
+WARNING: Image format was not specified for '/home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd' and probing guessed raw.
+         Automatically detecting the format is dangerous for raw images, write operations on block 0 will be restricted.
+         Specify the 'raw' format explicitly to remove the restrictions.
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;042;160t[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+BdsDxe: starting Boot0002 "UEFI QEMU NVMe Ctrl 1234 1" from PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-00-00-00-00-00-00-00)
+[001;001H[001;001H[UART] lock @ 0x00000000772eebc0
+[CONS] line-atomic console: diag=off (build default)
+Booting AArch64 OS...
+[FPU] xsave=0 xcr0=0x0 size=512 mxcsr_mask=0xFFFF
+[PVTLB] KVM PV TLB flush: not offered (IPIs only)
+[DMAP] base=0xFFFF800000000000 ioremap=0xFFFF808000000000 alias=ok
+[MEMMAP] src=multiboot multiboot_rc=0 entries=21 e820_rc=0 e820_entries=3 e820_ram_in_map=0
+[MEMMAP]   0x0000000000000000-0x00000000000A0000 type=1
+[MEMMAP]   0x0000000000100000-0x0000000000800000 type=1
+[MEMMAP]   0x0000000000800000-0x0000000000808000 type=4
+[MEMMAP]   0x0000000000808000-0x000000000080B000 type=1
+[MEMMAP]   0x000000000080B000-0x000000000080C000 type=4
+[MEMMAP]   0x000000000080C000-0x0000000000814000 type=1
+[MEMMAP]   0x0000000000814000-0x0000000000900000 type=4
+[MEMMAP]   0x0000000000900000-0x000000007E713000 type=1
+[MEMMAP]   0x000000007E713000-0x000000007E7D4000 type=2
+[MEMMAP]   0x000000007E7D4000-0x000000007F2ED000 type=1
+[MEMMAP]   0x000000007F2ED000-0x000000007F3ED000 type=2
+[MEMMAP]   0x000000007F3ED000-0x000000007F4ED000 type=2
+[MEMMAP]   0x000000007F4ED000-0x000000007F56D000 type=2
+[MEMMAP]   0x000000007F56D000-0x000000007F57F000 type=3
+[MEMMAP]   0x000000007F57F000-0x000000007F5FF000 type=4
+[MEMMAP]   0x000000007F5FF000-0x000000007FEBC000 type=1
+[MEMMAP]   0x000000007FEBC000-0x000000007FF40000 type=2
+[MEMMAP]   0x000000007FF40000-0x0000000080000000 type=4
+[MEMMAP]   0x00000000E0000000-0x00000000F0000000 type=2
+[MEMMAP]   0x0000000100000000-0x0000000380000000 type=1
+[MEMMAP]   0x000000FD00000000-0x0000010000000000 type=2
+[MEMMAP]   e820 0x000000FD00000000-0x0000010000000000 type=2
+[MEMMAP]   e820 0x0000000000000000-0x0000000080000000 type=1
+[MEMMAP]   e820 0x0000000100000000-0x0000000380000000 type=1
+[DMAP] ram above 8 GiB mapped_mib=6144 ranges=1
+MMU Initialized: Page Tables setup securely.
+VirtIO GPU: BGA
+VirtIO GPU successfully initialized.
+Original CCB: 0x0000000000000047
+Modified CCB: 0x0000000000000047
+[INPUT] PS/2 mouse: IntelliMouse (wheel, 4-byte)
+[INPUT] vmmouse absolute pointer enabled
+VirtIO Input devices successfully initialized.
+[FRAME] hi ext=0x0x0000000200000000-0x0x0000000380000000 ram=1
+[FRAME] ram ext0=1 ext1=1
+[FRAME] frames=2949120 total_mib=11520 ext0=0x0x0000000020000000-0x0x0000000070000000 ext1=0x0x0000000100000000-0x0x0000000200000000 extents=3 hi_mib=6144 reserved=0
+[KERNEL] Activating secondary cores via LAPIC IPIs...
+[KERNEL] smp_init: copying trampoline code...
+[KERNEL] smp_init: trampoline copied.
+[KERNEL] smp_init: Sending INIT IPI to core 1...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 1 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 2...
+[KERNEL] smp_init: Waiting after INIT IPI...
+start_scheduler called on CPU 1
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 2 power-on acknowledged.
+start_scheduler called on CPU 2
+[KERNEL] smp_init: Sending INIT IPI to core 3...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 3 power-on acknowledged.
+start_scheduler called on CPU 3
+[KERNEL] smp_init: Sending INIT IPI to core 4...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+start_scheduler called on CPU 4
+[KERNEL] Core 4 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 5...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+start_scheduler called on CPU 5
+[KERNEL] Core 5 power-on acknowledged.
+[KERNEL] smp_init: Sending INIT IPI to core 6...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+[KERNEL] Core 6 power-on acknowledged.
+start_scheduler called on CPU 6
+[KERNEL] smp_init: Sending INIT IPI to core 7...
+[KERNEL] smp_init: Waiting after INIT IPI...
+[KERNEL] smp_init: Sending STARTUP IPI...
+[KERNEL] smp_init: Waiting for core to acknowledge...
+start_scheduler called on CPU 7
+[KERNEL] Core 7 power-on acknowledged.
+[NFSIO] bytes=0x0x0000000000000000 rpcs=0x0x0000000000000000 ms=0x0x0000000000000000
+[KERNEL] LAPIC timer rate: 62552 counts/ms, TSC rate: 2300648 ticks/ms (PIT-counter calibrated)
+Found NVMe controller on PCI bus!
+PCI Config Space of NVMe:
+0x0000000000101B36 0x0000000000100007 0x0000000001080202 0x0000000000000000 
+0x0000000081000004 0x0000000000000000 0x0000000000000000 0x0000000000000000 
+0x0000000000000000 0x0000000000000000 0x0000000000000000 0x0000000011001AF4 
+0x0000000000000000 0x0000000000000040 0x0000000000000000 0x000000000000010B 
+NVMe BAR0 Phys: 0x0000000081000000 (Mapped to Virtual: 0xFFFF808000000000)
+[BLKQ] mmio win=0x0000000081000000-0x0000000081200000 bar_in_pool=0 alias_read=0x000000000F0107FF cap=0x000000000F0107FF hole_allocs=0
+Resetting controller, waiting for CSTS.RDY = 0...
+Controller reset complete!
+Enabling controller... CC=0x0000000000460001 CSTS=0x0000000000000001
+Controller enabled successfully!
+[BLKQ] mmio cc=0x0000000000460001 csts=0x0000000000000001 intms=0x0000000000000000 intmc=0x0000000000000000 asqt=0 acqh=0 was_cc=0x0000000000000000 was_csts=0x0000000000000000 n=1 cpu=0 ms=4049
+[BLKI] nvme ioq depth=16 sq_tail=0 cq_head=0 phase=1 sq_db=0xFFFF808000001008 cq_db=0xFFFF80800000100C create=0
+[BLKQ] ns nsid=1 nsze=0x0000000000200000 lbads=9 flbas=0 vid=0x0x0000000000001B36/0x0x0000000000001AF4
+NVMe driver initialized successfully!
+VirtIO Block successfully initialized.
+[BLKQ] mmio cc=0x0000000000460001 csts=0x0000000000000001 intms=0x0000000000000000 intmc=0x0000000000000000 asqt=1 acqh=1 was_cc=0x0000000000460001 was_csts=0x0000000000000001 n=2 cpu=0 ms=4059
+[FAT16] FAT resident in RAM
+FAT-16 filesystem successfully initialized.
+[VIRTIO_NET] PCI Interrupt Line: 10 (Vector: 42)
+[VIRTIO_NET] MAC Address: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+[VIRTIO_NET] RX queue size: 256 rx_vq address: 0x00000000767F6000 PFN: 0x00000000000767F6
+[VIRTIO_NET] TX queue size: 256 tx_vq address: 0x00000000767F9000 PFN: 0x00000000000767F9
+VirtIO Network successfully initialized.
+Initializing DHCP...
+DHCP Discover sent
+DHCP Offer received
+DHCP Request sent
+DHCP Ack received
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+DHCP DNS server: 10.0.2.3
+DHCP initialization complete.
+[RDMA] Remote PCIe sharing is INACTIVE (no startup parameter).
+[ACPI] fw_cfg rsdp addr=0x0000000020445352 size=20
+[ACPI] no valid RSDP in the first 1 MiB of low memory
+[ACPI] fw_cfg rsdp addr=0x0000000020445352 size=20
+[ACPI] no valid RSDP in the first 1 MiB of low memory
+[PCI] transport=legacy-cf8 base=0x0000000000000CF8 (no MCFG)
+[NV] no NVIDIA display-class device
+
+--- Parallel Program Loading ---
+Mode: FB_TEST - /dev/fb0 full-frame present probe...
+[WAVE-TRY] FBPROBE.BIN
+Loading program for scheduler (v2 AS): FBPROBE.BIN
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=-1
+/FBPROBE.BIN
+v2 loader: image mapped (lazy), bytes=60616 pages=15 first=in elap=16ms
+v2 loader: PID=1 entry=0x1000000000 sp=0x1800000000 resident=17 tables=6 abi=0x0 native=0 interp=0x0
+[ARRIVED] FBPROBE.BIN rc>0
+start_scheduler called on CPU 0
+[FBP] /dev/fb0 present-gate probe (N0)
+[FBP] fd=3
+[FBP] want_bytes=8294400
+[FBP] mmap_va=0x0x00000016F0000000
+[FBP] RESULT PASS mmap
+[FBP] corner_read=0x0x00000000FFFF0000
+[FBP] inside_read=0x0x00000000FFFF00FF
+[FBP] far_read=0x0x00000000FF203040
+[FBP] RESULT PASS readback
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=-1
+[ASCLONE] begin srcnr=4 srcres=2047 dstnr=0 free=2937800
+[FORKT] pid=1 clone_us=8547 regions=4 resident=2047 batches=68 max_hold_us=533
+[KERNEL] pid=2 (FBPROBE.BIN) memory fault VA=0x00000016F07E9000 PC=0x00000010000006AB rw=r  in=HOLE region=NONE rsp=0x00000017FFFFFFB0 live=1 inH=0 cr3frame=0x0000000200C3E000 asroot=0x0000000200C3E000 sys=-1 ret=0x0000000000000000 rbx=0x0000000000000000 rdi=0x0000000000000000 rsi=0x0000000000000000 rbp=0x00000017FFFFFFF0 rbp0=0x0000000000000000 ret=0x0000000000000000 -> killed
+[KERNEL] Process 2: FBPROBE.BIN exited unexpectedly or gracefully.
+[EXITPC] pid=2 last_user_pc=0x0 code=0x4000000B
+[FBP] past_frame_status=11
+[FBP] RESULT PASS past_frame (page past the frame is unmapped)
+[AS-TD] tgid=2 nr=4 res=2047
+[FBP] RESULT PASS flush
+qemu-system-x86_64: terminating on signal 15 from pid 179692 (make)

@@ -10,6 +10,8 @@
 #include "blk_cache.h"
 #include "virtio_blk.h"
 #include "process.h"
+#include "fb_mmap.h"     /* WP-E: HB_FB_BYTES (the display-mode frame) */
+#include "virtio_gpu.h"  /* WP-E: the kernel scanout framebuffer static */
 static int *vm_test_fdt_take(void); /* C1-k5: fake fd tables (below) */
 
 extern void uart_puts(const char *s);
@@ -3243,6 +3245,66 @@ void vm_test_post_cache_suite(void) {
   test_vm_publish_identity();
 }
 
+/* WP-E (N0 present gate): /dev/fb0's full-frame mapping.
+ *
+ * The display mode is 1920x1080 B8G8R8A8 = HB_FB_BYTES (8,294,400 B).  The
+ * user mapping slot is USER_FB_SIZE (10,485,760 B, one frame plus slack).
+ * vm_map_fb() used to insert and map the SLOT's length, so the leaves walked
+ * 2,191,360 B past the end of the kernel framebuffer static -- into whatever
+ * .bss the linker put after it -- and on a real guest the mmap answered
+ * -ENOMEM (`[LCOMPAT] mmap fail fd=6 len=8294400 off=0 -> -12`).  The
+ * contract this test pins: one frame maps, and the region can never be the
+ * slot's slack. */
+static void test_vm_map_fb_frame(void) {
+  tests_run++;
+  uart_puts("  Running test_vm_map_fb_frame...\n");
+  struct addr_space *as = vm_as_create(VM_TEST_TAG);
+  if (!as) {
+    uart_puts("ASSERTION FAILED: vm_as_create returned NULL\n");
+    tests_failed++;
+    return;
+  }
+  struct process fake;
+  for (unsigned i = 0; i < sizeof(fake); i++)
+    ((unsigned char *)&fake)[i] = 0;
+  fake.as = as;
+
+  uint64_t fb_phys = kimg_pa(virtio_gpu_get_framebuffer());
+  int64_t va = vm_map_fb(&fake, fb_phys);
+  EXPECT_EQ((int)va, (int)USER_FB_BASE_V2); /* low half: the slot base only */
+
+  struct vm_region *r = vm_region_find(as, USER_FB_BASE_V2);
+  EXPECT_EQ((int)(r != 0), 1);
+  if (!r) {
+    vm_as_teardown(as);
+    return;
+  }
+  /* Exactly one display frame: 8,294,400 B / 4 KiB = 2025 pages.  The slot
+   * is 2560 pages; anything above 2025 is the old walk past the buffer. */
+  EXPECT_EQ((int)(r->len / FRAME_SIZE), 2025);
+  EXPECT_EQ((int)(r->len == HB_FB_BYTES), 1);
+  EXPECT_EQ((int)(r->len <= HB_FB_BYTES), 1);
+  EXPECT_EQ((int)as->resident_frames, 2025);
+
+  /* The last page of the frame translates to the last page of the
+   * framebuffer static, not to a frame past it. */
+  uint64_t leaf = 0;
+  EXPECT_EQ(vm_arch_walk(as, USER_FB_BASE_V2 + HB_FB_BYTES - FRAME_SIZE,
+                         &leaf), 0);
+  EXPECT_EQ((int)(vm_arch_leaf_phys(leaf) ==
+                  fb_phys + HB_FB_BYTES - FRAME_SIZE), 1);
+
+  /* ...and the FIRST page past the framebuffer is not mapped at all: that
+   * is "the slot can never walk past the real framebuffer". */
+  EXPECT_EQ(vm_arch_walk(as, USER_FB_BASE_V2 + HB_FB_BYTES, 0), -1);
+
+  /* Idempotent: a second map returns the same VA and adds no region. */
+  EXPECT_EQ((int)vm_map_fb(&fake, fb_phys), (int)USER_FB_BASE_V2);
+  EXPECT_EQ((int)as->resident_frames, 2025);
+
+  vm_as_teardown(as);
+}
+
 void vm_test_suite(void) {
   uart_puts("vm_test_suite:\n");
   test_vm_as_lifecycle();
@@ -3281,6 +3343,8 @@ void vm_test_suite(void) {
   test_vm_alloc_hole_atomic(); /* L56: find+reserve is one critical section */
   test_vm_dso_bases_distinct();
   test_fs_dso_identity_pair();
+  /* WP-E (N0 present gate): /dev/fb0 maps one frame, never the slot's slack */
+  test_vm_map_fb_frame();
 }
 
 #endif /* KERNEL_MODE_UNIT_TEST */

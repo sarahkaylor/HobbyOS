@@ -73,6 +73,28 @@ int hb_fb_mmap_translate(uint64_t offset, uint64_t len,
   return 0;
 }
 
+/* The slot span a /dev/fb0 mapping may occupy.  See fb_mmap.h: the slot is
+ * one display frame plus slack, and only the frame may ever be mapped. */
+int hb_fb_map_len(uint64_t want, uint64_t image_len, uint64_t slot_len,
+                  uint64_t *out) {
+  if (!out)
+    return -1;
+  if (want == 0 || image_len == 0 || slot_len == 0)
+    return -1;
+  if (image_len > slot_len)
+    return -1; /* an image larger than its slot can never be mapped */
+  if (want > image_len)
+    want = image_len; /* the clamp: never past the real framebuffer */
+  uint64_t len = (want + FB_MMAP_PAGE_SIZE - 1u) &
+                 ~(uint64_t)(FB_MMAP_PAGE_SIZE - 1u);
+  if (len < want)
+    return -1; /* rounding overflow */
+  if (len > slot_len)
+    return -1;
+  *out = len;
+  return 0;
+}
+
 int hb_fb_blank_ioctl(unsigned long arg) {
   /* /dev/fb0's FBIOBLANK on the fixed 2D mode: there is no refresh-rate /
    * suspend output to actually blank (virtio-gpu scanout has no VESA
