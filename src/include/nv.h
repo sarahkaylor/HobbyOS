@@ -153,6 +153,10 @@ void nv_test_suite(void);
 /* GSP firmware stage (nv_gsp.c): probe is read-only and safe; boot() is the
  * staged machine and stops at the first unverified contract with -ENOTSUP. */
 int nv_gsp_probe(struct nv_dev *d);
+/* Read-only VBIOS probe: finds the PCI ROM image and the falcon ucode table in
+ * it (docs/nv-pmu-acr-contract.md section 1).  No writes to the card beyond the
+ * PROM-shadow toggle, which is restored. */
+int nv_vbios_probe(struct nv_dev *d);
 int nv_gsp_boot(struct nv_dev *d);
 /* Read + parse + hash the staged firmware.  Pure file I/O, zero MMIO writes, so
  * it is safe to run on every boot. */

@@ -550,6 +550,8 @@ int nv_gsp_sec2_start_booter(struct nv_dev *d, const uint8_t *booter,
 int nv_gsp_firmware_check(struct nv_dev *d) {
   if (!d) return -EINVAL;
   int rc = 0;
+  /* The VBIOS first: FWSEC's ucode lives there, and the probe is read-only. */
+  (void)nv_vbios_probe(d);
   /* The booter must stay resident: SEC2 DMAs out of these frames, and patches
    * the signature into them before the transfer. */
   struct nv_fw_blob booter;
