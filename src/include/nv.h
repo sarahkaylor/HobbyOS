@@ -98,6 +98,12 @@ struct nv_dev {
 
   struct nv_mmio_ops ops;
   void *ops_ctx;
+  /* Boot-path addresses that must stay valid across stages. */
+  uint64_t booter_phys;   /* the booter blob's contiguous frames */
+  uint32_t booter_size;
+  uint64_t gsp_meta_phys; /* the 256-byte metadata block, DMA-able */
+  uint64_t radix3_root;   /* the RM image's radix3 tree */
+  uint32_t radix3_pages;
 };
 
 #define NV_FALCON_IDX_PMU 0
@@ -229,6 +235,12 @@ struct nv_info {
   uint32_t wpr_ctl_a, wpr_ctl_b; /* PFB 0x1FA804/08, the pair that moves */
   uint32_t gsp_msg0, gsp_msg1; /* GSP falcon mailbox pair */
   uint32_t gsp_ucctl;          /* GSP RISC-V status word */
+  /* Boot-path addresses that must stay valid across stages. */
+  uint64_t booter_phys;  /* the booter blob's contiguous frames */
+  uint32_t booter_size;
+  uint64_t gsp_meta_phys; /* the 256-byte metadata block, DMA-able */
+  uint64_t radix3_root;   /* the RM image's radix3 tree */
+  uint32_t radix3_pages;
 };
 
 struct nv_reg_req {

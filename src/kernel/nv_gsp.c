@@ -46,6 +46,7 @@
 #include "nv.h"
 #include "nv_regs.h"
 #include "nv_fw.h"
+#include "kmem.h"
 #include "errno.h"
 
 extern void uart_puts(const char *s);
@@ -295,17 +296,296 @@ static int nv_gsp_load_one(struct nv_dev *d, const char *name, int parse_hs,
   return 0;
 }
 
+/* ---- stage 5: hand the booter to SEC2 ----------------------------------
+ *
+ * SEC2, not the GSP, runs the booter: it builds WPR2 from the metadata block and
+ * then verifies and starts the RM image.  Register offsets here are SEC2-window
+ * relative (docs/nv-gsp-wpr-contract.md 4.2).
+ *
+ * The field positions are from the published falcon register definition, NOT
+ * guessed: DMATRFCMD has SEC at bits 3:2, IMEM at 4, WRITE at 5, SIZE at 10:8,
+ * CTXDMA at 14:12.  Our older encoder put a "port" at 12..14 and never set SEC,
+ * which is a silent way to load a booter that will not authenticate. */
+#define NV_SEC2_FBIF_TRANSCFG 0x840600 /* SEC2 window + 0x600, TRANSCFG[0] */
+#define NV_LOCAL_TRANSCFG_COHERENT 0x5 /* TARGET=COHERENT_SYSMEM | MEM_TYPE=PHYSICAL */
+#define NV_XFER_EXT_BASE 0x110
+#define NV_XFER_EXT_BASE1 0x128
+#define NV_XFER_FALCON_ADDR 0x114
+#define NV_XFER_EXT_ADDR 0x11C
+#define NV_XFER_CTRL 0x118
+#define NV_XFER_STATUS 0x120
+#define XF_IMEM (1u << 4)
+#define XF_SEC(n) (((n) & 0x3) << 2)
+#define XF_WRITE (1u << 5)
+#define XF_SIZE(log2) (((log2) & 0x7) << 8)
+#define XF_FULL (1u << 0)
+#define XF_IDLE (1u << 1)
+#define NV_SEC2_ADDR2 0x841000
+#define NV_BROM_PARAADDR0 (NV_SEC2_ADDR2 + 0x210)
+#define NV_BROM_ENGIDMASK (NV_SEC2_ADDR2 + 0x19C)
+#define NV_BROM_CURR_UCODE_ID (NV_SEC2_ADDR2 + 0x198)
+#define NV_BROM_MOD_SEL (NV_SEC2_ADDR2 + 0x180)
+
+/* One 256-byte-block DMA.  `is_imem` selects the code path (and SEC pages);
+ * `src_off` is the offset inside the image, which for IMEM requests is also the
+ * address the block lands at. */
+static int sec2_dma_block(struct nv_dev *d, uint64_t src_phys, uint32_t src_end,
+                          uint32_t dst, int is_imem, int sec) {
+  /* Full means the previous request has not been collected yet. */
+  for (int i = 0; i < 200000; i++) {
+    if (!(nv_rd32(d, NV_FALCON_SEC2_BASE + NV_XFER_STATUS) & XF_FULL)) break;
+    if (i == 199999) return -110;
+  }
+  nv_wr32(d, NV_FALCON_SEC2_BASE + NV_XFER_EXT_BASE,
+          (uint32_t)(src_phys >> 8));
+  nv_wr32(d, NV_FALCON_SEC2_BASE + NV_XFER_EXT_BASE1,
+          (uint32_t)((src_phys >> 40) & 0x1FF));
+  nv_wr32(d, NV_FALCON_SEC2_BASE + NV_XFER_FALCON_ADDR, dst);
+  nv_wr32(d, NV_FALCON_SEC2_BASE + NV_XFER_EXT_ADDR, src_end);
+  uint32_t ctrl = XF_SIZE(6) | XF_SEC(sec);
+  if (is_imem) ctrl |= XF_IMEM;
+  nv_wr32(d, NV_FALCON_SEC2_BASE + NV_XFER_CTRL, ctrl);
+  /* Idle means the request left the queue; the writes landed. */
+  for (int i = 0; i < 200000; i++) {
+    uint32_t st = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_XFER_STATUS);
+    if (st == 0xffffffffu || (st >> 16) == 0xBADFu) return -5;
+    if (st & XF_IDLE) return 0;
+  }
+  return -110;
+}
+
+/* Bring SEC2 out of the fence.  Before anything initialises it, the whole
+ * 0x840000 window reads 0xBADF5620 -- measured, and measured again on the
+ * reference card post-init where it answers falcon-shaped values.  The poke is
+ * a PMC engine enable; the bit is not named in the published PMC header, so two
+ * candidates are tried in order and the log says which one worked (or that
+ * neither did). */
+static int sec2_unfence(struct nv_dev *d) {
+  uint32_t ctl = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL);
+  if (ctl != NV_REG_FENCED && ctl != 0xffffffffu) {
+    uart_puts("[NV-SEC2] window live ctl=");
+    uart_print_hex(ctl);
+    uart_puts("\n");
+    return 0;
+  }
+  uint32_t en0 = nv_rd32(d, NV_PMC_ENABLE);
+  uart_puts("[NV-SEC2] pmc_enable=");
+  uart_print_hex(en0);
+  uart_puts(" while the window is fenced\n");
+
+  /* Is the window only unreadable, or also unwritable?  A write whose read-back
+   * is unchanged tells us the whole block is fenced; a read-back carrying the
+   * value tells us we simply may not see it yet. */
+  nv_wr32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL,
+          NV_FALCON_UC_CTRL_RESET_TLB);
+  uint32_t wr = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL);
+  uart_puts("[NV-SEC2] probe write-then-read ctl=");
+  uart_print_hex(wr);
+  uart_puts(wr == NV_REG_FENCED ? " (write ignored as well: fully fenced)\n"
+                                : "\n");
+
+  /* Sweep the engine-enable bits one at a time.  Setting a bit that is already
+   * set is a no-op, so this only ever *adds* an enable, and the original word is
+   * restored at the end.  The log names the bit if one of them lifts the fence;
+   * if none does, the fence is not a PMC_ENABLE bit on this part. */
+  int found = -1;
+  uint32_t found_ctl = 0;
+  for (int b = 0; b < 32; b++) {
+    if (en0 & (1u << b)) continue; /* already enabled: cannot be the gate */
+    nv_wr32(d, NV_PMC_ENABLE, en0 | (1u << b));
+    ctl = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL);
+    if (ctl != NV_REG_FENCED && ctl != 0xffffffffu) {
+      found = b;
+      found_ctl = ctl;
+      break;
+    }
+  }
+  nv_wr32(d, NV_PMC_ENABLE, en0); /* never leave an engine enabled that we set */
+  if (found >= 0) {
+    uart_puts("[NV-SEC2] unfence by pmc_bit=");
+    print_int(found);
+    uart_puts(" ctl=");
+    uart_print_hex(found_ctl);
+    uart_puts(" LIVE\n");
+    /* Re-enable it for real now that it is known. */
+    nv_wr32(d, NV_PMC_ENABLE, en0 | (1u << found));
+    return 0;
+  }
+  uart_puts("[NV-SEC2] unfence FAILED: no single PMC_ENABLE bit lifts the fence, "
+            "so SEC2 is gated by something this driver has not done yet "
+            "(the secure-boot handshake is the remaining candidate).\n");
+  return -ENODEV;
+}
+
+int nv_gsp_sec2_start_booter(struct nv_dev *d, const uint8_t *booter,
+                             uint32_t len, uint64_t meta_phys) {
+  if (!d || !booter || len < 0x7700 + 0x6000) return -EINVAL;
+  if (meta_phys == 0) return -EINVAL;
+
+  int rc = sec2_unfence(d);
+  if (rc != 0) return rc;
+
+  /* Halt it: never load a core that is running. */
+  uint32_t ctl = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL);
+  if (!(ctl & NV_FALCON_UC_CTRL_STOPPED)) {
+    nv_wr32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL,
+            NV_FALCON_UC_CTRL_RESET_TLB | NV_FALCON_UC_CTRL_RESET_UNK2 |
+                NV_FALCON_UC_CTRL_RESET_UNK3);
+    for (int i = 0; i < 100000; i++) {
+      ctl = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL);
+      if (ctl & NV_FALCON_UC_CTRL_STOPPED) break;
+    }
+  }
+  uart_puts("[NV-SEC2] halt ctl=");
+  uart_print_hex(ctl);
+  if (!(ctl & NV_FALCON_UC_CTRL_STOPPED)) {
+    uart_puts(" FAILED (never reached STOPPED)\n");
+    return -ETIMEDOUT;
+  }
+  uart_puts("\n");
+
+  /* The DMA reads system memory coherently and physically. */
+  nv_wr32(d, NV_SEC2_FBIF_TRANSCFG, NV_LOCAL_TRANSCFG_COHERENT);
+  uart_puts("[NV-SEC2] transcfg=");
+  uart_print_hex(nv_rd32(d, NV_SEC2_FBIF_TRANSCFG));
+  uart_puts("\n");
+
+  /* The boot ROM looks for the production signature at DMEM image +0x10, where
+   * DMEM image = file offset 0x7700.  Patch it into the frames in place (we own
+   * them) before the DMA, from the container's signature block at 0x3C. */
+  uint8_t *dmem_img = (uint8_t *)booter + 0x7700;
+  uint32_t patch_off = 0x10;
+  const uint32_t sig_slot = 0x180; /* 384 bytes */
+  const uint8_t *sig = booter + 0x3C;
+  for (uint32_t i = 0; i < sig_slot; i++) dmem_img[patch_off + i] = sig[i];
+  uart_puts("[NV-SEC2] signature patched into DMEM image at +0x10 (slot 0)\n");
+
+  /* IMEM: the booter's code region is at file offset 0x100, 0x7600 bytes. */
+  uint64_t base = d->booter_phys;
+  for (uint32_t off = 0; off < 0x7600; off += 256) {
+    rc = sec2_dma_block(d, base, off, 0, 1, 1);
+    if (rc != 0) {
+      uart_puts("[NV-SEC2] IMEM dma FAILED at off=");
+      uart_print_hex(off);
+      uart_puts(" rc=");
+      print_int(rc);
+      uart_puts("\n");
+      return rc;
+    }
+  }
+  uart_puts("[NV-SEC2] IMEM loaded 0x7600 bytes (118 blocks, SEC pages)\n");
+
+  /* DMEM: file offset 0x7700, 0x6000 bytes, not secret pages. */
+  for (uint32_t off = 0; off < 0x6000; off += 256) {
+    rc = sec2_dma_block(d, base, 0x7700 + off, 0, 0, 0);
+    if (rc != 0) {
+      uart_puts("[NV-SEC2] DMEM dma FAILED at off=");
+      uart_print_hex(off);
+      uart_puts(" rc=");
+      print_int(rc);
+      uart_puts("\n");
+      return rc;
+    }
+  }
+  uart_puts("[NV-SEC2] DMEM loaded 0x6000 bytes (96 blocks)\n");
+
+  /* Boot ROM parameters: where the signature is, which engine/user id it must
+   * cover, and which algorithm. */
+  nv_wr32(d, NV_BROM_PARAADDR0, patch_off);
+  nv_wr32(d, NV_BROM_ENGIDMASK, 1);
+  nv_wr32(d, NV_BROM_CURR_UCODE_ID, 3);
+  nv_wr32(d, NV_BROM_MOD_SEL, 1);
+  nv_wr32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_ENTRY, 0x100);
+  uart_puts("[NV-SEC2] brom para=");
+  uart_print_hex(nv_rd32(d, NV_BROM_PARAADDR0));
+  uart_puts(" engid=");
+  uart_print_hex(nv_rd32(d, NV_BROM_ENGIDMASK));
+  uart_puts(" ucode=");
+  uart_print_hex(nv_rd32(d, NV_BROM_CURR_UCODE_ID));
+  uart_puts(" modsel=");
+  uart_print_hex(nv_rd32(d, NV_BROM_MOD_SEL));
+  uart_puts(" bootvec=");
+  uart_print_hex(nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_ENTRY));
+  uart_puts("\n");
+
+  /* MAILBOX0/1 carry the metadata block's physical address: the booter's only
+   * argument.  A sentinel first, because 0 means success and a core that never
+   * started would otherwise look successful. */
+  nv_wr32(d, NV_FALCON_SEC2_BASE + 0x040, (uint32_t)meta_phys);
+  nv_wr32(d, NV_FALCON_SEC2_BASE + 0x044, (uint32_t)(meta_phys >> 32));
+  uart_puts("[NV-SEC2] mailbox0/1 = ");
+  uart_print_hex(meta_phys);
+  uart_puts("\n");
+
+  /* Start, then bound the wait: the booter halts when it is done. */
+  nv_wr32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL, NV_FALCON_UC_CTRL_START);
+  uint32_t mb0 = 0;
+  int halted = 0;
+  for (int i = 0; i < 400000; i++) {
+    ctl = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL);
+    mb0 = nv_rd32(d, NV_FALCON_SEC2_BASE + 0x040);
+    if (ctl & NV_FALCON_UC_CTRL_STOPPED) {
+      halted = 1;
+      break;
+    }
+  }
+  uart_puts("[NV-SEC2] start ctl=");
+  uart_print_hex(ctl);
+  uart_puts(" halted=");
+  print_int(halted);
+  uart_puts(" mailbox0=");
+  uart_print_hex(mb0);
+  uart_puts("\n");
+  if (!halted) {
+    uart_puts("[NV-SEC2] the booter never halted: it is spinning or the start "
+              "did not take\n");
+    return -ETIMEDOUT;
+  }
+  if (mb0 != 0) {
+    uart_puts("[NV-SEC2] booter returned a non-zero status: authentication or "
+              "layout rejection (the code values are not published)\n");
+    return -EPERM;
+  }
+  uart_puts("[NV-SEC2] booter reported success (mailbox0=0)\n");
+  return 0;
+}
+
 int nv_gsp_firmware_check(struct nv_dev *d) {
   if (!d) return -EINVAL;
-  uint32_t size = 0;
-  uint8_t sha[8] = {0};
-  int rc = nv_gsp_load_one(d, NV_FW_BOOTER, 1, &size, sha);
-  if (rc == 0) {
-    uart_puts("[NV-GSP] fw booter staged: this is the blob the falcon boot ROM "
-              "validates against fused keys\n");
+  int rc = 0;
+  /* The booter must stay resident: SEC2 DMAs out of these frames, and patches
+   * the signature into them before the transfer. */
+  struct nv_fw_blob booter;
+  int bldrc = nv_fw_load_blob(NV_FW_BOOTER, &booter);
+  if (bldrc == 0) {
+    struct nv_fw_container bc;
+    struct nv_fw_hs bhs;
+    if (nv_fw_container_parse(booter.buf, booter.size, &bc) == 0 &&
+        nv_fw_hs_parse(&bc, &bhs) == 0) {
+      uart_puts("[NV-GSP] fw BOOTER.BIN bytes=");
+      print_int((int)booter.size);
+      uart_puts(" phys=");
+      uart_print_hex(booter.phys);
+      uart_puts(" container ok data_off=");
+      uart_print_hex(bc.data_off);
+      uart_puts(" data_size=");
+      uart_print_hex(bc.data_size);
+      uart_puts(" sig=");
+      uart_print_hex(bhs.sig_prod_size);
+      uart_puts("\n");
+      d->booter_phys = booter.phys;
+      d->booter_size = booter.size;
+    } else {
+      uart_puts("[NV-GSP] fw BOOTER.BIN parse FAILED\n");
+    }
+  } else {
+    uart_puts("[NV-GSP] fw BOOTER.BIN load FAILED rc=");
+    print_int(bldrc);
+    uart_puts("\n");
   }
   uint32_t lsize = 0;
-  (void)nv_gsp_load_one(d, NV_FW_LOADER, 0, &lsize, sha);
+  uint8_t lhash[8] = {0};
+  (void)nv_gsp_load_one(d, NV_FW_LOADER, 0, &lsize, lhash);
   /* The bootloader stays resident: the metadata block points at its data region
    * (0x8000 bytes at file offset 0x6C), so freeing it before the block is built
    * would describe a buffer somebody else now owns. */
@@ -428,12 +708,12 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
 
   uint64_t root = 0;
   uint32_t tpages = 0;
-  int brc = nv_radix3_build(img_phys, elf.fwimage.size, &root, &tpages);
+  int trc = nv_radix3_build(img_phys, elf.fwimage.size, &root, &tpages);
   uart_puts("\n[NV-GSP] radix3 ");
-  if (brc != 0) {
+  if (trc != 0) {
     uart_puts("build FAILED rc=");
-    print_int(brc);
-    uart_puts(brc == -ENOMEM ? " (no contiguous run for the tree)\n" : "\n");
+    print_int(trc);
+    uart_puts(trc == -ENOMEM ? " (no contiguous run for the tree)\n" : "\n");
   } else {
     uart_puts("root=");
     uart_print_hex(root);
@@ -446,7 +726,6 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
     uart_puts(" (stage 3)\n");
     if (lrc2 == 0) {
       struct nv_wpr_meta_in m, back;
-      uint8_t mbuf[NV_WPR_META_SIZE];
       for (uint32_t i = 0; i < (uint32_t)sizeof m; i++)
         ((uint8_t *)&m)[i] = 0;
       m.sysmem_addr_radix3_elf = root;
@@ -496,8 +775,15 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
       m.vga_workspace_size = lin.fb_size - lay.wpr_end;
       m.verified = 0;
 
-      int erc = nv_fw_wpr_meta_encode(&m, mbuf);
-      int drc = erc == 0 ? nv_fw_wpr_meta_decode(mbuf, &back) : erc;
+      /* The block has to live where the GPU can read it: one contiguous frame,
+       * encoded in place.  `mbuf` is that frame, not a stack copy. */
+      int erc = nv_fw_meta_alloc(&m, &d->gsp_meta_phys);
+      uint8_t *mbuf = 0;
+      int drc = erc;
+      if (erc == 0) {
+        mbuf = (uint8_t *)phys_to_virt(d->gsp_meta_phys);
+        drc = nv_fw_wpr_meta_decode(mbuf, &back);
+      }
       uart_puts("[NV-GSP] meta ");
       if (erc != 0 || drc != 0) {
         uart_puts("encode/decode FAILED rc=");
@@ -516,13 +802,35 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
         uart_print_hex(back.size_radix3_elf);
         uart_puts(" verified=");
         print_int(nv_fw_wpr_meta_verified(&back));
+        uart_puts(" block_phys=");
+        uart_print_hex(d->gsp_meta_phys);
         uart_puts("\n");
       }
+      d->radix3_root = root;
+      d->radix3_pages = tpages;
     }
-    nv_radix3_release(root, tpages);
+  }
+
+  /* ---- stage 5: start the booter on SEC2 --------------------------------
+   * Everything above this line is memory work.  This is the first stage that
+   * writes to the card, and it is the one the metadata block was built for.
+   * The trees, the image and the block all stay resident until it returns. */
+  if (bldrc == 0 && lrc2 == 0 && d->gsp_meta_phys != 0) {
+    int src2 = nv_gsp_sec2_start_booter(d, booter.buf, booter.size,
+                                        d->gsp_meta_phys);
+    uart_puts("[NV-GSP] stage5 result=");
+    print_int(src2);
+    uart_puts(src2 == 0 ? " (booter ran and reported success)\n"
+                        : " (stopped; see the [NV-SEC2] rows above)\n");
+  }
+
+  if (d->radix3_root) {
+    nv_radix3_release(d->radix3_root, d->radix3_pages);
+    d->radix3_root = 0;
   }
   nv_fw_release(&rm);
   if (ldr_rc == 0) nv_fw_release(&loader);
+  if (bldrc == 0) nv_fw_release(&booter);
   return rc;
 }
 

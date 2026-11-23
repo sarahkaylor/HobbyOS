@@ -711,6 +711,23 @@ int nv_radix3_build_into(uint8_t *tree, uint32_t tree_pages, uint64_t tree_phys,
 }
 
 #ifdef __x86_64__
+int nv_fw_meta_alloc(const struct nv_wpr_meta_in *m, uint64_t *phys_out) {
+  if (!m || !phys_out) return -EINVAL;
+  uint64_t phys = frame_alloc_contig(1);
+  if (!phys) return -ENOMEM;
+  int rc = nv_fw_wpr_meta_encode(m, (uint8_t *)phys_to_virt(phys));
+  if (rc != 0) {
+    frame_free(phys);
+    return rc;
+  }
+  *phys_out = phys;
+  return 0;
+}
+
+void nv_fw_meta_release(uint64_t phys) {
+  if (phys) frame_free(phys);
+}
+
 int nv_radix3_build(uint64_t image_phys, uint64_t image_size,
                     uint64_t *root_phys, uint32_t *tree_pages) {
   if (!root_phys || !tree_pages) return -EINVAL;

@@ -284,6 +284,41 @@ driver ran comes back with the WPR block at its **pre-init** signature, so
 "tear down someone else's region" is the rare path and "lay out the region" is
 the normal one.
 
+### 5.7 Stage 5 measured: SEC2 is gated, and PMC_ENABLE is not the gate
+
+The first stage that writes to the card produced a definite answer, just not the
+one the plan expected:
+
+```
+[NV-SEC2] pmc_enable=0x0000000040000000 while the window is fenced
+[NV-SEC2] probe write-then-read ctl=0x00000000BADF5620 (write ignored as well: fully fenced)
+[NV-SEC2] unfence FAILED: no single PMC_ENABLE bit lifts the fence, so SEC2 is gated by
+          something this driver has not done yet (the secure-boot handshake is the
+          remaining candidate)
+```
+
+That is four facts, each of which took a register read to establish:
+
+1. **The whole SEC2 block (`0x840000`) is fenced, and it is *write*-fenced too** —
+   a write to `UC_CTRL` reads back the fence word, so the host cannot even
+   signal the engine it is not to run.
+2. **`PMC_ENABLE` reads `0x40000000`** — one bit. Engine enable is not how SEC2
+   is gated on this part; a single-bit sweep across all 32 bits (restored
+   afterwards) lifts nothing.
+3. **The PMU is the only falcon readable pre-boot** (`ctl=0x20`, valid
+   `UC_CAPS/CAPS2`). That is consistent with the boot chain being
+   host → PMU → FWSEC/ACR → SEC2 → GSP, with SEC2 unreachable until the PMU has
+   run the secure handshake. The contract lists FWSEC-FRTS as its step 5 and
+   marks it "not implemented in HobbyOS" — that step is now the blocker by name
+   rather than by guess.
+4. The booter's own artifacts are ready and were verified in the same run: the
+   metadata block sits in a DMA-able frame (`block_phys=0x2054e2000`), the
+   radix3 root is `0x2054cd000`, the ad10x signature address resolved.
+
+So stage 5 cannot be completed by talking to SEC2 first. The next rung is the
+PMU command handshake, and the register/mailbox contract for that is the thing
+to write down before any of it is coded.
+
 ### 5.6 What the two contract docs settled (and one plan they killed)
 
 `docs/nv-gsp-wpr-contract.md` and `docs/nv-gsp-rpc-contract.md` were built from

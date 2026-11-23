@@ -358,6 +358,12 @@ void nv_fw_slide_down(uint8_t *buf, uint32_t buf_len, uint32_t off,
                       uint32_t len);
 
 #ifdef __x86_64__
+/* Put the metadata block where the GPU can read it: one contiguous frame,
+ * encoded in place, phys returned.  The booter DMAs this block, so a stack
+ * copy is not good enough even though the bytes are identical. */
+int nv_fw_meta_alloc(const struct nv_wpr_meta_in *m, uint64_t *phys_out);
+void nv_fw_meta_release(uint64_t phys);
+
 /* Allocate the tree from contiguous frames and fill it.  On success
  * `*root_phys` is the value the metadata block wants, and `*tree_pages` is how
  * many frames to free later.  -ENOMEM when the frame pool cannot supply a
