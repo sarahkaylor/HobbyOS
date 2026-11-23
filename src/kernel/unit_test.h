@@ -89,5 +89,8 @@ void nv_fw_test_suite(void); /* nv_fw: firmware container/HS/ELF/WPR/SHA-256 */
 void nv_rpc_test_suite(void); /* nv_rpc: GSP-RPC transport, spec T-01..T-24 */
 void nv_flcn_test_suite(void); /* nv_flcn: XFER cmd, sig index, FRTS patch */
 #endif
+/* WP-F: /dev/nvshim over the mock RM.  Not arch-gated: the mock needs no
+ * hardware, so the ABI is exercised on both arches. */
+void nv_shim_test_suite(void);
 
 #endif // UNIT_TEST_H

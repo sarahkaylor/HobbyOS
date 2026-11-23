@@ -51,6 +51,7 @@
 #include "ntsync.h"  /* C2-ntsync: /dev/ntsync ioctls */
 #include "gpu_abi.h" /* M1: /dev/gpu GPU_IOC_* surface */
 #include "nv.h"      /* nv: /dev/nvctl NV_IOC_* surface */
+#include "nv_shim.h" /* WP-F: /dev/nvshim NVSHIM_IOC_* surface */
 #include "linux_snd.h" /* C4-audio: /dev/snd ALSA ioctls */
 #include "fs.h"
 #include "kline.h"
@@ -915,6 +916,14 @@ static int l_fd_ioctl(struct process *p, struct trap_frame *tf) {
     return l_ret(tf, nr);
   }
 #endif
+  /* WP-F (PLAN.md §3): the /dev/nvshim request set.  Same shape again -- the
+   * handler owns copy-in/copy-out -- and never parks: the mock retires a fence
+   * at submit time, so no wait here needs the scheduler.  Not arch-gated: the
+   * mock RM is plain C and the node is useful on both arches. */
+  if (file_is_devnvshim(p, fd)) {
+    int sr = nv_shim_ioctl(p, fd, (unsigned long)req, arg);
+    return l_ret(tf, sr);
+  }
   /* C4-audio (docs/cp-audio.md): the ALSA control/PCM request set.  A blocking
      WRITEI/DRAIN parks (LSND_PARKED, never an errno) and restarts on the TX
      completion wake. */

@@ -109,7 +109,14 @@ typedef enum {
   /* C4-audio (docs/cp-audio.md): an ALSA node, /dev/snd/controlC0 or
      /dev/snd/pcmC0D0p (linux_snd.c); exists only with a virtio-sound device.
      read/write refuse it, ioctl goes to linux_snd_ioctl(), mmap is refused. */
-  FILE_TYPE_DEVSND
+  FILE_TYPE_DEVSND,
+  /* nv-shim (PLAN.md §3 WP-F): /dev/nvshim -- the nouveau-subset device ABI
+     served by the mock RM (src/kernel/nv_shim.c).  read/write have no data
+     path; the compat ioctl(16) route answers the NVSHIM_IOC_* requests, and
+     closing the fd destroys every object the client owns.  Not x64-only: the
+     mock needs no hardware, so the node is useful on both arches.
+     Appended last: no values shift. */
+  FILE_TYPE_DEVNVSHIM
 } file_type_t;
 
 struct vm_object;
