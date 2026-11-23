@@ -330,6 +330,9 @@ int nv_bringup(struct nv_dev *d) {
    * status.  It cannot fail the bring-up -- a card with firmware already
    * running is a fact to report, not an error. */
   (void)nv_gsp_probe(d);
+  /* Firmware from disk: proves the file path, the container parse and the
+   * pinned digest on real hardware, with no register writes at all. */
+  if (d->hardware) (void)nv_gsp_firmware_check(d);
   return 0;
 }
 

@@ -93,14 +93,19 @@ fi
 if [ "${STAGE_FW:-1}" = "1" ] && [ -d third_party/nvfw/ga102/gsp ]; then
   mmd -i disk.img ::/NVIDIA 2>/dev/null || true
   mmd -i disk.img ::/NVIDIA/GSP 2>/dev/null || true
-  for f in third_party/nvfw/ad102/gsp/booter_load-*.bin \
-           third_party/nvfw/ad102/gsp/booter_unload-*.bin \
-           third_party/nvfw/ad102/gsp/bootloader-*.bin \
-           third_party/nvfw/ga102/gsp/gsp-*.bin; do
-    [ -f "$f" ] || continue
-    mcopy -o -i disk.img "$f" ::/NVIDIA/GSP/ || exit 1
-    say "staged $(basename "$f") on the image"
-  done
+  # Role names, not vendor names: the image is FAT16 and HobbyOS's native path
+  # resolver does not read long-filename entries, so /NVIDIA/GSP/booter_load-
+  # 535.113.01.bin would only be reachable as BOOTER~1.BIN.  8.3 role names are
+  # what the driver opens (see NV_FW_BOOTER in nv_gsp.c).
+  stage_fw() { # <source> <8.3 name>
+    [ -f "$1" ] || return 0
+    mcopy -o -i disk.img "$1" "::/NVIDIA/GSP/$2" || exit 1
+    say "staged $(basename "$1") as $2"
+  }
+  stage_fw "$(ls third_party/nvfw/ad102/gsp/booter_load-*.bin 2>/dev/null | head -1)" BOOTER.BIN
+  stage_fw "$(ls third_party/nvfw/ad102/gsp/bootloader-*.bin 2>/dev/null | head -1)" LOADER.BIN
+  stage_fw "$(ls third_party/nvfw/ga102/gsp/gsp-*.bin 2>/dev/null | head -1)" GSPRM.BIN
+  stage_fw "$(ls third_party/nvfw/ad102/gsp/booter_unload-*.bin 2>/dev/null | head -1)" UNLOAD.BIN
 fi
 
 say "recreating VM $VMID on $PVE_HOST"

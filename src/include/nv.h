@@ -59,6 +59,7 @@ struct nv_mmio_ops {
 };
 
 struct nv_dev {
+  int hardware; /* 1 when attached to a real card (nv_pci.c), 0 in unit tests */
   /* identity */
   uint16_t vendor, device;
   uint16_t subsystem_vendor, subsystem_device;
@@ -147,6 +148,9 @@ void nv_test_suite(void);
  * staged machine and stops at the first unverified contract with -ENOTSUP. */
 int nv_gsp_probe(struct nv_dev *d);
 int nv_gsp_boot(struct nv_dev *d);
+/* Read + parse + hash the staged firmware.  Pure file I/O, zero MMIO writes, so
+ * it is safe to run on every boot. */
+int nv_gsp_firmware_check(struct nv_dev *d);
 
 /* Falcon engine helpers (nv_falcon.c). */
 int nv_falcon_dmem_write(struct nv_dev *d, const struct nv_falcon *f,

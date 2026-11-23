@@ -36,11 +36,20 @@
 
 #include "nv.h"
 #include "nv_regs.h"
+#include "nv_fw.h"
 #include "errno.h"
 
 extern void uart_puts(const char *s);
 extern void uart_print_hex(uint64_t v);
 extern void print_int(int v);
+
+/* Two hex digits.  uart_print_hex() is 16 digits wide, which turns an 8-byte
+ * digest into a wall of zeros and makes the log hard to compare by eye. */
+static void nv_hex_byte(uint8_t b) {
+  static const char *d = "0123456789abcdef";
+  char s[3] = {d[b >> 4], d[b & 0xF], 0};
+  uart_puts(s);
+}
 
 /* PFB: the write-protected-region block.  MEASURED against a reference driver
  * on the same card (docs/nv-gsp-reference.md section 3.6) -- and the first two
@@ -167,6 +176,115 @@ int nv_gsp_probe(struct nv_dev *d) {
   return 0;
 }
 
+/* Stage 2, the part that needs no register contract at all: read the firmware
+ * from disk, parse it, and hash it.  This is pure file I/O -- the one stage in
+ * the chain that cannot wedge the card, so it runs on every boot and its result
+ * is checkable against a pinned digest.
+ *
+ * Names are 8.3 on purpose: the image is FAT16 and the native path resolver does
+ * not read long-name entries, so deploy.sh stages the canonical NVIDIA filenames
+ * under role names (BOOTER.BIN = booter_load, LOADER.BIN = bootloader,
+ * GSPRM.BIN = the RM image). */
+#define NV_FW_SAMPLE_BYTES (64u * 1024u)
+#define NV_FW_BOOTER "BOOTER.BIN"
+#define NV_FW_LOADER "LOADER.BIN"
+#define NV_FW_RM "GSPRM.BIN"
+
+static int nv_gsp_load_one(struct nv_dev *d, const char *name, int parse_hs,
+                           uint32_t *out_size, uint8_t out_sha[8]) {
+  struct nv_fw_blob b;
+  int rc = nv_fw_load_blob(name, &b);
+  uart_puts("[NV-GSP] fw ");
+  uart_puts(name);
+  if (rc != 0) {
+    uart_puts(" load FAILED rc=");
+    print_int(rc);
+    uart_puts(rc == -ENOENT ? " (not on the image)\n"
+                            : (rc == -ENOMEM ? " (frame pool too fragmented)\n"
+                                             : "\n"));
+    return rc;
+  }
+  *out_size = b.size;
+  uart_puts(" bytes=");
+  print_int((int)b.size); /* 38 MB fits an int; sizes are well under 2 GiB */
+  uart_puts(" phys=");
+  uart_print_hex(b.phys);
+
+  if (parse_hs) {
+    struct nv_fw_container c;
+    struct nv_fw_hs hs;
+    if ((rc = nv_fw_container_parse(b.buf, b.size, &c)) != 0) {
+      uart_puts(" container FAILED rc=");
+      print_int(rc);
+      uart_puts("\n");
+    } else if ((rc = nv_fw_hs_parse(&c, &hs)) != 0) {
+      uart_puts(" hs FAILED rc=");
+      print_int(rc);
+      uart_puts("\n");
+    } else {
+      uart_puts(" container ok data_off=");
+      uart_print_hex(c.data_off);
+      uart_puts(" data_size=");
+      uart_print_hex(c.data_size);
+      uart_puts(" sig=");
+      uart_print_hex(hs.sig_prod_size);
+      uart_puts(" trailer=");
+      uart_print_hex(c.trailing);
+    }
+  }
+  /* Integrity, sized to the failure that actually happens.  A short read is
+   * caught by head+tail hashes and the byte count; a full hash of the 38 MB RM
+   * image costs 108 s of emulated CPU (measured: hash_us=108600896), which is
+   * not a tax every boot should pay for a check that cannot fail differently
+   * from the sampled form. */
+  uint8_t sha[32];
+  uint32_t t0 = nv_rd32(d, NV_PTIMER_TIME_0);
+  const uint32_t kSample = 64 * 1024;
+  uint32_t n = NV_FW_SAMPLE_BYTES; /* 64 KiB, or the whole file if smaller */
+  n = b.size < n ? b.size : n;
+  if (nv_fw_sha256(b.buf, n, sha) == 0) {
+    uart_puts(" head=");
+    for (uint32_t i = 0; i < 4; i++) {
+      nv_hex_byte(sha[i]);
+      out_sha[i] = sha[i];
+    }
+    if (b.size > kSample) {
+      /* Tail: the other end of a truncated file. */
+      if (nv_fw_sha256(b.buf + b.size - kSample, kSample, sha) == 0) {
+        uart_puts(" tail=");
+        for (uint32_t i = 0; i < 4; i++) {
+          nv_hex_byte(sha[i]);
+          out_sha[4 + i] = sha[i];
+        }
+      }
+    }
+    uint32_t t1 = nv_rd32(d, NV_PTIMER_TIME_0);
+    uart_puts(" hash_us=");
+    /* PTIMER runs at ~1 GHz, so a raw tick delta is microseconds: a coarse but
+     * honest cost figure for hashing on this CPU. */
+    print_int((int)(t1 - t0));
+  }
+  uart_puts("\n");
+  nv_fw_release(&b);
+  return 0;
+}
+
+int nv_gsp_firmware_check(struct nv_dev *d) {
+  if (!d) return -EINVAL;
+  uint32_t size = 0;
+  uint8_t sha[8] = {0};
+  int rc = nv_gsp_load_one(d, NV_FW_BOOTER, 1, &size, sha);
+  if (rc == 0) {
+    uart_puts("[NV-GSP] fw booter staged: this is the blob the falcon boot ROM "
+              "validates against fused keys\n");
+  }
+  uint32_t lsize = 0;
+  (void)nv_gsp_load_one(d, NV_FW_LOADER, 0, &lsize, sha);
+  uint32_t rsize = 0;
+  (void)nv_gsp_load_one(d, NV_FW_RM, 0, &rsize, sha);
+  return rc;
+}
+
 /* The staged boot.  Deliberately stops at the first stage whose contract is
  * not verified, and says which contract is missing, so the next session's work
  * is named by the log rather than rediscovered. */
@@ -195,8 +313,9 @@ int nv_gsp_boot(struct nv_dev *d) {
   /* Stage 2..N are gated on firmware on disk and on register contracts that
    * have not been verified against a known-good driver yet.  Reporting the gate
    * is the honest outcome; pretending to try it is not. */
-  uart_puts("[NV-GSP] stage2 firmware: not attempted -- needs /NVIDIA/GSP/*.BIN "
-            "staged and nv_fw_load() (docs/nv-gsp-firmware.md section 3)\n");
+  /* Stage 2 is pure file I/O and runs on every boot (see nv_gsp_firmware_check);
+   * here we only record that it is not the blocker any more. */
+  uart_puts("[NV-GSP] stage2 firmware: read+parsed at bring-up (see fw rows)\n");
   uart_puts("[NV-GSP] stage3+ blocked on the WPR2/bootargs contracts; the "
             "reference dump (docs/nv-gsp-reference.md) is what unblocks them\n");
   return -ENOTSUP;

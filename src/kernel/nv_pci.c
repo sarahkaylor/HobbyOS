@@ -206,6 +206,9 @@ int nv_init(void) {
   d->ops.rd32 = nv_bar0_rd32;
   d->ops.wr32 = nv_bar0_wr32;
   d->ops_ctx = d;
+  /* From here on the register file is silicon, not a fake: the stages that need
+   * a real card (firmware from disk, BAR1) key off this. */
+  d->hardware = 1;
 
   rc = nv_bringup(d);
   nv_log_state(d);
