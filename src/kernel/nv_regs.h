@@ -102,15 +102,23 @@ static inline int nv_is_poison(uint32_t v) {
 #define NV_FALCON_INTR_EN_CLR (0x014)
 #define NV_FALCON_INTR_EN (0x018)
 #define NV_FALCON_INTR_ROUTING (0x01C)
+/* 0x040/0x044: envytools calls these SCRATCH0/SCRATCH1, but the GSP boot path
+ * in the reference driver uses exactly these offsets as its host<->processor
+ * MAILBOX0/1 (NV_PGSP_MAILBOX0 = 0x110040, i.e. base + 0x040).  Both readings
+ * describe the same registers; the boot path needs the mailbox one, so do not
+ * "fix" this to 0x090. */
 #define NV_FALCON_SCRATCH0 (0x040)
 #define NV_FALCON_SCRATCH1 (0x044)
+#define NV_FALCON_MAILBOX0_FLCN (0x040) /* GSP boot path mailbox (see above) */
+#define NV_FALCON_MAILBOX1_FLCN (0x044)
 #define NV_FALCON_ACCESS_EN (0x048)
 #define NV_FALCON_STATUS_BUSY (0x04C)
 #define NV_FALCON_STATUS_PAUSE (0x05C)
-#define NV_FALCON_MAILBOX0 (0x090) /* host/falcon mailbox pair; the docs list
-* 0x090/0x094 as "???" on v3+ and the
-* driver uses them only in the boot path */
-#define NV_FALCON_MAILBOX1 (0x094)
+/* 0x090/0x094: documented as "???" on v3+ in envytools; they are NOT the GSP
+ * boot mailboxes (those are 0x040/0x044 above).  Kept named so a future
+ * experiment can identify them without inventing a meaning. */
+#define NV_FALCON_UNK090 (0x090)
+#define NV_FALCON_UNK094 (0x094)
 #define NV_FALCON_UC_CTRL (0x100)
 #define NV_FALCON_UC_ENTRY (0x104) /* ucode entry point (PC low bits) */
 #define NV_FALCON_UC_CAPS (0x108)

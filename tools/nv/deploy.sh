@@ -49,9 +49,13 @@ else
   say "building ARCH=intel MODE=$MODE"
   # DESKTOP=hobby is required on x64: the icewm desktop's HBHOST.BIN is an
   # x86-only ts() path and this harness only needs a console that paints.
+  # LO_ON_DISK= keeps the LibreOffice suite off the image: when
+  # third_party/x11/.../libX11.a exists the Makefile defaults it to 1 and drags
+  # the whole suite into every disk build (measured by the infra lane: minutes of
+  # build for a file no driver probe opens).
   case "$MODE" in
-  desktop) make ARCH=intel MODE=desktop DESKTOP=hobby -j"$(nproc 2>/dev/null || echo 8)" disk.img ;;
-  *) make ARCH=intel MODE="$MODE" -j"$(nproc 2>/dev/null || echo 8)" disk.img ;;
+  desktop) make ARCH=intel MODE=desktop DESKTOP=hobby LO_ON_DISK= -j"$(nproc 2>/dev/null || echo 8)" disk.img ;;
+  *) make ARCH=intel MODE="$MODE" LO_ON_DISK= -j"$(nproc 2>/dev/null || echo 8)" disk.img ;;
   esac || { echo "build failed" >&2; exit 1; }
 fi
 
@@ -72,8 +76,10 @@ if ! r1 "qm status $VMID" >/dev/null 2>&1; then
   say "creating VM $VMID"
   r1 "qm create $VMID --name hobbyos-nv --memory 16384 --cores 8 --sockets 1 \
       --cpu host --machine q35 --bios ovmf --vga virtio \
-      --net0 virtio,bridge=vmbr0 \
       --efidisk0 local-lvm:0,efitype=4m,pre-enrolled-keys=0" >/dev/null || exit 1
+  # No net0: OVMF with a NIC can sit on "Start PXE over IPv4" instead of the
+  # NVMe entry (measured by the infra lane).  The driver probe needs no network;
+  # add one with `qm set 300 --net0 virtio,bridge=vmbr0` if a run ever does.
   # One quoted payload: single quotes inside a double-quoted remote command, so
   # nothing on this line needs another level of escaping.
   VM_ARGS="-drive file=$REMOTE_DIR/disk.img,format=raw,if=none,id=disk0 -device pcie-root-port,id=pcie.nvme,bus=pcie.0,slot=2 -device nvme,drive=disk0,serial=1234,bus=pcie.nvme -serial file:$REMOTE_DIR/serial.log -action shutdown=poweroff"

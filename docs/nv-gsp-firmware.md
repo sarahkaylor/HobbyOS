@@ -32,20 +32,42 @@ host driver ──writes──► booter ucode (falcon) ──verifies+loads─�
 
 ## 2. Blob inventory (535.113.01, AD102)
 
-| file | bytes | sha256 |
-|---|---|---|
-| `booter_load-535.113.01.bin` | 59 768 | `3ab46bf4c70d72e8fc89d98e6bdc9b83a61954a586629d26b8b5653a620237e0` |
-| `booter_unload-535.113.01.bin` | 39 544 | `09240c83595856a0fe70d2ab3ec7325455cd8adfc48ec7b47f6fced1e5431beb` |
-| `bootloader-535.113.01.bin` | 20 588 | `076d2a0675131ad8a8de215c611ce4271289adcc03e2cf39995f9b29079e2136` |
-| `gsp-535.113.01.bin` | 38 061 600 | `e30231ec0d317021770e16c81ae2c0553f728d0344248827582f78132c9447d4` |
+| directory | file | bytes | sha256 |
+|---|---|---|---|
+| `ad102` | `booter_load-535.113.01.bin` | 55 928 | `7d4ef3258da016f5208cfb1b348a9a1d69aaa13c2f8d4ee8c05d66bd05b45cd6` |
+| `ad102` | `booter_unload-535.113.01.bin` | 39 800 | `d036dfee0545c36e2194bc555cb268a5e11a6f13b5f66a7dec40838efc6ad87e` |
+| `ad102` | `bootloader-535.113.01.bin` | 32 876 | `044d3a21eff73eb12f22840e5f145d685727f40165b3f2d265cf664753e9ff9c` |
+| `ga102` | `booter_load-535.113.01.bin` | 59 768 | `3ab46bf4c70d72e8fc89d98e6bdc9b83a61954a586629d26b8b5653a620237e0` |
+| `ga102` | `booter_unload-535.113.01.bin` | 39 544 | `09240c83595856a0fe70d2ab3ec7325455cd8adfc48ec7b47f6fced1e5431beb` |
+| `ga102` | `bootloader-535.113.01.bin` | 20 588 | `076d2a0675131ad8a8de215c611ce4271289adcc03e2cf39995f9b29079e2136` |
+| `ga102` | `gsp-535.113.01.bin` | 38 061 600 | `e30231ec0d317021770e16c81ae2c0553f728d0344248827582f78132c9447d4` |
+
+The AD102 booter is a **different program** from the GA102 one — same version
+string, different size and hash.  Only the RM image is shared.
 
 Roles (from the names and from what each blob is): `booter_load` is the ucode
 that runs on the GPU processor first and installs the real image;
 `booter_unload` is its counterpart for the teardown path; `bootloader` is the
-non-secure loader stage; `gsp-*.bin` is the RM itself. Fetch with
-`tools/nv/fetch-firmware.sh` (pinned version, checksums verified), which stages
-them under `third_party/nvfw/ga102/gsp/` (gitignored — 38 MB does not belong in
-the repository).
+non-secure loader stage; `gsp-*.bin` is the RM itself.
+
+**The blobs come from two directories, and that is not an accident.** Verified by
+listing linux-firmware (2026-11-22):
+
+| directory | `booter_load` | `booter_unload` | `bootloader` | `gsp-*.bin` |
+|---|---|---|---|---|
+| `nvidia/ga102/gsp/` | yes | yes | yes | **yes** (`gsp-535.113.01.bin`, `gsp-570.144.bin`) |
+| `nvidia/ad102/gsp/` | yes | yes | yes | **no** |
+
+AD102 has no RM image of its own in this pin: it uses the GA102 one, which
+carries signature sections for both families (§3.3).  A fetch script that only
+looks in `nvidia/ad102/gsp/` finds the booter and then fails at the one file that
+matters.  Note also that **570.144** is published for both directories — that is
+the version a fresh attempt should pin (535.113.01 is what is analysed here
+because it is the version the reference driver in this generation's table names).
+
+Fetch with `tools/nv/fetch-firmware.sh` (pinned version, checksums verified),
+which stages them under `third_party/nvfw/` (gitignored — 38 MB does not belong
+in the repository).
 
 ## 3. Container formats, as measured
 
@@ -112,6 +134,22 @@ patch:
    on the real card; that is the processor's control port, and it is the only
    part of the GSP the host touches directly.
 
+### 3.3 The RM image's sections — and why AD102 borrows GA102's
+
+The ELF has ten sections; three matter:
+
+| section | offset | bytes | meaning |
+|---|---|---|---|
+| `.fwimage` | 0x40 | 38 043 648 (0x2448000) | the RM code+data image |
+| `.fwversion` | 0x2448040 | 11 | `"535.113.01"` |
+| `.fwsignature_ga10x` | 0x244B04B | 4096 | signature for GA10x |
+| `.fwsignature_ad10x` | 0x244A04B | 4096 | signature for **AD10x** |
+
+Both signatures are present in the one file, which is exactly how a GA102 RM
+image serves an AD102 part: the bootloader picks the section matching the
+fused engine id.  That also tells the driver what it must *not* try to do — §5
+item 5.
+
 ## 4. The sequence the driver must implement
 
 Each step names the observable that proves it happened. This is the shape of
@@ -175,9 +213,42 @@ Each of these is a task with an experiment, not a fact:
    has the mailbox registers defined) — otherwise a wrong WPR2 offset looks
    exactly like a hang.
 
-**Bottom line**: a from-scratch driver can absolutely boot this card's GSP, but
-only by matching NVIDIA's firmware interface exactly, and the fastest honest
-route is a reference card running a known-good driver next to ours (VM 301),
-comparing register and memory state stage by stage. Guessing the WPR2 offsets
-or the bootargs layout and testing on the real card would burn hardware cycles
-with no diagnosis.
+## 6. What the reference driver does, in register terms (unverified here)
+
+Established from the reference driver's own device headers and boot code during
+the research pass, and recorded so the next session starts from a named map
+rather than a guess.  **None of this has been exercised by `nv` yet** — every row
+is a hypothesis to verify against hardware, not a fact about our driver:
+
+| item | value |
+|---|---|
+| GSP processor block | BAR0 + **0x110000**; mailboxes at **+0x040 / +0x044** (envytools calls these offsets SCRATCH0/1 — see the note in `nv_regs.h`), engine reset at +0x3C0, per-queue head registers at +0xC00 |
+| RISC-V core window | BAR0 + **0x111000**; `CPUCTL` +0x388 bit 7 = ACTIVE, boot ROM parameters at +0x668 block |
+| Falcon v4 control | `CPUCTL` 0x100, `BOOTVEC` 0x104, `DMACTL` 0x10C, `DMATRFBASE` 0x110/0x128, `DMATRFCMD` 0x118 (idle = bit 1), `HWCFG2` 0xF4 bit 12 = scrubbing |
+| post-reset mask write | `0x1668 = 0x111` |
+| WPR2 (live check) | lo/hi at **0x1FA824 / 0x1FA828**; nonzero hi means the firmware set it up |
+| WPR meta placement | 256-byte `GspFwWprMeta`, magic `0xDC3AAE21371A60B3`, revision 1, at a 128 KiB-aligned base computed top-down from the end of VRAM |
+| first RPC exchange | queue head kick via `PGSP_QUEUE_HEAD(0)`; pre-queued `GSP_SET_SYSTEM_INFO` then `SET_REGISTRY`, then wait for the `GSP_INIT_DONE` event |
+| RPC frame | 32-byte header: version `0x03000000`, signature `"VRPC"`, length, function, result fields; queue elements carry auth tags, so the region must be exactly as the firmware expects |
+
+Two of those rows are checkable *without* booting anything: read `0x1FA828`
+(a nonzero value proves a previous owner left WPR2 programmed) and read
+`0x1668` before and after a reset to see the mask write take effect.  They are
+the cheapest first experiments on the real card.
+
+## 7. Bottom line
+
+A from-scratch driver can absolutely boot this card's GSP, but only by matching
+NVIDIA's firmware interface exactly.  The chain is vendor-signed end to end:
+the falcon boot ROM validates an RSA-3072 signature over the booter's patch site
+against fused keys, and the bootloader validates the RM image's
+`.fwsignature_ad10x` against a key in its ROM.  **There is no host-side
+signature to forge and none to skip** — the driver's job is to be a correct
+*loader* (place bytes, program registers, start, read the mailbox), never an
+authenticator.  That is good news: it means every step is observable, and a
+mistake shows up as a mailbox value or a stuck bit rather than a silent hang.
+
+The fastest honest route to a green P3 is therefore a reference card running a
+known-good driver next to ours (VM 301 in the harness plan), diffing register
+and memory state stage by stage.  Guessing the WPR2 layout or the bootargs
+encoding and testing on the real card burns hardware cycles with no diagnosis.
