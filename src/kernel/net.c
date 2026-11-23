@@ -205,8 +205,21 @@ static int net_sockets_reserve(void) {
     uint64_t base = frame_alloc_contig(nframes);
     if (base) {
       extern void *memset(void *dst, int c, size_t n);
-      memset((void *)base, 0, (size_t)nframes * FRAME_SIZE);
-      sockets = (struct socket_pcb *)base;
+      struct socket_pcb *tab = (struct socket_pcb *)base;
+      /* Zero each PCB's control fields, NOT the 4 MiB RX ring: the ring is
+         only ever read between rx_head and rx_tail (both zeroed below), so
+         its stale pool contents are unreachable.  A 64 MiB memset here runs
+         inside an IRQ-off window -- it measured 57 ms on the CI runner and
+         tripped the unit tier's [LOCKHEALTH-IRQOFF] 50 ms gate (worst_lock=-
+         because this lock is not registered).  16 x ~1 KiB instead. */
+      for (int i = 0; i < MAX_SOCKETS; i++) {
+        const size_t ring = offsetof(struct socket_pcb, rx_buf);
+        uint8_t *pcb = (uint8_t *)&tab[i];
+        memset(pcb, 0, ring);
+        memset(pcb + ring + SOCKET_RX_BUF_SIZE, 0,
+               sizeof(tab[i]) - (ring + SOCKET_RX_BUF_SIZE));
+      }
+      sockets = tab;
     }
   }
   spinlock_release_irqrestore(&sockets_reserve_lock, flags);
