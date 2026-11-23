@@ -52,6 +52,7 @@ struct fake_gpu {
   uint32_t wpr_a, wpr_b;     /* PFB 0x1FA804/08: the pair that moves */
   uint32_t mbox0, mbox1;     /* GSP falcon mailboxes */
   uint32_t riscv_ctl;        /* GSP RISC-V status word */
+  uint32_t bcr668;           /* GSP BCR_CTRL at +0x668: core selection */
   uint32_t nwrites;
   /* Write trail + the falcon reset/scrub bits, so a staged sequence can be
      asserted offline instead of only being observed on a card. */
@@ -80,6 +81,10 @@ static void fake_reset(void) {
   for (unsigned i = 0; i < sizeof(fg); i++) p[i] = 0;
   fg.boot0 = (0x192u << 20) | 0xA1u; /* AD102, stepping 0xa1 */
   fg.boot1 = 0;
+  /* BCR_CTRL as measured on the card after a launch attempt: RISCV|BRFETCH
+   * set, VALID clear -- i.e. the core is selected as RISC-V, which is what the
+   * reset path has to clear before STARTCPU can reach the falcon core. */
+  fg.bcr668 = 0x110u;
   fg.pmc_enable = NV_PMC_ENABLE_TIMER;
   fg.timer_step = 32;
   for (int i = 0; i < FAKE_NR_FALCON; i++) {
@@ -100,7 +105,7 @@ static uint32_t fake_rd32(void *ctx, uint32_t off) {
   if (off == NV_FALCON_GSP_BASE + 0x040) return fg.mbox0;
   if (off == NV_FALCON_GSP_BASE + 0x044) return fg.mbox1;
   if (off == NV_FALCON_GSP_BASE + 0x3C0) return 0;
-  if (off == NV_FALCON_GSP_BASE + 0x1668) return 0;
+  if (off == NV_FALCON_GSP_BASE + 0x1668) return fg.bcr668; /* BCR_CTRL */
   if (off == NV_FALCON_GSP_BASE + 0x1000 + 0x388) return fg.riscv_ctl;
   if (off == 0x1FA804) return fg.wpr_a;
   if (off == 0x1FA808) return fg.wpr_b;
@@ -161,6 +166,13 @@ static uint32_t fake_rd32(void *ctx, uint32_t off) {
 static void fake_wr32(void *ctx, uint32_t off, uint32_t val) {
   (void)ctx;
   fg.nwrites++;
+  /* BCR_CTRL (0x111668) is in the GSP's SECOND-PRI window, outside the 4 KiB
+   * falcon window the switch below covers.  Clearing the RISC-V select leaves
+   * VALID set, which is what the card did (0x110 -> 0x1). */
+  if (off == NV_FALCON_GSP_BASE + 0x1668) {
+    if (val == 0) fg.bcr668 = 1u;
+    return;
+  }
   if (fg.wr_n < 64) fg.wr_log[fg.wr_n++] = off;
   if (off == 0x110600) fg.v600 = val;
   if (off == 0x110624) fg.v624 = val;
@@ -391,6 +403,7 @@ static void test_nv_gsp_probe_reports_wpr2(void) {
   fg.mbox0 = 0xDEADBEEFu;
   fg.mbox1 = 0x12345678u;
   fg.riscv_ctl = 0x10u; /* bit 4 set, bit 7 clear: the measured live state */
+  fg.bcr668 = 0x110u;   /* RISCV|BRFETCH, VALID clear: measured on the card */
   ASSERT(nv_gsp_probe(d) == 0);
   EXPECT_EQ((int)d->wpr_ctl_a, (int)0x1FFFF000u);
   EXPECT_EQ((int)d->wpr_ctl_b, 0);
@@ -470,14 +483,36 @@ static void test_nv_gsp_fwsec_reset(void) {
 
   ASSERT(nv_gsp_fwsec_reset(d) == 0);
   EXPECT_EQ((int)fg.reset_pulses, 1);
-  ASSERT(fg.wr_n >= 7);
-  EXPECT_EQ((int)fg.wr_log[0], 0x110048);
-  EXPECT_EQ((int)fg.wr_log[1], 0x110014);
-  EXPECT_EQ((int)fg.wr_log[2], 0x1103C0);
-  EXPECT_EQ((int)fg.wr_log[3], 0x1103C0);
-  EXPECT_EQ((int)fg.wr_log[4], 0x110624);
-  EXPECT_EQ((int)fg.wr_log[5], 0x11010C);
-  EXPECT_EQ((int)fg.wr_log[6], 0x110600);
+  /* The reset's write trail, with the F1 observability probes filtered out.
+   * Those probes write 0x114 twice (sentinel, then restore) to establish that
+   * the register F1 judges the DMA by is readable in this run; they are not
+   * part of the reset sequence, so they are excluded from the order assertion
+   * and checked on their own right after it. */
+  {
+    uint32_t trail[8];
+    int tn = 0;
+    for (uint32_t i = 0; i < fg.wr_n && tn < 8; i++) {
+      if (fg.wr_log[i] != 0x110114 && fg.wr_log[i] != 0x110084)
+        trail[tn++] = fg.wr_log[i];
+    }
+    ASSERT(tn >= 7);
+    EXPECT_EQ((int)trail[0], 0x110048);
+    EXPECT_EQ((int)trail[1], 0x110014);
+    EXPECT_EQ((int)trail[2], 0x1103C0);
+    EXPECT_EQ((int)trail[3], 0x1103C0);
+    EXPECT_EQ((int)trail[4], 0x110624);
+    EXPECT_EQ((int)trail[5], 0x11010C);
+    EXPECT_EQ((int)trail[6], 0x110600);
+  }
+  /* The F1 probe must leave the destination register at 0, never at the
+   * sentinel: a stale destination would be inherited by the next transfer. */
+  EXPECT_EQ((int)fg.last_xfer_addr[NV_FALCON_IDX_GSP], 0);
+  /* The two state fixups the reference applies at this point: FALCON_RM holds
+   * PMC_BOOT_0, and the RISC-V core select is cleared so STARTCPU can reach
+   * the falcon core.  Both were missing, and the card measured the select
+   * clear as the difference between "START refused" and "the core ran". */
+  EXPECT_EQ((int)fg.scratch[NV_FALCON_IDX_GSP][3], (int)fg.boot0);
+  EXPECT_EQ((int)fg.bcr668, 1);
   ASSERT((fg.v624 & (1u << 7)) != 0);
   EXPECT_EQ((int)fg.v10c, 0);
   EXPECT_EQ((int)fg.v600, 5);

@@ -74,6 +74,27 @@ against the descriptor's `SignatureVersions` (`0x0003`). If the image is not val
 for this part's fuses, the boot ROM rejects it and no amount of transport fixing
 helps.
 
+### 2.1 What WP-A measured (8 deploys, 2026-11-23; logs in `evidence/nv/`)
+
+The wall was **four transport/state defects plus two image defects**, and the fuses
+are **not** the problem:
+
+| fact | evidence |
+|---|---|
+| The fuse check passes: `fuse@0x8241E0=0x1`, `sigvers=0x3` → the image is valid for this part, and the key version selects **signature index 1**, not 0 | `[NV-FUSE] verdict=COMPATIBLE` |
+| F1's oracle is unusable as written: `0x114` answers the fence word until the core select is cleared (and it is a **24-bit** register). Its question is answered instead by 0x110/0x114/0x118 after that clear | `[NV-FWSEC] f1 verdict=MASKED` (before) / `POSITIVE 0x114=0xF100` (after) |
+| The DMA destination never advanced, the SIZE field was 0 (4 bytes, not 256), and completion was polled on `0x120` instead of `0x118` bit 1 | `dst first=0 last=0` (before) / `118=0x616`, `114=0xF100` (after) |
+| The RISC-V core select (`0x111668` = `0x110`, VALID clear) had to be cleared **after** the reset: that is what un-fences the DMA window and makes STARTCPU take | `f3 core-select cleared: 0x110 -> 0x1`; `ctl_before=0x10 ctl_1us=0x0` |
+| F2 (PIO) alone changed nothing → the DMA *encoding* was not the only problem; F5 is moot (PIO has no context and still failed) | `[NV-FWSEC] f2 transport=PIO` … `status1438=0xBEEF0000` |
+| The FRTS command and the fuse-selected signature have to be patched into the DMEM image before the load (both were missing) | `init_cmd=0x15`, `sig … selects index=1` |
+| With those fixes the verdict channel **moves for the first time**: `0x1438` goes `0xBEEF0000` → `0x0` in the one run where the image landed | `[NV-FWSEC] status1438=0x0000000000000000 frts=0 (ucode ran)` |
+| …but the launch is **not** complete: SEC2 stays fenced and the core never halts inside 2 s | `SEC2=still fenced`, `halt wait done halted=0` |
+
+So: fuses ruled out; transport was wrong (fixed and measured); the ucode/params
+path had two more defects (fixed); the remaining gap is between "FWSEC wrote a
+zero FRTS status" and "the privilege level drops".
+
+
 **Sequencing rule:** no more SEC2 work until FWSEC's channel says it ran. SEC2's
 fence is privilege-gated (measured twice); engine pokes will not lift it.
 
