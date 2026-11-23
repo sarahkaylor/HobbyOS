@@ -246,6 +246,98 @@ static void test_nv_flcn_compare_words(void) {
   EXPECT_EQ(nv_flcn_compare_words(0, 4, img, sizeof img, 0, &mm), -EINVAL);
 }
 
+/* The store direction is four candidate encodings plus a control, and the whole
+ * reason they are enumerated is that a single attempt cannot say which field was
+ * wrong.  This case pins every one of them, bit by bit, and pins the control:
+ * a "store" variant that silently encodes a LOAD would overwrite falcon memory
+ * instead of reading it, which on the card looks exactly like a store that
+ * worked. */
+static void test_nv_flcn_store_encodings(void) {
+  uart_puts("  Running test_nv_flcn_store_encodings...\n");
+  tests_run++;
+  /* Base words first: SIZE 256 B = 6 << 8, DMEM non-secure. */
+  EXPECT_EQ((int)nv_flcn_store_cmd(256u, 0, 0, NV_FLCN_STORE_V_PLAIN), 0x620);
+  /* IMEM, secure: 0x600 | IMEM 0x10 | SEC 0x4 | DIR 0x20. */
+  EXPECT_EQ((int)nv_flcn_store_cmd(256u, 1, 1, NV_FLCN_STORE_V_PLAIN), 0x634);
+  /* ctx 5 lands in bits 14:12. */
+  EXPECT_EQ((int)nv_flcn_store_cmd(256u, 0, 0, NV_FLCN_STORE_V_CTX), 0x5620);
+  EXPECT_EQ((int)nv_flcn_store_cmd(256u, 0, 0, NV_FLCN_STORE_V_OWNER), 0x620);
+  EXPECT_EQ((int)nv_flcn_store_cmd(256u, 0, 0, NV_FLCN_STORE_V_CTX_OWNER),
+            0x5620);
+  /* The two contexts that were never tried keep their exact field position. */
+  EXPECT_EQ((int)nv_flcn_store_cmd(256u, 0, 0, NV_FLCN_STORE_V_CTX1), 0x1620);
+  EXPECT_EQ((int)nv_flcn_store_cmd(256u, 0, 0, NV_FLCN_STORE_V_CTX4), 0x4620);
+  /* The control must NOT have DIR set: it has to move bytes the other way, and
+   * the test refuses an encoder where the control and the store agree. */
+  EXPECT_EQ((int)nv_flcn_store_cmd(256u, 0, 0, NV_FLCN_STORE_V_LOAD_CONTROL),
+            0x600);
+  ASSERT((nv_flcn_store_cmd(256u, 0, 0, NV_FLCN_STORE_V_LOAD_CONTROL) &
+          NV_FLCN_XF_DIR) == 0);
+  ASSERT((nv_flcn_store_cmd(256u, 0, 0, NV_FLCN_STORE_V_PLAIN) &
+          NV_FLCN_XF_DIR) != 0);
+  /* The size field keeps its refusal: a store of 300 bytes is not a 256-byte
+   * store with three bytes hanging over. */
+  EXPECT_EQ((int)nv_flcn_store_cmd(300u, 0, 0, NV_FLCN_STORE_V_PLAIN),
+            0xffffffff);
+  EXPECT_EQ((int)nv_flcn_store_cmd(256u, 0, 0, NV_FLCN_STORE_V_COUNT),
+            0xffffffff);
+  EXPECT_EQ((int)nv_flcn_store_cmd(256u, 0, 0, -1), 0xffffffff);
+  /* The 0x11C word: the owner bit belongs to the two variants that name it and
+   * to no others -- a stray bit 31 on a plain store would be an address, not a
+   * flag, and the engine would be asked to write 2 GiB above the buffer. */
+  EXPECT_EQ((int)nv_flcn_store_off(0, NV_FLCN_STORE_V_PLAIN), 0);
+  EXPECT_EQ((int)nv_flcn_store_off(0x100, NV_FLCN_STORE_V_CTX), 0x100);
+  EXPECT_EQ((int)nv_flcn_store_off(0x100, NV_FLCN_STORE_V_OWNER),
+            (int)(0x100u | NV_FLCN_XF_OFF_OWNER));
+  EXPECT_EQ((int)nv_flcn_store_off(0, NV_FLCN_STORE_V_CTX_OWNER),
+            (int)NV_FLCN_XF_OFF_OWNER);
+  /* Names are part of the evidence: a log row says CTX_OWNER, not "3". */
+  ASSERT(nv_flcn_store_name(NV_FLCN_STORE_V_CTX_OWNER)[0] == 'C');
+  ASSERT(nv_flcn_store_name(NV_FLCN_STORE_V_COUNT)[0] == '?');
+}
+
+/* A read is not a value: three of the words this window returns are sentinels.
+ * The near-miss matters most -- 0xBADF5040 was measured as a real PC before a
+ * start, so anything that classifies by the 0xBADF prefix throws away real
+ * state, and anything that treats a sentinel as data invents some. */
+static void test_nv_flcn_read_class(void) {
+  uart_puts("  Running test_nv_flcn_read_class...\n");
+  tests_run++;
+  EXPECT_EQ(nv_flcn_read_class(0xBADF5620u), NV_FLCN_RD_FENCED);
+  EXPECT_EQ(nv_flcn_read_class(0xDEAD5EC1u), NV_FLCN_RD_SEC_MARKER);
+  EXPECT_EQ(nv_flcn_read_class(0xffffffffu), NV_FLCN_RD_DEAD);
+  EXPECT_EQ(nv_flcn_read_class(0u), NV_FLCN_RD_REAL);
+  EXPECT_EQ(nv_flcn_read_class(0x10u), NV_FLCN_RD_REAL);
+  EXPECT_EQ(nv_flcn_read_class(0xBADF5040u), NV_FLCN_RD_REAL);
+  EXPECT_EQ(nv_flcn_read_class(0xBADF5621u), NV_FLCN_RD_REAL);
+}
+
+/* A landing buffer prefilled with a word that is also in the image cannot tell
+ * "the engine copied it" from "the prefill survived".  The check is byte-wise
+ * because the pattern can straddle a word boundary, and the unaligned case is
+ * the one a word-aligned scan would miss. */
+static void test_nv_flcn_prefill_collides(void) {
+  uart_puts("  Running test_nv_flcn_prefill_collides...\n");
+  tests_run++;
+  uint8_t img[16];
+  for (uint32_t i = 0; i < sizeof img; i++) img[i] = 0;
+  EXPECT_EQ(nv_flcn_prefill_collides(img, sizeof img, 0xA6A6A6A6u), 0);
+  tput32(img + 4, 0xA6A6A6A6u);
+  EXPECT_EQ(nv_flcn_prefill_collides(img, sizeof img, 0xA6A6A6A6u), 1);
+  EXPECT_EQ(nv_flcn_prefill_collides(img, sizeof img, 0x5A5A5A5Au), 0);
+  /* Straddling words 1 and 2: A6 A6 A6 A6 at byte offset 5. */
+  for (uint32_t i = 0; i < sizeof img; i++) img[i] = 0;
+  img[5] = 0xA6;
+  img[6] = 0xA6;
+  img[7] = 0xA6;
+  img[8] = 0xA6;
+  EXPECT_EQ(nv_flcn_prefill_collides(img, sizeof img, 0xA6A6A6A6u), 1);
+  /* A tail that cannot hold four bytes is not a match, and a null image is not
+   * a crash. */
+  EXPECT_EQ(nv_flcn_prefill_collides(img, 3, 0xA6A6A6A6u), 0);
+  EXPECT_EQ(nv_flcn_prefill_collides(0, 16, 0xA6A6A6A6u), 0);
+}
+
 void nv_flcn_test_suite(void) {
   test_nv_flcn_xfer_cmd();
   test_nv_fwsec_sig_index();
@@ -254,6 +346,9 @@ void nv_flcn_test_suite(void) {
   test_nv_flcn_idx_word();
   test_nv_flcn_find_word();
   test_nv_flcn_compare_words();
+  test_nv_flcn_store_encodings();
+  test_nv_flcn_read_class();
+  test_nv_flcn_prefill_collides();
 }
 
 #endif /* KERNEL_MODE_UNIT_TEST */

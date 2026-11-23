@@ -162,6 +162,84 @@ int nv_flcn_compare_words(const uint32_t *words, uint32_t n, const uint8_t *img,
                           uint32_t img_len, uint32_t img_off,
                           struct nv_flcn_mismatch *out);
 
+/* ---- the engine's STORE direction --------------------------------------
+ *
+ * A load (sysmem -> falcon memory) is proven: the image lands and DMEM reads
+ * back word for word.  The reverse direction is the only channel that survives
+ * the read fence, and it had never been separated into encodings: r2c issued
+ * one store, the queue went FULL and stayed FULL, and the next load timed out.
+ * A single attempt cannot say which field was wrong, so the encodings are
+ * enumerated here as a function of the variant and pinned by the unit tier --
+ * the deploy log then names the variant by name, not by a literal at the call
+ * site.
+ *
+ *   0x118 bit 5      DIR (0 = load, 1 = store); 0x118 bits 12:14 = PORT/CTXDMA,
+ *                    the target the engine reads/writes sysmem through.  A
+ *                    load has the host read sysmem; a store has the ENGINE
+ *                    write it, which is why ctx 5 (coherent sysmem) is a
+ *                    candidate: a non-coherent target for an engine write is a
+ *                    buffer the host may never see.
+ *   0x11C bit 31     the candidate "owner" bit: a write-direction transfer
+ *                    hands the buffer to the engine, and this driver has never
+ *                    set it.
+ *   LOAD_CONTROL     DIR clear with the same address registers.  It must leave
+ *                    falcon memory holding the landing buffer's bytes.  Without
+ *                    this control, "the buffer did not change" cannot be told
+ *                    from "this driver cannot drive the engine at these
+ *                    addresses at all", and the store's negative would be a
+ *                    claim about the instrument instead of about the hardware.
+ */
+#define NV_FLCN_XF_DIR (1u << 5)
+#define NV_FLCN_XF_CTX_COHERENT (5u << 12)
+#define NV_FLCN_XF_CTX1 (1u << 12)
+#define NV_FLCN_XF_CTX4 (4u << 12)
+#define NV_FLCN_XF_OFF_OWNER (1u << 31)
+
+enum {
+  NV_FLCN_STORE_V_PLAIN = 0,   /* DIR only -- the encoding r2c issued */
+  NV_FLCN_STORE_V_CTX,         /* DIR | ctx 5 */
+  NV_FLCN_STORE_V_OWNER,       /* DIR | 0x11C bit 31 */
+  NV_FLCN_STORE_V_CTX_OWNER,   /* DIR | ctx 5 | 0x11C bit 31 */
+  NV_FLCN_STORE_V_LOAD_CONTROL,/* DIR clear: the control that must move bytes */
+  NV_FLCN_STORE_V_CTX1,        /* DIR | ctx 1 */
+  NV_FLCN_STORE_V_CTX4,        /* DIR | ctx 4 */
+  NV_FLCN_STORE_V_COUNT
+};
+
+/* The 0x118 word for one 256-byte block in the store direction.  0xFFFFFFFF for
+ * a variant/size the encoder cannot express, exactly like nv_flcn_xfer_cmd. */
+uint32_t nv_flcn_store_cmd(uint32_t bytes, int is_imem, int sec, int variant);
+
+/* The 0x11C word (the sysmem side offset, plus whatever the variant adds). */
+uint32_t nv_flcn_store_off(uint32_t sysmem_off, int variant);
+
+/* "PLAIN", "CTX", "OWNER", "CTX_OWNER", "LOAD_CONTROL", or "?" -- so a log row
+ * can be read without the enum. */
+const char *nv_flcn_store_name(int variant);
+
+/* ---- what a falcon read answered ---------------------------------------
+ *
+ * Three of the values this window returns are not data: 0xBADF5620 is the
+ * inaccessibility signature, 0xDEAD5EC1 is the code port's answer for a secure
+ * page, and all-ones is a dead bus.  0xBADF5040 looks like the fence word and
+ * is NOT it (measured as PC 0xBADF5040 before a start), so equality is the only
+ * test that works: a mask would classify real state as a fence.
+ */
+enum {
+  NV_FLCN_RD_REAL = 0,
+  NV_FLCN_RD_FENCED,
+  NV_FLCN_RD_SEC_MARKER,
+  NV_FLCN_RD_DEAD
+};
+int nv_flcn_read_class(uint32_t v);
+
+/* Does `val`'s byte pattern appear anywhere in `img`, at ANY byte alignment?
+ * A landing buffer prefilled with a value that is also in the image cannot
+ * distinguish "the engine copied it" from "the prefill survived", which is the
+ * ambiguity that makes a store test worthless.  Byte-wise on purpose: the
+ * pattern can straddle a word boundary. */
+int nv_flcn_prefill_collides(const uint8_t *img, uint32_t len, uint32_t val);
+
 /* Kernel unit tier (nv_flcn_test.c). */
 void nv_flcn_test_suite(void);
 

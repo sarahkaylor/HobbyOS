@@ -46,7 +46,65 @@ uint32_t nv_flcn_xfer_cmd(uint32_t bytes, int is_imem, int sec) {
   return cmd;
 }
 
-/* ---- 2. signature selection ------------------------------------------- */
+/* ---- 2b. the store direction ------------------------------------------- */
+
+static const char *const kStoreNames[NV_FLCN_STORE_V_COUNT] = {
+    "PLAIN", "CTX", "OWNER", "CTX_OWNER", "LOAD_CONTROL", "CTX1", "CTX4"};
+
+uint32_t nv_flcn_store_cmd(uint32_t bytes, int is_imem, int sec, int variant) {
+  uint32_t cmd = nv_flcn_xfer_cmd(bytes, is_imem, sec);
+  if (cmd == 0xffffffffu) return cmd;
+  if (variant < 0 || variant >= NV_FLCN_STORE_V_COUNT) return 0xffffffffu;
+  if (variant == NV_FLCN_STORE_V_LOAD_CONTROL) return cmd; /* DIR clear */
+  cmd |= NV_FLCN_XF_DIR;
+  if (variant == NV_FLCN_STORE_V_CTX || variant == NV_FLCN_STORE_V_CTX_OWNER)
+    cmd |= NV_FLCN_XF_CTX_COHERENT;
+  if (variant == NV_FLCN_STORE_V_CTX1) cmd |= NV_FLCN_XF_CTX1;
+  if (variant == NV_FLCN_STORE_V_CTX4) cmd |= NV_FLCN_XF_CTX4;
+  return cmd;
+}
+
+uint32_t nv_flcn_store_off(uint32_t sysmem_off, int variant) {
+  if (variant == NV_FLCN_STORE_V_OWNER ||
+      variant == NV_FLCN_STORE_V_CTX_OWNER)
+    return sysmem_off | NV_FLCN_XF_OFF_OWNER;
+  return sysmem_off;
+}
+
+const char *nv_flcn_store_name(int variant) {
+  if (variant < 0 || variant >= NV_FLCN_STORE_V_COUNT) return "?";
+  return kStoreNames[variant];
+}
+
+/* ---- 2c. classifying a read -------------------------------------------- */
+
+int nv_flcn_read_class(uint32_t v) {
+  /* The two sentinels are byte-copied here rather than pulled from nv_regs.h:
+   * this TU stays free of the register map so the unit tier can drive it on
+   * either port without a BAR0 in sight.  The values are the measured ones
+   * (docs/nvidia-driver.md 5.5 / round 2's log rows). */
+  if (v == 0xBADF5620u) return NV_FLCN_RD_FENCED;
+  if (v == 0xDEAD5EC1u) return NV_FLCN_RD_SEC_MARKER;
+  if (v == 0xffffffffu) return NV_FLCN_RD_DEAD;
+  return NV_FLCN_RD_REAL;
+}
+
+int nv_flcn_prefill_collides(const uint8_t *img, uint32_t len, uint32_t val) {
+  if (!img || len < 4u) return 0;
+  uint8_t b[4];
+  b[0] = (uint8_t)val;
+  b[1] = (uint8_t)(val >> 8);
+  b[2] = (uint8_t)(val >> 16);
+  b[3] = (uint8_t)(val >> 24);
+  for (uint32_t off = 0; off + 4u <= len; off++) {
+    if (img[off] == b[0] && img[off + 1] == b[1] && img[off + 2] == b[2] &&
+        img[off + 3] == b[3])
+      return 1;
+  }
+  return 0;
+}
+
+/* ---- 3. signature selection ------------------------------------------- */
 
 uint32_t nv_fwsec_sig_index(uint32_t fuse_reg, uint32_t sigvers,
                             uint32_t sigcount) {

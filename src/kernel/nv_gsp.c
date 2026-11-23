@@ -1229,6 +1229,687 @@ static int nv_pio_wr1_nb(struct nv_dev *d, uint32_t fbase, int is_imem,
   return 0;
 }
 
+/* ---- the engine's STORE direction ---------------------------------------
+ *
+ * The load direction is proven (the image lands, DMEM compares word for word
+ * through the port).  The reverse direction is the only channel that survives
+ * the read fence -- and the one attempt that was ever made left the xfer queue
+ * FULL and cost the next load its first block (r2c).  One attempt cannot say
+ * which field was wrong, so this is a matrix judged by EFFECT: the landing
+ * buffer is prefilled with a value that is not in the image, the request goes
+ * out, and the buffer itself is polled.  The buffer is host memory, so the
+ * judgement does not depend on any register inside the fence.
+ *
+ * Three things make a negative here mean something:
+ *   - the prefill value is checked against the staged bytes (byte-wise, any
+ *     alignment): a prefill that is also data cannot tell "copied" from
+ *     "survived", and this row says whether that happened;
+ *   - a LOAD_CONTROL with DIR clear runs first with the same address registers.
+ *     If it moves bytes and no store variant does, the finding is about the
+ *     direction bit, not about the driver being unable to drive the engine;
+ *   - each variant gets its own block, so a landing that lags one request
+ *     cannot be read as the next variant's success.
+ */
+#define NV_STORE_PREFILL 0xA6A6A6A6u
+
+struct nv_store_res {
+  int queue_full_at_entry; /* a previous request was already wedged */
+  int issued;
+  int changed;      /* the landing buffer changed: the engine wrote it */
+  uint64_t changed_ns;
+  int probes, match;
+  uint32_t first_bad; /* byte offset inside the block, 0xffffffff = none */
+  uint32_t bad_got, bad_want;
+  uint32_t ctl_after, stat_after;
+};
+
+static uint32_t nv_ld_word(const uint8_t *p) {
+  return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
+         ((uint32_t)p[3] << 24);
+}
+
+/* One request.  `want`/`want_len`/`want_off` describe the bytes the block is
+ * expected to hold; passing want = 0 skips the comparison (the buffer-change
+ * count is still the oracle).  `swap` writes the sysmem offset to 0x114 and the
+ * falcon address to 0x11C, i.e. the hypothesis that the two side registers swap
+ * roles with the direction; it is a separate axis from the command word because
+ * no encoding of 0x118 can express it. */
+static void nv_store_block(struct nv_dev *d, uint32_t fbase, uint64_t landing,
+                           uint32_t falcon_off, const uint8_t *want,
+                           uint32_t want_len, uint32_t want_off, int is_imem,
+                           int sec, int variant, int swap, uint64_t deadline_ns,
+                           struct nv_store_res *r) {
+  for (uint32_t i = 0; i < sizeof *r; i++) ((uint8_t *)r)[i] = 0;
+  r->first_bad = 0xffffffffu;
+  uint8_t *bb = (uint8_t *)phys_to_virt(landing);
+  for (uint32_t i = 0; i < NV_FLCN_BLOCK; i++) bb[i] = 0xA6;
+  uint32_t cmd = nv_flcn_store_cmd(NV_FLCN_BLOCK, is_imem, sec, variant);
+  /* A queue that is already FULL cannot take this request; say so rather than
+   * waiting on it, and do not issue a command that would be queued behind a
+   * request the engine never collected. */
+  int gone = 0;
+  for (int i = 0; i < 200000; i++) {
+    if (!(nv_rd32(d, fbase + NV_XFER_CTRL) & XF_FULL)) {
+      gone = 1;
+      break;
+    }
+  }
+  r->queue_full_at_entry = !gone;
+  if (!gone || cmd == 0xffffffffu) {
+    r->ctl_after = nv_rd32(d, fbase + NV_XFER_CTRL);
+    r->stat_after = nv_rd32(d, fbase + NV_XFER_STATUS);
+    return;
+  }
+  nv_wr32(d, fbase + NV_XFER_EXT_BASE, (uint32_t)(landing >> 8));
+  nv_wr32(d, fbase + NV_XFER_EXT_BASE1, (uint32_t)((landing >> 40) & 0x1FF));
+  uint32_t off_11c = nv_flcn_store_off(0, variant);
+  nv_wr32(d, fbase + NV_XFER_FALCON_ADDR, swap ? off_11c : falcon_off);
+  nv_wr32(d, fbase + NV_XFER_EXT_ADDR, swap ? falcon_off : off_11c);
+  nv_wr32(d, fbase + NV_XFER_CTRL, cmd);
+  r->issued = 1;
+  uint64_t t0 = 0, now = 0;
+  int have_t = nv_timer_read(d, &t0) == 0;
+  for (uint32_t i = 0; i < 8000000u; i++) {
+    if (bb[0] != 0xA6 || bb[1] != 0xA6 || bb[2] != 0xA6 || bb[3] != 0xA6) {
+      r->changed = 1;
+      if (have_t && nv_timer_read(d, &now) == 0) r->changed_ns = now - t0;
+      break;
+    }
+    if ((i & 0x3f) == 0 && have_t && nv_timer_read(d, &now) == 0 &&
+        now - t0 > deadline_ns)
+      break;
+  }
+  r->ctl_after = nv_rd32(d, fbase + NV_XFER_CTRL);
+  r->stat_after = nv_rd32(d, fbase + NV_XFER_STATUS);
+  if (!want) return;
+  for (uint32_t i = 0; i + 4u <= NV_FLCN_BLOCK; i += 4) {
+    if (want_off + i + 4u > want_len) break;
+    uint32_t got = nv_ld_word(bb + i);
+    uint32_t w = nv_ld_word(want + want_off + i);
+    r->probes++;
+    if (got == w) {
+      r->match++;
+    } else if (r->first_bad == 0xffffffffu) {
+      r->first_bad = i;
+      r->bad_got = got;
+      r->bad_want = w;
+    }
+  }
+}
+
+static void nv_store_row(struct nv_dev *d, const char *tag, int variant,
+                         int is_imem, int sec, uint32_t falcon_off, int swap,
+                         const struct nv_store_res *r) {
+  (void)d; /* the row is a function of the result only */
+  uart_puts("[NV-STORE] ");
+  uart_puts(tag);
+  uart_puts(" v=");
+  uart_puts(nv_flcn_store_name(variant));
+  uart_puts(swap ? " sides=SWAPPED" : " sides=contract");
+  uart_puts(" imem=");
+  print_int(is_imem);
+  uart_puts(" sec=");
+  print_int(sec);
+  uart_puts(" @falcon=0x");
+  uart_print_hex(falcon_off);
+  uart_puts(" cmd=0x");
+  uart_print_hex(nv_flcn_store_cmd(NV_FLCN_BLOCK, is_imem, sec, variant));
+  uart_puts(" 11c=0x");
+  uart_print_hex(nv_flcn_store_off(0, variant));
+  uart_puts(" -> changed=");
+  print_int(r->changed);
+  if (r->changed) {
+    uart_puts(" at +");
+    uart_print_hex(r->changed_ns);
+    uart_puts(" ns");
+  }
+  uart_puts(" match=");
+  print_int(r->match);
+  uart_puts("/");
+  print_int(r->probes);
+  if (r->first_bad != 0xffffffffu) {
+    uart_puts(" first_bad=+0x");
+    uart_print_hex(r->first_bad);
+    uart_puts(" got=");
+    uart_print_hex(r->bad_got);
+    uart_puts(" want=");
+    uart_print_hex(r->bad_want);
+  }
+  uart_puts(" 118=");
+  uart_print_hex(r->ctl_after);
+  uart_puts(" 120=");
+  uart_print_hex(r->stat_after);
+  uart_puts(" pending_s=");
+  print_int((int)NV_FALCON_XFER_STORES_PENDING(r->stat_after));
+  uart_puts(" pending_l=");
+  print_int((int)NV_FALCON_XFER_LOADS_PENDING(r->stat_after));
+  uart_puts(" verdict=");
+  if (r->queue_full_at_entry)
+    uart_puts("QUEUE-WEDGED-BEFORE-THIS-OP (an earlier request was still FULL, "
+              "so this variant was never issued)\n");
+  else if (!r->issued)
+    uart_puts("NOT-ISSUED (the encoder refused the word)\n");
+  else if (!r->changed)
+    uart_puts("NO-EFFECT (the landing buffer still holds the prefill: nothing "
+              "wrote host memory)\n");
+  else if (r->probes && r->match == r->probes)
+    uart_puts("STORE-WORKS (the bytes the engine wrote to host memory are the "
+              "block asked for, byte for byte)\n");
+  else
+    uart_puts("STORE-WROTE-OTHER-BYTES (host memory changed, but to something "
+              "other than the requested block: first_bad names the word)\n");
+}
+
+/* Run the matrix.  Returns the first variant that got bytes into host memory,
+ * or -1.  `landing` is a 4 KiB contiguous frame; each probe uses its own
+ * 256-byte slot so a late landing cannot be read as the next variant's success.
+ *
+ * The store queue is FOUR slots deep on this part (measured: pending_s counted
+ * 1,2,3,4 across four requests and none retired), so the probe list is capped at
+ * four and every row that finds a slot already full says so instead of blaming
+ * its own encoding. */
+struct nv_store_probe {
+  int variant;
+  int swap;
+  int is_imem;
+  int sec;
+  uint32_t falcon_off;
+};
+
+static int nv_store_matrix(struct nv_dev *d, uint32_t fbase, uint64_t landing,
+                           const uint8_t *img, uint32_t img_len,
+                           uint32_t dmem_off, uint32_t dmem_len,
+                           const char *when, const struct nv_store_probe *pr,
+                           int nprobe) {
+  struct nv_store_res r;
+  uart_puts("[NV-STORE] ");
+  uart_puts(when);
+  uart_puts(" prefill=0x");
+  uart_print_hex(NV_STORE_PREFILL);
+  uart_puts(" collisions-in-image=");
+  print_int(nv_flcn_prefill_collides(img, img_len, NV_STORE_PREFILL));
+  uart_puts(" entry 118=");
+  uart_print_hex(nv_rd32(d, fbase + NV_XFER_CTRL));
+  uart_puts(" 120=");
+  uart_print_hex(nv_rd32(d, fbase + NV_XFER_STATUS));
+  uart_puts(" (a prefill that is also in the image would make 'unchanged' and "
+            "'copied' the same observation)\n");
+
+  /* Control first: same address registers, DIR clear.  It must leave falcon
+   * memory holding the prefill; a PIO read of the destination answers it.  This
+   * is the row that separates "the direction does not work" from "the engine is
+   * not taking anything at all right now" -- which after START is a real
+   * possibility, because the window is fenced and every read here may be the
+   * fence word. */
+  {
+    const uint32_t kCtlOff = 0x1800; /* past the 0xD80 DMEM image */
+    uint8_t *bb = (uint8_t *)phys_to_virt(landing + 4096u - NV_FLCN_BLOCK);
+    for (uint32_t i = 0; i < NV_FLCN_BLOCK; i++) bb[i] = 0xA6;
+    uint32_t ctl_cmd = nv_flcn_store_cmd(NV_FLCN_BLOCK, 0, 0,
+                                        NV_FLCN_STORE_V_LOAD_CONTROL);
+    uint32_t before = 0;
+    (void)nv_pio_rd1_nb(d, fbase, 0, kCtlOff, &before);
+    nv_wr32(d, fbase + NV_XFER_EXT_BASE,
+            (uint32_t)((landing + 4096u - NV_FLCN_BLOCK) >> 8));
+    nv_wr32(d, fbase + NV_XFER_EXT_BASE1,
+            (uint32_t)(((landing + 4096u - NV_FLCN_BLOCK) >> 40) & 0x1FF));
+    nv_wr32(d, fbase + NV_XFER_FALCON_ADDR, kCtlOff);
+    nv_wr32(d, fbase + NV_XFER_EXT_ADDR, 0);
+    nv_wr32(d, fbase + NV_XFER_CTRL, ctl_cmd);
+    uint32_t after = 0;
+    int answered = 0;
+    for (int i = 0; i < 200; i++) { /* bounded: ~1 ms of pacing */
+      if (nv_pio_rd1_nb(d, fbase, 0, kCtlOff, &after) == 0 &&
+          after == NV_STORE_PREFILL) {
+        answered = 1;
+        break;
+      }
+      uint64_t tw = 0;
+      if (nv_timer_read(d, &tw) == 0) {
+        uint64_t t1 = 0;
+        while (nv_timer_read(d, &t1) == 0 && t1 - tw < 50000ULL) {
+        }
+      }
+    }
+    uart_puts("[NV-STORE] control ");
+    uart_puts(when);
+    uart_puts(" v=LOAD_CONTROL cmd=0x");
+    uart_print_hex(ctl_cmd);
+    uart_puts(" @falcon=0x");
+    uart_print_hex(kCtlOff);
+    uart_puts(" was=");
+    uart_print_hex(before);
+    uart_puts(" now=");
+    uart_print_hex(after);
+    uart_puts(" 118=");
+    uart_print_hex(nv_rd32(d, fbase + NV_XFER_CTRL));
+    uart_puts(answered
+                  ? " verdict=ENGINE-DRIVES-THESE-ADDRESSES (DIR clear moved the "
+                    "prefill into falcon memory, so a store's silence below is "
+                    "about the direction, not about the addresses)\n"
+                  : " verdict=CONTROL-FAILED (DIR clear did not move the bytes "
+                    "either, so no store row below says anything about its own "
+                    "encoding -- this is the window's state, not the "
+                    "store's)\n");
+    if (!answered) return -1;
+  }
+
+  int winner = -1;
+  for (int i = 0; i < nprobe && i < 4; i++) {
+    /* Every probe gets its own slot, even when the falcon offset repeats. */
+    uint32_t slot = (uint32_t)i * NV_FLCN_BLOCK;
+    uint32_t img_ref = pr[i].is_imem ? 0u : dmem_off;
+    uint32_t img_len_ref = pr[i].is_imem ? dmem_off : dmem_len;
+    nv_store_block(d, fbase, landing + slot, pr[i].falcon_off, img + img_ref,
+                   img_len_ref, pr[i].falcon_off, pr[i].is_imem, pr[i].sec,
+                   pr[i].variant, pr[i].swap, 20000000ULL, &r);
+    nv_store_row(d, when, pr[i].variant, pr[i].is_imem, pr[i].sec,
+                 pr[i].falcon_off, pr[i].swap, &r);
+    if (r.changed && r.probes && r.match == r.probes && winner < 0)
+      winner = pr[i].variant;
+    if (r.queue_full_at_entry && i + 1 < nprobe)
+      uart_puts("[NV-STORE] the queue is FULL: the rows below were not issued, "
+                "so they carry no information about their own encoding\n");
+  }
+  return winner;
+}
+
+/* ---- the launch, watched across the whole budget ------------------------
+ *
+ * Round 2 answered "did it run?" with a blocking wait for one word: the poll
+ * broke when 0x1438 changed, and everything the core did between START and that
+ * write was never sampled.  The fence closed ~3.5 us after START and the verdict
+ * word arrived at ~104 ms, so a blocking poll has a 104 ms blind spot by
+ * construction.
+ *
+ * This is a non-blocking sweep instead: four words sampled every iteration, the
+ * verdict word every iteration, a timestamp taken only when something changes
+ * (a timer read per sample would cost more than the sample), and no early exit
+ * for any reason -- not for the halt bit, not for the verdict write -- so the
+ * window's behaviour over the whole 2 s is one continuous observation.
+ *
+ *   0x110100 UC_CTRL     the core's own control word (STOPPED bit 4)
+ *   0x110114 DMATRFMOFFS the DMA destination echo, inside the fenced block
+ *   0x111668 BCR_CTRL    the RISC-V/falcon core select
+ *   0x110FF0 PC          where the core is, if the window is open at all
+ *
+ * DMEM is sampled through the port only while one of those reads is a real
+ * value: poking the data port while the window is fenced would be asking a
+ * closed door 125,000 times a second, and the reopen is visible in the register
+ * poll anyway.
+ */
+#define NV_SWEEP_REGS 4
+#define NV_SWEEP_EV_MAX 40
+#define NV_SWEEP_DM_MAX 8
+
+struct nv_sweep_ev {
+  uint64_t ns;
+  uint32_t reg;
+  uint32_t from, to;
+};
+
+struct nv_sweep_dm {
+  uint64_t ns;
+  uint32_t addr, from, to;
+};
+
+struct nv_sweep_state {
+  struct nv_sweep_ev ev[NV_SWEEP_EV_MAX];
+  struct nv_sweep_dm dm[NV_SWEEP_DM_MAX];
+  int nev, ndm, dropped;
+  uint64_t iters;
+  uint64_t first_fence_ns[NV_SWEEP_REGS];
+  uint64_t last_real_ns[NV_SWEEP_REGS];
+  uint64_t first_real_ns[NV_SWEEP_REGS];
+  int seen_fence[NV_SWEEP_REGS], seen_real[NV_SWEEP_REGS];
+  int reopened;
+  uint64_t reopened_ns;
+  uint64_t dm_samples, dm_fenced, dm_changes;
+  uint64_t end_ns;
+  uint32_t dm_last[4];
+  int dm_seeded;
+};
+static struct nv_sweep_state g_sw; /* file scope: the kernel stack is small */
+
+struct nv_launch_obs {
+  uint32_t st;
+  uint32_t ctl_at_change, pc_at_change, bcr_at_change, dma_at_change,
+      mb_at_change;
+  uint64_t changed_ns;
+  int changed;
+  int halted;
+  uint32_t ctl_last;
+};
+
+static void nv_sw_ev(uint64_t ns, uint32_t reg, uint32_t from, uint32_t to) {
+  if (g_sw.nev < NV_SWEEP_EV_MAX) {
+    g_sw.ev[g_sw.nev].ns = ns;
+    g_sw.ev[g_sw.nev].reg = reg;
+    g_sw.ev[g_sw.nev].from = from;
+    g_sw.ev[g_sw.nev].to = to;
+    g_sw.nev++;
+  } else {
+    g_sw.dropped++;
+  }
+}
+
+static void nv_sw_dm(uint64_t ns, uint32_t addr, uint32_t from, uint32_t to) {
+  g_sw.dm_changes++;
+  if (g_sw.ndm < NV_SWEEP_DM_MAX) {
+    g_sw.dm[g_sw.ndm].ns = ns;
+    g_sw.dm[g_sw.ndm].addr = addr;
+    g_sw.dm[g_sw.ndm].from = from;
+    g_sw.dm[g_sw.ndm].to = to;
+    g_sw.ndm++;
+  } else {
+    g_sw.dropped++;
+  }
+}
+
+/* The instant the verdict word was written: take everything that describes it
+ * before printing anything, because a row costs several microseconds of UART
+ * and this is the one moment the whole round exists to look at.  Two channels,
+ * in the order that survives the fence: the PIO port (answers only while the
+ * window is open) and the engine's store direction (answers -- if it works --
+ * regardless, because its landing buffer is host memory). */
+static void nv_verdict_instant(struct nv_dev *d, uint32_t fbase, uint64_t landing,
+                               const uint8_t *img, uint32_t img_len,
+                               uint32_t dmem_off, uint32_t dmem_len,
+                               int store_variant) {
+  static const uint32_t pio_addr[4] = {0x000, 0x004, 0x0B0C, 0x0D40};
+  uint32_t pio_val[4] = {0, 0, 0, 0};
+  int pio_rc[4] = {0, 0, 0, 0};
+  struct nv_store_res st_res;
+  const uint32_t st_off = 0xB00;   /* the appif/DMEMMAPPER + command buffer */
+  /* The most-promising remaining candidate: DIR with the two side registers
+   * swapped, on the block that holds the FRTS command. */
+  const int st_var = NV_FLCN_STORE_V_PLAIN;
+  int do_store = (store_variant >= 0);
+  (void)img_len;
+  for (int i = 0; i < 4; i++)
+    pio_rc[i] = nv_pio_rd1_nb(d, fbase, 0, pio_addr[i], &pio_val[i]);
+  if (do_store)
+    nv_store_block(d, fbase, landing, st_off, img + dmem_off, dmem_len, st_off,
+                   0, 0, st_var, 1, 2000000ULL, &st_res);
+  uart_puts("[NV-SWEEP] at-verdict port:");
+  for (int i = 0; i < 4; i++) {
+    uint32_t want = 0;
+    int have_want = pio_addr[i] + 4u <= dmem_len &&
+                    nv_img_word(img + dmem_off, dmem_len, pio_addr[i], &want);
+    uart_puts(" @");
+    uart_print_hex(pio_addr[i]);
+    uart_puts("=");
+    uart_print_hex(pio_val[i]);
+    if (pio_rc[i] != 0)
+      uart_puts("(READ-FAILED)");
+    else if (nv_flcn_read_class(pio_val[i]) == NV_FLCN_RD_FENCED)
+      uart_puts("(FENCED)");
+    else if (nv_flcn_read_class(pio_val[i]) == NV_FLCN_RD_SEC_MARKER)
+      uart_puts("(SEC-MARKER)");
+    else if (have_want && pio_val[i] == want)
+      uart_puts("(unchanged)");
+    else if (have_want)
+      uart_puts("(CHANGED)");
+  }
+  uart_puts("\n");
+  if (do_store) {
+    nv_store_row(d, "at-verdict", st_var, 0, 0, st_off, 1, &st_res);
+  } else {
+    uart_puts("[NV-SWEEP] at-verdict store: NOT AVAILABLE (no store variant "
+              "worked in this run, so DMEM at this instant is unobservable)\n");
+  }
+}
+
+static void nv_launch_sweep(struct nv_dev *d, uint32_t fbase, uint32_t stale,
+                            const char *tag, uint64_t budget_ns,
+                            struct nv_launch_obs *o, uint64_t landing,
+                            const uint8_t *img, uint32_t img_len,
+                            uint32_t dmem_off, uint32_t dmem_len,
+                            int store_variant) {
+  static const char *const nm[NV_SWEEP_REGS] = {"ctl", "dma114", "bcr", "pc"};
+  uint32_t addr[NV_SWEEP_REGS];
+  addr[0] = fbase + NV_FALCON_UC_CTRL;
+  addr[1] = fbase + NV_XFER_FALCON_ADDR;
+  addr[2] = NV_GSP_BCR_CTRL;
+  addr[3] = fbase + NV_FALCON_PC;
+  static const uint32_t dm_addr[4] = {0x000, 0x800, 0x0B0C, 0x0D40};
+  static const uint64_t marks[10] = {1000ULL,    10000ULL,   100000ULL,
+                                     1000000ULL, 3500000ULL, 10000000ULL,
+                                     100000000ULL, 104000000ULL, 1000000000ULL,
+                                     2000000000ULL};
+  static const char *const mark_name[10] = {"1us",  "10us",  "100us", "1ms",
+                                            "3.5ms", "10ms",  "100ms", "104ms",
+                                            "1s",    "2s"};
+
+  for (uint32_t i = 0; i < sizeof g_sw; i++) ((uint8_t *)&g_sw)[i] = 0;
+  o->st = stale;
+  o->changed = 0;
+  o->halted = 0;
+  o->ctl_last = 0;
+
+  uint64_t t0 = 0, now = 0;
+  int have_t = nv_timer_read(d, &t0) == 0;
+  uart_puts("[NV-SWEEP] ");
+  uart_puts(tag);
+  uart_puts(" start budget_ns=");
+  uart_print_hex(budget_ns);
+  uart_puts(" timer=");
+  print_int(have_t);
+  uart_puts(" store-snapshot=");
+  uart_puts(store_variant >= 0 ? "on(SWAPPED/DIR, block 0xB00)" : "off");
+  uart_puts("\n");
+
+  int seeded = 0, mi = 0;
+  uint32_t lastv[NV_SWEEP_REGS] = {0, 0, 0, 0};
+  int window_open = 0;
+  uint64_t waited = 0;
+  for (;;) {
+    g_sw.iters++;
+    for (int k = 0; k < NV_SWEEP_REGS; k++) {
+      uint32_t v = nv_rd32(d, addr[k]);
+      int cls = nv_flcn_read_class(v);
+      if (k == 0) {
+        window_open = (cls == NV_FLCN_RD_REAL) ? 1 : 0;
+      }
+      if (cls == NV_FLCN_RD_REAL) {
+        if (k == 0) o->ctl_last = v;
+        if (v & (k == 0 ? NV_FALCON_UC_CTRL_STOPPED : 0u)) o->halted = 1;
+      }
+      if (!seeded) {
+        lastv[k] = v;
+        if (cls == NV_FLCN_RD_REAL) {
+          g_sw.seen_real[k] = 1;
+          g_sw.first_real_ns[k] = 0;
+          g_sw.last_real_ns[k] = 0;
+        } else if (cls == NV_FLCN_RD_FENCED) {
+          g_sw.seen_fence[k] = 1;
+          g_sw.first_fence_ns[k] = 0;
+        }
+        continue;
+      }
+      if (v == lastv[k]) continue;
+      uint64_t ts = 0;
+      if (have_t && nv_timer_read(d, &ts) == 0) ts -= t0;
+      nv_sw_ev(ts, (uint32_t)k, lastv[k], v);
+      if (cls == NV_FLCN_RD_FENCED) {
+        if (!g_sw.seen_fence[k]) {
+          g_sw.seen_fence[k] = 1;
+          g_sw.first_fence_ns[k] = ts;
+        }
+      } else if (cls == NV_FLCN_RD_REAL) {
+        if (!g_sw.seen_real[k]) g_sw.first_real_ns[k] = ts;
+        g_sw.seen_real[k] = 1;
+        g_sw.last_real_ns[k] = ts;
+        if (g_sw.seen_fence[k] && !g_sw.reopened) {
+          g_sw.reopened = 1;
+          g_sw.reopened_ns = ts;
+        }
+      }
+      lastv[k] = v;
+    }
+    seeded = 1;
+
+    /* The verdict word, outside the fenced span, every iteration. */
+    o->st = nv_rd32(d, 0x1438);
+    if (!o->changed && (o->st >> 16) != (stale >> 16)) {
+      uint64_t ts = 0;
+      if (have_t && nv_timer_read(d, &ts) == 0) ts -= t0;
+      o->changed = 1;
+      o->changed_ns = ts;
+      o->ctl_at_change = nv_rd32(d, fbase + NV_FALCON_UC_CTRL);
+      o->dma_at_change = nv_rd32(d, fbase + NV_XFER_FALCON_ADDR);
+      o->bcr_at_change = nv_rd32(d, NV_GSP_BCR_CTRL);
+      o->pc_at_change = nv_rd32(d, fbase + NV_FALCON_PC);
+      o->mb_at_change = nv_rd32(d, fbase + NV_FALCON_MAILBOX0_FLCN);
+      uart_puts("[NV-SWEEP] ");
+      uart_puts(tag);
+      uart_puts(" verdict-write at +");
+      uart_print_hex(ts);
+      uart_puts(" ns\n");
+      nv_verdict_instant(d, fbase, landing, img, img_len, dmem_off, dmem_len,
+                         store_variant);
+    }
+
+    /* DMEM, only while the window is answering. */
+    if (window_open && (g_sw.iters & 0x0f) == 0) {
+      int k = (int)((g_sw.iters >> 4) & 3u);
+      uint32_t v = 0;
+      if (nv_pio_rd1_nb(d, fbase, 0, dm_addr[k], &v) == 0) {
+        g_sw.dm_samples++;
+        if (nv_flcn_read_class(v) == NV_FLCN_RD_FENCED) {
+          g_sw.dm_fenced++;
+        } else if (!g_sw.dm_seeded) {
+          g_sw.dm_last[k] = v;
+        } else if (v != g_sw.dm_last[k]) {
+          uint64_t ts = 0;
+          if (have_t && nv_timer_read(d, &ts) == 0) ts -= t0;
+          nv_sw_dm(ts, dm_addr[k], g_sw.dm_last[k], v);
+          g_sw.dm_last[k] = v;
+        }
+        g_sw.dm_seeded = 1;
+      }
+    }
+
+    if ((g_sw.iters & 0x3f) == 0 && have_t && nv_timer_read(d, &now) == 0) {
+      waited = now - t0;
+      if (mi < 10 && waited >= marks[mi]) {
+        uart_puts("[NV-SWEEP] ");
+        uart_puts(tag);
+        uart_puts(" at ");
+        uart_puts(mark_name[mi]);
+        uart_puts(" ctl=");
+        uart_print_hex(lastv[0]);
+        uart_puts(" dma114=");
+        uart_print_hex(lastv[1]);
+        uart_puts(" bcr=");
+        uart_print_hex(lastv[2]);
+        uart_puts(" pc=");
+        uart_print_hex(lastv[3]);
+        uart_puts(" 1438=");
+        uart_print_hex(o->st);
+        uart_puts("\n");
+        mi++;
+      }
+      if (waited > budget_ns) break;
+    }
+  }
+  g_sw.end_ns = waited;
+
+  uart_puts("[NV-SWEEP] ");
+  uart_puts(tag);
+  uart_puts(" done iters=");
+  uart_print_hex(g_sw.iters);
+  uart_puts(" end_ns=");
+  uart_print_hex(g_sw.end_ns);
+  uart_puts(" events=");
+  print_int(g_sw.nev);
+  uart_puts(" dropped=");
+  print_int(g_sw.dropped);
+  uart_puts("\n");
+  for (int i = 0; i < g_sw.nev; i++) {
+    uart_puts("[NV-SWEEP] ");
+    uart_puts(tag);
+    uart_puts(" ev +");
+    uart_print_hex(g_sw.ev[i].ns);
+    uart_puts(" ns ");
+    uart_puts(nm[g_sw.ev[i].reg]);
+    uart_puts(" ");
+    uart_print_hex(g_sw.ev[i].from);
+    uart_puts(" -> ");
+    uart_print_hex(g_sw.ev[i].to);
+    uart_puts(nv_flcn_read_class(g_sw.ev[i].to) == NV_FLCN_RD_FENCED
+                  ? " (FENCED)\n"
+                  : (nv_flcn_read_class(g_sw.ev[i].from) == NV_FLCN_RD_FENCED
+                         ? " (REAL: out of the fence)\n"
+                         : "\n"));
+  }
+  for (int i = 0; i < g_sw.ndm; i++) {
+    uart_puts("[NV-SWEEP] ");
+    uart_puts(tag);
+    uart_puts(" dmemchg +");
+    uart_print_hex(g_sw.dm[i].ns);
+    uart_puts(" ns @");
+    uart_print_hex(g_sw.dm[i].addr);
+    uart_puts(" ");
+    uart_print_hex(g_sw.dm[i].from);
+    uart_puts(" -> ");
+    uart_print_hex(g_sw.dm[i].to);
+    uart_puts("\n");
+  }
+  for (int k = 0; k < NV_SWEEP_REGS; k++) {
+    uart_puts("[NV-SWEEP] ");
+    uart_puts(tag);
+    uart_puts(" window ");
+    uart_puts(nm[k]);
+    uart_puts(" real=");
+    print_int(g_sw.seen_real[k]);
+    if (g_sw.seen_real[k]) {
+      uart_puts(" last_real=+");
+      uart_print_hex(g_sw.last_real_ns[k]);
+    }
+    uart_puts(" fenced=");
+    print_int(g_sw.seen_fence[k]);
+    if (g_sw.seen_fence[k]) {
+      uart_puts(" first_fence=+");
+      uart_print_hex(g_sw.first_fence_ns[k]);
+    }
+    uart_puts("\n");
+  }
+  uart_puts("[NV-SWEEP] ");
+  uart_puts(tag);
+  uart_puts(" dmem samples=");
+  uart_print_hex(g_sw.dm_samples);
+  uart_puts(" fenced=");
+  uart_print_hex(g_sw.dm_fenced);
+  uart_puts(" changes=");
+  uart_print_hex(g_sw.dm_changes);
+  uart_puts("\n");
+  uart_puts("[NV-SWEEP] ");
+  uart_puts(tag);
+  uart_puts(" verdict=");
+  if (g_sw.reopened) {
+    uart_puts("WINDOW-REOPENED at +");
+    uart_print_hex(g_sw.reopened_ns);
+    uart_puts(" ns after being fenced (the fence is state, not a timer: what "
+              "the core produced is visible from that instant on)\n");
+  } else if (g_sw.dropped) {
+    uart_puts("INCONCLUSIVE (event log overflowed: re-read the raw rows)\n");
+  } else if (!g_sw.seen_fence[0] && !g_sw.seen_fence[2]) {
+    uart_puts("WINDOW-NEVER-FENCED (every sample of ctl and bcr was a real "
+              "value: the 3.5 us fence of round 2 did not reproduce)\n");
+  } else {
+    uart_puts("WINDOW-CLOSED-AND-STAYED-CLOSED (first fence word at +");
+    uart_print_hex(g_sw.first_fence_ns[0] ? g_sw.first_fence_ns[0]
+                                          : g_sw.first_fence_ns[2]);
+    uart_puts(" ns -- +0 means it was ALREADY fenced at the first sample, i.e. "
+              "within one iteration of START, which is not the same as 'the "
+              "fence arrived at 0 ns' -- and no sample of any of the four words "
+              "was a real value again inside the whole budget: DMEM is not "
+              "visible through the port for the rest of the run)\n");
+  }
+}
+
+
 /* ---- is IMEM readable, and is the code in it? --------------------------
  *
  * Two questions, and they had been conflated.  Every IMEM read in runs r2a/r2b
@@ -1577,6 +2258,7 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
   uint64_t phys = frame_alloc_contig((int)pages);
   if (!phys) return -ENOMEM;
   uint64_t imem_scratch = 0; /* allocated below; freed at `out` */
+  uint64_t store_scratch = 0; /* the store direction's landing frame */
   uint8_t *buf = (uint8_t *)phys_to_virt(phys);
   int rc = nv_vbios_read(d, d->ucode_payload, buf, total);
   if (rc != 0) {
@@ -1670,6 +2352,67 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
         uart_print_hex(w[i]);
       }
       uart_puts("\n");
+
+      /* ---- the verdict channel's own negative control -------------------
+       *
+       * "hi16 became 0, so FWSEC reported no error" is an inference, and it is
+       * the inference the whole launch verdict rests on.  It has never been
+       * tested against a run that MUST fail: if an invalid command still
+       * produces the same 0x00005A5A at the same time, the word is written by
+       * the ucode's exit path and carries no status at all -- and this round's
+       * "success" reading collapses.
+       *
+       * The injected fault is the DMEMMAPPER command selector: init_cmd 0x15
+       * (FRTS) becomes 0x99, an id no handler in that dispatcher can claim.
+       * Everything else in the image, the launch and the timings stay identical
+       * to run r3c, so the comparison is one variable.
+       *
+       * The DMEMMAPPER block is located by its own "DMAP" signature rather than
+       * by a remembered offset, and the row prints where it found it.
+       */
+      {
+        /* RESULT (r3d, evidence/nv/r3d-fault-injected-init-cmd.log): the fault
+         * landed (init_cmd 0x15 -> 0x99, read back through nv_fwsec_read_cmd)
+         * and the answer is decisive -- the core halted at +27,623,488 ns
+         * (27.6 ms, three times earlier than a normal launch) and 0x1438 kept
+         * its sentinel: NOTHING was written.  So the 0x00005A5A write at
+         * ~105 ms is conditional on the FRTS command being accepted, which is
+         * what makes it evidence; and a rejected command produces no error code
+         * at all, so the channel cannot report one.  Off again: this is a
+         * one-run control, and a fault-injected boot must never be the default
+         * shape of a run. */
+        const int kInjectFault = 0;
+        if (kInjectFault) {
+          uint32_t dmap = nv_flcn_find_word(dmem, d->ucode_dmem, 0x50414D44u);
+          if (dmap == NV_FLCN_IDX_NONE || dmap + 0x30 > d->ucode_dmem) {
+            uart_puts("[NV-FWSEC] CONTROL: no DMAP block found in the staged "
+                      "DMEM, so the fault was not injected (this run is a "
+                      "repeat of the previous one)\n");
+          } else {
+            uint8_t *p = dmem + dmap + 0x2C; /* init_cmd */
+            uint32_t was = (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+                           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+            p[0] = 0x99;
+            p[1] = 0;
+            p[2] = 0;
+            p[3] = 0;
+            uint32_t now = 0;
+            int rrc2 = nv_fwsec_read_cmd(dmem, d->ucode_dmem, d->ucode_iface,
+                                        &now, w, 11);
+            uart_puts("[NV-FWSEC] CONTROL: DMAP at dmem+0x");
+            uart_print_hex(dmap);
+            uart_puts(" init_cmd 0x");
+            uart_print_hex(was);
+            uart_puts(" -> 0x");
+            uart_print_hex(now);
+            uart_puts(" (rrc=");
+            print_int(rrc2);
+            uart_puts(") FAULT INJECTED: if the verdict word still reads "
+                      "0x00005A5A at the same +105 ms, hi16 carries no status "
+                      "and the 'no error' reading is unfounded\n");
+          }
+        }
+      }
     } else {
       uart_puts(prc == -ERANGE ? " (command buffer too small)" : " (not the image the descriptor described)");
       uart_puts("\n");
@@ -1703,6 +2446,7 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
    * engine copies in the landing map.  Allocated here because the write probe
    * has to run before the load. */
   imem_scratch = frame_alloc_contig(1);
+  store_scratch = frame_alloc_contig(1);
   {
     /* IMEM: is it writable/readable at all, and by which path?
      *
@@ -2047,15 +2791,26 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
                   "port proved in this run; IMEM either read back or copied back "
                   "byte for byte)\n");
       } else if (dm.match == dm.probes && dm.probes > 0) {
-        uart_puts("DMEM IS THE IMAGE, IMEM IS NOT VERIFIED (the code port refused "
-                  "the read and the engine copy did not match; the load's IMEM "
-                  "half rests on the DMA's effect only)\n");
+        uart_puts("DMEM IS THE IMAGE, IMEM IS NOT VERIFIED (the code port answers "
+                  "0xDEAD5EC1 at every address and the engine's store direction "
+                  "is the other channel -- see the [NV-STORE] rows; the load's "
+                  "IMEM half rests on the DMA's effect only)\n");
       } else {
         uart_puts("IMAGE IS NOT WHERE IT WAS STAGED FOR (see the DIFF rows: the "
                   "answered values say which unit is wrong)\n");
       }
     }
   }
+
+  /* ---- the store channel, AFTER the launch -------------------------------
+   *
+   * MEASURED in r3a: a store request is accepted (0x120's stores-pending count
+   * went 1,2,3,4 and the queue never went FULL) and never retires -- and with
+   * those four slots held, the core never wrote its verdict word at all.  So the
+   * matrix is not free before START: it costs the launch.  It runs after the
+   * sweep now, where a stuck request can only cost itself.
+   */
+  int store_variant = -1;
 
   /* Is a write into the BROM parameter window landing?  That block is the one
    * place the launch contract lists as "never sampled" (its D4), and if writes
@@ -2146,21 +2901,33 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
    * first microsecond after START until the port stops answering. */
   uint32_t dm_pre[16];
   int dm_pre_ok = (nv_falcon_dmem_read(d, gspf, 0x000, dm_pre, 16) == 0);
-  static const uint32_t samp_addr[4] = {0x000, 0x800, 0x1000, 0x2000};
-  uint32_t samp_pre[4] = {0, 0, 0, 0};
-  int samp_pre_ok = 1;
-  for (int i = 0; i < 4; i++) {
-    if (nv_falcon_dmem_read(d, gspf, samp_addr[i], &samp_pre[i], 1) != 0)
-      samp_pre_ok = 0;
+  /* ---- bracket the fence with the same instrument ------------------------
+   *
+   * Every earlier round inferred "the window was open until START, then
+   * fenced" from two different code paths (a PIO read-back before START, a
+   * sampler after it).  Running the identical sweep for 60 ms before START
+   * makes the closing edge one observation with one timestamp convention: the
+   * last sample that answered a real value, and the first that did not.
+   *
+   * r3c also spent 80 ms here doing nothing, as the control for run r3a (whose
+   * launch never wrote its verdict after issuing four engine store requests
+   * between the load and START): the verdict still arrived at +105,788,608 ns,
+   * so the pause is exonerated and r3a's silent launch is attributable to the
+   * queued store requests.  The pause is not kept -- its question is answered
+   * and 140 ms of dead time per boot buys nothing.
+   */
+  {
+    struct nv_launch_obs pre;
+    nv_launch_sweep(d, NV_GSP_U, kStale, "pre-start", 60000000ULL, &pre,
+                    store_scratch, buf, total, d->ucode_imem, d->ucode_dmem, -1);
+    uart_puts("[NV-SWEEP] pre-start guard 1438=");
+    uart_print_hex(pre.st);
+    uart_puts(pre.st == kStale ? " (sentinel intact before START)\n"
+                               : " (NOT the sentinel before START)\n");
   }
-  int samp_changed = 0, samp_which = -1;
-  uint32_t samp_now = 0;
-  uint64_t samp_at_ns = 0;
-  int samp_fenced = 0, samp_reads = 0, samp_fails = 0;
-  uint64_t samp_fenced_ns = 0;
 
   /* START accepted, or refused?  Two samples a decade apart in time: 0x10 at
-   * both is a refused start (nothing ran); clear at 1 us and 0x10 at 10 ms is a
+   * both is a refused start (nothing ran); clear at 1 us and 0x10 later is a
    * core that ran and died (docs/nv-fwsec-launch-contract.md step 13). */
   uint32_t ctl_pre = nv_rd32(d, NV_GSP_U + NV_FALCON_UC_CTRL);
   uint32_t pc_pre = nv_rd32(d, NV_GSP_U + NV_FALCON_PC);
@@ -2168,87 +2935,22 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
   for (volatile int spin = 0; spin < 400; spin++) {
   }
   uint32_t ctl_1us = nv_rd32(d, NV_GSP_U + NV_FALCON_UC_CTRL);
-  /* Bound the wait the way the contract does: 2 s for the core to halt, with
-   * the verdict channel sampled throughout so a status written early is not
-   * missed.  The first version polled 0x1438 for ~200 k iterations and gave up
-   * while the core was still RUNNING (measured: ctl 0x10 -> 0x0 and stayed),
-   * which read as "never ran" when it meant "still working".
-   *
-   * When the sentinel does change, capture everything that describes the
-   * instant: the elapsed time, the core control word, the PC and 0x111668.
-   * "After START" is only a correlation if it is measured, not assumed. */
-  uint32_t st = kStale;
-  uint32_t ctl_10ms = ctl_1us;
-  int halted = 0, changed = 0;
-  uint64_t changed_ns = 0;
-  uint32_t ctl_at_change = 0, pc_at_change = 0, bcr_at_change = 0,
-           mb_at_change = 0;
-  {
-    uint64_t t0 = 0, now = 0;
-    int have_t = nv_timer_read(d, &t0) == 0;
-    static const uint64_t marks[4] = {1000000ULL, 10000000ULL, 100000000ULL,
-                                      1000000000ULL}; /* 1 ms .. 1 s */
-    int mi = 0;
-    uint64_t waited = 0;
-    for (int i = 0; i < 4000000; i++) {
-      st = nv_rd32(d, 0x1438);
-      ctl_10ms = nv_rd32(d, NV_GSP_U + NV_FALCON_UC_CTRL);
-      /* Sample DMEM while the window is still ours: the first change is the
-       * core executing, the first fence word is the moment the window closes.
-       * Non-blocking, because a waiting read after the fence costs a timeout
-       * per call and made r2b's row say "no change" over 300 ms of stalls
-       * rather than over the microseconds it was written for. */
-      if (samp_pre_ok && !samp_fenced && i < 1000) {
-        int k = i & 3;
-        uint32_t v = 0;
-        if (nv_pio_rd1_nb(d, NV_GSP_U, 0, samp_addr[k], &v) == 0) {
-          samp_reads++;
-          if (v == NV_REG_FENCED) {
-            samp_fenced = 1;
-            if (have_t && nv_timer_read(d, &now) == 0)
-              samp_fenced_ns = now - t0;
-          } else if (v != samp_pre[k] && !samp_changed) {
-            samp_changed = 1;
-            samp_which = k;
-            samp_now = v;
-            if (have_t && nv_timer_read(d, &now) == 0) samp_at_ns = now - t0;
-          }
-        } else {
-          samp_fails++;
-        }
-      }
-      if ((st >> 16) != (kStale >> 16)) {          /* somebody wrote 0x1438 */
-        changed = 1;
-        if (have_t && nv_timer_read(d, &now) == 0) changed_ns = now - t0;
-        ctl_at_change = ctl_10ms;
-        pc_at_change = nv_rd32(d, NV_GSP_U + NV_FALCON_PC);
-        bcr_at_change = nv_rd32(d, NV_GSP_BCR_CTRL);
-        mb_at_change = nv_rd32(d, NV_GSP_U + NV_FALCON_MAILBOX0_FLCN);
-        break;
-      }
-      if (ctl_10ms & NV_FALCON_UC_CTRL_STOPPED) {   /* the core halted */
-        halted = 1;
-        break;
-      }
-      if (have_t && (i & 0xff) == 0 && nv_timer_read(d, &now) == 0) {
-        waited = now - t0;
-        if (mi < 4 && waited >= marks[mi]) {
-          uart_puts("[NV-FWSEC] at +");
-          uart_print_hex(waited);
-          uart_puts(" ns: ctl=");
-          uart_print_hex(ctl_10ms);
-          uart_puts(" pc=");
-          uart_print_hex(nv_rd32(d, NV_GSP_U + NV_FALCON_PC));
-          uart_puts(" 1438=");
-          uart_print_hex(st);
-          uart_puts("\n");
-          mi++;
-        }
-        /* 2 s: the reference's own halt budget for this launch. */
-        if (waited > 2000000000ULL) break;
-      }
-    }
-  }
+
+  /* The blocking wait is gone.  Round 2's poll broke the moment 0x1438
+   * changed, which is 104 ms after START -- so everything the core did in
+   * between, including whether the window ever re-opened, was never sampled.
+   * nv_launch_sweep() runs the whole 2 s without an early exit and timestamps
+   * every change in the four words that describe the core and the window. */
+  struct nv_launch_obs obs;
+  nv_launch_sweep(d, NV_GSP_U, kStale, "post-start", 2000000000ULL, &obs,
+                  store_scratch, buf, total, d->ucode_imem, d->ucode_dmem,
+                  store_scratch ? 1 : 0);
+  uint32_t st = obs.st;
+  uint32_t ctl_10ms = obs.ctl_last;
+  int halted = obs.halted, changed = obs.changed;
+  uint64_t changed_ns = obs.changed_ns;
+  uint32_t ctl_at_change = obs.ctl_at_change, pc_at_change = obs.pc_at_change,
+           bcr_at_change = obs.bcr_at_change, mb_at_change = obs.mb_at_change;
   uart_puts("[NV-FWSEC] halt wait done halted=");
   print_int(halted);
   uart_puts(" sentinel_changed=");
@@ -2267,36 +2969,34 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
     uart_print_hex(bcr_at_change);
     uart_puts(" mb0=");
     uart_print_hex(mb_at_change);
-  }
-  uart_puts("[NV-FWSEC] dmem-samples ");
-  if (!samp_pre_ok) {
-    uart_puts("UNOBSERVABLE (the pre-START read did not answer)\n");
-  } else {
-    uart_puts("changed=");
-    print_int(samp_changed);
-    if (samp_changed) {
-      uart_puts(" first@0x");
-      uart_print_hex(samp_addr[samp_which]);
-      uart_puts(" was=");
-      uart_print_hex(samp_pre[samp_which]);
-      uart_puts(" now=");
-      uart_print_hex(samp_now);
-      uart_puts(" at +");
-      uart_print_hex(samp_at_ns);
-      uart_puts(" ns");
-    }
-    uart_puts(" fenced=");
-    print_int(samp_fenced);
-    if (samp_fenced) {
-      uart_puts(" at +");
-      uart_print_hex(samp_fenced_ns);
-      uart_puts(" ns");
-    }
-    uart_puts(" reads=");
-    print_int(samp_reads);
-    uart_puts(" failed=");
-    print_int(samp_fails);
     uart_puts("\n");
+  }
+
+  /* ---- the store matrix, now that the launch has said its piece ---------- */
+  {
+    static const struct nv_store_probe probes[3] = {
+        /* The field-swap hypothesis: sysmem offset to 0x114, falcon address to
+         * 0x11C.  r3a's four encodings all queued and never retired, and no
+         * encoding of 0x118 can express "the sides swap with the direction". */
+        {NV_FLCN_STORE_V_PLAIN, 1, 0, 0, 0x000},
+        /* Two contexts that were never tried: 1 and 4.  ctx 5 pointed at a
+         * TRANSCFG slot this driver never configured; 1 and 4 are the other
+         * plausible coherent targets. */
+        {NV_FLCN_STORE_V_CTX1, 0, 0, 0, 0x400},
+        {NV_FLCN_STORE_V_CTX4, 0, 0, 0, 0x800},
+    };
+    if (store_scratch) {
+      store_variant = nv_store_matrix(d, NV_GSP_U, store_scratch, buf, total,
+                                      d->ucode_imem, d->ucode_dmem, "post",
+                                      probes, 3);
+      uart_puts("[NV-STORE] post winner=");
+      uart_puts(store_variant >= 0
+                    ? nv_flcn_store_name(store_variant)
+                    : "none (no store variant put bytes in host memory)");
+      uart_puts("\n");
+    } else {
+      uart_puts("[NV-STORE] post skipped: no contiguous landing frame\n");
+    }
   }
 
   uart_puts("[NV-FWSEC] after start ctl_1us=");
@@ -2517,6 +3217,7 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
   }
 out:
   if (imem_scratch) frame_free(imem_scratch);
+  if (store_scratch) frame_free(store_scratch);
   for (uint32_t i = 0; i < pages; i++) frame_free(phys + (uint64_t)i * FRAME_SIZE);
   return rc;
 }
