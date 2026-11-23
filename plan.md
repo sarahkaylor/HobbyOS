@@ -1,172 +1,188 @@
 # HobbyOS native NVIDIA driver (Ada / RTX 4090) — execution plan
 
-Working plan for the `nv/ada-driver` branch. Not committed to the repo (the
-public design + status doc is `docs/nvidia-driver.md`).
+Canonical plan for branch `nv/ada-driver`. Public status doc: `docs/nvidia-driver.md`.
+Contract docs this work stands on: §5. Written to be read cold after any pause.
 
-## 0. Objective
+Owner's goal, verbatim: *"create a driver that will work for an nvidia card"*,
+validated by *"games like Rimworld and Cyberpunk"* with *"reasonable performance"*.
+No copying from other drivers; studying them is allowed.
 
-A native HobbyOS driver for NVIDIA GPUs (`nv`), targeting the RTX 4090
-(AD102, `10de:2684`) passed through to a HobbyOS VM, built fresh (studying
-nouveau / open-gpu-kernel-modules / envytools docs allowed; no copying).
-Validation hardware: `root@192.168.10.174` (Proxmox `r1`), VM 117 currently
-owns `0000:01:00`. Build host: `sarah@192.168.0.123` (sarahpc, x86_64, KVM).
+Hardware: RTX 4090 (AD102 `10de:2684`) on Proxmox `r1` (`root@192.168.10.174`),
+driver VM 300, ROM-work VM 312. Build host `sarah@192.168.0.123`.
 
-Final validation ask: RimWorld and Cyberpunk "work well" on this card.
-That is only reachable with hardware 3D inside HobbyOS, which needs (a) GSP-RM
-firmware booted by the kernel driver and (b) a Vulkan userspace (Mesa nvk).
-This plan delivers (a) as far as hardware verification allows, plus a measured
-statement of where games stand today (Venus stack) and the exact remaining
-rungs. Overclaiming here is the failure mode to avoid.
+---
 
-## 1. Facts established before coding (2026-11-22)
+## 0. Definition of done, honestly staged
 
-| fact | evidence |
+| Level | Claim | Status |
+|---|---|---|
+| L1 | HobbyOS owns the card, verifies NVIDIA's firmware, and builds every structure GSP-RM will consume | **done, measured** |
+| L2 | FWSEC runs → SEC2 unfences → booter runs → GSP-RM reports `INIT_DONE` | **blocked at FWSEC** |
+| L3 | A kernel submit reaches the 3-D engine and a clear reads back | not started |
+| L4 | nvk enumerates AD102; `vkcube` draws and presents | not started |
+| L5 | RimWorld / Cyberpunk render at 720p ≥30 fps | not started |
+
+L1 stands on its own: a from-scratch driver that identifies the part, brings up
+the register window, reads 38 MB of vendor firmware from disk and proves it
+byte-for-byte, and lays out VRAM the way the vendor booter expects. L2 is the wall.
+
+---
+
+## 1. What is true today (measured; each row cites its log line)
+
+| Stage | Evidence |
 |---|---|
-| HobbyOS x64 has **no PCI bus driver**; only a private CF8/CFC helper inside `src/kernel/virtio_net.c` | grep; `docs/graphics-accel.md` §2.6 |
-| ACPI RSDP/XSDT + DMAR parsing exists, private to `src/kernel/iommu_vtd.c` (`find_rsdp`, `find_acpi_table`) | read |
-| VT-d IOMMU driver exists (`iommu_vtd.c`) but only for the QEMU emulated `intel-iommu` | read |
-| `mmu_map_mmio_range()` maps arbitrary phys (incl. >4 GiB) non-cacheable, 1 GiB/2 MiB pages | `src/kernel/arch/x64/mmu.c:277` |
-| x64 IDT has gates only for 32–47, 129, 130, 132; IRQ dispatch is `general_interrupt_inner()` with per-device globals | `src/kernel/arch/x64/trap.c` |
-| No MSI/MSI-X support anywhere | grep |
-| Graphics today: Mesa (virgl/Venus/lavapipe) in the guest → virtio-gpu 3D → host virglrenderer | `docs/gpu-abi.md`, `docs/cyberpunk.md` |
-| Cyberpunk runs on HobbyOS (Venus, strix): 720p ~30 fps, 1080p lower; P9 target 30 fps not met | `docs/cyberpunk.md` §0 |
-| r1: 4090 `01:00` + two 5090 `41:00`,`82:00`, all bound to `vfio-pci`; no host NVIDIA driver, no Vulkan, virglrenderer 1.9.0 | ssh probe |
-| VM 117 (Windows gaming) owns `0000:01:00` (`hostpci0: 0000:01:00,pcie=1,x-vga=1`) — may be shut down | `cat /etc/pve/qemu-server/117.conf` |
-| sarahpc: clang 21, lld, qemu, mtools, /dev/kvm, HobbyOS checkout | ssh probe |
+| PCIe; BAR0 16 MiB, BAR1 32 GiB (1 GiB window mapped), BAR3 32 MiB | `[NV] found 10DE:2684 at 2:0.0` |
+| Identification | `boot0=0x192000A1 chipset=0x192 AD102 stepping=161 gsp=required` |
+| PTIMER live | `ptimer hz~999MHz`, advance proved |
+| Register map vs NVIDIA 580.178.04 on the same card | 9/9 rows equal (`docs/nvidia-driver.md` §5.5) |
+| Falcon probe | PMU/GSP `present`; SEC2 `fenced` |
+| 38,061,600 B firmware → contiguous frames, digest == host | `phys=0x200c29000`, `sha256 e30231ec…` |
+| radix3 over `.fwimage` | `root=0x2054c3000 pages=21 maps 9288 image pages` |
+| 256-byte WPR metadata block, DMA-able | `magic ok wpr=0x5F8700000..0x5FE400000 block_phys=0x2054e2000` |
+| VRAM layout (matches contract field for field) | `image=0x5FBEB0000 bootbin=0x5FE2F8000 frts=0x5FE300000` |
+| VBIOS readable; FWSEC ucode located | `desc 0x43E3C`, payload `0x44168..0x540E8`, `IMEM+DMEM==StoredSize` |
+| Falcon page accepts **writes** (read fence only) | `[NV-PROBE] verdict=WRITES LAND` |
+| Ucode staged on the **GSP** with signature + correct BROM params | `[NV-FWSEC] GSP IMEM+DMEM loaded`, `brom para=0xB24 engid=0x400 ucode=9` |
+| FWSEC executes | **NO** — `status1438=0xBEEF0000 frts=NEVER WRITTEN`, `SEC2=still fenced` |
+| Unit tier | **513 tests, 0 failed** |
 
-## 2. Driver architecture
+Reproduce in ~4 minutes: `tools/nv/deploy.sh --mode test --gpu --wave NVSMI.BIN`.
 
-```
-userspace   NVSMI.BIN  (card info / register read behind a whitelist)
-              |  ioctl /dev/nvctl
-kernel      nv.c        probe, lifecycle, ABI, staged bring-up state machine
-            nv_regs.h   register map (PMC/PBUS/PFB/PTIMER/FALCON/GSP)
-            nv_falcon.c falcon engine: IMEM/DMEM, DMA load, mailbox
-            nv_gsp.c    GSP-RM boot: WPR meta, booter, HS, RPC queues
-            pci.c/h     generic PCIe: ECAM(MCFG)+legacy, BARs, caps, MSI-X
-            acpi.c/h    RSDP/XSDT/MCFG/DMAR table locator (shared)
-            irq table   irq_register_vector() + gates 0xA0..0xBF
-```
+---
 
-Design rules:
-- `#ifdef __x86_64__` everywhere (ARM compiles empty TUs), no new syscall rows
-  (SYS_MAX frozen): `/dev/nvctl` rides the Linux-ABI `ioctl` path like
-  `/dev/gpu` (`file_is_devgpu`-style predicate in `file_obj.h`).
-- Kernel identity-maps phys → virt, so DMA buffers use their kernel addresses
-  as bus addresses. Target VM gets **no vIOMMU** (documented decision) so
-  device DMA = guest-physical identity; VT-d path stays for the emulated case.
-- Everything side-effecting is a state machine with a `[NV]` serial row per
-  transition, so a failed stage names itself instead of vanishing.
-- MMIO access goes through a `struct nv_mmio_ops` vtable so the sequencing is
-  host-testable with a fake register file (this is how P1/P2/P3 get unit
-  coverage without a GPU).
-- No copying: register names/sequences re-derived from public documentation
-  (envytools docs, open-gpu-kernel-modules headers, nouveau's *behaviour*),
-  and each sequence in our source cites the datasheet section or the behaviour
-  it reproduces (not the source file).
+## 2. The wall: FWSEC does not execute
 
-## 3. Stages and gates
+The verdict channel is sound: BAR0 `0x1438` bits 31:16, prefilled with
+`0xBEEF0000` so "nobody wrote" is distinguishable from "success". (`MAILBOX0` is
+**not** the FWSEC channel — the vendor passes NULL there.) The ucode reaches the
+GSP with the right block size, the right BROM parameters and the PKC signature
+patched at DMEM `0xB24`. It still does not run.
 
-| stage | deliverable | gate (must actually run) |
-|---|---|---|
-| P0 harness | `tools/nv/deploy.sh` (build on sarahpc → push to r1 → recreate VM → boot → pull serial), `tools/nv/gpu-switch.sh` (move 4090 between VMs, stop 117 last/first), VM 300 `hobbyos-nv`, VM 301 `linux-ref` | HobbyOS x64 boots on r1 with and without the 4090; serial captured |
-| P1 pci | `acpi.c/h`, `pci.c/h`, `pci_test.c`, IRQ vector table | unit tier green (host + x64 QEMU); on r1 the 4090 is enumerated with BAR sizes equal to the reference Linux VM's |
-| P2 nv core | `nv.c/h`, `nv_regs.h`, `/dev/nvctl`, `NVSMI.BIN` | `[NV]` rows on real hardware: boot0 → AD102, BAR0/BAR1/VRAM match reference VM; `NVSMI.BIN` prints them from userspace |
-| P3 falcon/GSP | `nv_falcon.c`, `nv_gsp.c`, `nv_fw.c/h`, firmware fetch+analysis doc | falcon ucode loaded and run, boot status/mailbox rows captured (partial credit recorded honestly) |
-| P3a firmware | `nv_gsp_firmware_check()` + `deploy.sh` staging | **DONE on silicon**: 38,061,600 B RM image read into contiguous frames, container parsed, SHA-256 == host `shasum` (`e30231ec0d317021`) |
-| P3b WPR/boot | WPR2 layout, metadata, booter handoff | **GATED**: needs `docs/nv-gsp-wpr-contract.md` (lane L-wpr); each step must prove itself by read-back |
-| P3c RPC | queue + message transport | **GATED** on `docs/nv-gsp-rpc-contract.md` (lane L-rpc) |
-| P4 games | measurement + ladder | RimWorld/Cyberpunk numbers on the Venus stack (control) + reference-VM 4090 numbers for the same titles; explicit statement of what the driver adds and what is still missing |
+**Experiment queue — cheapest first, one deploy each, yes/no answers.**
 
-## 4. Games validation shape
+| # | Experiment | Positive result means | Negative means |
+|---|---|---|---|
+| F1 | Read GSP `0x110114` right after the IMEM load, before any reset (window still readable): expect `0xF100` | the DMA landed in the GSP | it did not → F2 |
+| F2 | Load IMEM/DMEM by **PIO** (`0x180/0x184`, `0x1C0/0x1C4`), with a wait that does not poll the fenced `XFER_STATUS` | PIO runs the core → the DMA request encoding is wrong | still no run → ucode/params, not transport |
+| F3 | After an attempt, read the RISC-V switch `0x111668`: `0x111` = running in RISC-V mode | it switched then stopped → FRTS question | never set → core never got that far |
+| F4 | Re-check `0x840000` in the same run for the privilege drop (secondary oracle) | FWSEC's job was done | confirms F2/F3 |
+| F5 | Vary the DMA context id: `0x600` is `TRANSCFG(ctx)`, ctx = register index; sysmem-no-coherent is **4**, not 5 | a ctx mismatch explains it | rules the DMA path out |
 
-1. **Control A (existing stack)**: RimWorld + Cyberpunk on HobbyOS via Venus
-   (strix KVM) — numbers already in `docs/cyberpunk.md`; re-quote with anchors.
-2. **Control B (the card is good)**: RimWorld native Linux in VM 301 with the
-   4090 passed through — fps at 1080p. Answers "is this card enough for these
-   games" independent of HobbyOS.
-3. **Target**: HobbyOS + native `nv` driver — needs P3 complete + Mesa nvk, so
-   P4 reports the gap, not a pass. No fabricated fps.
+Still unrun and cheap: **B. fuse check** — read `0x8241C0 + (UcodeId-1)*4` and AND
+against the descriptor's `SignatureVersions` (`0x0003`). If the image is not valid
+for this part's fuses, the boot ROM rejects it and no amount of transport fixing
+helps.
 
-## 5. Lanes
+**Sequencing rule:** no more SEC2 work until FWSEC's channel says it ran. SEC2's
+fence is privilege-gated (measured twice); engine pokes will not lift it.
 
-| lane | worktree | owns |
-|---|---|---|
-| L-pci | `~/Documents/GitHub/hobbyos-nv/lane-pci` | `src/include/{pci,acpi}.h`, `src/kernel/{pci,acpi,pci_test}.c`, trap.c vector table, unit_test.c registration |
-| L-infra | `lane-infra` | `tools/nv/*`, r1 VMs, reference measurements, evidence |
-| L-gsp | `lane-gsp` | `docs/nv-gsp-firmware.md`, firmware fetch tool, `nv_gsp.c` skeleton + host tests |
-| parent | `ada` (= `nv/ada-driver`) | `nv.c/h`, `nv_regs.h`, `nv_falcon.c`, `/dev/nvctl` wiring, `NVSMI.BIN`, integration, pushes |
+---
 
-## 5.1 State at 2026-11-23 (measured, not planned)
+## 3. Work packages (parallel, each with a gate)
 
-| item | state | evidence |
-|---|---|---|
-| card owned by HobbyOS | yes | `[NV] found 10DE:2684 at 2:0.0`, BAR0 16 MiB, BAR1 32 GiB (64 MiB window mapped) |
-| identification | yes | `boot0=0x192000A1 chipset=0x192 AD102 stepping=161 gsp=required` |
-| timer | yes | `ptimer hz~999 MHz`, advance proven |
-| falcon probe | yes | PMU/GSP `present`; SEC2 `fenced` (was wrongly reported `absent`) |
-| register map cross-check | yes | 9/9 rows equal to NVIDIA 580.178.04's pre-init dump (`docs/nvidia-driver.md` §5.5) |
-| firmware on disk | yes | BOOTER/LOADER/GSPRM staged as 8.3 role names, read through FAT16 |
-| firmware integrity | yes | kernel SHA-256 == host `shasum` for all three blobs |
-| RM image described (radix3) | **yes** | `root=0x2054cd000 pages=21 maps 9288 image pages` |
-| metadata block | **yes** (built, DMA-able) | `256B magic ok wpr=0x5F8700000..0x5FE400000 block_phys=0x2054e2000` |
-| VRAM layout | **yes**, matches the contract field for field | `image=0x5FBEB0000 bootbin=0x5FE2F8000 frts=0x5FE300000` |
-| booter started on SEC2 | **no — gated** | `[NV-SEC2] unfence FAILED: no single PMC_ENABLE bit lifts the fence` |
-| GSP-RM running | **no** | needs PMU → FWSEC → SEC2 first (measured, §5.7) |
-| hardware 3D | **no** | needs GSP-RM + a Vulkan userspace |
-| unit tier | **512 tests, 0 failed** | `run_unit_tests_intel.sh` on sarahpc |
-| branch | `nv/ada-driver` @ `9cb42ecf`+, not merged | owner review pending |
+| WP | Scope | Gate | Needs 4090? |
+|---|---|---|---|
+| **A. FWSEC** | F1-F5, then the launch | `0x1438` hi16 becomes a real code **and** SEC2 unfences | yes |
+| **B. fuses** | fuse bitmask vs `SignatureVersions` | non-zero AND, documented | yes, read-only |
+| **C. RPC (offline)** | `docs/nv-rpc-implementation-spec.md`: block map, producer header, 48-byte elements, checksum, SWAP_RX, doorbell — pure half only | the spec's 24 cases pass in the kernel unit tier on synthetic queues | **no** |
+| **D. DMA facility** | `nv_dma.{c,h}`: bus address ≠ phys, identity guard, `iommu_vtd_translation_enabled()` (VT-d is already initialised from `net_rdma.c` with a passthrough entry for this GPU) | a unit test rejects a mapping whose `bus != phys` under translation | **no** |
+| **E. Present gate** | `/dev/fb0` mmap: `vm_map_fb()` maps 10,485,760 B over an 8,294,400 B framebuffer; `vm.c:5303-5310` drops the clamp | pixel at (1919,1079) in a QMP screendump | **no** |
+| **F. `/dev/nv*` shim** | nouveau-subset ABI (device, alloc, VM bind, channel, submit, fence) over a mock RM | probe creates device/VM/channel; fence retires | **no** |
+| **G. SEC2 booter** | `nv_gsp_sec2_start_booter` (already coded) once FWSEC unfences | metadata `verified` == `0xA0A0…`, or a behavioural equivalent if masked | yes |
 
-What a reviewer should test first: `tools/nv/deploy.sh --mode test --gpu --wave
-NVSMI.BIN` reproduces every row above in ~4 minutes.
+Ordering by leverage: D unblocks C; C unblocks the driver's upper half; E unblocks
+every present measurement; F lets a real Vulkan stack attach before GSP-RM is up.
+C/D/E/F are how this project progresses on days when the card is busy or FWSEC is
+stuck.
 
-## 5.2 Resume sheet (state at branch 6313df11)
+---
 
-Read this first after any pause. Everything below is measured, not planned.
+## 4. The ladder to games (`docs/nv-games-ladder.md`; weeks are ESTIMATES)
 
-| Stage | State | Evidence row |
-|---|---|---|
-| PCI / BARs / ID / timer | done | `[NV] found 10DE:2684`, `ptimer hz~999MHz` |
-| Register map vs NVIDIA driver | 9/9 rows equal | `docs/nvidia-driver.md` 5.5 |
-| Firmware from disk (38 MB, contiguous) | done | `[NV-GSP] fw GSPRM.BIN bytes=38061600 phys=0x200c29000` |
-| radix3 for the RM image | done | `radix3 root=0x2054c3000 pages=21 maps 9288 image pages` |
-| WPR metadata block (VBIOS-independent) | done | `meta 256B magic ok wpr=0x5F8700000..0x5FE400000 block_phys=...` |
-| VRAM layout matches contract | done, field for field | `image=0x5FBEB0000 bootbin=0x5FE2F8000 frts=0x5FE300000` |
-| VBIOS read + FWSEC ucode located | done | `desc 0x43E3C`, payload `0x44168..0x540E8`, `IMEM+DMEM==StoredSize` |
-| Falcon page accepts writes | **yes** (read fence only) | `[NV-PROBE] verdict=WRITES LAND` |
-| GSP reset + ucode staged (IMEM/DMEM) | done | `[NV-FWSEC] IMEM loaded`, `DMEM loaded` |
-| FWSEC actually executes | **NO** | `mailbox never overwritten -- the ucode did not run` |
-| SEC2 booter | blocked behind FWSEC | `[NV-SEC2] fence is privilege state` |
-| GSP-RM RPC | contract written, not coded | `docs/nv-gsp-rpc-contract.md` |
+| # | Rung | Gate | Today |
+|---|---|---|---|
+| N0 | 1080p present gate | 8,294,400 B maps; pixel visible | fails `-ENOMEM` |
+| N1 | RimWorld's own menu on virgl 720p | ≥30 fps median, input, audio | never measured on the current winsys |
+| N2 | `/dev/nv*` shim over a mock RM | probe + fence retire | absent |
+| N3 | GSP-RM boots | mailbox moves, first RPC answered | FWSEC never ran |
+| N4 | RM objects + first submit | 64×64 clear reads back | absent |
+| N5 | nvk enumerates AD102 | `vulkaninfo` lists `AD102 (NVK)` | absent |
+| N6 | **first frame** (`vkcube`) | draws + presents | absent |
+| N7 | RimWorld via Zink+nvk | menu ≥30 fps, world loads | 170.9 fps synthetic only |
+| N8 | Cyberpunk via vkd3d+nvk | P9 script end to end | 29.8 fps on Venus |
+| N9 | "reasonable performance" | 720p ≥30 fps incl. present | unmeasurable today |
 
-### Blockers, in the order they must fall
+**Highest-leverage rung: N6** — the one observation where VRAM, VA, submit,
+fences, shader upload and present all work at once, and exactly where both games'
+already-proven userspace attaches. Critical path N3→N6 ≈ 20-37 weeks.
 
-1. **Why the core does not run.** Two candidates, both cheap to settle:
-   (a) `bl_dmem_desc_v2` field layout is inferred (11 dwords, 64-bit bases);
-   (b) the boot ROM's GSP parameters at `0x111210`-ish may not be writable, so
-   the ROM refuses to start.  Settle (b) first: it invalidates (a) if true.
-2. **SEC2's fence** lifts only after FWSEC; do not re-attempt engine pokes.
-3. **The booter** (already coded, `nv_gsp_sec2_start_booter`) needs the metadata
-   `verified` word — a read-back that may also be masked, so judge by behaviour.
-4. **RPC** (`docs/nv-gsp-rpc-contract.md`): queues in sysmem, 129-entry address
-   table, 48-byte elements, `VRPC` header, doorbell `0x110C00`.
-5. **Games**: `docs/nv-games-state.md` — the honest ladder, measured.
+Two facts that keep it honest: both titles' non-graphics stacks already work on
+HobbyOS (audio via virtio-snd/ALSA; Cyberpunk played 10.5 min and reloaded), and
+Venus and the native driver are mutually exclusive on this card — Venus needs the
+GPU on the host, `nv` needs it in the guest, and r1 has one.
 
-### Rules that have earned their place (all learned the hard way here)
+---
 
-- A masked read is not evidence. Every wrong conclusion so far came from reading
-  a fenced register as if it were data. Use `MAILBOX0`-style channels or effect.
-- Hex arithmetic in comments is how a false "the document must be wrong" gets
-  written; put the numbers in a test instead.
-- Prefill any register whose zero means success before judging it.
-- One `[NV-*]` row per stage, and the row names the stage when it fails.
+## 5. Contracts this work stands on (read before coding)
 
-## 6. Risks
-
-| risk | mitigation |
+| Doc | What it settles |
 |---|---|
-| GSP boot is a multi-week RE problem | graded stages; falcon + booter progress is real, verifiable work; document the fence precisely |
-| 4090 BAR1 is 32 GiB (ReBAR); QEMU may assign a huge window HobbyOS can't map | BAR probe falls back to the 256 MiB window; log both sizes; `mmu_map_mmio_range` handles >4 GiB |
-| Only one VM can hold the card | `gpu-switch.sh`, stop/recreate discipline, never two VMs with the same hostpci |
-| Passthrough VM needs a console without the GPU | virtio-vga + serial socket; `x-vga=0` on the 4090 |
-| Agents sharing one tree collide on obj/disk.img | one worktree per lane; parent runs integration builds and all hardware boots |
+| `docs/nvidia-driver.md` | what the driver does; every claim anchored to a log line |
+| `docs/nv-gsp-firmware.md` | blob formats, HS headers, what the boot ROM validates |
+| `docs/nv-gsp-reference.md` | NVIDIA's own driver on this card: pre/post BAR0 dumps |
+| `docs/nv-gsp-wpr-contract.md` | WPR2 ownership (the **booter** programs it), layout, meta fields |
+| `docs/nv-pmu-acr-contract.md` | boot order: host → FWSEC on the GSP → SEC2 booter; FRTS |
+| `docs/nv-vbios-map.md` | finding ucode in the ROM (EFI-stripped logical base rule) |
+| `docs/nv-devinit-contract.md` | why devinit replay is dead on Turing+; the sentinel method |
+| `docs/nv-fwsec-launch-contract.md` | launch sequence, BROM values, diagnosis table |
+| `docs/nv-rpc-implementation-spec.md` | transport field by field + 24 test cases |
+| `docs/nv-games-ladder.md` | the ladder, effort ranges, "build now" list |
+
+Corrections already applied, so nobody re-derives them: the fence is **read-side
+only**; `0x1FA824/828` are `WPR2_ADDR_LO/HI` as (start,END) in 4 KiB units and are
+read-protected; there is **no** descriptor to write on GA102; FWSEC's verdict is
+`0x1438`, not `MAILBOX0`; VBIOS pointers are relative to a logical image with the
+EFI ROM removed (`+0x14E00` above `0xFC00`).
+
+---
+
+## 6. Rules of evidence (each cost at least one run)
+
+1. **A masked read is not evidence.** Reads beyond the readable blocks return
+   `0xBADF5620`, whose bit 4 is clear — "not halted" and "unreadable" look
+   identical. Use a channel that can answer, or judge by effect.
+2. **Prefill anything whose zero means success.** Bitten twice, in two registers.
+3. **Hex arithmetic belongs in a test, not a comment.** Every "the document must
+   be wrong" so far was my own subtraction slip.
+4. **One `[NV-*]` row per stage; the row names the stage when it fails.**
+5. **Check that an observation could have been negative** before calling a
+   subsystem working.
+6. **Do not copy.** Contracts and byte layouts yes; code no. Tag claims
+   MEASURED / SOURCE / INFERRED.
+
+---
+
+## 7. Risks
+
+| Risk | Mitigation |
+|---|---|
+| FWSEC becomes a long RE problem | F1-F5 are single-deploy tests; WP C/D/E/F proceed without the card |
+| One card, many lanes | `tools/nv/gpu-switch.sh`; never two VMs with the same hostpci; VM 300 = driver, 312 = ROM work |
+| A wrong write wedges the card | every write preceded by a read or a contract; VM restart + FLR clears state (observed) |
+| Session/attention decay | this file + `docs/nvidia-driver.md` §5.x are the memory; every claim cites a log line |
+| Estimates are optimistic | the ladder states its assumptions; N0-N2 are deliberately driver-independent |
+
+---
+
+## 8. Resuming cold — checklist
+
+1. `git log --oneline -12` on `nv/ada-driver`; the last commit message states the
+   current obstacle in its own words.
+2. Run `tools/nv/deploy.sh --mode test --gpu --wave NVSMI.BIN`; read the
+   `[NV-FWSEC]`, `[NV-PROBE]`, `[NV-MAP]`, `[NV-GSP]` rows.
+3. If FWSEC still reports the sentinel, run the next un-tried §2 experiment.
+4. If a contract doc contradicts this file, the doc wins — fix this file in the
+   same commit.
+5. Keep the tier green: `UNIT_TESTS_TIMEOUT=1200 ./run_unit_tests_intel.sh` on
+   `sarah@192.168.0.123` (513 tests today).
