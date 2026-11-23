@@ -414,6 +414,39 @@ static int sec2_unfence(struct nv_dev *d) {
   return -ENODEV;
 }
 
+/* ---- the accessibility map -----------------------------------------------
+ *
+ * Which offsets in an engine window answer, and which return the
+ * inaccessibility signature?  This is read-only and it is the difference
+ * between "0x600 is fenced" and "everything above the IO page is fenced":
+ * a 64-character row per window, one character per 64-byte block, sampled at
+ * the block's first dword.  'F' = the fence word, '-' = all ones (nothing
+ * there), '.' = a real read.
+ *
+ * The boundary matters because it says what devinit has to unlock, and whether
+ * the unlock is page-scoped or region-scoped. */
+static void nv_map_window(struct nv_dev *d, uint32_t base, const char *name) {
+  char row[65];
+  for (int i = 0; i < 64; i++) {
+    uint32_t v = nv_rd32(d, base + (uint32_t)i * 64);
+    row[i] = v == NV_REG_FENCED ? 'F' : (v == 0xffffffffu ? '-' : '.');
+  }
+  row[64] = 0;
+  uart_puts("[NV-MAP] ");
+  uart_puts(name);
+  uart_puts(" ");
+  uart_puts(row);
+  uart_puts("\n");
+}
+
+void nv_gsp_map_windows(struct nv_dev *d) {
+  if (!d) return;
+  uart_puts("[NV-MAP] one char per 64B block, F=fence word -=all ones .=a read\n");
+  nv_map_window(d, NV_FALCON_GSP_BASE, "gsp 0x110000");
+  nv_map_window(d, NV_FALCON_SEC2_BASE, "sec2 0x840000");
+  nv_map_window(d, NV_FALCON_PMU_BASE, "pmu 0x10A000");
+}
+
 /* ---- stage 6a: reset the GSP falcon the way FWSEC expects ----------------
  *
  * docs/nv-pmu-acr-contract.md section 3.3 steps 1-3, which are required before
@@ -895,6 +928,7 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
    * Everything above this line is memory work.  This is the first stage that
    * writes to the card, and it is the one the metadata block was built for.
    * The trees, the image and the block all stay resident until it returns. */
+  nv_gsp_map_windows(d);
   /* Stage 6a runs before stage 5 in the canonical order, and needs no ucode:
    * reset the GSP and route its DMA at system memory. */
   if (bldrc == 0) {

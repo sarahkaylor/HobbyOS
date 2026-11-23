@@ -376,7 +376,24 @@ Two findings, both of which changed the code:
    core is already STOPPED on handover, which is the property that matters, so the
    reset is skipped — with a test asserting the destructive half does not run on a
    stopped core and does run on a running one.
-2. **The DMA-configuration registers (`0x600`, `0x624`, `0x10C`) are fenced too.**
+2. **The fence is block-granular, and it is not a whole-engine state.** A
+   read-only map of each engine window (one character per 64-byte block, sampled
+   at the block's first dword) says exactly where the wall is:
+
+   ```
+   [NV-MAP] gsp 0x110000 ...F.FFFF.F-.FF.FFFFFFFFFFFFFFFFFFFFFFFF....--......-.-..-..FFFF
+   [NV-MAP] sec2 0x840000 F..FFFFFFFFF.FF.FFFFFFFFFFFFFFFFFFFFFFFF....--......-.-..-..FFFF
+   [NV-MAP] pmu 0x10A000 ...........-....-...............................................
+   ```
+
+   The PMU is almost entirely readable; the GSP and SEC2 share a large fenced
+   span in the middle of the window; and the fences are per block rather than
+   per engine. That is consistent with the privileged aperture the second
+   generation falcon headers describe, and it means "which offsets does devinit
+   have to unlock" is now an answerable question with a map instead of a guess.
+
+3. **The DMA-configuration registers (`0x600`, `0x624`, `0x10C`) fall inside
+   that fenced span.**
    They read back the inaccessibility signature after being written. So the falcon
    block past its basic IO page is not ours yet: on this generation the driver is
    expected to replay the VBIOS's **devinit (golden-register) tables** before any
