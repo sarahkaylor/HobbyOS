@@ -1,0 +1,5 @@
+file   rtx4090-ad102-vbios-1MiB.bin
+size   1048576 (0x100000)
+sha256 7dfb34281d403ac71b003259a3c5e6111c8ac9ebb91dc151712a9924cc22b863
+gzip   rtx4090-ad102-vbios-1MiB.bin.gz
+gzip-sha256 3a4a863dc25b90c28085b2fea4d300aaf51d5294e7abc97b7f2869ea739488cb

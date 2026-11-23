@@ -1,0 +1,74 @@
+file      /tmp/prom_1m.bin
+size      1048576 bytes (0x100000)
+
+== image chain ==
+  [0] base 0x00000 size  64512 (0x0FC00) type 0x00  pcir@0x00170 PCIR npde@0x00190 vendor 0x10DE device 0x2684 last False
+  [1] base 0x0FC00 size  85504 (0x14E00) type 0x03  pcir@0x0FC1C PCIR npde@0x0FC40 vendor 0x10DE device 0x2684 last False
+  [2] base 0x24A00 size  24576 (0x06000) type 0xE0  pcir@0x24B60 NPDS npde@0x24B80 vendor 0x10DE device 0x2680 last False
+  [3] base 0x2AA00 size 439296 (0x6B400) type 0xE0  pcir@0x2AA20 NPDS npde@0x2AA40 vendor 0x10DE device 0x2680 last True
+  image0_size 0x0FC00   first type-0xE0 base 0x24A00   shift 0x14E00
+
+== BIT token tables ==
+  table at 0x001B0 hdr=12 stride=6 entries=19 bcd=0x0100 checksum=ok
+    token 0x32 ver 1 size   4 ptr 0x0023E  00 00 00 00
+    token 0x42 ver 2 size  37 ptr 0x0024A  40 18 02 95 4c 00 00 00
+    token 0x43 ver 2 size  44 ptr 0x0026F  e0 50 00 00 00 00 00 00
+    token 0x44 ver 1 size   4 ptr 0x0029B  fe 51 00 00
+    token 0x49 ver 1 size  36 ptr 0x0029F  9e 40 00 00 00 00 a2 40
+    token 0x4D ver 2 size  41 ptr 0x002C3  0e 0e 41 fc 41 f6 eb 07
+    token 0x4E ver 0 size   0 ptr 0x00000  
+    token 0x50 ver 2 size 252 ptr 0x002EC  b9 26 07 00 66 2b 07 00
+    token 0x53 ver 2 size  24 ptr 0x003E8  68 00 50 b9 00 19 d3 00
+    token 0x54 ver 1 size   2 ptr 0x00400  b2 52
+    token 0x55 ver 1 size   5 ptr 0x0040A  bf 50 00 00 00
+    token 0x56 ver 1 size   6 ptr 0x0040F  2b 47 95 45 00 00
+    token 0x78 ver 1 size   8 ptr 0x00415  00 00 01 01 00 00 00 00
+    token 0x64 ver 1 size   2 ptr 0x0041D  50 77
+    token 0x70 ver 2 size   4 ptr 0x0041F  e8 0d 08 00
+    token 0x75 ver 1 size  17 ptr 0x00423  00 00 00 00 00 00 00 00
+    token 0x69 ver 2 size 110 ptr 0x00434  40 18 02 95 4c 00 00 8b
+    token 0x45 ver 1 size   4 ptr 0x00402  00 00 00 00
+    token 0x73 ver 1 size   4 ptr 0x00406  00 00 00 00
+
+== token 0x70 -> ucode table ==
+  token ver 2 size 4 payload@0x0041F = 0x80DE8 (logical)
+  table flash offset = 0x80DE8 + 0x14E00 = 0x95BE8
+  header 01 06 06 10 01 30  ver=1 hdrsize=6 entrysize=6 entries=16
+    [ 0] @0x95BEE app 0x01 target 0x01 ptr 0x15C54 -> 0x2AA54 
+    [ 1] @0x95BF4 app 0x00 target 0x00 ptr 0x00000 -> 0x00000 
+    [ 2] @0x95BFA app 0x00 target 0x00 ptr 0x00000 -> 0x00000 
+    [ 3] @0x95C00 app 0x00 target 0x00 ptr 0x00000 -> 0x00000 
+    [ 4] @0x95C06 app 0x00 target 0x00 ptr 0x00000 -> 0x00000 
+    [ 5] @0x95C0C app 0x07 target 0x06 ptr 0x3F2E8 -> 0x540E8 
+    [ 6] @0x95C12 app 0x08 target 0x01 ptr 0x5BF2C -> 0x70D2C 
+    [ 7] @0x95C18 app 0x00 target 0x00 ptr 0x00000 -> 0x00000 
+    [ 8] @0x95C1E app 0x45 target 0x07 ptr 0x1ED90 -> 0x33B90 
+    [ 9] @0x95C24 app 0x85 target 0x07 ptr 0x2F03C -> 0x43E3C Hdr=0x032C0301 ver=3 hdrsize=812
+    [10] @0x95C2A app 0x49 target 0x05 ptr 0x4F084 -> 0x63E84 
+    [11] @0x95C30 app 0x89 target 0x05 ptr 0x557D8 -> 0x6A5D8 
+    [12] @0x95C36 app 0x00 target 0x00 ptr 0x00000 -> 0x00000 
+    [13] @0x95C3C app 0x00 target 0x00 ptr 0x00000 -> 0x00000 
+    [14] @0x95C42 app 0x00 target 0x00 ptr 0x00000 -> 0x00000 
+    [15] @0x95C48 app 0x00 target 0x00 ptr 0x00000 -> 0x00000 
+
+== ucode descriptors ==
+    app 0x45 desc@0x33B90 Hdr=0x032C0301 ver=3 hdrsize=812 stored=65408
+      pkc_off=0xB24 ifc=0x1C imem_phys=0x0 imem_load=61952 imem_virt=0x0
+      dmem_phys=0x0 dmem_load=3456 engine_mask=0x0400 ucode_id=9 sig_count=2 sig_versions=0x3
+      payload 0x33EBC..0x43E3C (65408 bytes, imem+dmem=65408, consistent)
+      first 16 bytes c6 82 d6 52 06 2f 61 ac 2b 17 40 be 15 7e d5 27
+    app 0x85 desc@0x43E3C Hdr=0x032C0301 ver=3 hdrsize=812 stored=65408
+      pkc_off=0xB24 ifc=0x1C imem_phys=0x0 imem_load=61952 imem_virt=0x0
+      dmem_phys=0x0 dmem_load=3456 engine_mask=0x0400 ucode_id=9 sig_count=2 sig_versions=0x3
+      payload 0x44168..0x540E8 (65408 bytes, imem+dmem=65408, consistent)
+      first 16 bytes ec a3 a3 0a 1f c3 f6 f6 de 89 7d 5a 94 df 8b 0b
+    app 0x49 desc@0x63E84 Hdr=0x032C0301 ver=3 hdrsize=812 stored=25640
+      pkc_off=0xA10 ifc=0x10 imem_phys=0x0 imem_load=22528 imem_virt=0x0
+      dmem_phys=0x0 dmem_load=3112 engine_mask=0x0001 ucode_id=10 sig_count=2 sig_versions=0x3
+      payload 0x641B0..0x6A5D8 (25640 bytes, imem+dmem=25640, consistent)
+      first 16 bytes 95 5e aa 39 ed f0 34 d7 ab 89 80 f7 a6 03 2c bd
+    app 0x89 desc@0x6A5D8 Hdr=0x032C0301 ver=3 hdrsize=812 stored=25640
+      pkc_off=0xA10 ifc=0x10 imem_phys=0x0 imem_load=22528 imem_virt=0x0
+      dmem_phys=0x0 dmem_load=3112 engine_mask=0x0001 ucode_id=10 sig_count=2 sig_versions=0x3
+      payload 0x6A904..0x70D2C (25640 bytes, imem+dmem=25640, consistent)
+      first 16 bytes 69 23 6e ab 82 21 00 08 10 fc b1 34 df 30 05 92

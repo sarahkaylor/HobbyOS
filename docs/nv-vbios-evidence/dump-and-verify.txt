@@ -1,0 +1,35 @@
+== guest ==
+kernel : Linux version 6.8.0-147-generic (buildd@lcy02-amd64-081) (x86_64-linux-gnu-gcc-13 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, GNU ld (GNU Binutils for Ubuntu) 2.42) #147-Ubuntu SMP PREEMPT_DYNAMIC Thu Sep 24 11:33:16 UTC 2026
+pci    : 0100 10DE:2684
+lspci  : 01:00.0 VGA compatible controller: NVIDIA Corporation AD102 [GeForce RTX 4090] (rev a1)
+
+== route A: PCI Expansion ROM BAR ==
+rom attribute size: 524288
+bytes actually readable: 150016 (0x24A00)
+first 16 bytes: 55 aa 7e eb 4b 37 34 30 30 e9 4c 19 77 cc 56 49
+sha256: ace119e2a16de9bb1406474010a4fb4b18b4933c5ed3ac0b24f3a9ccd491cb64
+
+== route B: PROM aperture at BAR0+0x300000 ==
+config[0x50] before: 0x0 (bit0 = ROM shadow enable)
+config[0x50] after clearing bit0: 0x0
+bytes read: 1048576 (0x100000)
+first 16 bytes: 55 aa 7e eb 4b 37 34 30 30 e9 4c 19 77 cc 56 49
+sha256: 7dfb34281d403ac71b003259a3c5e6111c8ac9ebb91dc151712a9924cc22b863
+rom-BAR bytes are a byte-identical prefix of the PROM dump: True
+last non-0xFF byte at: 0x95dff
+config[0x50] restored: 0x0
+
+== landmark scan (from the byte dump) ==
+AA55   27 0x0 0xf1fb 0xfc00 0x12361 0x21eef 0x2a900 0x3260d 0x32b40
+PCIR   4 0x170 0xf21d 0xfc1c 0x3265d
+NPDS   4 0xf225 0x24b60 0x2aa20 0x32667
+NPDE   6 0x190 0xf254 0xfc40 0x24b80 0x2aa40 0x32733
+BIT\0  1 0x1b2
+
+== driver recipe, executed as dword reads ==
+rd32 misaligned at 0x41F -> 0x80DE8 (aligned neighbours: 0x41C=0xE8775000 0x420=0x0000080D)
+table 0x95BE8 header 01 06 06 10 01 30
+entry[9] @0x95C24 85 07 3c f0 02 00 -> desc 0x43E3C
+desc 44 bytes: 01 03 2c 03 80 ff 00 00 24 0b 00 00 1c 00 00 00 00 00 00 00 00 f2 00 00 00 00 00 00 00 00 00 00 80 0d 00 00 00 04 09 02 03 00 49 80
+payload first 16: ec a3 a3 0a 1f c3 f6 f6 de 89 7d 5a 94 df 8b 0b
+raw read at 0x80DE8 (no shift): e7 8f 84 00 e7 8f 84 00 e7 8f 84 00 e7 8f 84 00
