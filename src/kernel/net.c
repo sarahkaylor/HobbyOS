@@ -1,4 +1,6 @@
 #include "net.h"
+#include "frame.h" /* net_sockets_reserve(): the PCB table is frame-backed */
+#include "kmem.h"  /* phys_to_virt(): AArch64 identity, x86_64 DMAP */
 #include "kline.h"
 #include "virtio_net.h"
 #include "lock.h"
@@ -41,7 +43,25 @@ static uint32_t dns_server = 0;
 static uint64_t entropy_state = 0;
 static uint32_t entropy_draws = 0;
 
-static struct socket_pcb sockets[MAX_SOCKETS];
+/* The PCB table is MAX_SOCKETS x (4 MiB RX ring + bookkeeping) = 64 MiB.
+ * It used to be a static array, i.e. 64 MiB of kernel .bss -- three
+ * quarters of the whole ARM limine placement window
+ * (docs/blk-cache.md section 11).  With the unit-test image's static
+ * footprint already at ~85 MiB, a 156 KiB .text growth (Nov 2026 merge)
+ * pushed __bss_start over a 2 MiB alignment boundary, the framebuffer's
+ * 2 MiB alignment then rounded it up twice, and `make ARCH=arm
+ * MODE=unit_tests` stopped linking ("kernel .bss exceeds the limine
+ * placement window").
+ *
+ * It is a frame-backed table now, allocated on first use: kernel pool
+ * frames are identity-mapped, so `sockets[i].rx_buf` is still a plain
+ * address, and every `sockets[i].field` in this file is unchanged.  The
+ * allocation is NOT done in net_init() because the unit tier's
+ * frame_test_suite() asserts against a pristine pool (same rule as
+ * blk_cache_init(), see main.c); in unit-test mode the first
+ * net_socket_create() -- which runs after that suite -- reserves it. */
+static struct socket_pcb *sockets; /* frame-backed; NULL until reserved */
+static spinlock_t sockets_reserve_lock;
 volatile uint32_t rdma_ring_dbg = 0;
 static spinlock_t net_lock;
 static spinlock_t ipr_lock; /* cp/nfs: IPv4 reassembly (ipr_*, below) */
@@ -171,17 +191,67 @@ int net_get_random_bytes(void* buf, uint32_t len) {
   return (int)len;
 }
 
+/* Reserve the socket-PCB table from the frame pool (idempotent).  Returns 0
+ * on success, -1 when the pool has no contiguous run for it (then
+ * net_socket_create() fails, and socket() reports ENFILE rather than the
+ * kernel taking a data abort on a NULL table).  Called from net_init() on
+ * normal boots and from the first net_socket_create() in unit-test mode --
+ * never from the IRQ receive path. */
+static int net_sockets_reserve(void) {
+  if (sockets) return 0;
+  uint64_t flags = spinlock_acquire_irqsave(&sockets_reserve_lock);
+  if (!sockets) {
+    uint64_t bytes = (uint64_t)sizeof(struct socket_pcb) * MAX_SOCKETS;
+    int nframes = (int)((bytes + FRAME_SIZE - 1) / FRAME_SIZE);
+    uint64_t base = frame_alloc_contig(nframes);
+    if (base) {
+      extern void *memset(void *dst, int c, size_t n);
+      /* phys_to_virt, not a cast: pool frames are identity-mapped only on
+         AArch64; on x86_64 the direct map lives at DMAP_BASE and the only
+         identity window is the image itself, [KIMG_BASE, CP_KHOLE_HI) =
+         [0x70000000, 0x78000000) (src/include/kmem.h) -- and the pool may
+         not hand out frames there (they are reserved for the image).  Every
+         other frame_alloc_contig() caller in the tree converts the same way
+         (blk_cache, elf_loader, nfs).  Measured: without this the x86_64
+         unit tier hangs at the first net_socket_create()
+         (test_net_socket_fd_table); with it, 561 tests / 0 failed. */
+      struct socket_pcb *tab = (struct socket_pcb *)phys_to_virt(base);
+      /* Zero each PCB's control fields, NOT the 4 MiB RX ring: the ring is
+         only ever read between rx_head and rx_tail (both zeroed below), so
+         its stale pool contents are unreachable.  A 64 MiB memset here runs
+         inside an IRQ-off window -- it measured 57 ms on the CI runner and
+         tripped the unit tier's [LOCKHEALTH-IRQOFF] 50 ms gate (worst_lock=-
+         because this lock is not registered).  16 x ~1 KiB instead. */
+      for (int i = 0; i < MAX_SOCKETS; i++) {
+        const size_t ring = offsetof(struct socket_pcb, rx_buf);
+        uint8_t *pcb = (uint8_t *)&tab[i];
+        memset(pcb, 0, ring);
+        memset(pcb + ring + SOCKET_RX_BUF_SIZE, 0,
+               sizeof(tab[i]) - (ring + SOCKET_RX_BUF_SIZE));
+      }
+      sockets = tab;
+    }
+  }
+  spinlock_release_irqrestore(&sockets_reserve_lock, flags);
+  return sockets ? 0 : -1;
+}
+
 void net_init(void) {
   // Initialize global network spinlock to serialize accesses to the socket table
   spinlock_init(&net_lock);
+  spinlock_init(&sockets_reserve_lock);
   spinlock_init(&ipr_lock); /* cp/nfs: IPv4 reassembly */
 /* IRQ class: the receive path runs from the device interrupt. */
   lock_register(&net_lock, "net_lock", LOCK_RANK_BACKEND, LOCK_CLASS_IRQ);
 
-  // Clear all socket Control Blocks
-  for (int i = 0; i < MAX_SOCKETS; i++) {
-    sockets[i].in_use = 0;
-  }
+  /* Reserve + zero the socket-PCB table (64 MiB, frame-backed; see the
+     declaration).  Normal boots do it here, while the pool is still one
+     unfragmented run; the unit tier defers it to the first socket because
+     frame_test_suite() asserts against a pristine pool. */
+#ifndef KERNEL_MODE_UNIT_TEST
+  if (net_sockets_reserve() != 0)
+    uart_puts("[net] no socket table -- every socket() will fail\n");
+#endif
 
   // Invalidate the ARP cache entries
   for (int i = 0; i < ARP_CACHE_SIZE; i++) {
@@ -432,6 +502,12 @@ static void handle_udp(struct ipv4_hdr* ip, uint8_t* packet, uint32_t len) {
   }
 
   uint64_t flags = spinlock_acquire_irqsave(&net_lock);
+  /* No table yet (unit-test tier, before the first socket -- the earlier
+     code always had a .bss table) means no socket can match. */
+  if (!sockets) {
+    spinlock_release_irqrestore(&net_lock, flags);
+    return;
+  }
   int rdma_socket_found = 0;
   for (int i = 0; i < MAX_SOCKETS; i++) {
     if (sockets[i].in_use && sockets[i].protocol == IP_PROTO_UDP && sockets[i].local_port == ntohs(udp->dst_port)) {
@@ -524,6 +600,10 @@ static void handle_tcp(struct ipv4_hdr* ip, uint8_t* packet, uint32_t len) {
 
   // Lock the socket table to securely process the incoming TCP segment
   uint64_t flags = spinlock_acquire_irqsave(&net_lock);
+  if (!sockets) { /* no table reserved yet: nothing can match */
+    spinlock_release_irqrestore(&net_lock, flags);
+    return;
+  }
   for (int i = 0; i < MAX_SOCKETS; i++) {
     if (sockets[i].in_use && sockets[i].protocol == IP_PROTO_TCP &&
         sockets[i].local_port == ntohs(tcp->dst_port) &&
@@ -955,6 +1035,10 @@ volatile uint32_t net_port_dup;
 int net_sockets_in_use(void);
 
 struct socket_pcb* net_socket_create(int protocol) {
+  /* The table is frame-backed (see the declaration): reserve it before
+     taking net_lock (frame_alloc_contig takes frame_lock, which must never
+     nest under net_lock). */
+  if (net_sockets_reserve() != 0) return NULL;
   uint64_t flags = spinlock_acquire_irqsave(&net_lock);
   for (int i = 0; i < MAX_SOCKETS; i++) {
     if (!sockets[i].in_use) {
@@ -1058,8 +1142,9 @@ struct socket_pcb* net_socket_create(int protocol) {
 int net_sockets_in_use(void) {
   uint64_t flags = spinlock_acquire_irqsave(&net_lock);
   int n = 0;
-  for (int i = 0; i < MAX_SOCKETS; i++)
-    if (sockets[i].in_use) n++;
+  if (sockets)
+    for (int i = 0; i < MAX_SOCKETS; i++)
+      if (sockets[i].in_use) n++;
   spinlock_release_irqrestore(&net_lock, flags);
   return n;
 }
