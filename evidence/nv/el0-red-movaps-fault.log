@@ -1,0 +1,16 @@
+[EL0] nvabi_probe: /dev/nvshim DRM face from ring 3 (WP-EL0)
+[EL0] 01 open path=/dev/nvshim fd=3 PASS
+[EL0] 02 version name=nouveau v=1.3.1 name_len=8 PASS
+[EL0] 03 get_cap capability=SYNCOBJ value=1 PASS
+[EL0] 04 getparam chipset=0x192 pci=0x2684 fb_size=0x100000000 PASS
+[EL0] 05 arg_size vm_init_enc_size=8 ret_errno=22 PASS
+[EL0] 06 vm_init umd_end=0x8000000000 total=0x10000000000 errno=0 PASS
+[EL0] 07 gem_new handle=1 size=0x2000 bus=0x204c3e000 map_handle=0x1000 PASS
+[EL0] 08 gem_info map_handle=0x1000 size=0x2000 foreign_errno=22 PASS
+[EL0] 09 mmap_off0 errno=22 PASS
+[EL0] 10 mmap_foreign offset=0x30a000 errno=22 PASS
+[EL0] 11 mmap offset=0x1000 len=0x2000 va=0x1080000000 errno=0 PASS
+[KERNEL] User process fault! Vector: 13 RIP: 0x10000048ac
+[KERNEL] fault-pc region=0x0000001000001000+0x0000000000008000 prot=5 kind=1 jit=0 live=1 err=0x0000000000000000 rsp=0x00000017FFFFFAE8
+[KREG] pid=2 vec=13 erc=0x0000000000000000 rip=0x00000010000048AC rsp=0x00000017FFFFFAE8 rax=0x00000010000092D0 rbx=0x000000100000B010 rcx=0x0000000000000043 rdx=0x000000008C7BB45A rsi=0x000000008C7BB45A rdi=0x0000000000000001 rbp=0x0000000080BCE9AE r8=0x0000000000000000 r9=0x0000000000000000 r10=0x0000000000000000 r11=0x0000000000000246 r12=0x0000000000001000 r13=0x0000001080000000 r14=0x0000000000000001 r15=0x0000000000000001
+[LCOMPAT] fault-no-handler pid=2 sig=11 ipc=0x0x10000048AC rsp=0x0x17FFFFFAE8 vec=13 live=1 -> default action
