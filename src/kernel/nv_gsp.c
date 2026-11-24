@@ -3795,6 +3795,11 @@ struct sec2_img {
 };
 
 static int sec2_attempt(struct nv_dev *d, const struct sec2_img *im,
+                        uint32_t sig_idx, const char *tag);
+static void sec2_dmem_diff(struct nv_dev *d, const struct sec2_img *im,
+                           const char *tag);
+
+static int sec2_attempt(struct nv_dev *d, const struct sec2_img *im,
                         uint32_t sig_idx, const char *tag) {
   uint8_t *dmem = im->file + im->dmem_file;
   const uint8_t *sig = im->file + im->sig_off + sig_idx * im->sig_slot;
@@ -3835,6 +3840,11 @@ static int sec2_attempt(struct nv_dev *d, const struct sec2_img *im,
                                      0x2000, 0x4000, 0x5F00, 0x5FF0};
     struct nv_falcon sf = d->falcon[NV_FALCON_IDX_SEC2];
     if (!sf.base) sf.base = NV_FALCON_SEC2_BASE;
+    /* `present` was set by the probe when this window answered the fence word.
+     * It answers real registers now (r5b cleared the core select), and flcn_pio
+     * refuses to touch a falcon it thinks is absent -- that flag, not the
+     * hardware, is what made r5e's landing map return 8/8 read errors. */
+    sf.present = 1;
     int match = 0, bad = -1, rerr = 0;
     uint32_t bad_off = 0, bad_got = 0, bad_want = 0;
     for (uint32_t i = 0; i < 8; i++) {
@@ -3869,10 +3879,14 @@ static int sec2_attempt(struct nv_dev *d, const struct sec2_img *im,
       uart_puts(" want=");
       uart_print_hex(bad_want);
     }
-    uart_puts(match == 8 ? " verdict=LANDED (the port reads the staged image "
-                           "back word for word, signature patch included)\n"
-                         : " verdict=NOT-LANDED (report the raw counts above: "
-                           "the image the core sees is not the image we staged)\n");
+    uart_puts(rerr == 8
+                  ? " verdict=DMEM-UNREADABLE (no probe answered: no claim "
+                    "either way -- this is not evidence the image is absent)\n"
+                  : (match == 8
+                         ? " verdict=LANDED (the port reads the staged image back "
+                           "word for word, signature patch included)\n"
+                         : " verdict=NOT-LANDED (the image the core sees is not "
+                           "the image we staged; raw counts above)\n"));
     /* IMEM with the same SECRET bit the load used.  A marker word is an
      * unreadable page, not a mismatch, and is reported as such. */
     uint32_t iunread = 0, imatch = 0;
@@ -4001,7 +4015,77 @@ static int sec2_attempt(struct nv_dev *d, const struct sec2_img *im,
     uart_puts(" verdict=THIRD-STATE (neither sentinel nor 0xA0A0: report raw)\n");
   }
   (void)halted;
+  /* What did the core leave in its own data image?  A rejection that writes a
+   * status word is visible here, and so is silence. */
+  sec2_dmem_diff(d, im, tag);
   return verified ? 1 : 0;
+}
+
+/* ---- what the core left in DMEM ---------------------------------------
+ *
+ * A boot ROM that rejects an image does not have to be silent: several falcon
+ * ROMs leave a status word in DMEM.  With the port answering (r5b cleared the
+ * core select; `present` is forced because the probe set it while the window
+ * was still fenced) the whole DMEM image can be compared against the bytes we
+ * staged, and every word the core changed is visible.
+ *
+ * Read-only, and it runs after the core has halted, so it cannot influence the
+ * attempt it describes.
+ */
+static void sec2_dmem_diff(struct nv_dev *d, const struct sec2_img *im,
+                           const char *tag) {
+  struct nv_falcon sf = d->falcon[NV_FALCON_IDX_SEC2];
+  if (!sf.base) sf.base = NV_FALCON_SEC2_BASE;
+  sf.present = 1;
+  const uint8_t *img = im->file + im->dmem_file;
+  uint32_t words = im->dmem_len / 4u;
+  uint32_t chunk[64];
+  uint32_t changed = 0, first_off = 0, first_got = 0, first_want = 0;
+  int have_first = 0, rerr = 0;
+  for (uint32_t done = 0; done < words; done += 64) {
+    uint32_t n = words - done;
+    if (n > 64) n = 64;
+    if (nv_falcon_dmem_read(d, &sf, done * 4u, chunk, (int)n) != 0) {
+      rerr++;
+      break;
+    }
+    for (uint32_t i = 0; i < n; i++) {
+      const uint8_t *p = img + (done + i) * 4u;
+      uint32_t want = (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+                      ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+      if (chunk[i] != want) {
+        changed++;
+        if (!have_first) {
+          have_first = 1;
+          first_off = (done + i) * 4u;
+          first_got = chunk[i];
+          first_want = want;
+        }
+      }
+    }
+  }
+  uart_puts("[NV-SEC2] attempt=");
+  uart_puts(tag);
+  uart_puts(" dmem after changed=");
+  uart_print_hex(changed);
+  uart_puts("/");
+  uart_print_hex(words);
+  uart_puts(" read_errors=");
+  print_int(rerr);
+  if (have_first) {
+    uart_puts(" first@");
+    uart_print_hex(first_off);
+    uart_puts(" got=");
+    uart_print_hex(first_got);
+    uart_puts(" staged=");
+    uart_print_hex(first_want);
+  }
+  uart_puts(rerr ? " verdict=PARTIAL-READ (report raw)\n"
+                 : (changed == 0
+                        ? " verdict=DMEM UNTOUCHED (the core wrote nothing back "
+                          "into the data image: no status word, no trace)\n"
+                        : " verdict=DMEM CHANGED (the core wrote into its own "
+                          "data image: the row above names where and what)\n"));
 }
 
 /* `force` runs the attempt even when the SEC2 window refuses to be read.
