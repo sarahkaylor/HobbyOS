@@ -1,0 +1,35 @@
+# The audit list's mechanical source -- docs/nv-arm-reloc.md §4
+command: python3 tools/kernel_reloc_audit.py --by-symbol --mode unit_tests hobbyos.elf
+elf:    the MODE=unit_tests image of gate-green-unit.txt (417 pointer
+        words).  "table" is the containing symbol, or the section
+        bucket when no sized symbol covers the slot.
+
+# hobbyos.elf
+# kernel link range [0x40080000, 0x417B054C)   .rela.dyn=417 entries (present)
+# pointer words baked into static data (need relocating): 417
+#   applied at boot (R_AARCH64_RELATIVE, addend in image): 417
+#   NOTHING WILL APPLY THEM (left at their link address):     0
+# folded-table inventory: 20 table(s) / 412 word(s), plus 5 linker-generated .got slot(s)
+
+words  first slot       section   table                               -> first target
+  108  0x0000401F5C68 .rodata   l_tab_fd                               -> l_fd_fsync
+   94  0x0000401F6280 .rodata   l_tab_proc                             -> l_proc_rt_sigaction
+   36  0x0000401F6778 .rodata   l_tab_tmr                              -> l_tmr_pause
+   26  0x0000401F5B18 .rodata   l_tab_core                             -> l_core_time
+   18  0x0000401F5960 .rodata   .rodata                                -> .rodata+0xafc2 "open"
+   18  0x0000401F6190 .rodata   l_tab_mem                              -> l_mem_mmap
+   18  0x0000401F6C48 .rodata   reason_names                           -> .rodata+0x3757e "ok"
+   13  0x0000401F59D8 .rodata   cons_dtags                             -> .rodata+0x42633 "[PUB]"
+   12  0x0000401F69F0 .rodata   do_hw_params.nm                        -> .rodata+0x23f1b "sbits"
+   10  0x0000401F6CD8 .rodata   arg_names                              -> .rodata+0x3757e "ok"
+    9  0x0000401F5990 .rodata   cons_dnames                            -> .rodata+0x136e7 "pub"
+    9  0x0000401F74C0 .rodata   vm_pw_name                             -> .rodata+0x12676 "touch_obj"
+    8  0x0000401F57B0 .rodata   el_compat_83                           -> .rodata+0x2155f "ld-linux-x86-64.so.2"
+    8  0x0000401F6700 .rodata   l_tab_shm                              -> l_shm_shmget
+    8  0x0000401F6D28 .rodata   link_names                             -> .rodata+0x3757e "ok"
+    7  0x0000401F6B10 .rodata   kStoreNames                            -> .rodata+0x4284a "PLAIN"
+    5  0x000040239288 .got      .got                                   -> linux_compat_sig_deliverable
+    3  0x0000401F7250 .rodata   g_reloc_probe                          -> .rodata+0x39158 "reloc_probe"
+    3  0x0000401F7268 .rodata   g_reloc_names                          -> .rodata+0x4114a "alpha"
+    2  0x0000401F5838 .rodata   fat16_getdents64.selves                -> .rodata+0x10f93
+    2  0x0000401F69E0 .rodata   elem_name                              -> .rodata+0x21db5 "Master Playback Volume"

@@ -4,6 +4,13 @@ Lane: `wp-reloc` · branch `nv/wp-reloc-arm` (cut from `5cc95b9d`, the round-3
 integration tip) · box `sarah@192.168.0.250` (`/srv/nv/wp-reloc`) · worktree
 `/Users/sarah/Documents/GitHub/hobbyos-nv/wp-reloc` · 2026-11-23.
 
+> **Follow-up (landed after this report).** The audit list this lane produced
+> by hand in §5, and the "it cannot grow silently" claim in §4, are now a
+> checked-in, per-`MODE` inventory with a link-time guard:
+> **`docs/nv-arm-reloc.md`** (list in §4, gate in §3, refresh via
+> `make reloc_baseline MODE=<mode>`). Read that doc for the current numbers;
+> this report stays as the round-4 measurement record.
+
 Tags: **MEASURED** = I ran it on c4 and read the number · **SOURCE** = read from
 the tree · **INFERRED** = reasoning, not observed. All arithmetic below was
 computed in code, not by hand.

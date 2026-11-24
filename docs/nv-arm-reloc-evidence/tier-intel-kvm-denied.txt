@@ -1,0 +1,14 @@
+# why the intel tier above used SKIP_KVM=1
+command: TOOLS_SKIP=1 BROWSER_SKIP=1 ./run_unit_tests_intel.sh (KVM path, default on a host with /dev/kvm)
+result: QEMU refused to start; kept because it is the reason the run
+        above is TCG and not KVM, not because it is a test result.
+
+# launcher (shell, desktop, wave) exercises the DSO version.
+rm -f SHTEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT SORT.TXT STAGE4K.BIN
+qemu-system-x86_64 -M q35,vmport=on -cpu host -smp 8 -m 12288M -pflash /home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd -display gtk -serial stdio -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1 -drive file=disk.img,format=raw,id=disk0,if=none -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -device virtio-tablet-pci  -action shutdown=poweroff  -display none -enable-kvm
+WARNING: Image format was not specified for '/home/sarah/.local/share/OVMF/OVMF_CODE_4M.fd' and probing guessed raw.
+         Automatically detecting the format is dangerous for raw images, write operations on block 0 will be restricted.
+         Specify the 'raw' format explicitly to remove the restrictions.
+qemu-system-x86_64: Could not access KVM kernel module: Permission denied
+qemu-system-x86_64: failed to initialize kvm: Permission denied
+make: *** [Makefile:3424: run] Error 1

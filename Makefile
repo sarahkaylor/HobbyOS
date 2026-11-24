@@ -70,8 +70,11 @@ endif
 # Post-link audit of pointer words baked into kernel static data (see
 # tools/kernel_reloc_audit.py).  Runs after every AArch64 kernel link; it is a
 # build dependency the same way fat16img.py is (python3, stdlib only).
+# RELOC_BASELINE is the audited per-MODE folded-table inventory the gate
+# compares the image against (docs/nv-arm-reloc.md §4); keep the two in step.
 PYTHON ?= python3
 RELOC_AUDIT ?= $(PYTHON) tools/kernel_reloc_audit.py
+RELOC_BASELINE ?= tools/reloc_tables_baseline.json
 
 # Mode selection (desktop or test)
 ifneq ($(filter lo_test_run lo_test_build,$(MAKECMDGOALS)),)
@@ -1083,13 +1086,20 @@ $(TARGET): $(OBJS)
 	@if [ "$$(cat .arch-stamp 2>/dev/null)" != "$(ARCH)" ]; then rm -f $@; printf '%s' "$(ARCH)" > .arch-stamp; fi
 	$(LD) $(LDFLAGS) -o $@ $^
 ifeq ($(ARCH),arm)
-	@# Post-link reloc gate (docs/... ; SWARM-REPORT-WP-RELOC.md): a word in
-	@# static data that holds a kernel link address must be covered by an
-	@# R_AARCH64_RELATIVE entry arch/arm/reloc.c applies, or the image would
-	@# boot with a pointer that is wrong under the Limine slide.  This is the
-	@# "break the build, not the boot" half of the fix -- a reintroduced
+	@# Post-link reloc gate (docs/nv-arm-reloc.md; SWARM-REPORT-WP-RELOC.md):
+	@# a word in static data that holds a kernel link address must be covered
+	@# by an R_AARCH64_RELATIVE entry arch/arm/reloc.c applies, or the image
+	@# would boot with a pointer that is wrong under the Limine slide.  This is
+	@# the "break the build, not the boot" half of the fix -- a reintroduced
 	@# folded table stops here instead of faulting with ESR EC=0.
-	$(RELOC_AUDIT) --gate $@
+	@# The second half compares the image's folded-table inventory with
+	@# $(RELOC_BASELINE) (per MODE, audited in docs/nv-arm-reloc.md): while
+	@# the -pie link relocates every word, a NEW table would pass the coverage
+	@# check silently, so a table that is not in the audit list, or one that
+	@# grew a row, fails the link until the author either builds it at run time
+	@# or records it (--update-baseline + a note in the doc).
+	$(RELOC_AUDIT) --gate --baseline $(RELOC_BASELINE) --mode $(MODE) \
+	    $(RELOC_GATE_FLAGS) $@
 endif
 ifeq ($(ARCH),intel)
 	$(OBJCOPY) -I elf64-x86-64 -O elf32-i386 $@
@@ -5026,6 +5036,18 @@ test_intel:
 unit_tests_arm:
 	$(MAKE) ARCH=arm MODE=unit_tests run
 
+# Refresh the audited folded-table inventory (docs/nv-arm-reloc.md §4).  The
+# post-link gate rejects an image whose inventory drifted, so this builds with
+# the inventory check off, records the result for $(MODE), then re-links with
+# the gate back on -- the last step is what proves the refreshed file accepts
+# the image.  Commit tools/reloc_tables_baseline.json together with the doc row.
+#   make reloc_baseline MODE=unit_tests
+reloc_baseline:
+	$(MAKE) ARCH=arm MODE=$(MODE) RELOC_GATE_FLAGS=--no-inventory $(TARGET)
+	$(RELOC_AUDIT) --update-baseline --baseline $(RELOC_BASELINE) \
+	    --mode $(MODE) $(TARGET)
+	$(MAKE) ARCH=arm MODE=$(MODE) $(TARGET)
+
 unit_tests_intel:
 	$(MAKE) ARCH=intel MODE=unit_tests run
 
@@ -5110,7 +5132,7 @@ test_parity_ci:
 	bash tools/gate/parity_ci_test.sh
 
 .PHONY: icewm_test
-.PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test desktop_test_build host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test merge_gate merge_gate_ci test_merge_gate parity_ci test_parity_ci cache_setup cold_vs_cached test_cache test_diff_harness test_pr_sync bigload_intel t4_compat_parity t4_device_gate t4_device_selftest t4_device_check t4_w0_gate t4_w0_selftest t4_wave_gate t4_wave_selftest t4_glued_selftest t4_compat_selftest open_mode_scan nfs_rsize_scan uname_parity_host t3_pollbrk t3_nullentry t3_resume_page_selftest
+.PHONY: all clean run memtest fileio_test fork_test tests test test_run_raw unit_tests desktop_test desktop_test_build host_tests run_arm run_intel test_arm test_intel unit_tests_arm unit_tests_intel desktop_test_arm desktop_test_intel files_nav_test deploy_intel deploy_run_intel format check-format style-diff style-test merge_gate merge_gate_ci test_merge_gate parity_ci test_parity_ci cache_setup cold_vs_cached test_cache test_diff_harness test_pr_sync bigload_intel t4_compat_parity t4_device_gate t4_device_selftest t4_device_check t4_w0_gate t4_w0_selftest t4_wave_gate t4_wave_selftest t4_glued_selftest t4_compat_selftest open_mode_scan nfs_rsize_scan uname_parity_host t3_pollbrk t3_nullentry t3_resume_page_selftest reloc_baseline
 
 # icewm.md §9 (lane apps): virtual-display core host golden test
 # (src/kernel/vdisplay.c with the kernel glue compiled out).

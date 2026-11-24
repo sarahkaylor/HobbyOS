@@ -1,0 +1,15 @@
+# the union path -- a MODE with no inventory section of its own
+command: python3 tools/kernel_reloc_audit.py --gate --mode soak hobbyos.elf
+elf:    the MODE=test image above; `soak` has no section in
+        tools/reloc_tables_baseline.json, so the gate compares against
+        the union of the audited modes (desktop + test + unit_tests).
+result: exit 0 -- 18 tables / 406 words, every name the union lists.
+
+# hobbyos.elf
+# kernel link range [0x40080000, 0x41527260)   .rela.dyn=411 entries (present)
+# pointer words baked into static data (need relocating): 411
+#   applied at boot (R_AARCH64_RELATIVE, addend in image): 411
+#   NOTHING WILL APPLY THEM (left at their link address):     0
+# folded-table inventory: 18 table(s) / 406 word(s), plus 5 linker-generated .got slot(s)
+hobbyos.elf: reloc gate OK -- 411 kernel pointer word(s), every one applied at boot
+hobbyos.elf: folded-table inventory matches -- 18 table(s) / 406 word(s) as audited [union of desktop, test, unit_tests]

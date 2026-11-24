@@ -1,0 +1,17 @@
+# intel unit tier on the tree with the gate (docs/nv-arm-reloc.md §8)
+command: SKIP_KVM=1 TOOLS_SKIP=1 BROWSER_SKIP=1 UNIT_TESTS_TIMEOUT=1800 ./run_unit_tests_intel.sh
+why SKIP_KVM=1: this VM's /dev/kvm is root:kvm and this user is not in
+  the kvm group, so -enable-kvm dies with `Could not access KVM kernel
+  module: Permission denied` (kept in tier-intel-kvm-denied.txt).  The
+  tier therefore ran under TCG, slower but the same binary and the same
+  assertions; count parity is what this row is for.
+result: 589 run / 0 failed / UNIT TESTS PASSED, exit 0 -- identical to the
+        documented intel baseline at eaf006a9 (589/0), and the intel link
+        ran no reloc gate at all (0 `reloc gate` lines in build.log).
+
+Running unit tests with QEMU_ARGS: 
+    RUNNING KERNEL UNIT TESTS     
+Tests run:    589
+Tests failed: 0
+UNIT TESTS PASSED
+intel exit=0

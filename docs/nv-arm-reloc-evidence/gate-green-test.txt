@@ -1,0 +1,14 @@
+# GREEN -- MODE=test (the soak tier's kernel image)
+make: TOOLS_SKIP=1 BROWSER_SKIP=1 ARCH=arm MODE=test hobbyos.elf
+result: make exit 0; 18 tables / 406 words + 5 .got = 411 pointer words.
+
+python3 tools/kernel_reloc_audit.py --gate --baseline tools/reloc_tables_baseline.json --mode test \
+     hobbyos.elf
+# hobbyos.elf
+# kernel link range [0x40080000, 0x41527260)   .rela.dyn=411 entries (present)
+# pointer words baked into static data (need relocating): 411
+#   applied at boot (R_AARCH64_RELATIVE, addend in image): 411
+#   NOTHING WILL APPLY THEM (left at their link address):     0
+# folded-table inventory: 18 table(s) / 406 word(s), plus 5 linker-generated .got slot(s)
+hobbyos.elf: reloc gate OK -- 411 kernel pointer word(s), every one applied at boot
+hobbyos.elf: folded-table inventory matches -- 18 table(s) / 406 word(s) as audited [MODE=test]

@@ -1,0 +1,77 @@
+{
+ "about": "Folded-table inventory for the AArch64 kernel image.  Every entry is a table of function/string pointers that the compiler folded into static data and ld.lld resolved to LINK addresses; arch/arm/reloc.c applies one R_AARCH64_RELATIVE per word at boot.  tools/kernel_reloc_audit.py --gate fails the link when a table appears (NEW) or grows (GREW) without this file and docs/nv-arm-reloc.md being updated on purpose.  Regenerate with --update-baseline; do not hand-edit.",
+ "generated_by": "tools/kernel_reloc_audit.py --update-baseline",
+ "modes": {
+  "desktop": {
+   "total": 411,
+   "tables": {
+    "l_tab_fd": 108,
+    "l_tab_proc": 94,
+    "l_tab_tmr": 36,
+    "l_tab_core": 26,
+    ".rodata": 18,
+    "l_tab_mem": 18,
+    "reason_names": 18,
+    "cons_dtags": 13,
+    "do_hw_params.nm": 12,
+    "arg_names": 10,
+    "cons_dnames": 9,
+    "vm_pw_name": 9,
+    "el_compat_83": 8,
+    "l_tab_shm": 8,
+    "link_names": 8,
+    "kStoreNames": 7,
+    "elem_name": 2,
+    "fat16_getdents64.selves": 2
+   }
+  },
+  "unit_tests": {
+   "total": 417,
+   "tables": {
+    "l_tab_fd": 108,
+    "l_tab_proc": 94,
+    "l_tab_tmr": 36,
+    "l_tab_core": 26,
+    ".rodata": 18,
+    "l_tab_mem": 18,
+    "reason_names": 18,
+    "cons_dtags": 13,
+    "do_hw_params.nm": 12,
+    "arg_names": 10,
+    "cons_dnames": 9,
+    "vm_pw_name": 9,
+    "el_compat_83": 8,
+    "l_tab_shm": 8,
+    "link_names": 8,
+    "kStoreNames": 7,
+    "g_reloc_names": 3,
+    "g_reloc_probe": 3,
+    "elem_name": 2,
+    "fat16_getdents64.selves": 2
+   }
+  },
+  "test": {
+   "total": 411,
+   "tables": {
+    "l_tab_fd": 108,
+    "l_tab_proc": 94,
+    "l_tab_tmr": 36,
+    "l_tab_core": 26,
+    ".rodata": 18,
+    "l_tab_mem": 18,
+    "reason_names": 18,
+    "cons_dtags": 13,
+    "do_hw_params.nm": 12,
+    "arg_names": 10,
+    "cons_dnames": 9,
+    "vm_pw_name": 9,
+    "el_compat_83": 8,
+    "l_tab_shm": 8,
+    "link_names": 8,
+    "kStoreNames": 7,
+    "elem_name": 2,
+    "fat16_getdents64.selves": 2
+   }
+  }
+ }
+}
