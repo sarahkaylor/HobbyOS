@@ -18,7 +18,9 @@ Claims are tagged MEASURED (seen in a log from this branch), SOURCE (read from a
 cited contract) or INFERRED. Evidence:
 `evidence/nv/el0-nvif-44of44.log` (the green EL0 run, trimmed to `[EL0]` and
 `[NVSHIM]` rows), `evidence/nv/nvif-mutation-m1-wrong-class.log`,
-`evidence/nv/nvif-mutation-m2-size-check.log`.
+`evidence/nv/nvif-mutation-m2-size-check.log`, and
+`evidence/nv/el0-red-nvif-del-buffer.log` (the one red EL0 run a row produced
+before a client-side fix).
 
 ---
 
@@ -222,10 +224,12 @@ cookie the client chose (`0x17fffff920`, an address in its own stack) is the
 cookie the kernel's rows name, and the class ids the client parses out of its
 own buffer are the ids the kernel says it wrote.
 
-One defect found by a row and fixed: row 31's second `DEL` initially answered
-`-EINVAL` because the shared 192-byte request buffer had been rebuilt as an
-`MTHD` by the call in between — a client-side bug in the probe (a real winsys
-uses one buffer per call), caught because the row demanded `0` and got `22`.
+One defect found by a row and fixed (`evidence/nv/el0-red-nvif-del-buffer.log`,
+red at 43/44, then `el0-nvif-44of44.log` green): row 31's second `DEL`
+initially answered `-EINVAL` (`del_again=22`) because the shared 192-byte
+request buffer had been rebuilt as an `MTHD` by the call in between — a
+client-side bug in the probe (a real winsys uses one buffer per call), caught
+because the row demanded `0` and got `22`.
 
 ---
 
