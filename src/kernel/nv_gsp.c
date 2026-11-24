@@ -54,6 +54,7 @@
 #include "nv_dma.h"
 #include "nv_rpc.h"
 #include "nv_gsp_glue.h"
+#include "nv_vram.h"
 #include "frame.h"
 #include "kmem.h"
 #include "errno.h"
@@ -2233,6 +2234,12 @@ int nv_gsp_fwsec_reset(struct nv_dev *d) {
   return 0;
 }
 
+/* The metadata block's `verified` field, read and written byte-wise (it is a
+ * wire structure the firmware also touches).  Defined above the launch so the
+ * BAR1 read-back of the VRAM copy can use the same offset. */
+#define NV_WPR_OFF_VERIFIED 0xF8u
+#define NV_WPR_VERIFIED_WORD 0xA0A0A0A0A0A0A0A0ULL
+
 /* ---- stage 6b: launch FWSEC ---------------------------------------------
  *
  * docs/nv-pmu-acr-contract.md 3.3 steps 4-11, now that the measurement says the
@@ -2246,13 +2253,61 @@ int nv_gsp_fwsec_reset(struct nv_dev *d) {
  * cleanly into MAILBOX0, so trying both costs one boot and answers the question.
  * The descriptor byte layout below is INFERRED from the field list in the
  * contract; if variant B is the one that works, that inference gets a note.
+ *
+ * Round 4 adds the VRAM channel: the FRTS region (1 MiB at frts_off) is
+ * prefilled through BAR1 before the launch and scanned again after it.  BAR1 is
+ * a PFB decode of VRAM, so the falcon's read fence does not cover it, and the
+ * prefill makes "FWSEC wrote nothing" an observation instead of an assumption
+ * (src/kernel/nv_vram.c).
  */
-int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size) {
+int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size,
+                        uint64_t wpr_start) {
   if (!d) return -EINVAL;
   if (!d->ucode_desc || !d->ucode_imem || !d->ucode_dmem) {
     uart_puts("[NV-FWSEC] no ucode located: nothing to launch\n");
     return -ENOENT;
   }
+  /* ---- the VRAM channel, before anything touches the falcon -------------
+   *
+   * This is the one path the launch cannot fence.  It also comes first in the
+   * run so its answer exists whether the launch below succeeds, fails or
+   * wedges: a region read after a failed launch means nothing unless the same
+   * region was the host's own pattern before it.
+   *
+   * `frts_off` arrives in 4 KiB pages (the command's unit), so the region is
+   * frts_off*4096 for frts_size*4096 bytes -- 0x5FE300000 for 0x100000 here.
+   */
+  struct nv_vram_win vram;
+  struct nv_vram_scan vscan_pre;
+  int vram_ready = 0;
+  const uint32_t kVramSentinel = 0xA5A5A5A5u;
+  uint32_t vram_len = frts_size * 4096u;
+  /* One region of 1 MiB is the contract's value; a page count that would make
+   * the window larger than a few MiB is not a region this run should write
+   * into, so it is refused rather than scaled. */
+  if (frts_size > 0x400u) vram_len = 0;
+  for (uint32_t i = 0; i < (uint32_t)sizeof vram; i++) ((uint8_t *)&vram)[i] = 0;
+  nv_vram_scan_reset(&vscan_pre);
+  if (frts_off && vram_len) {
+    int vrc = nv_vram_prefill(d, &vram, (uint64_t)frts_off * 4096u, vram_len,
+                              kVramSentinel, &vscan_pre);
+    vram_ready = (vrc == 0);
+    uart_puts("[NV-BAR1] channel=");
+    uart_puts(vram_ready ? "TRUSTWORTHY" : "BLIND");
+    uart_puts(" (prefill read back through the aperture; only TRUSTWORTHY can "
+              "report a firmware write)\n");
+    /* The same three questions asked before START, so the change of behaviour
+     * is one observation with one instrument rather than two code paths. */
+    (void)nv_vram_behaviour(d, (uint64_t)frts_off * 4096u, "frts-pre");
+    (void)nv_vram_behaviour(d, (uint64_t)frts_off * 4096u + vram_len - 0x1000u,
+                            "frts-last-pre");
+    (void)nv_vram_behaviour(d, (uint64_t)frts_off * 4096u + vram_len,
+                            "above-pre");
+    (void)nv_vram_behaviour(d, 0x5F0000000ULL, "scratch-pre");
+  } else {
+    uart_puts("[NV-BAR1] skipped: no FRTS region in this layout\n");
+  }
+
   uint32_t total = d->ucode_imem + d->ucode_dmem;
   uint32_t pages = (total + FRAME_SIZE - 1) / FRAME_SIZE;
   uint64_t phys = frame_alloc_contig((int)pages);
@@ -2972,6 +3027,190 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size)
     uart_puts("\n");
   }
 
+  /* ---- what FWSEC left in VRAM, read on the channel the fence misses ----
+   *
+   * Run r4a's first shape of this block reported "every word of the 1 MiB
+   * changed, therefore FWSEC wrote 1 MiB", and the log itself refutes that:
+   * the head dump read 0xBAD0AC0A at offset 0 and the next dump, 32 reads
+   * later, read 0xBAD0AC2A at the *same* offset.  An address that answers a
+   * different value on every access is a counter, not memory (PLAN.md section
+   * 6, rule 1: a read that cannot be negative is not evidence).
+   *
+   * So every post-launch conclusion now starts with nv_vram_behaviour(), which
+   * asks the same address three questions: eight reads in a row (memory answers
+   * the same value), two addresses alternately (a shared counter means the
+   * address is ignored), and a write read back (a page that will not hold a
+   * value cannot report a firmware write either).  Only a window that answers
+   * memory gets a scan.
+   *
+   * The probes cover four offsets on purpose, so the boundary of whatever
+   * happened is measured and not assumed: the FRTS region itself, the bootbin
+   * page inside the same WPR region, the metadata copy page at the WPR base,
+   * and a scratch page 134 MiB below the WPR that no firmware is told about.
+   */
+  if (vram.p && vram_len) {
+    uint64_t frts64 = (uint64_t)frts_off * 4096u;
+    /* The four boundary offsets, so the extent of the poison is measured and
+     * not assumed: the last 4 KiB page below the region, the first page of it,
+     * its last page, and the first page above it.  A poison that starts exactly
+     * at frtsOffset and ends exactly at frtsOffset+frtsSize is the region the
+     * FRTS command was handed, which is what makes the next run's control
+     * (fault-injected init_cmd) worth a deploy. */
+    int mem_below = nv_vram_behaviour(d, frts64 - 0x1000u, "below-frts-post");
+    int mem_frts = nv_vram_behaviour(d, frts64, "frts-post");
+    int mem_frts_last = nv_vram_behaviour(d, frts64 + vram_len - 0x1000u,
+                                          "frts-last-post");
+    uint64_t meta_off = wpr_start ? wpr_start : 0x5F8700000ULL;
+    int mem_above = (frts64 + vram_len == meta_off)
+                        ? -1
+                        : nv_vram_behaviour(d, frts64 + vram_len,
+                                            "above-frts-post");
+    int mem_boot = nv_vram_behaviour(d, 0x5FE2F8000ULL, "bootbin-post");
+    int mem_meta = nv_vram_behaviour(d, meta_off, "wpmeta-post");
+    int mem_scratch = nv_vram_behaviour(d, 0x5F0000000ULL, "scratch-post");
+
+    if (mem_frts == 1) {
+      struct nv_vram_scan post;
+      int src = nv_vram_scan_window(&vram, 0, vram_len / 4u, kVramSentinel,
+                                    &post);
+      int eff = nv_vram_judge(&vscan_pre, &post);
+      uart_puts("[NV-BAR1] frts post-scan rc=");
+      print_int(src);
+      uart_puts(" words=");
+      uart_print_hex(post.words);
+      uart_puts(" untouched=");
+      uart_print_hex(post.sentinel);
+      uart_puts(" changed=");
+      uart_print_hex(post.other);
+      uart_puts(" zero=");
+      uart_print_hex(post.zero);
+      uart_puts(" sum=");
+      uart_print_hex(post.sum);
+      uart_puts(" (pre sum=");
+      uart_print_hex(vscan_pre.sum);
+      uart_puts(")\n");
+      uart_puts("[NV-BAR1] frts verdict=");
+      uart_puts(nv_vram_effect_name(eff));
+      uart_puts(eff == NV_VRAM_EFFECT_NOTHING
+                    ? " (every word is still the host's pattern: FWSEC wrote "
+                      "nothing into the region in this run)\n"
+                    : (eff == NV_VRAM_EFFECT_WROTE
+                           ? " (words the host prefilled are something else now: "
+                             "see the first-change row)\n"
+                           : " (see the raw counts: no verdict read into them)\n"));
+      if (post.other) {
+        uart_puts("[NV-BAR1] first change @frts+0x");
+        uart_print_hex(post.first_other_off);
+        uart_puts(" = ");
+        uart_print_hex(post.first_other_val);
+        uart_puts("\n");
+      }
+    } else if (mem_frts == 2) {
+      uart_puts("[NV-BAR1] frts post-scan skipped: reads are stable but a write "
+                "does not read back, so 'changed' and 'a constant poison' look "
+                "identical at this offset (verdict=AMBIGUOUS, no claim)\n");
+    } else {
+      uart_puts("[NV-BAR1] frts post-scan skipped: the region answers an access "
+                "counter after START, so no word in it is a readable datum "
+                "(verdict=FENCED-ON-BAR1, poison 0xBAD0AC0A + n)\n");
+    }
+
+    /* The metadata copy the booter leaves at gspFwWprStart.  Its magic and its
+     * `verified` word are the only VRAM-side trace of the booter -- i.e. of the
+     * privilege drop having happened -- and SEC2 writes them, so absence this
+     * run is expected and presence would be news.  Read only when the page
+     * answers memory: zeros from a poisoned page are not "no copy". */
+    if (wpr_start && mem_meta == 1) {
+      struct nv_vram_win mw;
+      if (nv_vram_open(d, wpr_start, 256, &mw) == 0) {
+        uint64_t magic = ((uint64_t)nv_vram_rd32(&mw, 4u) << 32) |
+                         (uint64_t)nv_vram_rd32(&mw, 0u);
+        uint32_t ver_lo = nv_vram_rd32(&mw, NV_WPR_OFF_VERIFIED);
+        uint32_t ver_hi = nv_vram_rd32(&mw, NV_WPR_OFF_VERIFIED + 4);
+        uint32_t nz = 0;
+        for (uint32_t i = 0; i < 64; i++)
+          if (nv_vram_rd32(&mw, i * 4u)) nz++;
+        uart_puts("[NV-BAR1] wpmeta @");
+        uart_print_hex(wpr_start);
+        uart_puts(" magic=");
+        uart_print_hex(magic);
+        uart_puts(" verified_hi=");
+        uart_print_hex(ver_hi);
+        uart_puts("_lo=");
+        uart_print_hex(ver_lo);
+        uart_puts(" nonzero_words=");
+        uart_print_hex(nz);
+        if (magic == 0xDC3AAE21371A60B3ULL && ver_hi == 0xA0A0A0A0u &&
+            ver_lo == 0xA0A0A0A0u)
+          uart_puts(" verdict=BOOTER ACCEPTED THE META (the privilege drop "
+                    "happened: SEC2 ran)\n");
+        else if (magic == 0xDC3AAE21371A60B3ULL)
+          uart_puts(" verdict=META COPY PRESENT, verified NOT SET (something "
+                    "copied the block; no booter acceptance)\n");
+        else
+          uart_puts(" verdict=NO META COPY AT gspFwWprStart (absent magic: "
+                    "consistent with the booter never running, which the SEC2 "
+                    "rows already report)\n");
+        nv_vram_close(&mw);
+      }
+    } else if (wpr_start) {
+      uart_puts("[NV-BAR1] wpmeta read skipped: the page does not answer as "
+                "memory after START\n");
+    }
+
+    /* One summary row, so the shape of the fence is one line in the report:
+     * which of the four offsets still answered memory after START. */
+    uart_puts("[NV-BAR1] post-start map below=");
+    uart_puts(mem_below == 1 ? "MEMORY" : (mem_below == 2 ? "AMBIGUOUS" : "POISON"));
+    uart_puts(" frts-first=");
+    uart_puts(mem_frts == 1 ? "MEMORY" : (mem_frts == 2 ? "AMBIGUOUS" : "POISON"));
+    uart_puts(" frts-last=");
+    uart_puts(mem_frts_last == 1 ? "MEMORY"
+                                 : (mem_frts_last == 2 ? "AMBIGUOUS" : "POISON"));
+    uart_puts(" above=");
+    uart_puts(mem_above < 0 ? "same-page"
+                            : (mem_above == 1 ? "MEMORY"
+                                              : (mem_above == 2 ? "AMBIGUOUS"
+                                                                : "POISON")));
+    uart_puts(" bootbin=");
+    uart_puts(mem_boot == 1 ? "MEMORY" : (mem_boot == 2 ? "AMBIGUOUS" : "POISON"));
+    uart_puts(" wpmeta=");
+    uart_puts(mem_meta == 1 ? "MEMORY" : (mem_meta == 2 ? "AMBIGUOUS" : "POISON"));
+    uart_puts(" scratch=");
+    uart_puts(mem_scratch == 1 ? "MEMORY"
+                               : (mem_scratch == 2 ? "AMBIGUOUS" : "POISON"));
+    uart_puts(" halt_ns=");
+    uart_print_hex(changed_ns);
+    uart_puts(" halted=");
+    print_int(halted);
+    uart_puts("\n");
+
+    /* Page granularity at both edges.  'M' = the page answers as memory, 'P' =
+     * it answers a sequence, 'n' = neither.  Nine pages at each edge, four
+     * outside and four inside plus the boundary page, so "the fence covers this
+     * 1 MiB and nothing else" is a count and not a claim. */
+    {
+      char pm[10];
+      if (nv_vram_page_map(d, frts64 - 4u * 0x1000u, 9, pm) == 0) {
+        uart_puts("[NV-BAR1] edge lo pages ");
+        uart_print_hex(frts64 - 4u * 0x1000u);
+        uart_puts("..+0x9000: ");
+        uart_puts(pm);
+        uart_puts("\n");
+      }
+      if (nv_vram_page_map(d, frts64 + vram_len - 5u * 0x1000u, 9, pm) == 0) {
+        uart_puts("[NV-BAR1] edge hi pages ");
+        uart_print_hex(frts64 + vram_len - 5u * 0x1000u);
+        uart_puts("..+0x9000: ");
+        uart_puts(pm);
+        uart_puts("\n");
+      }
+    }
+    nv_vram_close(&vram);
+  } else {
+    uart_puts("[NV-BAR1] post-scan skipped: the VRAM channel is not open\n");
+  }
+
   /* ---- the store matrix, now that the launch has said its piece ---------- */
   {
     static const struct nv_store_probe probes[3] = {
@@ -3221,11 +3460,6 @@ out:
   for (uint32_t i = 0; i < pages; i++) frame_free(phys + (uint64_t)i * FRAME_SIZE);
   return rc;
 }
-
-/* The metadata block's `verified` field, read and written byte-wise (it is a
- * wire structure the firmware also touches). */
-#define NV_WPR_OFF_VERIFIED 0xF8u
-#define NV_WPR_VERIFIED_WORD 0xA0A0A0A0A0A0A0A0ULL
 
 /* `force` = run the attempt even when the SEC2 window refuses to be read. */
 int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
@@ -3752,7 +3986,8 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
     int frc = nv_gsp_fwsec_reset(d);
     if (frc == 0 && lay.frts_offset) {
       int lrc3 = nv_gsp_fwsec_launch(d, (uint32_t)(lay.frts_offset >> 12),
-                                     (uint32_t)(lay.frts_size >> 12));
+                                     (uint32_t)(lay.frts_size >> 12),
+                                     lay.wpr_start);
       uart_puts("[NV-GSP] stage6b (fwsec) result=");
       print_int(lrc3);
       uart_puts("\n");

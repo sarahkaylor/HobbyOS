@@ -22,6 +22,7 @@
 #include "unit_test.h"
 #include "nv.h"
 #include "nv_regs.h"
+#include "nv_vram.h"
 #include "errno.h"
 
 #define FAKE_NR_FALCON 3
@@ -712,6 +713,111 @@ static void test_nv_dmem_probe(void) {
   EXPECT_EQ(nv_falcon_dmem_probe(d, f, 0x10000, 1, 0, &seen), -ERANGE);
 }
 
+/* ---- the VRAM channel: prefill, scan, judge ----------------------------
+ *
+ * The instrument round 4 judges FWSEC with.  Its whole value rests on one
+ * property: a region whose prefill did not survive cannot report a firmware
+ * write.  That is asserted here (the BLIND cases) as hard as the positive one,
+ * because "0 words changed" out of a region nobody could write is exactly the
+ * false negative this project keeps paying runs for.
+ */
+static void test_nv_vram_scan_and_judge(void) {
+  uart_puts("  Running test_nv_vram_scan_and_judge...\n");
+  tests_run++;
+  const uint32_t SENT = 0xA5A5A5A5u;
+  uint32_t mem[64];
+  struct nv_vram_win w;
+  for (uint32_t i = 0; i < 64; i++) mem[i] = SENT;
+  w.p = (volatile uint8_t *)mem;
+  w.phys = 0;
+  w.vram_off = 0;
+  w.len = sizeof mem;
+
+  struct nv_vram_scan pre, post;
+  ASSERT(nv_vram_scan_window(&w, 0, 64, SENT, &pre) == 0);
+  EXPECT_EQ((int)pre.words, 64);
+  EXPECT_EQ((int)pre.sentinel, 64); /* the prefill stuck */
+  EXPECT_EQ((int)pre.other, 0);
+  EXPECT_EQ((int)pre.zero, 0);
+  EXPECT_EQ(nv_vram_judge(&pre, &pre), NV_VRAM_EFFECT_NOTHING);
+
+  /* A single changed word is a write, and the scan names where and what. */
+  mem[5] = 0xDEADBEEFu;
+  ASSERT(nv_vram_scan_window(&w, 0, 64, SENT, &post) == 0);
+  EXPECT_EQ((int)post.other, 1);
+  EXPECT_EQ((int)post.first_other_off, 20);
+  EXPECT_EQ((int)post.first_other_val, 0xDEADBEEF);
+  EXPECT_EQ(nv_vram_judge(&pre, &post), NV_VRAM_EFFECT_WROTE);
+
+  /* A zero read back is a change, not "success": the region was NOT zero. */
+  mem[5] = 0;
+  ASSERT(nv_vram_scan_window(&w, 0, 64, SENT, &post) == 0);
+  EXPECT_EQ((int)post.zero, 1);
+  EXPECT_EQ((int)post.other, 1);
+  EXPECT_EQ(nv_vram_judge(&pre, &post), NV_VRAM_EFFECT_WROTE);
+
+  /* BLIND, case 1: the region read back zeros, so the host's prefill never
+   * landed.  The pre-scan must refuse to be an instrument. */
+  struct nv_vram_scan blind;
+  for (uint32_t i = 0; i < 64; i++) mem[i] = 0;
+  ASSERT(nv_vram_scan_window(&w, 0, 64, SENT, &blind) == 0);
+  EXPECT_EQ((int)blind.sentinel, 0);
+  EXPECT_EQ((int)blind.other, 64);
+  EXPECT_EQ(nv_vram_judge(&blind, &blind), NV_VRAM_EFFECT_BLIND);
+  /* ...and even against a "quiet" post-scan it stays blind. */
+  EXPECT_EQ(nv_vram_judge(&blind, &pre), NV_VRAM_EFFECT_BLIND);
+
+  /* BLIND, case 2: some words stuck and some did not -- a partially decoded
+   * window says nothing about the words that did not stick. */
+  for (uint32_t i = 0; i < 64; i++) mem[i] = (i < 32) ? SENT : 0xFFFFFFFFu;
+  ASSERT(nv_vram_scan_window(&w, 0, 64, SENT, &blind) == 0);
+  EXPECT_EQ((int)blind.sentinel, 32);
+  EXPECT_EQ(nv_vram_judge(&blind, &pre), NV_VRAM_EFFECT_BLIND);
+
+  /* MIXED exists for a hand-built pair whose counts disagree; the driver's own
+   * fold cannot produce one, and the judge must not read a verdict into it. */
+  struct nv_vram_scan bogus = pre;
+  bogus.words = 100;
+  EXPECT_EQ(nv_vram_judge(&pre, &bogus), NV_VRAM_EFFECT_MIXED);
+
+  /* Bounds: a scan past the mapped length is refused rather than read. */
+  EXPECT_EQ(nv_vram_scan_window(&w, 0, 65, SENT, &pre), -EINVAL);
+  EXPECT_EQ(nv_vram_fill(&w, 0, 65, SENT), -EINVAL);
+
+  /* The names are what the log prints; a rename must not silently change a
+   * verdict's meaning. */
+  ASSERT(nv_vram_effect_name(NV_VRAM_EFFECT_NOTHING)[0] == 'N');
+  ASSERT(nv_vram_effect_name(NV_VRAM_EFFECT_WROTE)[0] == 'W');
+  ASSERT(nv_vram_effect_name(NV_VRAM_EFFECT_BLIND)[0] == 'B');
+
+  /* A device with no BAR1 window cannot open one: the caller must get an
+   * error, not a window onto address 0. */
+  struct nv_dev *d = fake_attach();
+  struct nv_vram_win nw;
+  EXPECT_EQ(nv_vram_open(d, 0, 16, &nw), -ENODEV);
+  EXPECT_EQ((int)(nw.p != 0), 0);
+
+  /* The read-kind classifier: the difference between memory and a counter is
+   * the difference between "FWSEC wrote the region" and "the region answered
+   * 0xBAD0AC0A+n", which is exactly the mistake run r4a's first shape made. */
+  uint32_t same[4] = {7, 7, 7, 7};
+  EXPECT_EQ(nv_vram_reads_kind(same, 4), NV_VRAM_READS_MEMORY);
+  uint32_t ctr[4] = {0xBAD0AC0Au, 0xBAD0AC0Bu, 0xBAD0AC0Cu, 0xBAD0AC0Du};
+  EXPECT_EQ(nv_vram_reads_kind(ctr, 4), NV_VRAM_READS_COUNTER);
+  uint32_t odd[4] = {1, 2, 4, 8};
+  EXPECT_EQ(nv_vram_reads_kind(odd, 4), NV_VRAM_READS_OTHER);
+  EXPECT_EQ(nv_vram_reads_kind(same, 1), NV_VRAM_READS_OTHER); /* one sample proves nothing */
+  EXPECT_EQ(nv_vram_reads_kind(0, 4), NV_VRAM_READS_OTHER);
+
+  /* The page map degrades to '?' for every page when there is no aperture:
+   * "unknown" must never be spelled 'M'. */
+  char pm[5];
+  EXPECT_EQ(nv_vram_page_map(d, 0x5FE300000ULL, 4, pm), 0);
+  EXPECT_EQ((int)pm[0], '?');
+  EXPECT_EQ((int)pm[3], '?');
+  EXPECT_EQ((int)pm[4], 0); /* NUL-terminated for the log */
+}
+
 static void test_nv_ioc_sizes(void) {
   uart_puts("  Running test_nv_ioc_sizes...\n");
   tests_run++;
@@ -768,6 +874,7 @@ void nv_test_suite(void) {
   test_nv_xfer_encoding();
   test_nv_falcon_halt_start();
   test_nv_selftest();
+  test_nv_vram_scan_and_judge();
   test_nv_ioc_sizes();
   test_nv_info_fill();
 }
