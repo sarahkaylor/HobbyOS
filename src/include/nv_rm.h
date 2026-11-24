@@ -64,6 +64,43 @@
 /* The bit set that says "this object will be CPU-mapped by its client". */
 #define NV_RM_DOM_CPU_MAP (NV_RM_DOM_CPU | NV_RM_DOM_MAPPABLE | NV_RM_DOM_COHERENT)
 
+/* ---- GR topology, i.e. what GETPARAM GRAPH_UNITS answers ---------------
+ *
+ * On Turing and later this is NOT a host-readable fuse block.  nouveau reads
+ * it out of GSP-RM's reply to NV_VGPU_MSG_FUNCTION_GET_GSP_STATIC_INFO
+ * (nvkm/subdev/gsp/rm/r535/gsp.c: gpcs = popcount(gpcMask), tpcs = the sum of
+ * popcount(tpcMask) over the enabled GPCs) and reports it through
+ * nvkm_gr_units() -> r535_gr_units(), which packs
+ *
+ *     value = (tpc_total << 8) | gpc_nr        [u32; no ROP field]
+ *
+ * Mesa decodes exactly that (nouveau_device.c: `gpc = value & 0xff`,
+ * `tpc = (value >> 8) & 0xffff`) and derives SM count as tpc * mp_per_tpc.
+ *
+ * An RM without GSP-RM has never received that reply, so the only two honest
+ * things this seam can carry are:
+ *   NV_RM_TOPO_NONE     -- no model at all: GRAPH_UNITS refuses, named;
+ *   NV_RM_TOPO_DECLARED -- a DECLARED part model.  It answers, and the console
+ *                          row says src=declared so no reader mistakes a
+ *                          declaration for a measurement.
+ * A declared model is falsifiable, which is what keeps it honest: when GSP-RM
+ * boots, gsp->gr.{gpcs,tpcs} must produce the same numbers or the table is
+ * wrong and gets fixed.
+ *
+ * tpc_total is the TOTAL over GPCs, not per GPC (that is r535_gr_units'
+ * packing; gf100_gr_units' `tpc_total` field means the same thing).  rop_nr is
+ * carried for the pre-Turing packing, which puts it at bit 32; the Ada/GSP-RM
+ * packing has no ROP field, so a GSP-shaped answer leaves those bits zero. */
+#define NV_RM_TOPO_NONE 0u
+#define NV_RM_TOPO_DECLARED 1u
+
+struct nv_rm_gpu_topo {
+  uint32_t gpc_nr;    /* enabled GPCs (the answer's bits 0-7) */
+  uint32_t tpc_total; /* enabled TPCs over all GPCs (bits 8-23) */
+  uint32_t rop_nr;    /* enabled ROPs; not part of the Ada packing */
+  uint32_t source;    /* NV_RM_TOPO_* */
+};
+
 /* Identity the ABI's device row reports.  Filled by the RM, not by ioctl
  * code, so a future GSP-RM backend reports the card it actually found. */
 struct nv_rm_device_info {
@@ -75,6 +112,15 @@ struct nv_rm_device_info {
   uint32_t mock;         /* 1 = this RM has no card behind it */
   uint64_t fb_size;      /* bytes of memory the RM will allocate from */
   char name[8];          /* "AD102", NUL padded */
+  /* GETPARAM VRAM_BAR_SIZE is nouveau's `resource_size(NVKM_BAR1_FB)`: the
+   * size of the VRAM BAR window, NOT the amount of VRAM (that is fb_size, and
+   * GETPARAM FB_SIZE is `vram_available`).  A node with no aperture answers
+   * 0, which is also what nouveau's helper yields for a missing BAR; nvk then
+   * correctly takes its "not a full BAR" path.  Do not answer fb_size here:
+   * bar_size == vram_size is exactly the test nvk uses for its full-BAR fast
+   * path (nvk_device.c), and this node has no BAR at all. */
+  uint64_t bar1_fb_size;
+  struct nv_rm_gpu_topo topo;
   /* PMC_BOOT_0's revision byte (bits 0-7): 0xa1 on the AD102 this project
    * targets (PLAN.md §1, `boot0=0x192000A1`).  Added for WP-NVIF: NVIF's
    * NV_DEVICE_V0_INFO reports it, and it belongs to the RM (the thing that
@@ -167,5 +213,12 @@ int nv_rm_mock_pending(void);
  * 0, -EINVAL (unknown handle / bad range), -EFAULT (object has no memory). */
 int nv_rm_mock_read_bo(uint32_t dev_id, uint64_t handle, uint64_t off,
                        void *dst, uint32_t len);
+/* Replace the declared GR topology (or clear it with source = NV_RM_TOPO_NONE)
+ * for the next device_open().  This is how the unit tier proves BOTH branches
+ * of GETPARAM GRAPH_UNITS: the declared answer, and the named refusal an RM
+ * with no model must give.  Same seam rules as hold(): it survives a device
+ * teardown, so a test cannot silently lose it. */
+int nv_rm_mock_set_topo(uint32_t source, uint32_t gpc_nr, uint32_t tpc_total,
+                        uint32_t rop_nr);
 
 #endif /* NV_RM_H */

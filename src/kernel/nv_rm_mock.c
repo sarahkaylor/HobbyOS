@@ -57,6 +57,46 @@
 
 #define MOCK_DEV_ID 1u
 
+/* ---- The DECLARED GR topology of the part this mock stands for ----------
+ *
+ * AD102-300 = GeForce RTX 4090, the card this project owns (PLAN.md §0/§1).
+ * NVIDIA's Ada whitepaper gives the full AD102 die as 12 GPC / 72 TPC /
+ * 144 SM / 176 ROP and the 4090's enabled configuration as 11 GPC / 64 TPC /
+ * 128 SM (ROPs undiminished).  That makes the declaration falsifiable: a real
+ * GSP-RM answers with the enabled masks, and on this part that must be 11/64
+ * -- see nvkm/subdev/gsp/rm/r535/gsp.c (GET_GSP_STATIC_INFO) and
+ * r535_gr_units().
+ *
+ * This is a DECLARATION, not a measurement.  Nothing on this node has ever
+ * received that reply; that is why it is tagged NV_RM_TOPO_DECLARED and why
+ * every GETPARAM GRAPH_UNITS row prints src=declared.  rop_nr is recorded for
+ * the record only: the Ada packing has no ROP field. */
+#define MOCK_GR_GPC_NR    11u
+#define MOCK_GR_TPC_TOTAL 64u
+#define MOCK_GR_ROP_NR    176u
+
+/* The topology the next device_open() will report.  Held outside g_mock's
+ * reset so a test's choice survives a teardown, exactly like hold(). */
+static struct nv_rm_gpu_topo g_mock_topo = {MOCK_GR_GPC_NR, MOCK_GR_TPC_TOTAL,
+                                            MOCK_GR_ROP_NR, NV_RM_TOPO_DECLARED};
+
+int nv_rm_mock_set_topo(uint32_t source, uint32_t gpc_nr, uint32_t tpc_total,
+                        uint32_t rop_nr) {
+  if (source != NV_RM_TOPO_NONE && source != NV_RM_TOPO_DECLARED) return -EINVAL;
+  if (source == NV_RM_TOPO_NONE) {
+    g_mock_topo.gpc_nr = g_mock_topo.tpc_total = g_mock_topo.rop_nr = 0;
+  } else if (gpc_nr == 0 || gpc_nr > 0xffu || tpc_total == 0 || tpc_total > 0xffffu) {
+    return -EINVAL; /* a model that cannot be packed the way nouveau packs it */
+  } else {
+    g_mock_topo.gpc_nr = gpc_nr;
+    g_mock_topo.tpc_total = tpc_total;
+    g_mock_topo.rop_nr = rop_nr;
+  }
+  g_mock_topo.source = source;
+  return 0;
+}
+
+
 struct mock_alloc {
   int used;
   uint32_t dev;
@@ -184,6 +224,12 @@ static int mock_device_open(uint32_t *dev_id, struct nv_rm_device_info *info) {
   info->name[3] = '0'; info->name[4] = '2'; info->name[5] = 0;
   info->name[6] = 0;   info->name[7] = 0;
   info->revision = 0xa1; /* PMC_BOOT_0 bits 0-7 on the AD102 this mock stands for */
+  /* No VRAM BAR window exists on a node whose memory is pool RAM: nouveau's
+   * VRAM_BAR_SIZE is an aperture size, and answering fb_size here would tell
+   * nvk "full BAR" (bar_size == vram_size) about an aperture that is not
+   * there. */
+  info->bar1_fb_size = 0;
+  info->topo = g_mock_topo; /* a declared model, or none; see the top of file */
   spinlock_release(&g_mock.lock);
   return 0;
 }
