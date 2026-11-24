@@ -1,0 +1,43 @@
+00000000000017a0 <snd_pcm_open>:
+    17a0:	test   %rdi,%rdi
+    17a3:	je     17ac <snd_pcm_open+0xc>
+    17a5:	movq   $0x0,(%rdi)
+    17ac:	mov    $0xffffffed,%eax
+    17b1:	ret
+    17b2:	data16 data16 data16 data16 cs nopw 0x0(%rax,%rax,1)
+
+0000000000001760 <snd_device_name_hint>:
+    1760:	test   %rdx,%rdx
+    1763:	je     176f <snd_device_name_hint+0xf>
+    1765:	lea    0x26b4(%rip),%rax        # 3e20 <snd_device_name_hint.no_devices>
+    176c:	mov    %rax,(%rdx)
+    176f:	xor    %eax,%eax
+    1771:	ret
+    1772:	data16 data16 data16 data16 cs nopw 0x0(%rax,%rax,1)
+
+0000000000001b20 <pa_simple_new>:
+    1b20:	mov    0x18(%rsp),%rax
+    1b25:	test   %rax,%rax
+    1b28:	je     1b4d <pa_simple_new+0x2d>
+    1b2a:	mov    $0x3,%ecx
+    1b2f:	test   %r9,%r9
+    1b32:	je     1b4b <pa_simple_new+0x2b>
+    1b34:	cmpl   $0x0,0x4(%r9)
+    1b39:	je     1b4b <pa_simple_new+0x2b>
+    1b3b:	xor    %ecx,%ecx
+    1b3d:	cmpb   $0x0,0x8(%r9)
+    1b42:	setne  %cl
+    1b45:	lea    (%rcx,%rcx,2),%ecx
+    1b48:	add    $0x3,%ecx
+    1b4b:	mov    %ecx,(%rax)
+    1b4d:	xor    %eax,%eax
+    1b4f:	ret
+
+
+Dynamic section at offset 0xd90 contains 9 entries:
+  Tag        Type                         Name/Value
+ 0x000000000000000e (SONAME)             Library soname: [libasound.so.2]
+ 0x000000000000001e (FLAGS)              BIND_NOW
+ 0x000000006ffffffb (FLAGS_1)            Flags: NOW
+ 0x0000000000000006 (SYMTAB)             0x260
+ 0x000000000000000b (SYMENT)             24 (bytes)
