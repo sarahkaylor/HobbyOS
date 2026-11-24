@@ -3964,25 +3964,162 @@ static int sec2_attempt(struct nv_dev *d, const struct sec2_img *im,
   nv_wr32(d, NV_FALCON_SEC2_BASE + 0x040, (uint32_t)im->meta_phys);
   nv_wr32(d, NV_FALCON_SEC2_BASE + 0x044, (uint32_t)(im->meta_phys >> 32));
 
-  nv_wr32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL, NV_FALCON_UC_CTRL_START);
-  /* Where does the core go?  PC (0xFF0) answers "did anything execute at all",
-   * which is the one question the verdicts cannot: a boot ROM rejection and a
-   * start that never reached the core both leave no write behind.  Sampled at
-   * fixed iteration counts so the series is comparable between runs. */
-  uint32_t pc_pre = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_PC);
-  uint32_t pc_s[5];
-  int pc_n = 0;
+  /* ---- START -> STOPPED: the measurement r5h's PC series could not make ----
+   *
+   * The question is not "is the core stopped" (it always reads stopped) but
+   * *when* it stopped, and the two answers are different facts about the world:
+   *
+   *   microseconds  the START trigger never reached the core: ctl carried
+   *                 STOPPED (bit 4, RO) before the write and no sample ever
+   *                 showed it clear.  Nothing about the image was looked at.
+   *   milliseconds  the core left STOPPED (ctl reads 0x0 while it runs -- bit 1
+   *                 START is a write-only trigger, bit 4 STOPPED is RO) and came
+   *                 back to it later, which is the boot ROM having read the
+   *                 image.  The halt time then says whether it took a rejection
+   *                 path (round 3: 27.6 ms) or the long one (105.8 ms).
+   *
+   * The instrument is the ptimer, read exactly as FWSEC's halt time is, and it
+   * is proven capable *in this same boot*: the GSP window's `[NV-SWEEP]
+   * post-start` rows show ctl 0x10 -> 0x0 within one iteration of START and
+   * 0x0 -> 0x10 at +105,690,496 ns.  So a window that answers 0x10 in every
+   * sample here is not a blind instrument; it is a core that never ran.
+   *
+   * Three things keep the number honest:
+   *
+   *  - ctl is read BEFORE the START write, so "already stopped" cannot be
+   *    reported as "stopped after the start";
+   *  - the cost of one ctl read through this window is measured first (64 timed
+   *    reads) and printed: a halt time at or below that floor is a bound, and
+   *    the row calls it one;
+   *  - sampling continues for the whole budget even after STOPPED is seen, so a
+   *    core that is still running at 1 ms and halts at 27 ms cannot be reported
+   *    as one that was stopped at 1 us.  Every non-STOPPED sample is counted.
+   */
   uint32_t ctl = 0, mb0 = 0;
   int halted = 0;
-  for (int i = 0; i < 400000; i++) {
-    ctl = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL);
-    mb0 = nv_rd32(d, NV_FALCON_SEC2_BASE + 0x040);
-    if (i == 0 || i == 8 || i == 64 || i == 1024 || i == 16384) {
-      if (pc_n < 5) pc_s[pc_n++] = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_PC);
+  {
+    const uint64_t kBudgetNs = 200000000ULL; /* 200 ms: FWSEC's own halt was
+                                              * 105.8 ms, so this covers a ROM
+                                              * that runs and halts late */
+    const uint32_t fbase = NV_FALCON_SEC2_BASE;
+    uint64_t rc0 = 0, rc1 = 0, read_cost_ns = 0;
+    int have_t = nv_timer_read(d, &rc0) == 0;
+    {
+      uint32_t sink = 0;
+      for (int i = 0; i < 64; i++) sink ^= nv_rd32(d, fbase + NV_FALCON_UC_CTRL);
+      (void)sink;
+      if (have_t && nv_timer_read(d, &rc1) == 0) read_cost_ns = (rc1 - rc0) / 64u;
     }
-    if (ctl & NV_FALCON_UC_CTRL_STOPPED) {
-      halted = 1;
-      break;
+
+    uint32_t ctl_pre = nv_rd32(d, fbase + NV_FALCON_UC_CTRL);
+    uint32_t pc_pre = nv_rd32(d, fbase + NV_FALCON_PC);
+    uint64_t t0 = 0;
+    int have_start_t = nv_timer_read(d, &t0) == 0;
+    nv_wr32(d, fbase + NV_FALCON_UC_CTRL, NV_FALCON_UC_CTRL_START);
+    /* The earliest possible sample: the read right after the trigger, then the
+     * clock.  Timestamping first would let three MMIO round-trips pass before
+     * the window was looked at, which is the whole span being measured. */
+    ctl = nv_rd32(d, fbase + NV_FALCON_UC_CTRL);
+    const uint32_t ctl_first = ctl;
+    uint64_t first_ns = 0, stop_ns = 0, running_ns = 0;
+    {
+      uint64_t tt = 0;
+      if (have_start_t && nv_timer_read(d, &tt) == 0) first_ns = tt - t0;
+    }
+    int stopped = (ctl & NV_FALCON_UC_CTRL_STOPPED) ? 1 : 0;
+    if (stopped) stop_ns = first_ns;
+    uint64_t polls = 1, run_samples = 0, trans = 0;
+    uint64_t ev_t[8], ev_v[8];
+    int nev = 0;
+    uint32_t last = ctl;
+    for (int i = 0; i < 4000000; i++) {
+      uint32_t v = nv_rd32(d, fbase + NV_FALCON_UC_CTRL);
+      polls++;
+      if (!(v & NV_FALCON_UC_CTRL_STOPPED)) {
+        run_samples++;
+        if (!running_ns && have_start_t) {
+          uint64_t ts = 0;
+          if (nv_timer_read(d, &ts) == 0) running_ns = ts - t0;
+        }
+      } else if (!stopped) {
+        stopped = 1;
+        if (have_start_t) {
+          uint64_t ts = 0;
+          if (nv_timer_read(d, &ts) == 0) stop_ns = ts - t0;
+        }
+      }
+      if (v != last) {
+        uint64_t ts = 0;
+        if (have_start_t && nv_timer_read(d, &ts) == 0) ts -= t0;
+        if (nev < 8) {
+          ev_t[nev] = ts;
+          ev_v[nev] = v;
+          nev++;
+        }
+        last = v;
+        trans++;
+      }
+      /* The budget, checked every 64 samples: a timer read is three MMIO
+       * round-trips and would dominate a loop whose purpose is to sample. */
+      if ((i & 0x3f) == 0 && have_start_t) {
+        uint64_t nn = 0;
+        if (nv_timer_read(d, &nn) == 0 && nn >= t0 + kBudgetNs) break;
+      }
+      if (stopped && run_samples) break; /* ran, then halted: number taken */
+    }
+    mb0 = nv_rd32(d, fbase + 0x040);
+    halted = stopped;
+
+    uart_puts("[NV-SEC2] attempt=");
+    uart_puts(tag);
+    uart_puts(" halt-timing pre=");
+    uart_print_hex(ctl_pre);
+    uart_puts(" read_cost_ns=");
+    uart_print_hex(read_cost_ns);
+    uart_puts(" first=");
+    uart_print_hex(ctl_first);
+    uart_puts(" at_ns=");
+    uart_print_hex(first_ns);
+    uart_puts(" running_at_ns=");
+    uart_print_hex(running_ns);
+    uart_puts(" stop_ns=");
+    uart_print_hex(stop_ns);
+    uart_puts(" polls=");
+    uart_print_hex(polls);
+    uart_puts(" running_samples=");
+    uart_print_hex(run_samples);
+    uart_puts(" transitions=");
+    uart_print_hex(trans);
+    for (int k = 0; k < nev; k++) {
+      uart_puts(" ev+");
+      uart_print_hex(ev_t[k]);
+      uart_puts("ns:");
+      uart_print_hex(ev_v[k]);
+    }
+    uart_puts(" pc_pre=");
+    uart_print_hex(pc_pre);
+    if (stopped && run_samples) {
+      uart_puts(stop_ns >= 1000000ULL
+                    ? " verdict=RAN-TO-HALT ms-scale (the core left STOPPED, so "
+                      "the START trigger reached it, and halted after this many "
+                      "ns: a boot ROM read the image)\n"
+                    : " verdict=RAN-TO-HALT sub-ms (the core did leave STOPPED, "
+                      "but was back within one ms -- report the number, it is "
+                      "near this window's read floor)\n");
+    } else if (stopped) {
+      uart_puts(ctl_pre & NV_FALCON_UC_CTRL_STOPPED
+                    ? " verdict=NEVER-LEFT-STOPPED us-scale (STOPPED was already "
+                      "set before the START write and every sample since read it "
+                      "set: the trigger did not reach the core, so the image was "
+                      "never looked at)\n"
+                    : " verdict=STOPPED-FROM-THE-FIRST-SAMPLE us-scale (ctl was "
+                      "not stopped before the write and read stopped at the "
+                      "first sample after it: the interval is below this "
+                      "window's read floor)\n");
+    } else {
+      uart_puts(" verdict=STILL-RUNNING at the end of the budget (the core left "
+                "STOPPED and never came back: report the budget, not a halt "
+                "time)\n");
     }
   }
 
@@ -4015,13 +4152,6 @@ static int sec2_attempt(struct nv_dev *d, const struct sec2_img *im,
   uart_print_hex(nv_rd32(d, NV_FALCON_SEC2_BASE + 0x044));
   uart_puts(" verified=");
   uart_print_hex(v);
-  uart_puts(" pc_pre=");
-  uart_print_hex(pc_pre);
-  uart_puts(" pc_samples=");
-  for (int k = 0; k < pc_n; k++) {
-    uart_puts(k ? "," : "");
-    uart_print_hex(pc_s[k]);
-  }
   uart_puts(" pc_after=");
   uart_print_hex(nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_PC));
   if (verified) {
