@@ -10,6 +10,21 @@ No copying from other drivers; studying them is allowed.
 Hardware: RTX 4090 (AD102 `10de:2684`) on Proxmox `r1` (`root@192.168.10.174`),
 driver VM 300, ROM-work VM 312. Build host `sarah@192.168.0.123`.
 
+**Since 2026-11-24 r1 also hosts two RTX 5090s** — GB202 `10de:2b85` at `41:00.0`
+and `82:00.0` (audio functions `41:00.1`/`82:00.1`), all four on `vfio-pci`, IOMMU
+groups 58/59 and 22/23. They are **a second bring-up target, not extra capacity for
+the first one**: every wall in §2 is per-card state, so a 5090 cannot boot the 4090's
+GSP-RM any faster. What they legitimately buy:
+
+| Use | Why it is real |
+|---|---|
+| A parallel campaign lane (`nv-card2`) | GB202 is Blackwell: its own chipset id, its own GSP-RM, its own boot path. Whether the AD102 contract (WPR2 layout, FWSEC, SEC2 booter) transfers is an open question to be measured, not assumed |
+| A sacrificial GPU | resets, wedged falcons, FLR recovery and bad-ucode probes can be run on a 5090 while the AD102 campaign keeps 01:00.0 |
+| A host-side renderer (blocked on approval) | r1 has no NVIDIA host driver today; installing one would let Venus/virgl run on r1 instead of llvmpipe or strix — but it changes the host the card lanes depend on, so it needs Sarah's approval first |
+
+Sum of GPUs on r1: 1× AD102 (the driver target, VM 300 owns `01:00.0`), 2× GB202
+(second target + laboratory).
+
 ---
 
 ## 0. Definition of done, honestly staged
@@ -387,6 +402,19 @@ lane" was not evidence that it builds from the tree.
 `nvif new refused class=0xc7b5 name=ampere_dma_copy_b need=gsp_rm missing=rm_chan_object`
 and enumeration 0. Making the build permanent changes nothing about where nvk stops;
 that is still rung N3.
+
+### 2.9 Hardware added (2026-11-24): two RTX 5090s on r1
+
+Verified on the host, not taken on trust: `lspci -nn` reports `10de:2b85` twice,
+`lspci -k` shows `vfio-pci` on all four functions, and each card sits in its own pair of
+IOMMU groups (58/59, 22/23) — so per-GPU passthrough is available without splitting a
+group with the 4090 (groups 41/42).
+
+Consequences for the board: a new worker profile `nv-card2` owns the 5090 lane; the
+card-lane isolation card is explicitly **per GPU**, not per host; and the 5090 has its
+own identification/firmware card, because a Blackwell part will not answer the AD102
+questions. The AD102 campaign keeps `01:00.0` and VM 300 to itself.
+
 
 ---
 

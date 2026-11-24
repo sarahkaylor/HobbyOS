@@ -67,7 +67,8 @@ nor the WebKit staging.
 
 | Assignee | Lane |
 |---|---|
-| `nv-card` | the one RTX 4090 (r1 VM 300): SEC2 unfence, booter, GSP-RM, BAR1 reads |
+| `nv-card` | the RTX 4090 (r1 VM 300, PCI `01:00.0`): SEC2, booter, GSP-RM, BAR1 reads |
+| `nv-card2` | the two RTX 5090s (r1 PCI `41:00.0`, `82:00.0`, GB202): second bring-up target + sacrificial lab |
 | `nv-shim` | `/dev/nvshim`: NVIF, PRIME, mmap semantics, DRM ABI |
 | `nv-plat` | platform 3D: nvk build/enumeration, RimWorld audio, Cyberpunk recipe |
 | `nv-verify` | merge gate, nightly soak, docs-in-step |
@@ -96,3 +97,16 @@ Watching it work: dashboard `http://192.168.0.251:9119` → Sessions; board stat
 `hermes kanban --board hobbyos-nv list`. A worker's session is its own profile's
 `~/.hermes/profiles/<p>/state.db`; `last_activity_at` age is the liveness signal, not
 `ended_at`.
+
+## GPU inventory on r1 (as of 2026-11-24)
+
+| PCI | part | who owns it |
+|---|---|---|
+| `01:00.0` + `01:00.1` | AD102 RTX 4090 (`10de:2684`) | `nv-card` via VM 300 |
+| `41:00.0` + `41:00.1` | GB202 RTX 5090 (`10de:2b85`) | `nv-card2` |
+| `82:00.0` + `82:00.1` | GB202 RTX 5090 (`10de:2b85`) | `nv-card2` |
+
+All six functions are on `vfio-pci`. IOMMU groups: 41/42 (4090), 58/59 and 22/23 (5090s)
+— no group is shared between lanes, so passthrough is per-GPU. r1's host has **no**
+NVIDIA driver installed; host-rendered (Venus/virgl) measurement on r1 is a blocked
+card awaiting approval, and today those measurements run on `strix` or llvmpipe.
