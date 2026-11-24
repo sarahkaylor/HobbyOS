@@ -169,6 +169,35 @@ struct nvshim_drm_getparam {
 #define NVSHIM_DRM_PARAM_VRAM_USED          19
 #define NVSHIM_DRM_PARAM_HAS_VMA_TILEMODE   20
 
+/* Which params a stock winsys asks for on the device-create path, and what a
+ * wrong answer costs (SOURCE: Mesa src/nouveau/winsys/nouveau_device.c):
+ *
+ *     PCI_DEVICE (4)       fatal if refused
+ *     EXEC_PUSH_MAX (17)   NOT fatal -- falls back to NOUVEAU_GEM_MAX_PUSH
+ *     VRAM_BAR_SIZE (18)   NOT fatal -- bar_size_B stays 0
+ *     GRAPH_UNITS (13)     FATAL (`goto out_err`) -- the wall this node had
+ *
+ * The asymmetry is the reason GRAPH_UNITS got served first: the two params
+ * around it can be answered wrongly and nothing stops, so their values must be
+ * right for a different reason -- they shape heaps.
+ *
+ *   EXEC_PUSH_MAX  is a promise about THIS node: the largest push_count EXEC
+ *                  accepts (NVSHIM_DRM_MAX_PUSH).  That is what the number
+ *                  means in nouveau too (nouveau_exec_push_max_from_ib_max),
+ *                  and this node keeps the promise.
+ *   VRAM_BAR_SIZE  is an APERTURE size -- nouveau answers
+ *                  resource_size(NVKM_BAR1_FB), not the amount of VRAM.  This
+ *                  node has no aperture, so it answers 0; answering the 4 GiB
+ *                  arena would make bar_size == vram_size, which is precisely
+ *                  the test nvk uses to enable its full-BAR CPU-upload path
+ *                  (nvk_device.c) for a window that does not exist.
+ *   GRAPH_UNITS    is (tpc_total << 8) | gpc_nr, the Ada/GSP-RM packing
+ *                  (r535_gr_units); answered from the RM's topology, which on
+ *                  this node is a DECLARED part model (the row says
+ *                  src=declared).  There is no host-readable fuse for it on
+ *                  Turing+; the numbers only ever arrive in GSP-RM's
+ *                  GET_GSP_STATIC_INFO reply. */
+
 /* ---- memory objects ---------------------------------------------------- */
 
 /* struct drm_nouveau_gem_info.  `offset` is the object's address in the GPU

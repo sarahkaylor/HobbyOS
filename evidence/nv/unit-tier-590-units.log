@@ -1,0 +1,11 @@
+# Unit tier on nv/wp-units (intel, TCG: SKIP_KVM=1).  Trimmed to the rows this
+# lane added or changed.  Full log: 590 suites, 0 failed, "UNIT TESTS PASSED".
+  Running test_nvshim_getparam_graph_units...
+[NVSHIM] drm getparam param=13 value=0x400b gpc=11 tpc=64 src=declared
+[NVSHIM] drm getparam param=18 value=0x0
+[NVSHIM] drm getparam refused param=13 reason=mock_has_no_topo
+[NVSHIM] nvif new refused class=0xc797 name=ampere_b_gr need=gsp_rm missing=rm_chan_object alloc=rm_alloc engine=eng3d
+[NVSHIM] nvif new refused class=0xc7b5 name=ampere_dma_copy_b need=gsp_rm missing=rm_chan_object alloc=ce_alloc engine=copy1
+Tests run:    590
+Tests failed: 0
+UNIT TESTS PASSED

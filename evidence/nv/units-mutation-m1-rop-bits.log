@@ -1,0 +1,7 @@
+# MUTATION M1 -- GRAPH_UNITS packs rop_nr at bit 32 (gf100's packing) instead of
+# the Ada one.  Applied to src/kernel/nv_shim.c:nv_shim_gr_units_value(), run, reverted.
+    RUNNING KERNEL UNIT TESTS     
+EXPECT_EQ FAILED: (int)(nv_shim_gr_units_value(&topo) >> 32) == 0 at src/kernel/nv_shim_drm_test.c:1741
+Tests run:    590
+Tests failed: 1
+UNIT TESTS FAILED

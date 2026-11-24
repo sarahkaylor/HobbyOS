@@ -1698,6 +1698,158 @@ static void test_nvshim_nvif_engine(void) {
   EXPECT_EQ(nv_rm_mock_live(), 0);
 }
 
+/* ---- 6. GETPARAM GRAPH_UNITS and the engine-class wall ------------------
+ *
+ * The winsys asks GRAPH_UNITS on the device-create path and treats failure as
+ * fatal (Mesa nouveau_device.c: `if (nouveau_ws_param(fd, ...)) goto out_err`),
+ * which is why it -- not NVIF -- is the first thing that stopped a stock nvk.
+ * The tier holds the ANSWER to a value and the ABSENCE to a name:
+ *   - the packing is the Ada/GSP-RM one, (tpc_total << 8) | gpc_nr, and it
+ *     stays inside 24 bits (r535_gr_units has no ROP field);
+ *   - the numbers are the declared RTX 4090 model (11 GPC / 64 TPC), which is
+ *     nvk's 128 SMs once mp_per_tpc = 2 is applied -- the declared model is
+ *     the falsifiable kind, not a hedge;
+ *   - both faces answer identically: one table, two ioctls;
+ *   - an RM with NO topology refuses -ENOSYS instead of answering, and its
+ *     reason is mock_has_no_topo rather than the generic mock_has_no_card;
+ *   - VRAM_BAR_SIZE is an aperture size, not the amount of VRAM: 0 here, and
+ *     never equal to FB_SIZE (bar == vram is nvk's full-BAR fast path).
+ * It also pins the engine-class wall's naming: class -> (name, engine, RM
+ * allocation), the same table the refusal row prints.
+ */
+static int str_eq_(const char *a, const char *b) {
+  if (!a || !b) return 0;
+  while (*a && *a == *b) {
+    a++;
+    b++;
+  }
+  return *a == *b;
+}
+
+static void test_nvshim_getparam_graph_units(void) {
+  uart_puts("  Running test_nvshim_getparam_graph_units...\n");
+  tests_run++;
+
+  /* The packing, as a pure function: 11 GPC / 64 TPC -> 0x400b, and the ROP
+   * count is NOT in the word (the Ada path never sets those bits). */
+  struct nv_rm_gpu_topo topo;
+  topo.gpc_nr = 11;
+  topo.tpc_total = 64;
+  topo.rop_nr = 176;
+  topo.source = NV_RM_TOPO_DECLARED;
+  EXPECT_EQ((int)nv_shim_gr_units_value(&topo), 0x400b);
+  EXPECT_EQ((int)(nv_shim_gr_units_value(&topo) >> 32), 0);
+  /* Field edges: 8 bits of GPC and 16 bits of TPC, no carry into bit 24. */
+  topo.gpc_nr = 0xff;
+  topo.tpc_total = 0xffff;
+  EXPECT_EQ((int)nv_shim_gr_units_value(&topo), 0xffffffff & 0xffffff);
+  /* No model, no number -- even if the fields happen to hold values. */
+  topo.gpc_nr = 11;
+  topo.tpc_total = 64;
+  topo.source = NV_RM_TOPO_NONE;
+  EXPECT_EQ((int)nv_shim_gr_units_value(&topo), 0);
+  EXPECT_EQ((int)nv_shim_gr_units_value(0), 0);
+
+  /* The wall's named requirement, from the same table the row prints. */
+  const char *name = 0, *engine = 0, *alloc = 0;
+  EXPECT_EQ(nv_shim_nvif_engine_class(NVSHIM_NVIF_CLASS_AMPERE_B, &name, &engine, &alloc), 0);
+  EXPECT_EQ(str_eq_(name, "ampere_b_gr"), 1);
+  EXPECT_EQ(str_eq_(engine, "eng3d"), 1);
+  EXPECT_EQ(str_eq_(alloc, "rm_alloc"), 1);
+  EXPECT_EQ(nv_shim_nvif_engine_class(NVSHIM_NVIF_CLASS_AMPERE_DMA_COPY_B, &name, &engine,
+                                      &alloc), 0);
+  EXPECT_EQ(str_eq_(alloc, "ce_alloc"), 1);
+  EXPECT_EQ(str_eq_(engine, "copy1"), 1);
+  EXPECT_EQ(nv_shim_nvif_engine_class(NVSHIM_NVIF_CLASS_KEPLER_INLINE_TO_MEM_B, &name,
+                                      &engine, &alloc), 0);
+  EXPECT_EQ(str_eq_(engine, "m2mf"), 1);
+  EXPECT_EQ(nv_shim_nvif_engine_class(0x00001234, &name, &engine, &alloc), -1);
+
+  /* The refusal REASON is part of the answer: an RM with no topology and a node
+   * with no card are different absences, and a client reading the console
+   * should not have to guess which one it met. */
+  EXPECT_EQ(str_eq_(nv_shim_param_refusal_reason(NVSHIM_PARAM_GRAPH_UNITS),
+                    "mock_has_no_topo"), 1);
+  EXPECT_EQ(str_eq_(nv_shim_param_refusal_reason(NVSHIM_PARAM_PTIMER_TIME),
+                    "mock_has_no_card"), 1);
+  EXPECT_EQ(str_eq_(nv_shim_param_refusal_reason(NVSHIM_PARAM_BUS_TYPE),
+                    "mock_has_no_card"), 1);
+
+  /* A model that cannot be packed the way nouveau packs it is rejected at the
+   * seam, not silently truncated. */
+  EXPECT_EQ(nv_rm_mock_set_topo(NV_RM_TOPO_DECLARED, 0, 64, 0), -EINVAL);
+  EXPECT_EQ(nv_rm_mock_set_topo(NV_RM_TOPO_DECLARED, 11, 0, 0), -EINVAL);
+  EXPECT_EQ(nv_rm_mock_set_topo(7, 11, 64, 0), -EINVAL);
+  EXPECT_EQ(nv_rm_mock_set_topo(NV_RM_TOPO_DECLARED, 11, 64, 176), 0);
+
+  struct drm_probe pr;
+  EXPECT_EQ(drm_probe_up(&pr, 124), 0);
+  if (!pr.up) return;
+
+  /* The declared answer, on the winsys face. */
+  struct nvshim_drm_getparam q;
+  q.param = NVSHIM_PARAM_GRAPH_UNITS;
+  q.value = 0xFFFFFFFFFFFFFFFFull;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GETPARAM, &q, (int)sizeof q), 0);
+  EXPECT_EQ((int)q.value, 0x400b);
+  EXPECT_EQ((int)(q.value & 0xff), 11);          /* gpc_count */
+  EXPECT_EQ((int)((q.value >> 8) & 0xffff), 64); /* tpc_count */
+  EXPECT_EQ((int)(q.value >> 24), 0);            /* no ROP field, as on Ada */
+  /* nvk's own derivation of shaderSMCount = tpc_count * mp_per_tpc, and
+   * mp_per_tpc == 2 for anything >= 0x140 (Mesa nouveau_device.c). */
+  EXPECT_EQ((int)(((q.value >> 8) & 0xffff) * 2), 128);
+
+  /* VRAM_BAR_SIZE is an aperture, and this node has none.  FB_SIZE is the
+   * arena a client sizes heaps from, and the two must not be conflated. */
+  struct nvshim_drm_getparam b;
+  b.param = NVSHIM_PARAM_VRAM_BAR_SIZE;
+  b.value = 0xFFFFFFFFFFFFFFFFull;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GETPARAM, &b, (int)sizeof b), 0);
+  EXPECT_EQ((int)b.value, 0);
+  struct nvshim_drm_getparam f;
+  f.param = NVSHIM_PARAM_FB_SIZE;
+  f.value = 0;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GETPARAM, &f, (int)sizeof f), 0);
+  EXPECT_EQ((f.value >= (1ull << 30)), 1);
+  EXPECT_EQ((b.value != f.value), 1);
+
+  /* The deprecated 'N' face reads the SAME table: one param number, one
+   * answer, whichever magic the client used.  It needs the 'N' request number
+   * (magic 'N', not 'd'), and the struct still goes through the probe's user
+   * window -- the handler copies from user memory either way. */
+  struct nvshim_param nq;
+  nq.param = NVSHIM_PARAM_GRAPH_UNITS;
+  nq.pad = 0;
+  nq.value = 0xFFFFFFFFFFFFFFFFull;
+  EXPECT_EQ(drm_ioc_at(&pr, DREQ_STR, NVSHIM_IOC_GET_PARAM, &nq, (int)sizeof nq), 0);
+  EXPECT_EQ((int)nq.value, 0x400b);
+  nq.param = NVSHIM_PARAM_VRAM_BAR_SIZE;
+  nq.value = 0xFFFFFFFFFFFFFFFFull;
+  EXPECT_EQ(drm_ioc_at(&pr, DREQ_STR, NVSHIM_IOC_GET_PARAM, &nq, (int)sizeof nq), 0);
+  EXPECT_EQ((int)nq.value, 0);
+
+  /* No model: the param refuses, named.  The device's identity is a snapshot
+   * taken at open, so the seam change needs a fresh device. */
+  drm_probe_down(&pr);
+  EXPECT_EQ(nv_rm_mock_set_topo(NV_RM_TOPO_NONE, 0, 0, 0), 0);
+  EXPECT_EQ(drm_probe_up(&pr, 125), 0);
+  if (pr.up) {
+    struct nvshim_drm_getparam r;
+    r.param = NVSHIM_PARAM_GRAPH_UNITS;
+    r.value = 0xFFFFFFFFFFFFFFFFull;
+    EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GETPARAM, &r, (int)sizeof r), -ENOSYS);
+    EXPECT_EQ((int)r.value, -1); /* untouched: a refusal writes nothing */
+    /* ... and the generic card-reading params still say the card reason. */
+    r.param = NVSHIM_PARAM_PTIMER_TIME;
+    EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GETPARAM, &r, (int)sizeof r), -ENOSYS);
+    drm_probe_down(&pr);
+  }
+
+  /* Restore the declared model: the seam is sticky by design. */
+  EXPECT_EQ(nv_rm_mock_set_topo(NV_RM_TOPO_DECLARED, 11, 64, 176), 0);
+  EXPECT_EQ(nv_rm_mock_live(), 0);
+}
+
 void nv_shim_drm_test_suite(void) {
   test_nvshim_drm_layout();
   test_nvshim_drm_refusals();
@@ -1710,6 +1862,7 @@ void nv_shim_drm_test_suite(void) {
   test_nvshim_nvif_device();
   test_nvshim_nvif_sclass();
   test_nvshim_nvif_engine();
+  test_nvshim_getparam_graph_units();
 }
 
 #endif /* KERNEL_MODE_UNIT_TEST */

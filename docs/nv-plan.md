@@ -299,6 +299,59 @@ START with 'still halted'", which is exactly SEC2's behaviour. The GSP writes `0
 never writes `0x840048`/`0x840014` at all. One variable, three writes, on a window that
 answers — the next deploy.
 
+### 2.7 Round 6 (2026-11-24): GRAPH_UNITS is a GSP message, and the wall moved one call later
+
+Branch `nv/wp-units` (`SWARM-REPORT-WP-UNITS.md`). Gate: intel unit **590 / 0**, EL0
+**47/47**, two mutation runs red. All MEASURED unless tagged.
+
+**The question, in three lines (SOURCE).** `nouveau_abi16.c` answers `GETPARAM
+GRAPH_UNITS` with `gr ? nvkm_gr_units(gr) : 0`; `nvkm_gr_units()` calls
+`gr->func->units`, which on this card is `r535_gr_units()`:
+`(gsp->gr.tpcs << 8) | gsp->gr.gpcs`. Those two fields are filled in exactly one
+place — `r535_gsp_get_static_info()`, from the `GET_GSP_STATIC_INFO` reply's
+`gpcMask` and per-GPC `tpcMask` popcounts. So on Ada the topology is **a firmware
+message, not a register**: the host-side path (`gf100_gr_oneinit`'s `0x409604` and
+`GPC_UNIT(i,0x2608)`) is never reached, because `ga102_gr_new()` returns
+`-ENODEV` whenever GSP-RM is present. Packing: TPC *total* in bits 8-23, GPC in
+bits 0-7, **no ROP field** (the pre-Turing `gf100_gr_units` puts ROPs at bit 32,
+and Mesa masks those bits away anyway).
+
+**Served, and labelled.** `param=13 value=0x400b gpc=11 tpc=64 src=declared` —
+11 GPC / 64 TPC is the RTX 4090's published configuration (full AD102 die 12/72;
+NVIDIA Ada whitepaper), i.e. 128 SMs through Mesa's `tpc * mp_per_tpc`. It is a
+DECLARED model, not a measurement: nothing here has received a static-info reply,
+`src=` says so in the row, and the header names the falsification path (when
+GSP-RM boots the masks must produce 11/64 or the table is wrong). The no-model
+branch is kept and proved: `-ENOSYS`, `reason=mock_has_no_topo` — deliberately not
+`mock_has_no_card`, because "never received a topology" and "no card" are
+different absences. A declared model that cannot be packed (gpc 0/>0xff, tpc
+0/>0xffff) is `-EINVAL` at the seam rather than truncated.
+
+**The other params on that path, audited.** Only `PCI_DEVICE` (4) and
+`GRAPH_UNITS` (13) are fatal to `nouveau_ws_device_new`; `EXEC_PUSH_MAX` (17) and
+`VRAM_BAR_SIZE` (18) fall back. `VRAM_BAR_SIZE` was answering the 4 GiB arena,
+i.e. `bar_size == vram_size` — exactly nvk's test for its full-BAR CPU-upload
+path (`nvk_device.c`: `bar_size_B >= vram_size_B`) — for a node with no aperture
+at all; it answers 0 now. `EXEC_PUSH_MAX` keeps answering this node's own accepted
+maximum (64), which is what that number means.
+
+**The engine-class wall, named.** On Ada every engine object is one RM allocation
+under `chan->rm.object` (GR/2D/M2MF: `nvkm_gsp_rm_alloc`; CE:
+`rm->api->ce->alloc` with `NVC0B5_ALLOCATION_PARAMETERS{engineType = COPY0+inst}`).
+The refusal now names what is missing and the allocation that would create it:
+`class=0xc7b5 name=ampere_dma_copy_b need=gsp_rm missing=rm_chan_object
+alloc=ce_alloc engine=copy1`. The walk was also corrected: with `ALL_3D_ENGINES`
+the client asks copy → 2D → 3D → M2MF → compute, choosing the *highest* class
+whose low byte matches (`nouveau_context.c`), so the first object a stock nvk
+requests is **copy `0xc7b5`**, not 3D as round 5's row 30 had it.
+
+**Where a stock nvk stops now (MEASURED from EL0).** Past the device-create
+params, at the copy-class object, by name. Next: an RM channel object (rung N3)
+cures `missing=rm_chan_object`; and one card deploy could turn the declared
+topology into a measured one — read `0x409604` and `GPC_UNIT(i,0x2608)` before
+GSP-RM, with a known-good register in the same block as the control, because
+"unreadable" and "zero GPCs" both look like `0xBADF5620` (§6 rule 1).
+
 ---
 
 ## 3. Work packages (parallel, each with a gate)
@@ -310,7 +363,7 @@ answers — the next deploy.
 | **C. RPC (offline)** | `docs/nv-rpc-implementation-spec.md` — pure half only | the spec's 24 cases pass in the kernel unit tier on synthetic queues | **no** | **done**: T-01…T-24, two mutation runs recorded; wired into the boot path by G |
 | **D. DMA facility** | `nv_dma.{c,h}`: bus address ≠ phys, identity guard, translation probe | a unit test rejects a mapping whose `bus != phys` under translation | **no** | **done**: 13 cases, two red runs |
 | **E. Present gate** | `/dev/fb0` mmap over an 8,294,400 B framebuffer | pixel at (1919,1079) in a QMP screendump | **no** | **done**: pixel red, 535-page over-map closed, one word past the frame now faults |
-| **F. `/dev/nv*` shim** | nouveau-subset ABI over a mock RM | probe creates device/VM/channel; fence retires | **no** | **done**: 16 real `DRM_IOCTL_NOUVEAU_*` rows + 21 named refusals, CPU-mapped BOs + `mmap` (583/0 on intel, 465/0 on ARM); stock nvk still needs NVIF and PRIME |
+| **F. `/dev/nv*` shim** | nouveau-subset ABI over a mock RM | probe creates device/VM/channel; fence retires | **no** | **done**: 16 real `DRM_IOCTL_NOUVEAU_*` rows + 21 named refusals, CPU-mapped BOs + `mmap` (583/0 on intel, 465/0 on ARM); NVIF served (§2.5) and, since round 6, `GETPARAM GRAPH_UNITS` too — a stock nvk now stops at the first engine class object (copy `0xc7b5`), refused by name; PRIME still missing |
 | **G. SEC2 booter / glue** | `nv_gsp_sec2_start_booter` + the transport seam | metadata `verified` == `0xA0A0…`; block PTE[0] == `nv_dma_bus()`, one doorbell | yes / **no** for the seam | **seam done** (`nv_gsp_rpc_setup/notify/stage8`, 568/0, two mutations red); booter still blocked: two forced attempts left `verified` at its sentinel |
 
 Ordering by leverage: D unblocks C; C unblocks the driver's upper half; E unblocks
@@ -326,7 +379,7 @@ stuck.
 |---|---|---|---|
 | N0 | 1080p present gate | 8,294,400 B maps; pixel visible | **closed 2026-11-23**: full frame maps, `(1919,1079)=(255,0,0)` in a QMP screendump; the recorded `-ENOMEM` did not reproduce on this tip (see `SWARM-REPORT-WP-E.md`) |
 | N1 | RimWorld's own menu on virgl 720p | ≥30 fps median, input, audio | **MET on fps and input (2026-11-23)**: the real menu (steam modal dismissed by 3 presses after the `input_target` fix) presents at **51.02 fps median**, verified from a dumped frame; **audio not reachable**, renderer host **llvmpipe** (r1 has no NVIDIA driver — the 4090 stays on `vfio-pci`). Round 3's 51.02 fps was the same number measured on a modal no press could dismiss |
-| N2 | `/dev/nv*` shim over a mock RM | probe + fence retire | **done**: 16 real `DRM_IOCTL_NOUVEAU_*` rows (magic `'d'`, real struct sizes), 21 named refusals, CPU-mapped BOs with `mmap`; a stock nvk still needs NVIF and PRIME |
+| N2 | `/dev/nv*` shim over a mock RM | probe + fence retire | **done**: 16 real `DRM_IOCTL_NOUVEAU_*` rows (magic `'d'`, real struct sizes), 21 named refusals, CPU-mapped BOs with `mmap`; NVIF (round 5) and `GETPARAM GRAPH_UNITS` (round 6) served, so a stock winsys's device probe now ends at the copy-class object by name; PRIME still missing |
 | N3 | GSP-RM boots | mailbox moves, first RPC answered | FWSEC never ran |
 | N4 | RM objects + first submit | 64×64 clear reads back | absent |
 | N5 | nvk enumerates AD102 | `vulkaninfo` lists `AD102 (NVK)` | absent |
