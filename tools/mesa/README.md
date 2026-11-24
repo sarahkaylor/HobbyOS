@@ -22,6 +22,43 @@ Artifacts land in `obj/mesa/lib/`:
 | `libGL.a` | the same objects, static (for in-guest probes) |
 | `exports.txt`, `undefined.txt` | `nm -D` dumps the build verifies itself against |
 
+## Vulkan (NVK): `build-nvk.sh`
+
+The other artifact the tree builds from Mesa is **`libvulkan_nouveau.so`**, Mesa's
+NVK ICD for the same compat class — a glibc DSO that a Vulkan client `dlopen`s.
+It is a *separate* configuration, not an option of the GL build, because the two
+artifacts have opposite closure requirements:
+
+```
+tools/mesa/build-nvk.sh all     # sysroot → zlib → libelf → libcxx → libdrm → mesa → probe → audit
+tools/mesa/build-nvk.sh audit   # SONAME, DT_NEEDED, ICD entry points, symbol provenance
+```
+
+| | `build-hobbyos.sh` (GL) | `build-nvk.sh` (NVK) |
+|---|---|---|
+| Mesa | 26.2.6 (tree pin) | 25.0.7 |
+| header/ABI | HobbyOS `x86_64-none-elf`, replayed host TU lines | glibc 2.31 sysroot, real cross/native meson build |
+| `-Dvulkan-drivers` | **empty** (no Vulkan in the GL DSO) | `nouveau` |
+| output | `obj/mesa/lib/libGL.so.1` | `obj/mesa-nvk/build/src/nouveau/vulkan/libvulkan_nouveau.so` |
+| `DT_NEEDED` | none | the glibc 2.31 five (`libc`, `libm`, `libdl`, `libpthread`, `ld-linux`) |
+
+Why 25.0.7 rather than the 26.2.6 pin, measured: `meson setup -Dllvm=disabled
+-Dvulkan-drivers=nouveau` on 26.2.6 stops at `ERROR: Feature llvm cannot be
+disabled: CLC requires LLVM` (that series compiles OpenCL kernels for nouveau
+and would carry a static LLVM). 25.0.7 is the last series where
+`-Dllvm=disabled` is allowed with `vulkan-drivers=nouveau`. Both need the Rust
+NAK; Rust is not what separates them.
+
+libdrm, libelf, zlib and libc++ are linked in **statically** so the compat class
+stages no library it does not already have. `build-nvk.sh audit` is the gate:
+it fails on an unexpected `DT_NEEDED`, a wrong SONAME, a missing
+`vk_icdGetInstanceProcAddr`/`vk_icdNegotiateLoaderICDInterfaceVersion`, or an
+undefined symbol that is neither in the 2.31 runtime nor weak.
+
+The one change to Mesa's source is `patches/0014-nvk-hobbyos-node-and-named-refusals.patch`
+(named-node discovery + named refusals); the guest harness and the probe stay
+NVIDIA-lane-specific in `tools/nv/nvk/`.
+
 ## Why it is not a `meson --cross-file` build
 
 A HobbyOS cross build cannot run target binaries, and Mesa's configure probes

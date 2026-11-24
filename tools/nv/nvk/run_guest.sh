@@ -18,14 +18,22 @@
 #   [NVSHIM]/nvk: rows                         -- which layer refused
 #
 # Env: NVK_SYSROOT (glibc 2.31 sysroot + crt), NVK_ICD (path to
-#      libvulkan_nouveau.so), NVK_VKH (Vulkan-Headers include dir),
-#      NVK_WORK (out dir), NVK_TIMEOUT (seconds), NVK_SKIP_BUILD=1.
+#      libvulkan_nouveau.so), NVK_VKH (Vulkan headers), NVK_RUN_DIR (out dir),
+#      NVK_TIMEOUT (seconds), NVK_SKIP_BUILD=1 (probe already built),
+#      NVK_SKIP_KERNEL_BUILD=1 (image already built), SKIP_KVM=1 (force TCG;
+#      the same switch every other HobbyOS harness takes).
+#
+#      Defaults point at what tools/mesa/build-nvk.sh just built (honouring the
+#      same NVK_WORK), so
+#      `bash tools/mesa/build-nvk.sh all && bash tools/nv/nvk/run_guest.sh`
+#      needs no environment at all.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-SYS="${NVK_SYSROOT:-$HOME/cp/vk-build/sysroot-glibc231}"
-ICD="${NVK_ICD:-$HOME/cp/vk-build/build-mesa-nvk25/src/nouveau/vulkan/libvulkan_nouveau.so}"
-VKH="${NVK_VKH:-$HOME/cp/vk-build/vulkan-headers/include}"
-W="${NVK_WORK:-$ROOT/obj/nvk}"
+BUILD="${NVK_WORK:-$ROOT/obj/mesa-nvk}"
+SYS="${NVK_SYSROOT:-$BUILD/sysroot-glibc231}"
+ICD="${NVK_ICD:-$BUILD/build/src/nouveau/vulkan/libvulkan_nouveau.so}"
+VKH="${NVK_VKH:-$BUILD/src/mesa-25.0.7/include}"
+W="${NVK_RUN_DIR:-$ROOT/obj/nvk-run}"
 TIMEOUT_S="${NVK_TIMEOUT:-300}"
 mkdir -p "$W"
 
@@ -100,20 +108,34 @@ LOG="$W/serial.log"
 say "boot (deadline ${TIMEOUT_S}s, log $LOG)"
 (
   cd "$ROOT" || exit 1
-  QEMU_ARGS_LINE=(-M q35,vmport=on -cpu host -smp 8 -m 12288M
+  QEMU_ARGS_LINE=(-M q35,vmport=on -smp 8 -m 12288M
     -pflash "$OVMF" -display none -serial stdio
     -device pcie-root-port,id=pcie.1,bus=pcie.0,slot=1
     -drive file=$IMG,format=raw,id=disk0,if=none
     -device nvme,drive=disk0,serial=1234,bus=pcie.1 -device edu
     -netdev user,id=net0 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56
-    -device virtio-tablet-pci -action shutdown=poweroff -enable-kvm)
-  # A session started before the user joined group `kvm` has no access to
-  # /dev/kvm even though /etc/group says otherwise; sg(1) picks the group up.
-  if [ -w /dev/kvm ]; then
-    exec qemu-system-x86_64 "${QEMU_ARGS_LINE[@]}"
-  else
-    exec sg kvm -c "qemu-system-x86_64 $(printf '%q ' "${QEMU_ARGS_LINE[@]}")"
+    -device virtio-tablet-pci -action shutdown=poweroff)
+  # Acceleration: KVM when it is usable, TCG otherwise -- the same rule as
+  # run_unit_tests_intel.sh and tools/nv/el0_wave.sh, with the writability test
+  # this harness already needed (a /dev/kvm that exists but is root:kvm-only is
+  # not usable, and -enable-kvm would abort the boot instead of slowing it).
+  ACCEL=(); SG=()
+  if [ "${SKIP_KVM:-0}" != 1 ]; then
+    if [ -w /dev/kvm ]; then
+      ACCEL=(-enable-kvm -cpu host); say "accel: kvm"
+    elif id -nG 2>/dev/null | tr ' ' '\n' | grep -qx kvm; then
+      # A session started before the user joined group `kvm` has no access to
+      # /dev/kvm even though /etc/group says otherwise; sg(1) picks it up.
+      ACCEL=(-enable-kvm -cpu host); SG=(1); say "accel: kvm (via sg kvm)"
+    fi
   fi
+  if [ "${#ACCEL[@]}" = 0 ]; then
+    say "accel: tcg (SKIP_KVM=${SKIP_KVM:-0}; /dev/kvm writable: $([ -w /dev/kvm ] && echo yes || echo no))"
+  fi
+  if [ "${#SG[@]}" != 0 ]; then
+    exec sg kvm -c "qemu-system-x86_64 $(printf '%q ' "${QEMU_ARGS_LINE[@]}" "${ACCEL[@]}")"
+  fi
+  exec qemu-system-x86_64 "${QEMU_ARGS_LINE[@]}" "${ACCEL[@]}"
 ) >> "$LOG" 2>&1 &
 QEMU_PID=$!
 for _ in $(seq 1 "$TIMEOUT_S"); do

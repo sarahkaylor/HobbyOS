@@ -1,3 +1,28 @@
+tools/mesa: NVK reaches HobbyOS through a named node, and names every refusal (nvk)
+
+Why: HobbyOS has no sysfs and no /dev/dri, so libdrm's drmGetDevices2() -- the
+only device discovery nvk has -- finds nothing and the driver enumerates zero
+physical devices with no explanation.  On top of that, Mesa's own error paths
+report only "0 devices": a GETPARAM or NVIF refusal is invisible in the guest
+log unless the userspace driver says which call and which class failed.
+
+What, in three files:
+  * nvk_instance.c    a device-enumeration hook that builds the one-element
+                      drmDevice a named node describes ($NVK_HOBBYOS_NODE, else
+                      /dev/nvshim) and runs it through the normal per-DRM path
+                      (drm_fd_is_nouveau, VERSION, GETPARAM, VM_INIT, NVIF),
+                      so everything below the hook is stock nvk.  No node ->
+                      VK_ERROR_INCOMPATIBLE_DRIVER, i.e. the libdrm scan runs
+                      unchanged on a real Linux host.
+  * nouveau_device.c  GETPARAM(GRAPH_UNITS) failure names the parameter, errno
+                      and the fact that no physical device follows.
+  * nouveau_context.c NVIF object creation through a wrapper that names the
+                      engine, the class id and errno when the kernel refuses.
+
+Everything here is diagnostic or discovery: no rendering path is changed, and
+the ABI the ICD speaks is upstream's.  Applied by tools/mesa/build-nvk.sh to
+the pristine Mesa 25.0.7 tarball.
+
 --- a/src/nouveau/vulkan/nvk_instance.c
 +++ b/src/nouveau/vulkan/nvk_instance.c
 @@ -20,6 +20,89 @@
