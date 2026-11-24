@@ -220,8 +220,10 @@ every run (FRTS carve, halt 105.73-105.92 ms, edges `MMMMPPPPP`/`PPPPPMMMM`).
 
 What actually changed: **`0x841668` read `0x110`** — RISCV|BRFETCH, the same word the GSP's
 `0x111668` read before F3. Clearing it gave `ctl=0x10`, `transcfg=0x5`, and with the GSP's
-pre-load DMA configuration (`0x624` `0x110 -> 0x190`) SEC2 **loaded and executed for the
-first time** (`halted=1`, DMEM landing 8/8 LANDED) — writing nothing.
+pre-load DMA configuration (`0x624` `0x110 -> 0x190`) SEC2 **loaded the booter for the first
+time** (DMEM landing 8/8 LANDED, BROM words reading back as written) — writing nothing. It
+did **not** execute: `halted=1` was read from a `ctl` that already carried STOPPED before the
+load, which §2.6 measures.
 
 > **Correction to §2 and §5.** "SEC2's fence is privilege-gated (measured twice)" is
 > **wrong**. Rounds 1-4 were reading a *core-select* state as a privilege wall. SEC2 sits
@@ -231,9 +233,9 @@ first time** (`halted=1`, DMEM landing 8/8 LANDED) — writing nothing.
 Three transport defects were fixed on the way: the load header's offsets used as file
 rather than data-region offsets (signature bytes landing at the head of IMEM), the DMA
 destination never advancing, and the missing DMA configuration that stalled the queue at
-block 19. Next: measure START->STOPPED now that `ctl` answers (microseconds = START never
-reached the core; milliseconds = the ROM ran and rejected), then settle whether the file's
-`0x7600` app-code bytes are ciphertext or plaintext, then the cheap `(engid,ucode)` variants.
+block 19. Next: measure START->STOPPED now that `ctl` answers — **done, §2.6: microseconds,
+and the bit never moved** — so the image questions (ciphertext or plaintext, the
+`(engid,ucode)` variants) wait behind the core-start path.
 
 **NVIF — served from ring 3.** `DRM_IOCTL_NOUVEAU_NVIF` (nr `0x47`) answers `NEW` route
 `0x00` class `0x0080` NV_DEVICE (object keyed by the client's cookie, as nouveau does),
@@ -265,13 +267,45 @@ produced the PASS its own report quoted — its regex required `exposes=(\d+) rc
 while the client prints `exposes=... to_container=... rc=...`, so it graded a passing run as
 FAIL. Fixed with a tolerant parse plus a QEMU-free `--self-test`.
 
+### 2.6 Round 5b (2026-11-24): SEC2's START->STOPPED is 2.3 µs, and it is not a halt
+
+Four boots, eight attempts (`r6a`-`r6d`), one row per attempt, branch
+`nv/wp-a5b-halttime`, report `SWARM-REPORT-WP-A5B.md`.
+
+**The PC channel was replaced with halt timing, and the answer is unambiguous.**
+`ctl` (`0x840100`) carries STOPPED **before** the START write — the state the halt-gate
+reset leaves the core in — and carried it in every one of ~335,000 samples taken at ~590 ns
+intervals for 200 ms after the write: `running_samples=0`, `transitions=0`, **8 for 8**. The
+first sample lands 2272-2336 ns after the trigger, which is the cost of a write + read +
+ptimer read, so that number is a *bound*; the real statement is that STOPPED never moved.
+
+The instrument is proven in the same boots, on the GSP window: `ctl` reads `0x0` (running)
+within 1 µs of its START and `0x10` again at 105.82-105.86 ms, with the FRTS carve receipt
+(`0xBAD0AC73+`) in all four. So "never left STOPPED" is a fact about SEC2, not a blind read.
+
+**Consequence for round 5's headline.** "SEC2 executed for the first time" was `halted=1`
+read from that pre-set bit; the correct sentence is *SEC2 loaded the booter and the START
+trigger never took the core out of STOPPED*. Everything the booter would write stayed
+untouched (metadata sentinel, bootbin prefill `0x2000/0x2000`, DMEM `0/0x1800`, MAILBOX0
+still holding its own argument) — consistent with no execution, and now with a measurement
+under it. Every image-side question (ciphertext vs plaintext, signature slot, `(engid,ucode)`)
+is behind this: none of them can matter to a core that never starts.
+
+**The named lever, from this tree's own GSP measurement.** `nv_gsp_fwsec_reset` records
+"the reset is REQUIRED for STARTCPU to be accepted — measured: without it the core answers
+START with 'still halted'", which is exactly SEC2's behaviour. The GSP writes `0x048 &= ~3`,
+`0x014 = 0xffffffff` and pulses `0x3C0`, then waits out the scrub; SEC2 gets only the
+`UC_CTRL` reset bits plus one `0x8403C0` pulse issued *before* `0x841668` is cleared, and
+never writes `0x840048`/`0x840014` at all. One variable, three writes, on a window that
+answers — the next deploy.
+
 ---
 
 ## 3. Work packages (parallel, each with a gate)
 
 | WP | Scope | Gate | Needs 4090? | Status 2026-11-23 |
 |---|---|---|---|---|
-| **A. FWSEC** | F1-F5, then the launch | `0x1438` hi16 becomes a real code **and** SEC2 unfences | yes | **partial**: 3 mechanisms fixed, image lands, verdict word written; SEC2 still fenced |
+| **A. FWSEC** | F1-F5, then the launch | `0x1438` hi16 becomes a real code **and** SEC2 unfences | yes | **partial**: 3 mechanisms fixed, image lands, verdict word written; SEC2 unfenced and loading, but its core never leaves STOPPED (§2.6) |
 | **B. fuses** | fuse bitmask vs `SignatureVersions` | non-zero AND, documented | yes, read-only | **done**: `COMPATIBLE`, sig index 1 |
 | **C. RPC (offline)** | `docs/nv-rpc-implementation-spec.md` — pure half only | the spec's 24 cases pass in the kernel unit tier on synthetic queues | **no** | **done**: T-01…T-24, two mutation runs recorded; wired into the boot path by G |
 | **D. DMA facility** | `nv_dma.{c,h}`: bus address ≠ phys, identity guard, translation probe | a unit test rejects a mapping whose `bus != phys` under translation | **no** | **done**: 13 cases, two red runs |

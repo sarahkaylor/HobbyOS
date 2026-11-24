@@ -1,0 +1,6 @@
+[RMAP] pulse dlopen ok handle=0x1040000040
+[RMAP] pa_simple_new -> stream=(nil) error=6
+[RMAP] alsa dlopen ok handle=0x10400015c0
+[RMAP] snd_device_name_hint -> rc=0 devices=0
+[RMAP] snd_pcm_open("default") -> rc=-19 pcm=(nil) errno=0 text=No such device
+[RMAP] done

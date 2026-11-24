@@ -1,0 +1,7 @@
+file=obj/rw-audio/probe.wav rate=48000 ch=2 bits=16 frames=120772 duration=2.516s
+peak=16000/32767 (-6.2 dBFS) rms=11313 (-9.2 dBFS)
+active(> -50 dBFS, 100 ms windows)=2.5s of 2.5s
+zero-crossings up=2517 -> tone=1000.4 Hz
+wavgrade: PASS
+duration=2.516083
+size=483132
