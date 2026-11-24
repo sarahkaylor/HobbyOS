@@ -849,6 +849,20 @@ static int l_fd_ioctl(struct process *p, struct trap_frame *tf) {
   uint64_t arg = l_arg(tf, 2);
 
   if (fd < 0 || fd >= MAX_OPEN_FDS) return l_ret(tf, -EBADF);
+  /* WP-EL0 (nv/wp-el0-shim): a CLOSED fd is EBADF on every ioctl, whatever
+   * the request.  Without this, a closed slot falls through every
+   * file_is_dev*() check (they answer 0 for a slot that holds nothing) to the
+   * final -ENOTTY -- so a client that used an fd after close was told "this
+   * node does not understand that request" instead of "you closed it", and a
+   * use-after-close became invisible.  Measured from EL0 against /dev/nvshim:
+   * `ioctl(closed_fd, DRM_IOCTL_NOUVEAU_GETPARAM)` answered 25 where Linux
+   * answers 9 (SWARM-REPORT-WP-EL0.md, step 32).  Same check l_fd_fadvise64()
+   * already makes, and it applies to the whole table, so every device node the
+   * compat surface serves inherits Linux's answer. */
+  {
+    struct process *pg = process_group(p);
+    if (!pg || fd >= MAX_OPEN_FDS || pg->open_fds[fd] < 0) return l_ret(tf, -EBADF);
+  }
 
   if (req == L_FIONBIO) {
     int32_t on;
