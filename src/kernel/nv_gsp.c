@@ -758,11 +758,15 @@ static int rpc_stage8_common(struct nv_gsp_rpc *r, struct nv_dev *d,
     uart_puts("\n");
   } else if (lrc == -EAGAIN || lrc == -ETIMEDOUT) {
     /* The honest reading of a zeroed status header: the RM task has not
-     * started, so nothing is listening and the doorbell is withheld rather than
-     * written into a window a reset just fenced. */
+     * started, so nothing is listening and this stage writes no doorbell rather
+     * than one into a window a reset just fenced.  The COUNT is not zero when
+     * the pre-boot handshake ran and rang its one notification, so the row says
+     * who rang and what this stage did rather than printing a bare zero that a
+     * reader would have to reconcile with [NV-PRE]. */
     uart_puts("linked=0 peer=none (status header still zero: RM has not "
-              "started; doorbell withheld, doorbells=");
+              "started; this stage sends nothing, and none of the doorbells=");
     print_int((int)r->doorbells);
+    uart_puts(" so far came from it)");
     uart_puts(" wait_us=");
     uart_print_hex(link_timeout_us);
     if (lrc == -ETIMEDOUT) {
@@ -810,10 +814,13 @@ int nv_gsp_rpc_stage8(struct nv_dev *d) { return rpc_stage8_common(&g_gsp_rpc, d
 int nv_gsp_rpc_stage9_into(struct nv_gsp_rpc *r, struct nv_dev *d) {
   if (!r || !d) return -EINVAL;
   if (!r->q.linked) {
+    /* The pre-boot handshake may already have rung its one notification, so the
+     * count is not necessarily zero here; what this row can assert is that this
+     * stage sent nothing and rang nothing. */
     uart_puts("[NV-RPC] stage=init skipped: linked=0 (no peer header to answer, "
-              "so nothing was sent and no doorbell was rung; doorbells=");
+              "so nothing was sent from here and none of the doorbells=");
     print_int((int)r->doorbells);
-    uart_puts(")\n");
+    uart_puts(" so far came from here)\n");
     return -EAGAIN;
   }
 

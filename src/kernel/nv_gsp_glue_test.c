@@ -595,6 +595,71 @@ TEST(test_nv_gsp_rpc_preboot_queues_two_and_rings_once) {
   EXPECT_EQ(mmio.writes, 3);
 }
 
+/* G-07 the link stage after a pre-boot: the canary restores the PRE-BOOT's
+ * writePtr, not the zero the queue was built with.  Restoring zero would drop
+ * the two queued messages while every row before it still read OK -- a failure
+ * no row-level check can see, and one the boot lane's [NV-RPC] canary row can
+ * only report (restored=0 would mean the ring is empty again).  This also pins
+ * the count: the link stage rings nothing, so the pre-boot's one doorbell is
+ * the only one, and stage 9 refuses without adding another. */
+TEST(test_nv_gsp_rpc_link_after_preboot_keeps_the_queued_messages) {
+  uart_puts("  Running test_nv_gsp_rpc_link_after_preboot_keeps_the_queued_"
+            "messages...\n");
+  tests_run++;
+
+  struct t_mmio mmio;
+  t_zero(&mmio, (uint32_t)sizeof mmio);
+
+  struct nv_dev d;
+  t_zero(&d, (uint32_t)sizeof d);
+  d.ops.rd32 = t_rd32;
+  d.ops.wr32 = t_wr32;
+  d.ops_ctx = &mmio;
+  d.bar0_phys = 0x80000000ull;
+  d.bar1_phys = 0x8000000000ull;
+  d.bus = 1;
+
+  struct nv_gsp_rpc r;
+  t_zero(&r, (uint32_t)sizeof r);
+  int before = frame_free_count();
+
+  ASSERT(nv_gsp_rpc_preboot(&r, &d) == 0);
+  EXPECT_EQ(mmio.writes, 3); /* MAILBOX0/1 + the one notification */
+  EXPECT_EQ((int)r.doorbells, 1);
+
+  const uint8_t *block = (const uint8_t *)phys_to_virt(r.block.phys);
+  const uint8_t *cmd = block + NV_RPC_CMD_OFF;
+  const uint8_t *stat = block + NV_RPC_STAT_OFF;
+
+  /* The link stage: no peer, so -EAGAIN, and the canary runs (timeout 0). */
+  EXPECT_EQ(nv_gsp_rpc_stage8_into(&r, &d), -EAGAIN);
+  EXPECT_EQ((int)r.q.linked, 0);
+  EXPECT_EQ(mmio.writes, 3);              /* it rang nothing and published nothing */
+  EXPECT_EQ((int)r.doorbells, 1);         /* the pre-boot's, still the only one */
+  EXPECT_EQ((int)r.sends, 2);             /* two messages, no more */
+  EXPECT_EQ((int)t_ld32(cmd + NV_RPC_Q_WRITE_PTR), 2); /* restored, NOT zeroed */
+  EXPECT_EQ((int)t_ld32(stat + NV_RPC_Q_WRITE_PTR), 0); /* peer's word untouched */
+  EXPECT_EQ((int)r.q.tx_seq, 2);
+
+  /* The two messages are still in the ring, fold and sequence intact. */
+  const uint8_t *slot0 = cmd + NV_RPC_SLOT;
+  const uint8_t *slot1 = cmd + NV_RPC_SLOT + NV_RPC_SLOT;
+  EXPECT_EQ((int)t_ld32(slot0 + NV_RPC_R_FUNCTION), 72);
+  EXPECT_EQ((int)t_ld32(slot1 + NV_RPC_R_FUNCTION), 73);
+  ASSERT(nv_rpc_cksum(slot0, (uint32_t)NV_RPC_SLOT) == 0);
+  ASSERT(nv_rpc_cksum(slot1, (uint32_t)NV_RPC_SLOT) == 0);
+
+  /* Stage 9 on an unlinked queue: refuses, sends nothing, rings nothing. */
+  EXPECT_EQ(nv_gsp_rpc_stage9_into(&r, &d), -EAGAIN);
+  EXPECT_EQ(mmio.writes, 3);
+  EXPECT_EQ((int)r.doorbells, 1);
+  EXPECT_EQ((int)r.sends, 2);
+  EXPECT_EQ((int)t_ld32(cmd + NV_RPC_Q_WRITE_PTR), 2);
+
+  nv_gsp_rpc_teardown(&r);
+  EXPECT_EQ(frame_free_count(), before);
+}
+
 void nv_gsp_glue_test_suite(void) {
   test_nv_gsp_rpc_setup_allocates_the_whole_block();
   test_nv_gsp_rpc_pte0_is_the_bus_address_nv_dma_issued();
@@ -605,6 +670,7 @@ void nv_gsp_glue_test_suite(void) {
   test_nv_gsp_rpc_stage8_publishes_and_holds_the_doorbell();
   test_nv_gsp_rpc_publish_refuses_without_a_bus_address();
   test_nv_gsp_rpc_preboot_queues_two_and_rings_once();
+  test_nv_gsp_rpc_link_after_preboot_keeps_the_queued_messages();
 }
 
 #endif /* __x86_64__ */
