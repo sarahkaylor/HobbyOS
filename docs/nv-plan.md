@@ -368,9 +368,10 @@ only output): sysroot → zlib → libelf → libcxx → libdrm → mesa → pro
 cold on 48 cores, `audit: PASS`, ICD 24,451,584 B. Against the lane's 24,449,664 B
 artifact: SONAME identical, `DT_NEEDED` set identical (the glibc five), exported dynamic
 symbol set identical (2188; `nm -D` diff empty), every defined symbol the same size
-(13,904 symbols; `nm -S` diff empty); only the embedded build paths differ (the `strings`
-delta is 1,197 path-shaped strings), which is why the build-id and `.text` bytes differ.
-Same source, same patch, same flags.
+(13,904 symbols; `nm -S` diff empty); the binaries differ only in the build paths they
+embed (189 vs 221 distinct absolute paths once each build root is normalised — the tree
+build records the libc++ and sysroot include dirs the lane binary does not), which is why
+the build-id and `.text` bytes differ. Same source, same patch, same flags.
 
 **Three gaps the lane script did not have to pass**, all now handled and reported: its
 cross file had no `[binaries] rust` entry (meson 1.10 stops with `'rust' compiler binary
