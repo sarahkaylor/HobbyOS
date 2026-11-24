@@ -11,10 +11,28 @@ SECTIONS
     /* Text section: code */
     .text :
     {
+        /* First byte of the image.  `arch_reloc_self()` (arch/arm/reloc.c)
+         * derives the Limine slide as (runtime &__image_start) minus the link
+         * address 0x40080000; keep the ASSERT at the bottom of this file and
+         * KIMAGE_LINK_BASE in that file in step with the line above. */
+        __image_start = .;
         /* Ensure the boot assembly is placed first */
         *(.text.boot)
         *(.text)
         *(.text.*)
+    }
+
+    /* Load-time relocation table (AArch64 `-pie` link): one
+     * R_AARCH64_RELATIVE record per pointer word in static data, applied by
+     * arch/arm/reloc.c from boot.s before the first C consumer reads the
+     * table.  Placed explicitly so __rela_start/__rela_end bracket exactly
+     * this table and nothing else.  The x86_64 image is not slid and carries
+     * no relocations, so this section is empty there. */
+    .rela.dyn : ALIGN(8)
+    {
+        __rela_start = .;
+        KEEP(*(.rela.dyn))
+        __rela_end = .;
     }
 
     /* Read-only data section */
@@ -73,3 +91,10 @@ SECTIONS
    instead of .bss. */
 ASSERT(__bss_end <= 0x45600000,
        "kernel .bss exceeds the limine placement window (docs/blk-cache.md section 11)");
+
+/* The AArch64 image is linked -pie and slid by Limine, so arch/arm/reloc.c has
+   to know the LINK base to compute the slide.  It carries 0x40080000 as
+   KIMAGE_LINK_BASE; keep the two in step, or every relocated pointer lands one
+   constant away from where it belongs. */
+ASSERT(__image_start == 0x40080000,
+       "kernel link base moved: update KIMAGE_LINK_BASE in src/kernel/arch/arm/reloc.c");

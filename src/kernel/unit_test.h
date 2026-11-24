@@ -96,5 +96,11 @@ void nv_gsp_glue_test_suite(void);
  * hardware, so the ABI is exercised on both arches. */
 void nv_shim_test_suite(void);
 void nv_shim_drm_test_suite(void); /* WP-F2: /dev/nvshim DRM ('d') face */
+#ifdef __aarch64__
+/* Load-time relocation of static data: a folded `const` table of function or
+ * string pointers must hold RUNTIME addresses (boot.s applies .rela.dyn).
+ * AArch64-only: the x86_64 image loads at its link address. */
+void reloc_test_suite(void);
+#endif
 
 #endif // UNIT_TEST_H

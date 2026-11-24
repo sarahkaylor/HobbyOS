@@ -23,6 +23,13 @@ void run_all_unit_tests(void) {
   /* Frame allocator first: it asserts against a pristine pool (no
      process has taken a block yet), and its reuse checks rely on the
      rotating hint starting from zero. */
+#ifdef __aarch64__
+  /* Load-time relocations of static data: FIRST, because every suite below
+     reaches folded `const` tables of function/string pointers, and on a slid
+     image those hold link addresses unless boot.s applied .rela.dyn
+     (arch/arm/reloc.c; reloc_test.c is the gate). */
+  reloc_test_suite();
+#endif
   frame_test_suite();
   fat16_test_suite();
   locks_test_suite();

@@ -18,6 +18,7 @@
 #include "arch/cpu.h"
 #include "lock.h"
 #include "blk_cache.h"
+#include "reloc.h"
 
 void virtio_blk_handle_irq(void);
 extern int virtio_blk_irq;
@@ -472,6 +473,13 @@ static void test_wave_loader(void *arg) {
 
 void main(void) {
   uart_init();
+#ifdef __aarch64__
+  /* Load-time relocations of static data were applied in boot.s
+     (arch/arm/reloc.c) before the first C consumer; print the one [RELOC] row
+     and halt if the image is running with pointers this kernel did not
+     relocate.  A silent bad image is worse than a loud one. */
+  arch_reloc_report();
+#endif
   /* SEC-4 (security-plan.md #4): seed the stack canary before anything
      instrumented runs; src/kernel/ssp.c. */
   extern void ssp_init(void);

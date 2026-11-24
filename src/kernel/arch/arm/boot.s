@@ -54,6 +54,16 @@ clear_bss:
     b       clear_bss
 
 run_main:
+    // Apply the image's load-time relocations BEFORE anything reads static
+    // data (arch/arm/reloc.c).  The AArch64 image is linked -pie and Limine
+    // loads it at a slide: code is indifferent (adrp/add are PC-relative) but
+    // a `const` table of function/string pointers holds LINK addresses, and a
+    // call through one branches into zeros (ESR EC=0, "unknown reason").
+    // Order matters twice over: the pass must run after clear_bss above (its
+    // counters are .bss) and before main() (the first C consumer).  Memory is
+    // still writable here -- the MMU comes up inside main().
+    bl      arch_relocate_self
+
     // Call the C main function
     bl      main
 
