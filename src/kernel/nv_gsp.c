@@ -4005,17 +4005,94 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
   for (uint32_t i = 0; i < 8; i++) nv_hex_byte(sig[i]);
   uart_puts("\n");
 
-  /* IMEM: the code region, 256-byte blocks, secret pages.  The destination
-   * advances with the source -- the defect round 1 fixed on the GSP. */
-  for (uint32_t off = 0; off < imem_len; off += 256) {
-    rc = falcon_dma_block(d, NV_FALCON_SEC2_BASE, base, imem_file + off, off, 1,
-                          1);
+  /* ---- the DMA engine's configuration, the same three writes the GSP path
+   * makes before its load (nv_gsp_fwsec_reset): 0x624 bit 7, 0x10C = 0, and the
+   * context word in 0x600.  r5b's SEC2 load stalled at block 19 with 0x118
+   * reading 0x617 (bit 0, "a command is still pending") and 0x114/0x11C still
+   * holding block 18's values -- i.e. block 19 was never written, the queue
+   * stopped draining.  The GSP's 0x118 after a *successful* 242-block load reads
+   * 0x616, one bit short of identical, so the engine is in the state this card
+   * reaches when the load works, minus the configuration those writes provide.
+   */
+  {
+    uint32_t v624 = nv_rd32(d, NV_FALCON_SEC2_BASE + 0x624);
+    nv_wr32(d, NV_FALCON_SEC2_BASE + 0x624, v624 | (1u << 7));
+    nv_wr32(d, NV_FALCON_SEC2_BASE + 0x10C, 0);
+    nv_wr32(d, NV_FALCON_SEC2_BASE + 0x600, NV_LOCAL_TRANSCFG_COHERENT);
+    uart_puts("[NV-SEC2] dma cfg 624=");
+    uart_print_hex(v624);
+    uart_puts(" -> ");
+    uart_print_hex(nv_rd32(d, NV_FALCON_SEC2_BASE + 0x624));
+    uart_puts(" 10c=");
+    uart_print_hex(nv_rd32(d, NV_FALCON_SEC2_BASE + 0x10C));
+    uart_puts(" 600=");
+    uart_print_hex(nv_rd32(d, NV_FALCON_SEC2_BASE + 0x600));
+    uart_puts(" (the GSP path's own pre-load writes)\n");
+  }
+
+  /* IMEM then DMEM, 256-byte blocks, IMEM as secret pages, the destination
+   * advancing with the source -- the defect round 1 fixed on the GSP.
+   *
+   * If the DMA queue stalls, the same image goes in through the PIO port
+   * instead: one index write, one data register, no request and no status word
+   * to poll (round 2 measured that path on this card, and F2's whole point was
+   * that PIO needs no observable engine state).  The row says which transport
+   * actually fed the core, because "it ran" and "how it was loaded" are
+   * different facts and only one of them is about the booter. */
+  int via_pio = 0;
+  rc = 0;
+  {
+    uint32_t off = 0;
+    for (; off < imem_len; off += 256) {
+      rc = falcon_dma_block(d, NV_FALCON_SEC2_BASE, base, imem_file + off, off,
+                            1, 1);
+      if (rc != 0) break;
+    }
     if (rc != 0) {
       uart_puts("[NV-SEC2] IMEM dma FAILED at off=");
       uart_print_hex(off);
       uart_puts(" rc=");
       print_int(rc);
+      uart_puts(" dma state 110=");
+      uart_print_hex(nv_rd32(d, NV_FALCON_SEC2_BASE + NV_XFER_EXT_BASE));
+      uart_puts(" 114=");
+      uart_print_hex(nv_rd32(d, NV_FALCON_SEC2_BASE + NV_XFER_FALCON_ADDR));
+      uart_puts(" 118=");
+      uart_print_hex(nv_rd32(d, NV_FALCON_SEC2_BASE + NV_XFER_CTRL));
+      uart_puts(" 11c=");
+      uart_print_hex(nv_rd32(d, NV_FALCON_SEC2_BASE + NV_XFER_EXT_ADDR));
+      uart_puts(" 120=");
+      uart_print_hex(nv_rd32(d, NV_FALCON_SEC2_BASE + NV_XFER_STATUS));
       uart_puts("\n");
+    }
+  }
+  if (rc == 0) {
+    for (uint32_t off = 0; off < dmem_len; off += 256) {
+      rc = falcon_dma_block(d, NV_FALCON_SEC2_BASE, base, dmem_file + off, off,
+                            0, 0);
+      if (rc != 0) {
+        uart_puts("[NV-SEC2] DMEM dma FAILED at off=");
+        uart_print_hex(off);
+        uart_puts(" rc=");
+        print_int(rc);
+        uart_puts("\n");
+        break;
+      }
+    }
+  }
+  if (rc != 0) {
+    uart_puts("[NV-SEC2] DMA did not finish the load: falling back to PIO for "
+              "the whole image (index + data, no queue to stall)\n");
+    via_pio = 1;
+    rc = falcon_pio_block(d, NV_FALCON_SEC2_BASE, booter + imem_file, imem_len,
+                          0, 1, 1);
+    if (rc == 0)
+      rc = falcon_pio_block(d, NV_FALCON_SEC2_BASE, booter + dmem_file,
+                            dmem_len, 0, 0, 0);
+    if (rc != 0) {
+      uart_puts("[NV-SEC2] PIO load FAILED rc=");
+      print_int(rc);
+      uart_puts(" (index register out of range, or the port refused)\n");
       return rc;
     }
   }
@@ -4023,26 +4100,12 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
   uart_print_hex(imem_len);
   uart_puts(" bytes from file+");
   uart_print_hex(imem_file);
-  uart_puts(" (dst advances, SEC pages)\n");
-
-  /* DMEM: the data region, not secret pages. */
-  for (uint32_t off = 0; off < dmem_len; off += 256) {
-    rc = falcon_dma_block(d, NV_FALCON_SEC2_BASE, base, dmem_file + off, off, 0,
-                          0);
-    if (rc != 0) {
-      uart_puts("[NV-SEC2] DMEM dma FAILED at off=");
-      uart_print_hex(off);
-      uart_puts(" rc=");
-      print_int(rc);
-      uart_puts("\n");
-      return rc;
-    }
-  }
-  uart_puts("[NV-SEC2] DMEM loaded ");
+  uart_puts(" + DMEM ");
   uart_print_hex(dmem_len);
-  uart_puts(" bytes from file+");
+  uart_puts(" from file+");
   uart_print_hex(dmem_file);
-  uart_puts(" (dst advances)\n");
+  uart_puts(" transport=");
+  uart_puts(via_pio ? "PIO\n" : "DMA (destination advances, IMEM SEC pages)\n");
 
   /* Boot ROM parameters: where the signature is, which engine/user id it must
    * cover, and which algorithm.  BOOTVEC is the app's own entry offset inside
