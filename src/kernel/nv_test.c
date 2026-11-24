@@ -818,6 +818,103 @@ static void test_nv_vram_scan_and_judge(void) {
   EXPECT_EQ((int)pm[4], 0); /* NUL-terminated for the log */
 }
 
+/* ---- the booter's arrival receipt --------------------------------------
+ *
+ * Two claims the instrument must not blur: the region *changed*, and the
+ * region holds *the bootloader's bytes*.  A count alone would let a stray
+ * write or a partial DMA read as the booter having arrived, so MATCHED
+ * requires every word, and every non-matching verdict keeps its counts.  The
+ * BLIND cases exist because a region whose prefill did not stick reports
+ * "0 changed" for a reason that has nothing to do with the firmware.
+ */
+static void test_nv_bootbin_verdict(void) {
+  uart_puts("  Running test_nv_bootbin_verdict...\n");
+  tests_run++;
+  struct nv_vram_scan pre, post;
+  nv_vram_scan_reset(&pre);
+  pre.words = 0x2000; /* 0x8000 bytes */
+  pre.sentinel = 0x2000;
+  pre.sum = 0x1234;
+
+  /* Nothing changed: every word is still the host's pattern. */
+  post = pre;
+  EXPECT_EQ(nv_bootbin_verdict(&pre, &post, 0), NV_BOOTBIN_UNTOUCHED);
+
+  /* Changed to exactly the expected bytes: 8192/8192. */
+  post = pre;
+  post.sentinel = 0;
+  post.other = 0x2000;
+  EXPECT_EQ(nv_bootbin_verdict(&pre, &post, 0x2000), NV_BOOTBIN_MATCHED);
+
+  /* One word short is NOT the booter arriving: report raw, do not promote.
+   * This is the case a partial DMA produces, and it is the one a "did
+   * something change" instrument would call success. */
+  post.other = 0x2000;
+  EXPECT_EQ(nv_bootbin_verdict(&pre, &post, 0x1FFF), NV_BOOTBIN_OTHER);
+
+  /* Changed, but to something that is not the file (a garbage write, a clear). */
+  post.sentinel = 0x1000;
+  post.other = 0x1000;
+  post.zero = 0x1000;
+  EXPECT_EQ(nv_bootbin_verdict(&pre, &post, 0), NV_BOOTBIN_OTHER);
+
+  /* A region that came back as zeros: the prefill never landed, so no verdict
+   * in either direction -- the trap rounds 1-4 paid for. */
+  struct nv_vram_scan blind;
+  nv_vram_scan_reset(&blind);
+  blind.words = 0x2000;
+  blind.other = 0x2000;
+  blind.zero = 0x2000;
+  EXPECT_EQ(nv_bootbin_verdict(&blind, &blind, 0x2000), NV_BOOTBIN_BLIND);
+  /* Partially stuck is blind too. */
+  struct nv_vram_scan half;
+  nv_vram_scan_reset(&half);
+  half.words = 0x2000;
+  half.sentinel = 0x1000;
+  half.other = 0x1000;
+  EXPECT_EQ(nv_bootbin_verdict(&half, &post, 0), NV_BOOTBIN_BLIND);
+  /* A scan of a different length cannot be compared with this prefill. */
+  struct nv_vram_scan shortp;
+  nv_vram_scan_reset(&shortp);
+  shortp.words = 0x1000;
+  shortp.sentinel = 0x1000;
+  EXPECT_EQ(nv_bootbin_verdict(&pre, &shortp, 0x1000), NV_BOOTBIN_BLIND);
+
+  /* ---- the byte comparison itself, over a fake window ------------------- */
+  uint8_t vram[64];
+  uint8_t file[64];
+  for (uint32_t i = 0; i < 64; i++) {
+    vram[i] = (uint8_t)(i * 7u);
+    file[i] = vram[i];
+  }
+  struct nv_vram_win w;
+  w.p = (volatile uint8_t *)vram;
+  w.phys = 0;
+  w.vram_off = 0;
+  w.len = sizeof vram;
+  uint32_t mw = 0, bad_off = 0, bad_val = 0;
+  ASSERT(nv_vram_match(&w, 0, file, 64, &mw, &bad_off, &bad_val) == 0);
+  EXPECT_EQ((int)mw, 16);
+  /* One byte differs: the word it lives in must be the reported mismatch, and
+   * the count must be 15 -- not 16 with a note. */
+  file[9] ^= 0xFFu;
+  ASSERT(nv_vram_match(&w, 0, file, 64, &mw, &bad_off, &bad_val) == 0);
+  EXPECT_EQ((int)mw, 15);
+  EXPECT_EQ((int)bad_off, 8);
+  EXPECT_EQ((int)bad_val, (int)((uint32_t)vram[8] | ((uint32_t)vram[9] << 8) |
+                                ((uint32_t)vram[10] << 16) |
+                                ((uint32_t)vram[11] << 24)));
+  /* A request past the window is refused rather than read. */
+  EXPECT_EQ(nv_vram_match(&w, 0, file, 68, &mw, &bad_off, &bad_val), -EINVAL);
+  EXPECT_EQ(nv_vram_match(0, 0, file, 4, &mw, &bad_off, &bad_val), -EINVAL);
+
+  /* The names are what the log prints: a rename must not change a meaning. */
+  ASSERT(nv_bootbin_verdict_name(NV_BOOTBIN_MATCHED)[0] == 'M');
+  ASSERT(nv_bootbin_verdict_name(NV_BOOTBIN_UNTOUCHED)[0] == 'U');
+  ASSERT(nv_bootbin_verdict_name(NV_BOOTBIN_OTHER)[0] == 'O');
+  ASSERT(nv_bootbin_verdict_name(NV_BOOTBIN_BLIND)[0] == 'B');
+}
+
 static void test_nv_ioc_sizes(void) {
   uart_puts("  Running test_nv_ioc_sizes...\n");
   tests_run++;
@@ -875,6 +972,7 @@ void nv_test_suite(void) {
   test_nv_falcon_halt_start();
   test_nv_selftest();
   test_nv_vram_scan_and_judge();
+  test_nv_bootbin_verdict();
   test_nv_ioc_sizes();
   test_nv_info_fill();
 }

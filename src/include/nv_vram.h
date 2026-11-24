@@ -87,6 +87,36 @@ enum nv_vram_effect {
 int nv_vram_judge(const struct nv_vram_scan *pre, const struct nv_vram_scan *post);
 const char *nv_vram_effect_name(int e);
 
+/* ---- the booter's arrival receipt --------------------------------------
+ *
+ * The SEC2 booter's one host-visible job: it DMAs the bootloader's data region
+ * (meta.sysmem_addr_bootloader, size_bootloader = 0x8000 bytes) into VRAM at
+ * `boot_bin_offset`.  A prefill through BAR1 makes that arrival a count, and
+ * comparing the words against the bootloader's own bytes makes it a
+ * fingerprint: a random write and a firmware DMA are different events, and
+ * "something changed" cannot tell them apart.
+ *
+ * The verdict is pure so the truth table is pinned in the unit tier, including
+ * the case this project keeps paying runs for -- a region whose prefill did not
+ * survive must not be read as "the firmware wrote nothing".
+ */
+#define NV_BOOTBIN_BLIND 0     /* the prefill did not stick: no verdict */
+#define NV_BOOTBIN_UNTOUCHED 1 /* every word is still the host's pattern */
+#define NV_BOOTBIN_MATCHED 2   /* the region now holds the bootloader's bytes */
+#define NV_BOOTBIN_OTHER 3     /* changed, but not to the expected bytes */
+int nv_bootbin_verdict(const struct nv_vram_scan *pre,
+                       const struct nv_vram_scan *post, uint32_t match_words);
+const char *nv_bootbin_verdict_name(int v);
+
+/* Count the words of VRAM at `off` that equal the little-endian words of
+ * `expect` (a host byte buffer), reading through the open window.  `expect` is
+ * assembled byte by byte, so a caller may hand it any alignment.  Fills
+ * `match_words`, and the first disagreement's offset/value when there is one.
+ * Returns 0, or a negative errno when the request is not inside the window. */
+int nv_vram_match(const struct nv_vram_win *w, uint32_t off,
+                  const uint8_t *expect, uint32_t len, uint32_t *match_words,
+                  uint32_t *first_bad_off, uint32_t *first_bad_val);
+
 /* One 1:1 pattern probe: read the word, write `pat`, read it back, restore the
  * word it had.  Returns 1 when the pattern read back and the original was
  * restored, 0 when it did not, negative on a dead window.  `obs` gets what the
