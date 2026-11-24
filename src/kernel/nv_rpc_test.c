@@ -1744,7 +1744,9 @@ static void test_t29_preboot_framing(void) {
   ASSERT(nv_rpc_cksum(pre_stage, 0x1000) == 0);
   EXPECT_EQ(nv_rpc_elem_check(pre_stage, 1, &why), -EIO);
   EXPECT_EQ((int)why, (int)NV_RPC_BAD_SIG);
+}
 
+/* ======================================================================== */
 /* T-30 the peer's header is read, not remembered (the row's discriminator)  */
 /* ======================================================================== */
 
