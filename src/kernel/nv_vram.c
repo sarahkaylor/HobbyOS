@@ -166,6 +166,66 @@ const char *nv_vram_effect_name(int e) {
   }
 }
 
+/* ---- the booter's arrival receipt ---------------------------------------
+ *
+ * Same blind rule as nv_vram_judge, then one more question that FWSEC's FRTS
+ * check never had to ask: are the words the ones the booter would have put
+ * there?  The bootloader's data region is a file on our own disk, so a byte
+ * match is a fingerprint and not a coincidence -- while a region that changed
+ * to anything else is reported as OTHER with its counts, never promoted.
+ */
+int nv_bootbin_verdict(const struct nv_vram_scan *pre,
+                       const struct nv_vram_scan *post, uint32_t match_words) {
+  if (!pre || !post) return NV_BOOTBIN_BLIND;
+  if (pre->words == 0 || post->words != pre->words) return NV_BOOTBIN_BLIND;
+  if (pre->sentinel != pre->words || pre->other != 0 || pre->zero != 0)
+    return NV_BOOTBIN_BLIND;
+  if (post->other == 0) return NV_BOOTBIN_UNTOUCHED;
+  /* Every word has to match, not most of them: a half-finished DMA is not the
+   * booter having arrived, and "8191 of 8192" is a number the row prints. */
+  if (match_words >= post->words) return NV_BOOTBIN_MATCHED;
+  return NV_BOOTBIN_OTHER;
+}
+
+const char *nv_bootbin_verdict_name(int v) {
+  switch (v) {
+  case NV_BOOTBIN_UNTOUCHED: return "UNTOUCHED";
+  case NV_BOOTBIN_MATCHED: return "MATCHED";
+  case NV_BOOTBIN_OTHER: return "OTHER";
+  default: return "BLIND";
+  }
+}
+
+int nv_vram_match(const struct nv_vram_win *w, uint32_t off,
+                  const uint8_t *expect, uint32_t len, uint32_t *match_words,
+                  uint32_t *first_bad_off, uint32_t *first_bad_val) {
+  if (!w || !w->p || !expect || !match_words) return -EINVAL;
+  if ((uint64_t)off + (uint64_t)len > (uint64_t)w->len) return -EINVAL;
+  uint32_t words = len / 4u;
+  uint32_t match = 0;
+  uint32_t bad_off = 0, bad_val = 0;
+  int have_bad = 0;
+  for (uint32_t i = 0; i < words; i++) {
+    const uint8_t *e = expect + i * 4u;
+    /* Byte-wise on both sides: the wire image is a byte buffer and this kernel
+     * does not make wide loads of structures at arbitrary offsets. */
+    uint32_t ew = (uint32_t)e[0] | ((uint32_t)e[1] << 8) |
+                  ((uint32_t)e[2] << 16) | ((uint32_t)e[3] << 24);
+    uint32_t v = nv_vram_rd32(w, off + i * 4u);
+    if (v == ew) {
+      match++;
+    } else if (!have_bad) {
+      have_bad = 1;
+      bad_off = off + i * 4u;
+      bad_val = v;
+    }
+  }
+  *match_words = match;
+  if (first_bad_off) *first_bad_off = bad_off;
+  if (first_bad_val) *first_bad_val = bad_val;
+  return 0;
+}
+
 int nv_vram_pattern_probe(struct nv_vram_win *w, uint32_t off, uint32_t pat,
                           uint32_t *obs) {
   if (!w || !w->p) return -EINVAL;
