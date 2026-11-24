@@ -19,9 +19,12 @@
  *
  *  This header names the place where the two meet, and nothing else does.
  *  Everything in it is pure memory work plus the three function pointers in
- *  struct nv_rpc_hw; no function here writes a register except through that
- *  seam, so the whole path is drivable in the kernel unit tier with a counting
- *  doorbell (src/kernel/nv_gsp_glue_test.c).
+ *  struct nv_rpc_hw, with ONE named exception: nv_gsp_rpc_publish() programs
+ *  the two GSP falcon mailbox words, because that is where the argument page
+ *  is advertised and there is no link yet to carry it (contract 1.6).  It is
+ *  two dwords, both written through d->ops->wr32, and the unit tier counts
+ *  them: exactly 0x110040 and 0x110044, values = the libos page's bus address
+ *  low and high.
  *
  *  The two claims this file exists to make checkable:
  *
@@ -46,10 +49,17 @@ struct nv_dev;
 struct nv_gsp_rpc {
   struct nv_dma_map block; /* the 129-page block, owned by nv_dma          */
   struct nv_rpc_queue q;   /* the transport's view of the same bytes       */
+  /* The publish side (contract 1.5/1.6).  Three more mappings, all owned by
+   * nv_dma and all freed by nv_gsp_rpc_teardown(): the argument page, the
+   * libos-args table, and the three log regions that table names. */
+  struct nv_dma_map args;  /* GSP_ARGUMENTS_CACHED, one page               */
+  struct nv_dma_map libos; /* the table whose address goes in MAILBOX0/1   */
+  struct nv_dma_map logs;  /* NV_RPC_LIBOS_LOG_PAGES x 4 KiB, LOGINIT/...  */
   uint8_t *rx_stage;       /* caller scratch, NV_RPC_SLOT * NV_RPC_ELEM_MAX */
   uint32_t sends;          /* messages committed to the ring               */
   uint32_t doorbells;      /* notifications rung (must equal sends)        */
   int built;
+  int published;           /* the two mailbox words were written           */
 };
 
 /* Allocate the block through nv_dma, build it, and point the queue at it.
@@ -73,6 +83,35 @@ int nv_gsp_rpc_build(struct nv_gsp_rpc *r);
 
 /* Release the frames and forget the queue.  Safe on a zeroed struct. */
 void nv_gsp_rpc_teardown(struct nv_gsp_rpc *r);
+
+/* Build the two pages that TELL firmware where the block is and program the
+ * two mailbox words that name the first of them (contract 1.5/1.6):
+ *
+ *   1. GSP_ARGUMENTS_CACHED at nv_dma_bus(&r->args), carrying the BLOCK's
+ *      nv_dma_bus(&r->block) as mq.sharedMemPhysAddr == PTE[0], the queue
+ *      offsets, and pageTableEntryCount = 129;
+ *   2. the libos-args table at nv_dma_bus(&r->libos): LOGINIT, LOGINTR, LOGRM
+ *      (one 4 KiB page each, from r->logs) then RMARGS pointing at (1);
+ *   3. MAILBOX1:MAILBOX0 = that table's bus address, low:high.
+ *
+ * Everything it claims is re-read from memory or from its own call, and logged
+ * as [NV-ARG] rows -- the page is read back with nv_rpc_args_read() and
+ * cross-checked with nv_rpc_args_crosscheck().  MAILBOX0/1 are WRITE
+ * registers that read 0 by design on this card (contract 1.6, MEASURED), so
+ * they are logged and never gated on.
+ *
+ * Publishing deliberately does not touch the status queue: a zero status
+ * header is the boot's only proof that RM has not started, and manufacturing
+ * one here would counterfeit the evidence the link stage reads.
+ *
+ *   -EINVAL   NULL, or a transport that was never built.
+ *   -ENOTSUP  nv_dma_bus() refused a page or the block (VT-d translation is
+ *             live): nothing is written and no mailbox is programmed.
+ *   -EIO      the block's bus address is not the one the PTEs were built from,
+ *             or a page did not read back what was written.
+ * Idempotent: a second call rewrites the same two pages and the same two
+ * mailbox words. */
+int nv_gsp_rpc_publish(struct nv_gsp_rpc *r, struct nv_dev *d);
 
 /* Commit one staged element (nv_rpc_req_init + nv_rpc_elem_build format,
  * length at NV_RPC_R_LENGTH) and notify the peer.  Exactly one

@@ -182,6 +182,314 @@ int nv_gsp_rpc_build(struct nv_gsp_rpc *r) {
   return 0;
 }
 
+/* ============================================================================
+ *  The publish side: GSP_ARGUMENTS_CACHED + the libos-args table + MAILBOX0/1
+ *  (docs/nv-gsp-rpc-contract.md 1.5 and 1.6)
+ *
+ *  THE GAP THIS CLOSES.  Building the block is not telling firmware about it.
+ *  RM does not scan memory: it reads a one-page argument structure, finds it
+ *  through a table of named regions whose address the host put in two falcon
+ *  mailbox words, and walks the 129 PTEs from mq.sharedMemPhysAddr.  Without
+ *  this, a running RM reads a zero status header forever -- which is
+ *  indistinguishable, in a log, from RM never having started at all.
+ *
+ *  NO PEER IS NEEDED.  All of it is host-side image construction plus two
+ *  MMIO dwords, so it is checkable on a card where SEC2 has never reached
+ *  INIT_DONE, which is the card we have.
+ * ========================================================================== */
+
+/* The two GSP falcon mailbox words.  Defined here rather than beside the other
+ * GSP registers further down because the publish below is the first user. */
+#define NV_GSP_MAILBOX0 (NV_FALCON_GSP_BASE + 0x040)
+#define NV_GSP_MAILBOX1 (NV_FALCON_GSP_BASE + 0x044)
+
+/* One id8 as its eight characters.  Printed straight out of the re-read page,
+ * so the log shows the bytes the firmware will read rather than the string we
+ * meant to write; a non-printable byte becomes '.', which is visibly not a
+ * region name. */
+static void nv_arg_put_id8(uint64_t id) {
+  char s[9];
+  for (int i = 0; i < 8; i++) {
+    uint8_t c = (uint8_t)((id >> (8 * i)) & 0xFFu);
+    s[i] = (c >= 0x20 && c < 0x7F) ? (char)c : '.';
+  }
+  s[8] = 0;
+  uart_puts(s);
+}
+
+/* The argument page, the libos table, and the three log regions the table
+ * names.  Taken and released together: a table that names regions nobody
+ * allocated would point the firmware at someone else's memory. */
+static int nv_gsp_args_alloc(struct nv_gsp_rpc *r) {
+  int rc = nv_dma_alloc(NV_RPC_GSP_ARGS_PAGE, &r->args);
+  if (rc != 0) {
+    uart_puts("[NV-ARG] stage=alloc FAIL args page rc=");
+    print_int(rc);
+    uart_puts("\n");
+    return rc;
+  }
+  rc = nv_dma_alloc(NV_RPC_GSP_ARGS_PAGE, &r->libos);
+  if (rc != 0) {
+    uart_puts("[NV-ARG] stage=alloc FAIL libos table rc=");
+    print_int(rc);
+    uart_puts("\n");
+    nv_dma_free(&r->args);
+    return rc;
+  }
+  rc = nv_dma_alloc((uint64_t)NV_RPC_LIBOS_LOG_PAGES * NV_DMA_PAGE, &r->logs);
+  if (rc != 0) {
+    uart_puts("[NV-ARG] stage=alloc FAIL log regions rc=");
+    print_int(rc);
+    uart_puts("\n");
+    nv_dma_free(&r->args);
+    nv_dma_free(&r->libos);
+    return rc;
+  }
+  return 0;
+}
+
+int nv_gsp_rpc_publish(struct nv_gsp_rpc *r, struct nv_dev *d) {
+  if (!r || !d) return -EINVAL;
+  if (!r->built) {
+    uart_puts("[NV-ARG] stage=publish FAIL no block: publishing an address "
+              "nothing was built at would name a page table that does not "
+              "exist\n");
+    return -EINVAL;
+  }
+  if (!r->args.phys || !r->libos.phys || !r->logs.phys) {
+    uart_puts("[NV-ARG] stage=publish FAIL no argument pages (nv_dma_alloc "
+              "runs in setup)\n");
+    return -EINVAL;
+  }
+
+  struct nv_rpc_geom g;
+  if (nv_rpc_queue_geom(&g) != 0) return -EINVAL;
+
+  /* THE ADDRESS RULE.  Every address below is an nv_dma_bus() answer, and
+   * `phys` appears only as the CPU's way to reach a page it is writing.  The
+   * page the firmware walks and the page the firmware is told about are then
+   * the same number by construction, not by coincidence. */
+  uint64_t block_bus = nv_dma_bus(&r->block);
+  uint64_t args_bus = nv_dma_bus(&r->args);
+  uint64_t libos_bus = nv_dma_bus(&r->libos);
+  uint64_t logs_bus = nv_dma_bus(&r->logs);
+  if (block_bus == NV_DMA_BUS_INVALID || args_bus == NV_DMA_BUS_INVALID ||
+      libos_bus == NV_DMA_BUS_INVALID || logs_bus == NV_DMA_BUS_INVALID) {
+    uart_puts("[NV-ARG] stage=publish FAIL nv_dma_bus refused one of the four "
+              "mappings: no bus address exists, so no page is written and no "
+              "mailbox is programmed\n");
+    return -ENOTSUP;
+  }
+  if (block_bus != r->q.bus) {
+    /* The PTEs were built from q.bus.  Publishing a different number would
+     * tell firmware to walk a table that is not this block's. */
+    uart_puts("[NV-ARG] stage=publish FAIL block bus=");
+    uart_print_hex(block_bus);
+    uart_puts(" q.bus=");
+    uart_print_hex(r->q.bus);
+    uart_puts(": the published address is not the one the PTEs were built "
+              "from\n");
+    return -EIO;
+  }
+
+  /* ---- 1. GSP_ARGUMENTS_CACHED ---------------------------------------- */
+  uint8_t *args = (uint8_t *)phys_to_virt(r->args.phys);
+  int rc = nv_rpc_args_build(args, &g, block_bus);
+  if (rc != 0) {
+    uart_puts("[NV-ARG] stage=args FAIL nv_rpc_args_build rc=");
+    print_int(rc);
+    uart_puts("\n");
+    return rc;
+  }
+
+  /* The row is built from the page's OWN bytes (nv_rpc_args_read) and from the
+   * block's OWN PTE[0], not from the variables that wrote them: a writer that
+   * stored the wrong thing still returns 0. */
+  struct nv_rpc_rmargs a;
+  if (nv_rpc_args_read(args, &a) != 0) return -EIO;
+  const uint8_t *block = (const uint8_t *)phys_to_virt(r->block.phys);
+  uint64_t pte0 = glue_ld64(block);
+  int field = nv_rpc_args_crosscheck(&g, block_bus, &a);
+
+  uart_puts("[NV-ARG] stage=args bus=");
+  uart_print_hex(args_bus);
+  uart_puts(" phys=");
+  uart_print_hex(r->args.phys);
+  uart_puts(" magic=");
+  uart_print_hex(a.magic);
+  uart_puts(" size=");
+  uart_print_hex(a.size);
+  uart_puts("\n");
+
+  uart_puts("[NV-ARG] stage=args mq sharedMemPhysAddr=");
+  uart_print_hex(a.shared_mem_phys);
+  uart_puts(" pte0=");
+  uart_print_hex(pte0);
+  uart_puts(" equal=");
+  print_int(a.shared_mem_phys == pte0 ? 1 : 0);
+  uart_puts("\n");
+
+  uart_puts("[NV-ARG] stage=args mq cmd=");
+  uart_print_hex(a.cmd_queue_off);
+  uart_puts(" stat=");
+  uart_print_hex(a.stat_queue_off);
+  uart_puts(" hdr=");
+  uart_print_hex(a.elem_hdr_size);
+  uart_puts(" min=");
+  uart_print_hex(a.elem_size_min);
+  uart_puts(" max=");
+  uart_print_hex(a.elem_size_max);
+  uart_puts(" halign=");
+  uart_print_hex(a.header_align);
+  uart_puts(" ealign=");
+  uart_print_hex(a.elem_align);
+  uart_puts(" pte_count=");
+  print_int((int)a.pte_count);
+  uart_puts("\n");
+
+  uart_puts("[NV-ARG] stage=args crosscheck=");
+  uart_puts(field == NV_RPC_ARG_OK
+                ? "OK (the page in memory describes the block this boot "
+                  "built)\n"
+                : nv_rpc_arg_field_name((enum nv_rpc_arg_field)field));
+  if (field != NV_RPC_ARG_OK) {
+    uart_puts(" FAIL: the argument page and the transport disagree\n");
+    return -EIO;
+  }
+
+  /* ---- 2. the libos-args table ---------------------------------------- */
+  /* Every field is set: these are the four regions the reference driver
+   * publishes, in the reference order (contract 1.6).  The three log regions
+   * are real 4 KiB pages because the contract leaves "zero-sized log region"
+   * NOT ESTABLISHED and three pages is cheap; RMARGS is the argument page,
+   * and its size is the whole page so the firmware can read the 0xC8 struct
+   * starting at pa without a size it would have to trust. */
+  struct nv_rpc_libos_region e[NV_RPC_LIBOS_MAX];
+  const char *ids[NV_RPC_LIBOS_MAX] = {"LOGINIT", "LOGINTR", "LOGRM",
+                                       "RMARGS"};
+  for (int i = 0; i < (int)NV_RPC_LIBOS_MAX; i++) {
+    e[i].id = ids[i];
+    e[i].id8 = 0; /* build() packs `id` */
+    e[i].kind = NV_RPC_LIBOS_KIND_CONTIG;
+    e[i].loc = NV_RPC_LIBOS_LOC_SYSMEM;
+    if (i < (int)NV_RPC_LIBOS_LOG_PAGES) {
+      e[i].pa = logs_bus + (uint64_t)i * NV_DMA_PAGE;
+      e[i].size = NV_DMA_PAGE;
+    } else {
+      e[i].pa = args_bus;
+      e[i].size = NV_RPC_GSP_ARGS_PAGE;
+    }
+  }
+
+  uint8_t *libos = (uint8_t *)phys_to_virt(r->libos.phys);
+  rc = nv_rpc_libos_build(libos, e, NV_RPC_LIBOS_MAX);
+  if (rc != 0) {
+    uart_puts("[NV-ARG] stage=libos FAIL nv_rpc_libos_build rc=");
+    print_int(rc);
+    uart_puts("\n");
+    return rc;
+  }
+
+  uart_puts("[NV-ARG] stage=libos bus=");
+  uart_print_hex(libos_bus);
+  uart_puts(" phys=");
+  uart_print_hex(r->libos.phys);
+  uart_puts(" entries=");
+  print_int((int)NV_RPC_LIBOS_MAX);
+  uart_puts("\n");
+  for (uint32_t i = 0; i < NV_RPC_LIBOS_MAX; i++) {
+    struct nv_rpc_libos_region b;
+    if (nv_rpc_libos_read(libos, i, &b) != 0) return -EIO;
+    uart_puts("[NV-ARG] stage=libos[");
+    print_int((int)i);
+    uart_puts("] id=");
+    nv_arg_put_id8(b.id8);
+    uart_puts(" pa=");
+    uart_print_hex(b.pa);
+    uart_puts(" size=");
+    uart_print_hex(b.size);
+    uart_puts(" kind=");
+    print_int((int)b.kind);
+    uart_puts(" loc=");
+    print_int((int)b.loc);
+    uart_puts("\n");
+  }
+
+  /* The fourth entry is the whole point of the page: it must name the argument
+   * page's bus address, read back out of the table. */
+  struct nv_rpc_libos_region rargs;
+  if (nv_rpc_libos_read(libos, NV_RPC_LIBOS_MAX - 1u, &rargs) != 0) return -EIO;
+  if (rargs.id8 != nv_rpc_id8("RMARGS") || rargs.pa != args_bus) {
+    uart_puts("[NV-ARG] stage=libos FAIL RMARGS id=");
+    nv_arg_put_id8(rargs.id8);
+    uart_puts(" pa=");
+    uart_print_hex(rargs.pa);
+    uart_puts(" expected pa=");
+    uart_print_hex(args_bus);
+    uart_puts("\n");
+    return -EIO;
+  }
+
+  /* ---- 3. MAILBOX0/1 name the table ----------------------------------- *
+   * ORDERING.  0x110040 is FWSEC's error channel earlier in the boot
+   * (docs/nv-devinit-contract.md section 3): this publish must be the last
+   * writer of it in a boot.  Stage 8 runs after every SEC2/FWSEC attempt and
+   * nothing runs after it here; a later stage that needs FWSEC again must
+   * re-zero the word first.
+   *
+   * The readback is logged and NOT gated on.  The contract's MEASURED rows show
+   * 0x00000000 in both reference dumps (pre- and post-init), so "the firmware
+   * took my arguments" cannot be read out of these two words.  What this card
+   * measures instead: after the write they read back exactly what was written
+   * (arga: 0x20956B000).  That says the MMIO write landed -- a state fact about
+   * a card whose falcon page is not fenced -- and says nothing about firmware.
+   * Nothing may gate on either reading. */
+  nv_wr32(d, NV_GSP_MAILBOX0, (uint32_t)(libos_bus & 0xFFFFFFFFu));
+  nv_wr32(d, NV_GSP_MAILBOX1, (uint32_t)(libos_bus >> 32));
+  uint32_t mb0 = nv_rd32(d, NV_GSP_MAILBOX0);
+  uint32_t mb1 = nv_rd32(d, NV_GSP_MAILBOX1);
+  uart_puts("[NV-ARG] stage=mailbox0 bus=");
+  uart_print_hex(libos_bus);
+  uart_puts(" lo=");
+  uart_print_hex((uint64_t)(libos_bus & 0xFFFFFFFFu));
+  uart_puts(" hi=");
+  uart_print_hex(libos_bus >> 32);
+  uart_puts(" readback=");
+  uart_print_hex(((uint64_t)mb1 << 32) | mb0);
+  uart_puts(" (a state fact, not a firmware ack: nothing gates on it)\n");
+
+  /* ---- 4. the status header, still the peer's -------------------------- *
+   * Publishing must not counterfeit RM's first write.  Eight words at
+   * block + stat_off are what nv_rpc_link_validate() reads, so those eight are
+   * what this row prints -- from the block's bytes, after everything above. */
+  uint32_t sw[8];
+  int zeros = 0;
+  for (int i = 0; i < 8; i++) {
+    sw[i] = glue_ld32(block + g.stat_off + (uint32_t)i * 4u);
+    if (sw[i] == 0) zeros++;
+  }
+  uart_puts("[NV-ARG] stage=status bus=");
+  uart_print_hex(block_bus);
+  uart_puts(" off=");
+  uart_print_hex(g.stat_off);
+  uart_puts(" zero=");
+  print_int(zeros);
+  uart_puts("/8");
+  for (int i = 0; i < 8; i++) {
+    uart_puts(" w");
+    print_int(i);
+    uart_puts("=");
+    uart_print_hex(sw[i]);
+  }
+  uart_puts(zeros == 8 ? " (publishing did not counterfeit the peer's first "
+                         "write)\n"
+                       : " (NONZERO: the peer wrote it, or we did -- that "
+                         "difference matters)\n");
+
+  r->published = 1;
+  return 0;
+}
+
 int nv_gsp_rpc_setup(struct nv_gsp_rpc *r, uint8_t *rx_stage) {
   if (!r || !rx_stage) return -EINVAL;
 
@@ -189,9 +497,22 @@ int nv_gsp_rpc_setup(struct nv_gsp_rpc *r, uint8_t *rx_stage) {
   r->block.bus = 0;
   r->block.len = 0;
   r->block.pages = 0;
+  r->args.phys = 0;
+  r->args.bus = 0;
+  r->args.len = 0;
+  r->args.pages = 0;
+  r->libos.phys = 0;
+  r->libos.bus = 0;
+  r->libos.len = 0;
+  r->libos.pages = 0;
+  r->logs.phys = 0;
+  r->logs.bus = 0;
+  r->logs.len = 0;
+  r->logs.pages = 0;
   r->sends = 0;
   r->doorbells = 0;
   r->built = 0;
+  r->published = 0;
   r->rx_stage = rx_stage; /* before build: queue_init copies it */
 
   int rc = nv_dma_alloc(NV_RPC_BLOCK_SIZE, &r->block);
@@ -211,17 +532,33 @@ int nv_gsp_rpc_setup(struct nv_gsp_rpc *r, uint8_t *rx_stage) {
     nv_dma_free(&r->block);
     return rc;
   }
+
+  /* The publish side has to exist before stage 8 can tell anyone about the
+   * block.  Its failure is setup's failure for the same reason: a transport
+   * nobody can be told about is 129 frames doing nothing. */
+  rc = nv_gsp_args_alloc(r);
+  if (rc != 0) {
+    nv_dma_free(&r->block);
+    r->built = 0;
+    r->q.block = 0;
+    r->q.bus = 0;
+    return rc;
+  }
   return 0;
 }
 
 void nv_gsp_rpc_teardown(struct nv_gsp_rpc *r) {
   if (!r) return;
   nv_dma_free(&r->block);
+  nv_dma_free(&r->args);
+  nv_dma_free(&r->libos);
+  nv_dma_free(&r->logs);
   r->q.block = 0;
   r->q.bus = 0;
   r->q.linked = 0;
   r->q.swapped = 0;
   r->built = 0;
+  r->published = 0;
 }
 
 int nv_gsp_rpc_notify(struct nv_gsp_rpc *r, const uint8_t *stage,
@@ -295,6 +632,19 @@ int nv_gsp_rpc_stage8_into(struct nv_gsp_rpc *r, struct nv_dev *d) {
   struct nv_rpc_hw hw;
   nv_rpc_hw_dev(d, &hw);
 
+  /* Publish BEFORE looking for the peer.  The order is the contract's: the
+   * firmware is told where the block is before anybody checks whether it has
+   * arrived, and the check itself (the status header) is untouched by the
+   * publish -- so a zero header after this point still means "RM has not
+   * started", not "we scribbled on it".  No peer is needed: this is image
+   * construction plus two mailbox dwords. */
+  int prc = nv_gsp_rpc_publish(r, d);
+  if (prc != 0) {
+    uart_puts("[NV-ARG] stage=publish result=");
+    print_int(prc);
+    uart_puts(" (the firmware cannot be told where the block is)\n");
+  }
+
   enum nv_rpc_link_field bad = NV_RPC_LINK_OK;
   int lrc = nv_rpc_link_apply(&r->q, &bad);
   uart_puts("[NV-RPC] stage=link ");
@@ -317,7 +667,10 @@ int nv_gsp_rpc_stage8_into(struct nv_gsp_rpc *r, struct nv_dev *d) {
     uart_puts(" (header written but unusable; waiting will not fix it)\n");
   }
   nv_rpc_dump("link", &r->q);
-  return lrc;
+  /* A publish that failed is the more fundamental error: the firmware was
+   * never told where the block is, so the link's -EAGAIN cannot become 0 on
+   * this boot however long anyone waits. */
+  return prc != 0 ? prc : lrc;
 }
 
 int nv_gsp_rpc_stage8(struct nv_dev *d) {
@@ -351,10 +704,10 @@ int nv_gsp_rpc_stage8(struct nv_dev *d) {
 #define NV_PFB_MOVES_C 0x1FA82C
 #define NV_PFB_MOVES_D 0x1FA830
 
-/* GSP-specific words inside the falcon window (BAR0 0x110000 + offset). */
+/* GSP-specific words inside the falcon window (BAR0 0x110000 + offset).
+ * NV_GSP_MAILBOX0/1 are defined beside nv_gsp_rpc_publish(), their first
+ * user, so the publish does not depend on this block's position. */
 #define NV_GSP_ENGINE_RESET (NV_FALCON_GSP_BASE + 0x3C0)
-#define NV_GSP_MAILBOX0 (NV_FALCON_GSP_BASE + 0x040)
-#define NV_GSP_MAILBOX1 (NV_FALCON_GSP_BASE + 0x044)
 /* Was written down as a BAR0 word at 0x001668 -- wrong: 0x001668 reads the
  * unreadable-register answer in every state.  The live word is falcon-relative,
  * 0x111668 = BCR_CTRL, and 0x111 = VALID | RISCV | BRFETCH, i.e. "run the
