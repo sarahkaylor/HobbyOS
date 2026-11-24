@@ -1,0 +1,23 @@
+[EL0] nvabi_probe: /dev/nvshim DRM face from ring 3 (WP-EL0)
+[EL0] 01 open path=/dev/nvshim fd=3 PASS
+[EL0] 02 version name=nouveau v=1.3.1 name_len=8 PASS
+[EL0] 03 get_cap capability=SYNCOBJ value=1 PASS
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm getparam param=11 value=0x192
+[NVSHIM] drm getparam param=4 value=0x2684
+[NVSHIM] drm getparam param=8 value=0x100000000
+[EL0] 04 getparam chipset=0x192 pci=0x2684 fb_size=0x100000000 PASS
+[NVSHIM] drm refuse size nr=80 want=16 got=8
+[EL0] 05 arg_size vm_init_enc_size=8 ret_errno=22 PASS
+[NVSHIM] drm vm vm=1 umd_end=0x8000000000 total=0x10000000000
+[EL0] 06 vm_init umd_end=0x8000000000 total=0x10000000000 errno=0 PASS
+[NVSHIM] drm gem_new handle=1 size=0x2000 offset=0x204c4a000 domain=0x9 map=0x1000
+[EL0] 07 gem_new handle=1 size=0x2000 bus=0x204c4a000 map_handle=0x1000 PASS
+[NVSHIM] drm gem_info handle=1 offset=0x204c4a000 size=0x2000 map=0x1000
+[EL0] 08 gem_info map_handle=0x1000 size=0x2000 foreign_errno=22 PASS
+[NVSHIM] drm mmap refused off=0x0 reason=no_such_object
+[EL0] 09 mmap_off0 errno=22 PASS
+[NVSHIM] drm mmap refused handle=389 reason=not_this_clients_object
+[EL0] 10 mmap_foreign offset=0x30a000 errno=22 PASS
+[EL0] 11 mmap offset=0x1000 len=0x2000 va=(none) errno=22 FAIL
+[EL0] RESULT FAIL (no CPU mapping: the rest of the ABI needs it)
