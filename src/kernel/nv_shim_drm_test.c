@@ -1206,7 +1206,7 @@ static void test_nvshim_drm_cpu_map_refusals(void) {
   uint32_t vh = gn.info.handle;
   EXPECT_EQ((int)gn.info.map_handle, 0);
   uint64_t vphys = 0, vlen = 0;
-  EXPECT_EQ(nv_rm_mock.mem_phys(DDEV, vh, &vphys, &vlen), -ENOTSUP);
+  EXPECT_EQ(nv_rm_mock_if()->mem_phys(DDEV, vh, &vphys, &vlen), -ENOTSUP);
   EXPECT_EQ((int)(vphys == 0), 1); /* nothing filled in on a refusal */
 
   /* mmap shapes. */
