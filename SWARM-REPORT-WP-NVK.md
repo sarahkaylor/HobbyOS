@@ -3,7 +3,10 @@
 **Scope.** `tools/mesa` configured `-Dvulkan-drivers=` (empty), so the tree had no
 Vulkan ICD for nvk. This lane builds one for the x86_64 HobbyOS **Linux-ABI compat
 class** (the class a real Vulkan client is), attaches it to `/dev/nvshim`, and drives
-it until it either enumerates `AD102 (NVK)` or refuses at a name.
+it until it either enumerates `AD102 (NVK)` or refuses at a name. The build has since
+been made permanent as `tools/mesa/build-nvk.sh` (which configures
+`-Dvulkan-drivers=nouveau`, never an empty list); this report describes the lane that
+produced it.
 
 **Status: the wall is named and measured.** nvk loads in the guest, creates a Vulkan
 instance, opens `/dev/nvshim`, speaks DRM (`VERSION`, `GETPARAM`, `VM_INIT`), creates
@@ -32,12 +35,12 @@ file) or **INFERRED**.
 |---|---|
 | `libvulkan_nouveau.so` | Mesa's NVK ICD, 24,449,664 B, SONAME `libvulkan_nouveau.so`, `DT_NEEDED`: `libc.so.6 libm.so.6 libdl.so.2 libpthread.so.0 ld-linux-x86-64.so.2` — **nothing else** (MEASURED: `readelf -dW`) |
 | `src/user/nvk_probe.c` | the smallest loader-equivalent probe: calls the ICD ABI directly (`vk_icdGetInstanceProcAddr` → `vkCreateInstance` → `vkEnumeratePhysicalDevices` → `vkGetPhysicalDeviceProperties`), no loader, no ICD JSON |
-| `tools/nv/nvk/build.sh` | reproducible build: sysroot → zlib → libelf → libdrm → mesa → probe → audit |
-| `tools/nv/nvk/patches/0001-…patch` | the one Mesa change (8 hunks, 3 files), §2 |
+| `tools/mesa/build-nvk.sh` | the supported build (this lane's script, folded into the tree's Mesa configuration; `tools/nv/nvk/build.sh` is now a driver of it): sysroot → zlib → libelf → libcxx → libdrm → mesa → probe → audit |
+| `tools/mesa/patches/0014-nvk-hobbyos-node-and-named-refusals.patch` | the one Mesa change (8 hunks, 3 files), §2 — with the other Mesa patches |
 | `tools/nv/nvk/run_guest.sh` | stages glibc 2.31 + the ICD + the probe into a private `disk.img` copy, boots `MODE=test`, grades the serial log |
 
-`tools/nv/nvk/build.sh audit` passes and is what the claims in this table rest on
-(MEASURED):
+`tools/mesa/build-nvk.sh audit` (via `bash tools/nv/nvk/build.sh audit`) passes and is
+what the claims in this table rest on (MEASURED):
 
 ```
 DT_NEEDED: ld-linux-x86-64.so.2 libc.so.6 libdl.so.2 libm.so.6 libpthread.so.0
@@ -47,30 +50,38 @@ undefined not in the 2.31 runtime/ld.so: _ITM_deregisterTMCloneTable
 audit: PASS
 ```
 
-`tools/mesa/build-hobbyos.sh` is deliberately untouched: it builds the GL DSO with
+`tools/mesa/build-hobbyos.sh` is untouched by this lane: it builds the GL DSO with
 **0 `DT_NEEDED`** for the compat class, and a Vulkan ICD is a different artifact with a
-different dependency closure. The Vulkan build lives here (`tools/nv/nvk/`), and the GL
-lane keeps its invariants.
+different dependency closure. What changed when the build became permanent is *where the
+Vulkan build lives*: `tools/mesa/build-nvk.sh` is now the tree's Vulkan configuration
+(`-Dvulkan-drivers=nouveau`, never an empty list), the patch is
+`tools/mesa/patches/0014-…` with the other Mesa patches, and `tools/nv/nvk/build.sh` is a
+three-line driver of it. The GL lane keeps its invariants; the Vulkan lane keeps its
+harness (`run_guest.sh`, `src/user/nvk_probe.c`).
 
 ### 1.1 Why Mesa 25.0.7 and not the tree's 26.2.6 pin
 
-MEASURED, twice, in this environment:
+MEASURED, in this environment, and corrected against the first draft of this section
+(which said 25.0.7's NVK is "plain C" — it is not; both series use the Rust NAK):
 
-1. **26.2.6 NVK needs a Rust toolchain** (`rust.c bindgen` + `cbindgen` + a Rust NAK:
-   `src/nouveau/compiler/meson.build` has `rust.bindgen()`, `rust.proc_macro`,
-   `rustc-hash`, `paste`, and `meson.build:867-895` errors below rustc 1.85). The tree
-   has no rustc/cargo.
-2. **26.2.6 NVK also needs `mesa-clc`** (it compiles two OpenCL kernels into the
-   driver, `src/nouveau/vulkan/meson.build:102`), and `mesa-clc` needs LLVM **plus**
-   SPIRV-Tools **plus** SPIRV-LLVM-Translator; with `-Dllvm=disabled` meson stops at
-   `Feature llvm cannot be disabled: CLC requires LLVM`.
+1. **26.2.6 cannot be configured with `-Dllvm=disabled -Dvulkan-drivers=nouveau`.** meson
+   stops at
+   `src/mesa-26.2.6/meson.build:977:3: ERROR: Feature llvm cannot be disabled: CLC requires LLVM`
+   (`~/cp/vk-build/log-mesa-setup.txt`): that series compiles OpenCL kernels into the
+   nouveau driver with `mesa-clc`, so the ICD would carry a static LLVM — the same cost
+   `tools/cp/vk/build.sh` pays for lavapipe, and the opposite of this artifact's point
+   (a 24 MB ICD whose whole closure is the glibc five).
+2. **Both series need Rust.** 25.0.7's `meson.build:794` adds the `rust` language for
+   `with_nouveau_vk` and `src/nouveau/compiler/meson.build` uses `rust.bindgen` +
+   `rust.proc_macro`; this build needs `rustc`, `bindgen` and `cbindgen` (they ship in
+   `~/.cargo/bin`, which `build-nvk.sh` puts on PATH). Rust is therefore not what
+   separates 25.0.7 from 26.2.6 — LLVM/CLC is.
 
-Both are build-toolchain dependencies, not ABI facts. **25.0.7 is the last series whose
-NVK is plain C with no CL** and it speaks the same Vulkan ICD interface (version 5,
-negotiated in the guest — MEASURED). With rustc/bindgen/cbindgen installed the 25.0.7
-build still needs them (its NAK is already Rust), so a 26.2.6 attempt would additionally
-need `cargo install`-able mesa-clc or an LLVM/SPIRV stack built for the 2.31 sysroot.
-Recommendation: stay on 25.0.7 for the ICD until the guest has a Rust + LLVM build lane.
+25.0.7 is the last series where `-Dllvm=disabled` is allowed with
+`vulkan-drivers=nouveau`, and it speaks the same Vulkan ICD interface (version 5,
+negotiated in the guest — MEASURED). Recommendation: stay on 25.0.7 for the ICD until
+somebody wants to pay for a static LLVM in this DSO, or until the tree moves its NVK
+build onto `tools/cp/vk/build.sh`'s LLVM lane.
 
 ---
 
@@ -112,7 +123,7 @@ Without it the guest log would have shown `count=0` and nothing else.
 MEASURED before the fix: the ICD carried `DT_NEEDED libz.so.1` (Mesa's disk shader
 cache compresses) and the compat class stages no libz, so `RTLD_NOW` in the guest
 would have failed on `inflate`/`deflate`/`crc32`. Two honest fixes; both are in
-`build.sh`:
+`tools/mesa/build-nvk.sh`:
 
 * `-Dshader-cache=disabled` (removes Mesa's use), **and**
 * a static PIC `libz.a` in the sysroot, so the DSO links zlib in rather than adding a
@@ -213,13 +224,15 @@ unit suite) and grades only rows attributable to `PROBE.ELF`.
 ## 7. Reproduce
 
 ```sh
-# 1. build the ICD + probe (needs clang, meson, rustc, bindgen, cbindgen, patch)
-bash tools/nv/nvk/build.sh all          # ~6 min cold, ~10 s warm; ends with "audit: PASS"
+# 1. build the ICD + probe (needs clang, meson, cmake, rustc, bindgen, cbindgen, patch)
+bash tools/mesa/build-nvk.sh all        # cold ~15 min; warm ~10 s; ends with "audit: PASS"
+#    (tools/nv/nvk/build.sh is the same command through a thin driver)
 
 # 2. boot the guest and run the probe against /dev/nvshim
 NVK_SKIP_KERNEL_BUILD=1 bash tools/nv/nvk/run_guest.sh
 #    exit 0 = enumerated; exit 1 = the probe completed without enumerating
 #    (this lane's measured state: exit 1, wall = copy engine class 0xc7b5, need=gsp_rm)
+#    SKIP_KVM=1 forces TCG on a host whose /dev/kvm is not usable by this user.
 ```
 
 The whole guest run is ~20 s of boot plus the probe; `run_guest.sh` prints the

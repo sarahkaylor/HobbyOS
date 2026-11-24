@@ -406,6 +406,11 @@ host_build() {
   local mac_link=""
   [ "$(uname -s)" = Darwin ] && mac_link="-Dcpp_link_args=-Wl,-undefined,dynamic_lookup"
   if [ ! -f "${HOSTBUILD}/build.ninja" ]; then
+    # -Dvulkan-drivers= (empty) is the GL build's own configuration, not a
+    # hole: libGL.so.1 must keep 0 DT_NEEDED, and a Vulkan ICD is a different
+    # artifact with a different closure.  The tree's Vulkan configuration is
+    # build-nvk.sh in this directory (-Dvulkan-drivers=nouveau, glibc 2.31
+    # sysroot, Mesa 25.0.7); tools/nv/nvk/build.sh drives it.
     CC=gcc CXX=g++ meson setup "$HOSTBUILD" "$SRC" \
       -Dgallium-drivers="$drivers" \
       $mac_link \
