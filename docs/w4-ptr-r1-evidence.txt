@@ -1,0 +1,64 @@
+# WP-PTR — r1 run 3, one boot, host llvmpipe virgl, 720p
+
+Driver: `n1_ptr_menu_measure.py` (on r1 as `/root/n1/n1_ptr_menu_measure.py`).
+Image: `/root/n1/disk-ptr.img` = a copy of round 3's `disk-game.img` with ONE
+file replaced — `/LIB64/libX11.so.6` (sha256
+`5bdd94140f443043ab8533e1a12db1610c0b1ff9c06528cb0ae743dfddb579cc` before,
+`55923b3c56768471969d514990545456799b6b90048e41739ae5ee74bba1966b` after; the
+replacement was read back out of the image and hashed, so it is the DSO under
+test that ran).
+
+Boot line (QEMU 11.0.3 on r1, `-enable-kvm`): q35,vmport=on -smp 8 -m 12288M,
+OVMF, `-display egl-headless,gl=on`, `-device virtio-gpu-gl-pci -vga none`,
+`-device virtio-tablet-pci`, nvme disk, `-serial file:serial-ptr3.log`,
+`-qmp unix:/root/n1/qmp-ptr3`.
+
+## Frame-by-frame (elapsed seconds from the launcher)
+
+| t | event | CRC | presents |
+|---|---|---|---|
+| 64 | first present: loading art | `0xd0cb6fbecb358d2c` | 1 |
+| 707 | load advances (new picture) | `0x4ab25f59f342f8b3` | 31 240 |
+| 915 | **Steam modal** | `0x0e40610827f1e4d3` | 31 370 |
+| 940 | 3 presses at (485,588), pointer moved OFF the button, baseline CRC taken the same way | before `0x0e40610827f1e4d3` | — |
+| 940 | **DISMISSED** — off-button CRC after the presses | `0xcb920d0f8c49a201` | — |
+| 948 | menu presenting at 43.7 fps on the first measurement pass | `0xcb920d0f8c49a201` | 33 020 |
+| 948..1100 | 150 s of menu sampled | unchanged | 7 600 presents |
+
+The modal CRC is the same value round 3 recorded for the dialog with the
+pointer parked elsewhere (`0x0e40610827f1e4d3`), so this is the same screen;
+three presses — not seventy-two — dismissed it.
+
+## fps (guest `[XSW]` counter, stream 1 only)
+
+```
+MODAL:            intervals=143  median=51.02 p10=49.02 p90=52.08 min=45.25 max=52.63
+MENU(150s,+5s):   intervals=760  median=51.02 p10=49.02 p90=52.08 min=43.86 max=53.19
+                  presents=7600 guest_ms=149848   ->  50.72 fps mean
+RUN(stream1):     intervals=1165 median=51.02 p10=48.78 p90=52.08 min=9.80 max=59.52
+```
+
+fps = Δn/Δt between consecutive `[XSW]` rows (each row carries `n=`, the
+present counter, and `t=`, the guest's `CLOCK_MONOTONIC` ms since the process's
+first present). No host clock is used.
+
+## The frames (looked at, not inferred)
+
+* `r-modal-940s.raw` — the modal, before the press: "Could not initialize
+  Steam API. Possible causes: …", buttons **Ignore** / **Quit**.
+* `r-menu1-948s.raw` and `r-menu2-948s.raw`, dumped in the same pass and
+  **byte-identical** (sha256 `3563b2c15a8a435bf2be83e2ae19e096c55a54829342e8f6f4c6a70931e08069`
+  for both), so this is not a torn `pmemsave`: RimWorld's main menu —
+  **Load game, New colony, Options, Mods, Credits, Quit to OS, Language**,
+  "RIMWORLD — A story generator by Tynan Sylvester", version 1.5.4104 rev435,
+  no warning text.
+
+## Anomaly, stated rather than smoothed
+
+The log is not one monotonic `[XSW]` sequence: alongside the run-long stream
+there are rows with their own clock (`t` 0..25 269 ms) and counter (n 1..80)
+carrying the loader-art CRC, starting after the modal appeared. One
+`rwlaunch: exec` and one `Initialize engine version` are in the log, so it is
+one game process with two present streams, not a second launch. Every window
+above is restricted to the run-long stream (`t > 600 000`), and the frame CRCs
+quoted are from it; the menu frame itself is the byte-identical pair above.
