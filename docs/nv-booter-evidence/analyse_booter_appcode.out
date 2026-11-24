@@ -1,0 +1,102 @@
+booter app-code analysis — root /home/sarah/Documents/GitHub/HobbyOS/third_party/nvfw
+tool: analyse_booter_appcode.py; hint: 535.113.01, NVFW v1 containers
+
+== ad102/gsp/booter_load-535.113.01.bin (55928 bytes)
+   container: magic 0x10de ver 1  data_off 0x378 data_size 0xd700  end 0xda78  tiles file True
+   HS(v2):   sig 0x3c/0x300  patch_loc 0x33c (patch site 0x7710)  patch_sig 0x340  meta 0x344/0xc [1, 1, 3]  num_sig 2  load_hdr 0x354/0x24
+   load hdr: os_code (data+0x0,0x100)  os_data (data+0x7700,0x6000)  apps 1 ['code(data+0x100,0x7600) data(data+0x100,0x0)']
+   header sizes sum to 0xd700, data_size 0xd700 -> True
+   os_code    data+0x0000     256 B  H=-0.0000 IC=1.00000 zero=1.000 zlib=0.047 distinct=1 ascii>=6=0 16B:1/16 rep=1 tailrun=16 tail=00000000000000000000000000000000
+   os_data    data+0x7700   24576 B  H=0.0963 IC=0.98613 zero=0.993 zlib=0.010 distinct=55 ascii>=6=5 16B:24/1536 rep=1 tailrun=13 tail=00000000000000000000000000000000
+   app0_code  data+0x0100   30208 B  H=7.9949 IC=0.00390 zero=0.004 zlib=0.993 distinct=256 ascii>=6=56 16B:1864/1888 rep=17 tailrun=5 tail=9dbc2efab4decada2f8b1e5f762478d7
+
+== ad102/gsp/booter_unload-535.113.01.bin (39800 bytes)
+   container: magic 0x10de ver 1  data_off 0x378 data_size 0x9800  end 0x9b78  tiles file True
+   HS(v2):   sig 0x3c/0x300  patch_loc 0x33c (patch site 0x4910)  patch_sig 0x340  meta 0x344/0xc [1, 1, 3]  num_sig 2  load_hdr 0x354/0x24
+   load hdr: os_code (data+0x0,0x100)  os_data (data+0x4900,0x4e00)  apps 1 ['code(data+0x100,0x4800) data(data+0x100,0x0)']
+   header sizes sum to 0x9700, data_size 0x9800 -> False
+   os_code    data+0x0000     256 B  H=-0.0000 IC=1.00000 zero=1.000 zlib=0.047 distinct=1 ascii>=6=0 16B:1/16 rep=1 tailrun=16 tail=00000000000000000000000000000000
+   os_data    data+0x4900   19968 B  H=0.0895 IC=0.98712 zero=0.994 zlib=0.011 distinct=49 ascii>=6=3 16B:21/1248 rep=1 tailrun=1
+   app0_code  data+0x0100   18432 B  H=7.9905 IC=0.00390 zero=0.004 zlib=0.990 distinct=256 ascii>=6=30 16B:1130/1152 rep=15 tailrun=2 tail=9dbc2efab4decada2f8b1e5f762478d7
+
+== ga102/gsp/booter_load-535.113.01.bin (59768 bytes)
+   container: magic 0x10de ver 1  data_off 0x378 data_size 0xe600  end 0xe978  tiles file True
+   HS(v2):   sig 0x3c/0x300  patch_loc 0x33c (patch site 0x8410)  patch_sig 0x340  meta 0x344/0xc [1, 1, 3]  num_sig 2  load_hdr 0x354/0x24
+   load hdr: os_code (data+0x0,0x100)  os_data (data+0x8400,0x6200)  apps 1 ['code(data+0x100,0x8300) data(data+0x100,0x0)']
+   header sizes sum to 0xe600, data_size 0xe600 -> True
+   os_code    data+0x0000     256 B  H=-0.0000 IC=1.00000 zero=1.000 zlib=0.047 distinct=1 ascii>=6=0 16B:1/16 rep=1 tailrun=16 tail=00000000000000000000000000000000
+   os_data    data+0x8400   25088 B  H=-0.0000 IC=1.00000 zero=1.000 zlib=0.002 distinct=1 ascii>=6=0 16B:1/1568 rep=1 tailrun=1568 tail=00000000000000000000000000000000
+   app0_code  data+0x0100   33536 B  H=7.9943 IC=0.00391 zero=0.004 zlib=0.975 distinct=256 ascii>=6=50 16B:2029/2096 rep=59 tailrun=1
+
+== ga102/gsp/booter_unload-535.113.01.bin (39544 bytes)
+   container: magic 0x10de ver 1  data_off 0x378 data_size 0x9700  end 0x9a78  tiles file True
+   HS(v2):   sig 0x3c/0x300  patch_loc 0x33c (patch site 0x4a10)  patch_sig 0x340  meta 0x344/0xc [1, 1, 3]  num_sig 2  load_hdr 0x354/0x24
+   load hdr: os_code (data+0x0,0x100)  os_data (data+0x4a00,0x4d00)  apps 1 ['code(data+0x100,0x4900) data(data+0x100,0x0)']
+   header sizes sum to 0x9700, data_size 0x9700 -> True
+   os_code    data+0x0000     256 B  H=-0.0000 IC=1.00000 zero=1.000 zlib=0.047 distinct=1 ascii>=6=0 16B:1/16 rep=1 tailrun=16 tail=00000000000000000000000000000000
+   os_data    data+0x4a00   19712 B  H=-0.0000 IC=1.00000 zero=1.000 zlib=0.002 distinct=1 ascii>=6=0 16B:1/1232 rep=1 tailrun=1232 tail=00000000000000000000000000000000
+   app0_code  data+0x0100   18688 B  H=7.9894 IC=0.00391 zero=0.004 zlib=0.989 distinct=256 ascii>=6=33 16B:1145/1168 rep=16 tailrun=4 tail=af4206eb01b9986c564ccc851d28be57
+
+== detail: ad102/gsp/booter_load-535.113.01.bin app0 code (file [0x478,0x7a78))
+   sha256      47c6b4825c81cb082e377b47e58605added72344b078fa7b26d64d3e48046db3
+   length      30208 B = 1888 x 16 B
+   (a) byte statistics
+       H(byte) 7.9949 bits   H_min 7.7329   IC 0.00390 (uniform = 0.00391)
+       distinct byte values 256/256   zero fraction 0.0037   zlib ratio 0.9925
+       per-256-B window entropy: n=118 min 6.8058 mean 7.1721 max 7.2923
+   (c) block structure
+       16-B blocks: 1888 total, 1864 distinct, 17 repeated values, 24 excess
+       32-B blocks: 944 total, 942 distinct, 2 repeated values, 2 excess
+       64-B blocks: 472 total, 472 distinct, 0 repeated values, 0 excess
+       printable runs >= 6 B in the app-code region: 56
+       same container, DMEM image: 5 printable runs >= 6 B, e.g. ['NVRNG engine', 'NVPKA engine [RSA mode]', 'NVPKA engine [ECC mode]', 'CCC arithmetic error']
+       trailing identical 16-B blocks: 5  (=> 80 zero plaintext bytes before padding, if the tail is padding)
+       tail block 9dbc2efab4decada2f8b1e5f762478d7
+       != AES-128-ECB(K_debug37, 0^16) 717d1494eaca317ff106195258b38377 : True
+       repeated 16-B block values and their block indices:
+         count 2  51232d05cb4e525261d5659cfb5ec9d3  [4, 796]
+         count 2  e185a1b54909d95d8f78cbf7bfc363b1  [5, 797]
+         count 2  8bcaae3ac33801579bcc032a9f0f65d4  [52, 806]
+         count 2  806df6904c0d063b95f730132954d1aa  [233, 1831]
+         count 2  235f3eec2bdff8dfe2496a1d5218af34  [506, 1862]
+         count 2  c83644274f538295eea5ca1e5b9bc3e5  [510, 1707]
+         count 2  4413d4fc0d45db1890c43d817a0ef722  [582, 837]
+         count 2  2d736cebfc38a1afdc48b8da6240d284  [586, 600]
+         count 3  f043187e0878ed2e143c4a1d58e1d969  [592, 812, 832]
+         count 4  72a4a3eaaa49e486a6511d07ef2709ae  [609, 961, 1631, 1677]
+         count 3  3a6ae44388dd9c300948670270d2535f  [649, 1419, 1563]
+         count 2  f584244a40dff4411153a8dbc2ccf00d  [823, 1875]
+         count 2  eff4121b5db36ec813f38631cfa5646e  [1426, 1782]
+         count 2  71d8e897fdd9a04213d625520703e8b1  [1430, 1835]
+         count 2  59e0257063af11306733cb6537da0bea  [1498, 1646]
+         count 2  08c34ee34e208943f71172443bee3220  [1681, 1790]
+         count 5  9dbc2efab4decada2f8b1e5f762478d7  [1883, 1884, 1885, 1886, 1887]
+
+   (c2) key-scope probe: shared 16-B ciphertext blocks between images
+       ad102/gsp/booter_load-535.113.01.bin   vs ad102/gsp/booter_unload-535.113.01.bin   68 shared
+       ad102/gsp/booter_load-535.113.01.bin   vs ga102/gsp/booter_load-535.113.01.bin      0 shared
+       ad102/gsp/booter_load-535.113.01.bin   vs ga102/gsp/booter_unload-535.113.01.bin    0 shared
+       ad102/gsp/booter_unload-535.113.01.bin vs ga102/gsp/booter_load-535.113.01.bin      0 shared
+       ad102/gsp/booter_unload-535.113.01.bin vs ga102/gsp/booter_unload-535.113.01.bin    0 shared
+       ga102/gsp/booter_load-535.113.01.bin   vs ga102/gsp/booter_unload-535.113.01.bin  241 shared
+       zero-padding block ad102/gsp/booter_load-535.113.01.bin   9dbc2efab4decada2f8b1e5f762478d7  (5 trailing blocks)
+       zero-padding block ad102/gsp/booter_unload-535.113.01.bin 9dbc2efab4decada2f8b1e5f762478d7  (2 trailing blocks)
+       zero-padding block ga102/gsp/booter_load-535.113.01.bin   af4206eb01b9986c564ccc851d28be57  (1 trailing blocks)
+       zero-padding block ga102/gsp/booter_unload-535.113.01.bin af4206eb01b9986c564ccc851d28be57  (4 trailing blocks)
+
+-- (b) disassembly: every byte stream through llvm-objdump riscv64 --
+   note: RVC is dense -- most random 16-bit parcels decode as an instruction, so the longest valid run is the discriminator
+   app-code (the region in question)              parcels  11443  <unknown>   2428 ( 21.2%)  longest valid run    31  first invalid @0x4
+      top mnemonics: sd:752 fsd:736 fld:729 lw:726 ld:706
+   uniform random (same length)                   parcels  11471  <unknown>   2450 ( 21.4%)  longest valid run    40  first invalid @0xa
+      top mnemonics: fld:751 lw:750 sw:736 sd:735 fsd:726
+   control: plaintext RISC-V, RM .fwimage@0x100000 parcels   7552  <unknown>      0 (  0.0%)  longest valid run  7552  first invalid @none
+      top mnemonics: addi:1182 sd:1011 ld:981 li:633 slli:331
+
+-- (c) what the container headers declare --
+   nvfw_bin_hdr: magic 0x10DE version 1, data_off 0x378, data_size 0xd700 (no compression field, no uncompressed-size field)
+   nvfw_hs_ucode_hdr_v2: 2 signature slot(s) of 384 B; the two slots are RSA-3072-sized and the driver patches the fuse-selected one over the image at data+0x7398
+   signature meta: fuse_ver 1 engine_id 1 ucode_id 3
+   nvfw_hs_load_hdr_v2: os_code (data+0x0,0x100), os_data (data+0x7700,0x6000), app0 code (data+0x100,0x7600)
+   the load header is a copy descriptor: offsets/sizes/counts only, and its regions tile data_size exactly (True)
+   => nothing in the headers marks the image encrypted; the encoding is only observable in the bytes, and the BROM is the only entity that runs before the CPU does

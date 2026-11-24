@@ -1,0 +1,10 @@
+# MUTATION M2 -- every GETPARAM absence reports reason=mock_has_no_card, i.e. the
+# topology absence loses its own name.  Applied to nv_shim_param_refusal_reason(),
+# run, reverted.
+EXPECT_EQ FAILED: str_eq_(nv_shim_param_refusal_reason(NVSHIM_PARAM_GRAPH_UNITS), "mock_has_no_topo") == 1 at src/kernel/nv_shim_drm_test.c:1772
+  Left:  0
+  Right: 1
+    RUNNING KERNEL UNIT TESTS     
+Tests run:    590
+Tests failed: 1
+UNIT TESTS FAILED

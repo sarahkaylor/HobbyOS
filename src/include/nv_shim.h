@@ -85,6 +85,7 @@
  * ========================================================================== */
 
 #include <stdint.h>
+#include "nv_rm.h" /* struct nv_rm_gpu_topo, for nv_shim_gr_units_value() */
 
 #define NVSHIM_ABI_VERSION 1
 
@@ -326,6 +327,20 @@ uint64_t nv_shim_align_up(uint64_t len, uint32_t align);
 int nv_shim_alloc_ok(const struct nvshim_alloc *a);
 int nv_shim_bind_ok(const struct nvshim_vm_bind *b);
 int nv_shim_submit_ok(const struct nvshim_submit *s);
+
+/* WP-UNITS: the two answers this lane added, as pure functions so the tier can
+ * hold them to a value instead of a paragraph.
+ *   GRAPH_UNITS' packing: (tpc_total << 8) | gpc_nr, 0 when the RM has no
+ *   topology at all (r535_gr_units' shape; see nv_rm.h).
+ *   The engine-class wall's named requirement: class -> (row name, engine
+ *   instance, RM allocation), -1 for a class SCLASS does not report. */
+uint64_t nv_shim_gr_units_value(const struct nv_rm_gpu_topo *t);
+int nv_shim_nvif_engine_class(int32_t oclass, const char **name,
+                              const char **engine, const char **alloc);
+/* Why a GETPARAM has no answer: "mock_has_no_topo" for GRAPH_UNITS (an RM that
+ * never received a topology), "mock_has_no_card" for the params that read the
+ * card.  Exported so the tier asserts the NAME, not just the errno. */
+const char *nv_shim_param_refusal_reason(uint64_t param);
 
 void nv_shim_test_suite(void);
 void nv_shim_drm_test_suite(void);

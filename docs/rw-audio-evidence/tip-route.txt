@@ -1,0 +1,54 @@
+[SND] virtio-sound 1af4:1059 bar=0x000000C020008000 jacks=0 streams=1 chmaps=0 ctlq=64 txq=64
+[SND] stream 0 out formats=0x00000000000E0078 rates=0x0000000000003FFF ch=1..2
+[SND] irq line=11 vector=43 (TX completions by INTx)
+[SND] ALSA nodes: /dev/snd/controlC0 /dev/snd/pcmC0D0p
+[LP] ok   open controlC0 fd=3 errno=0
+[LP] ok   ctl PVERSION 0x20007
+[LP] ok   CARD_INFO driver='virtio-snd' name='VirtIO SoundCard'
+[LP] ok   PCM_NEXT_DEVICE -1 -> 0 -> -1
+[LP] ok   ctl PCM_INFO(0,0,playback) id='virtio-snd' name='VirtIO PCM 0' subdevices=1
+[LP] ok   ctl PCM_INFO capture -> ENOENT (r=-1 errno=2)
+[LP] ok   PCM_PREFER_SUBDEVICE
+[LP] ok   ELEM_LIST used=2 count=2 [Master Playback Volume] [Master Playback Switch]
+[LP] ok   ELEM_INFO by name: numid=1 type=2 count=2 max=100
+[LP] ok   ELEM_WRITE 50 / READ -> 50
+[LP] ok   ELEM_WRITE 100 (restore)
+[LP] ok   open pcmC0D0p fd=4
+[LP] ok   second open -> EBUSY (fd=-1 errno=16)
+[LP] ok   pcm PVERSION 0x2000e
+[LP] ok   pcm INFO stream=0 card=0 name='VirtIO PCM 0'
+[LP] ok   TTSTAMP monotonic
+[LP] ok   USER_PVERSION
+[LP] ok   mmap(status page) refused (errno=95) -> SYNC_PTR path
+[LP] ok   HW_REFINE(any): rate 48000..48000 ch 2..2 fmt 0x4 access 0x8 period 256..16384 buffer 512..131072
+[SND] hw_params rate=48000 ch=2 period=480 periods=4 buffer=1920
+[LP] ok   HW_PARAMS 480x4 -> buffer 1920 period_time 10000
+[LP] ok   SW_PARAMS boundary=0x7800000000000000
+[LP] ok   PREPARE -> state 2 avail 1920
+[LP] ok   START with an empty buffer -> EPIPE (r=-1 errno=32)
+[LP] ok   auto-start at start_threshold: state 3 hw 10080
+[LP] ok   poll(POLLOUT) woke after 10.1 ms (revents 0x4)
+[LP] ok   blocking WRITEI wrote 2.0 s total (96000)
+[LP] ok   hw_ptr monotonic during playback (last 94080)
+[LP] ok   SYNC_PTR state 3 appl 96000 hw 94080 (status appl 96000)
+[LP] ok   DELAY 1920 frames
+[LP] ok   DRAIN -> state 1 hw 96000 appl 96000
+[LP] ok   real-time pacing: 2.0 s of frames took 1.997 s (write 1.957 s, drain 0.040 s)
+[LP] ok   PREPARE after drain
+[SND] xrun n=1 frames_done=96960 chunks=202 t_ms=2147 wr_ago_us=150931 io_ago_us=105 done100ms=0 done40ms=0
+[LP] ok   stop writing -> XRUN (state 4, hw 960 appl 960)
+[LP] ok   WRITEI in XRUN -> EPIPE (-32)
+[LP] ok   PREPARE recovers (state 2)
+[LP] ok   0.5 s more tone after recovery, drained
+[LP] ok   PREPARE
+[LP] ok   O_NONBLOCK: 1920 frames then EAGAIN (state 3)
+[LP] ok   PAUSE(1) -> state 6
+[LP] ok   PAUSE(0) -> state 3
+[LP] ok   DROP -> state 1
+[LP] ok   HW_FREE -> state 0
+[SND] pcm closed: chunks=256 frames=120960 xruns=1 sync_ptr=1 writei=482 status=213 refine=1 parks=235 held=1 irqs=239 tx=256 ctl=6 ctl_timeouts=0
+[LP] ok   re-open after close (not EBUSY)
+[SND] pcm closed: chunks=0 frames=0 xruns=0 sync_ptr=0 writei=0 status=0 refine=0 parks=0 held=0 irqs=239 tx=256 ctl=6 ctl_timeouts=0
+[LP] tone: 1000 Hz, 2.0 s + 0.5 s at -6.2 dBFS (16000/32767) -> tools/cp/audio/wavcheck.py
+[LP] done rc=0
+System halt from CPU 7.

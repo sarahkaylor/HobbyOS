@@ -314,6 +314,21 @@ static long nvif_sclass(long fd, unsigned long ch, int count, unsigned long len,
   return nvif_call(fd, len);
 }
 
+/* Mesa's nouveau_ws_context_find_class(): for an engine it takes the HIGHEST
+ * class whose LOW BYTE matches (0xb5 copy, 0x2d 2D, 0x97 3D, 0x40/0x39 M2MF,
+ * 0xc0 compute).  Not the first: SCLASS reports two copy classes and the client
+ * asks for the newer one, so a probe that took list[0] would test a class a
+ * real client never requests. */
+static long find_cls(const struct nvshim_nvif_sclass_oclass *l, unsigned n,
+                     unsigned type) {
+  long best = 0;
+  for (unsigned i = 0; i < n; i++) {
+    long v = (long)l[i].oclass;
+    if (((unsigned long)v & 0xffu) == type && v > best) best = v;
+  }
+  return best;
+}
+
 /* The push stream this program writes through its CPU mapping: 64 bytes of a
  * pattern that is NOT the zero page the object was allocated with, so "the
  * kernel read the client's bytes" and "the kernel read fresh zeroed memory"
@@ -880,14 +895,16 @@ int main(void) {
   done(r_fch == -22 && r_root == -22 && r_ver == -22 && r_route == -22 &&
        r_thin == -22);
 
-  /* --- 30 the winsys walk: where a stock nvk actually stops ------------
+  /* --- 30 the winsys walk: what a stock nvk does after GRAPH_UNITS ------
    * nouveau_ws_device_new() runs VERSION, GET_CAP, VM_INIT (rows 2/3/6),
    * then: GETPARAM(PCI_DEVICE), NVIF NEW(device), NVIF MTHD(INFO),
    * GETPARAM(EXEC_PUSH_MAX), GETPARAM(VRAM_BAR_SIZE), GETPARAM(GRAPH_UNITS)
-   * -- and GETPARAM GRAPH_UNITS is FATAL (`goto out_err`) -- then
-   * CHANNEL_ALLOC, SCLASS, and one NVIF NEW per engine class.  This row walks
-   * that tail and reports the first two refusals it meets, in order, so the
-   * report can say where the wall is instead of guessing. */
+   * -- and GRAPH_UNITS is FATAL if it fails (`goto out_err`) -- then
+   * nouveau_ws_context_create(ALL_3D_ENGINES): CHANNEL_ALLOC (row 8's channel,
+   * the same request), SCLASS, then one NVIF NEW per engine IN THE CLIENT'S
+   * ORDER: copy, 2D, 3D, M2MF, compute (nouveau_context.c
+   * nouveau_ws_3d_context_init).  This row walks that tail, so the report can
+   * say where the wall is from a transcript instead of from reading code. */
   struct nvshim_drm_getparam qw;
   bzero_n(&qw, sizeof qw);
   long w_pcidev, w_pushmax, w_bar, w_units;
@@ -902,29 +919,116 @@ int main(void) {
   w_pushmax = err_of(ioctl_((int)fd, NVSHIM_DRM_IOC_GETPARAM, &qw));
   qw.param = NVSHIM_PARAM_VRAM_BAR_SIZE;
   w_bar = err_of(ioctl_((int)fd, NVSHIM_DRM_IOC_GETPARAM, &qw));
+  bzero_n(&qw, sizeof qw);
   qw.param = NVSHIM_PARAM_GRAPH_UNITS;
   w_units = ioctl_((int)fd, NVSHIM_DRM_IOC_GETPARAM, &qw);
-  /* As if it had answered: the next two steps a winsys takes -- SCLASS, then
-   * the highest class whose low byte is 0x97 (nvk's own find_class). */
+  unsigned long w_units_val = (unsigned long)qw.value;
+  /* Then the context: SCLASS, and the FIRST engine object it would make. */
   long w_sc = nvif_sclass(fd, ch, 16, 24 + 8 + 16 * 8, NVSHIM_NVIF_ROUTE_HIDDEN);
   struct nvshim_nvif_sclass_oclass wl[NVSHIM_NVIF_MAX_SCLASS];
   bzero_n(wl, sizeof wl);
   if (w_sc == 0) copy_n(wl, nbuf + 32, sizeof wl);
-  unsigned long pick = 0;
-  for (int i = 0; i < NVSHIM_NVIF_MAX_SCLASS; i++)
-    if ((wl[i].oclass & 0xff) == 0x97 && (unsigned long)wl[i].oclass > pick)
-      pick = (unsigned long)wl[i].oclass;
-  long w_eng = nvif_new_child(fd, ch, pick ? (long)pick : NVSHIM_NVIF_CLASS_AMPERE_B,
+  long w_copy = find_cls(wl, NVSHIM_NVIF_MAX_SCLASS, 0xb5);
+  long w_eng = nvif_new_child(fd, ch, w_copy ? w_copy : NVSHIM_NVIF_CLASS_AMPERE_DMA_COPY_B,
                               0xb400);
   begin(30, "nvif_winsys_walk");
-  r_s("stop1=getparam(13)=");
+  r_s("getparam(4)=");
+  r_dec(w_pcidev);
+  r_s(" nvif_new=");
+  r_dec(err_of(w_new));
+  r_s(" info=");
+  r_dec(err_of(w_info));
+  r_s(" pushmax=");
+  r_dec(w_pushmax);
+  r_s(" bar=");
+  r_dec(w_bar);
+  r_s(" units=");
   r_dec(err_of(w_units));
-  r_s(" then_sclass=");
+  r_s(" sclass=");
   r_dec(err_of(w_sc));
-  r_s(" stop2=nvif_new(3d)=");
+  r_s(" stop=nvif_new(copy ");
+  r_hex((unsigned long)w_copy);
+  r_s(")=");
   r_dec(err_of(w_eng));
-  done(w_pcidev == 0 && w_new == 0 && w_info == 0 && w_pushmax == 0 &&
-       w_bar == 0 && w_units == -38 && w_sc == 0 && w_eng == -38);
+  done(w_pcidev == 0 && w_new == 0 && w_info == 0 && w_pushmax == 0 && w_bar == 0 &&
+       w_units == 0 && w_units_val == ((64ul << 8) | 11ul) && w_sc == 0 &&
+       w_copy == 0xc7b5 && w_eng == -38);
+
+  /* --- 32 GRAPH_UNITS is a decomposition a client can act on ------------
+   * Mesa decodes gpc = value & 0xff and tpc = (value >> 8) & 0xffff, then nvk
+   * derives shaderSMCount = tpc_count * mp_per_tpc (2 on Ada).  The row proves
+   * the client's arithmetic, not just the ioctl's errno: 11 GPC / 64 TPC / 128
+   * SM is an RTX 4090, and the bits above 24 are zero because the Ada packing
+   * (r535_gr_units) has no ROP field -- a client that read gf100's rop field
+   * would get 0, and a node that invented one would be caught here. */
+  long w_gpc = (long)(w_units_val & 0xfful);
+  long w_tpc = (long)((w_units_val >> 8) & 0xfffful);
+  long w_sm = w_tpc * 2; /* mp_per_tpc(0x192) == 2, Mesa nouveau_device.c */
+  begin(31, "getparam_graph_units");
+  r_s("gpc=");
+  r_dec(w_gpc);
+  r_s(" tpc=");
+  r_dec(w_tpc);
+  r_s(" sm=");
+  r_dec(w_sm);
+  r_s(" rop_bits=");
+  r_hex(w_units_val >> 32);
+  done(w_gpc == 11 && w_tpc == 64 && w_sm == 128 && (w_units_val >> 32) == 0);
+
+  /* --- 33 every engine object the context asks for, in its real order ---
+   * ALL_3D_ENGINES means copy, 2D, 3D, M2MF and compute, each with the class
+   * find_cls() picked above.  All five are refused; the FIRST refusal is copy
+   * (0xc7b5), which is what a stock nvk meets -- not 3D, as "the 3D engine is
+   * missing" would suggest. */
+  const unsigned char order_types[5] = {0xb5, 0x2d, 0x97, 0x40, 0xc0};
+  const char *order_names[5] = {"copy", "2d", "3d", "m2mf", "compute"};
+  long w_cls[5], w_err[5];
+  int w_all_refused = 0;
+  for (int i = 0; i < 5; i++) {
+    w_cls[i] = find_cls(wl, NVSHIM_NVIF_MAX_SCLASS, order_types[i]);
+    if (i == 3 && w_cls[i] == 0) w_cls[i] = find_cls(wl, NVSHIM_NVIF_MAX_SCLASS, 0x39);
+    w_err[i] = nvif_new_child(fd, ch, w_cls[i], 0xb500 + (unsigned long)i);
+    if (w_err[i] == -38) w_all_refused++;
+  }
+  begin(32, "nvif_engine_order");
+  for (int i = 0; i < 5; i++) {
+    r_s(order_names[i]);
+    r_s("=");
+    r_hex((unsigned long)w_cls[i]);
+    r_s("/");
+    r_dec(err_of(w_err[i]));
+    r_s(" ");
+  }
+  r_s("refused=");
+  r_dec(w_all_refused);
+  r_s("/5");
+  done(w_all_refused == 5 && w_cls[0] == 0xc7b5 && w_cls[1] == 0x902d &&
+       w_cls[2] == 0xc797 && w_cls[3] == 0xa140 && w_cls[4] == 0xc7c0);
+
+  /* --- 34 VRAM_BAR_SIZE is an aperture, and this node has none ----------
+   * nouveau answers resource_size(NVKM_BAR1_FB), not the amount of VRAM.  The
+   * two numbers are different questions and a node that answered fb_size here
+   * would make bar == vram, which is exactly nvk's test for its full-BAR
+   * CPU-upload path.  0 is the honest answer for "no window", and the client
+   * then takes the upload-queue path (which needs the copy engine row 33 just
+   * refused by name). */
+  struct nvshim_drm_getparam qb2;
+  bzero_n(&qb2, sizeof qb2);
+  qb2.param = NVSHIM_PARAM_VRAM_BAR_SIZE;
+  long w_barel = ioctl_((int)fd, NVSHIM_DRM_IOC_GETPARAM, &qb2);
+  unsigned long w_barv = (unsigned long)qb2.value;
+  qb2.param = NVSHIM_PARAM_FB_SIZE;
+  qb2.value = 0;
+  long w_fbel = ioctl_((int)fd, NVSHIM_DRM_IOC_GETPARAM, &qb2);
+  unsigned long w_fbv = (unsigned long)qb2.value;
+  begin(33, "getparam_bar_size");
+  r_s("bar=");
+  r_hex(w_barv);
+  r_s(" vram=");
+  r_hex(w_fbv);
+  r_s(" full_bar=");
+  r_dec((w_barv >= w_fbv) ? 1 : 0);
+  done(w_barel == 0 && w_fbel == 0 && w_barv == 0 && w_fbv > 0 && w_barv < w_fbv);
 
   /* --- 31 DEL, and the object really goes ----------------------------- */
   nvif_hdr(NVSHIM_NVIF_DEL, NVSHIM_NVIF_ROUTE_NVIF, 0, (unsigned long)(uintptr_t)&dev2);
@@ -935,7 +1039,7 @@ int main(void) {
    * be built again -- a client that reuses one buffer must refill it. */
   nvif_hdr(NVSHIM_NVIF_DEL, NVSHIM_NVIF_ROUTE_NVIF, 0, (unsigned long)(uintptr_t)&dev2);
   long r_del2 = nvif_call(fd, 24); /* second DEL: not an error, as in nouveau */
-  begin(31, "nvif_del");
+  begin(34, "nvif_del");
   r_s("del=");
   r_dec(err_of(r_del));
   r_s(" info_after=");
@@ -946,7 +1050,7 @@ int main(void) {
 
   /* --- 32 a number nobody implements ----------------------------------- */
   long r_unk = ioctl_((int)fd, NVSHIM_DRM_IOC_ANY(0x7e, 8), &sa);
-  begin(32, "unknown_nr");
+  begin(35, "unknown_nr");
   r_s("nr=0x7e errno=");
   r_dec(err_of(r_unk));
   done(r_unk == -25 /* -ENOTTY */);
@@ -955,7 +1059,7 @@ int main(void) {
   vmi.kernel_managed_addr = 1ull << 39;
   vmi.kernel_managed_size = 1ull << 39;
   long r_vm2 = ioctl_((int)fd, NVSHIM_DRM_IOC_VM_INIT, &vmi);
-  begin(33, "vm_reinit");
+  begin(36, "vm_reinit");
   r_s("reason=objects_exist errno=");
   r_dec(err_of(r_vm2));
   done(r_vm2 == -38);
@@ -966,7 +1070,7 @@ int main(void) {
    * be -EFAULT and the kernel must survive it (a copy-in to an unproven user
    * address is how a driver takes the CPU down). */
   long r_badarg = ioctl_((int)fd, NVSHIM_DRM_IOC_GETPARAM, (void *)0xdead0000);
-  begin(34, "ptr_arg");
+  begin(37, "ptr_arg");
   r_s("arg=0xdead0000 errno=");
   r_dec(err_of(r_badarg));
   done(r_badarg == -14 /* -EFAULT */);
@@ -977,7 +1081,7 @@ int main(void) {
   vb_bad.op_count = 1;
   vb_bad.op_ptr = 0xdead1000;
   long r_badop = ioctl_((int)fd, NVSHIM_DRM_IOC_VM_BIND, &vb_bad);
-  begin(35, "ptr_inner");
+  begin(38, "ptr_inner");
   r_s("op_ptr=0xdead1000 errno=");
   r_dec(err_of(r_badop));
   done(r_badop == -14);
@@ -989,7 +1093,7 @@ int main(void) {
   ex_bad.push_count = 1;
   ex_bad.push_ptr = 0xdead2000;
   long r_badpush = ioctl_((int)fd, NVSHIM_DRM_IOC_EXEC, &ex_bad);
-  begin(36, "ptr_exec_push");
+  begin(39, "ptr_exec_push");
   r_s("push_ptr=0xdead2000 errno=");
   r_dec(err_of(r_badpush));
   done(r_badpush == -14);
@@ -1009,7 +1113,7 @@ int main(void) {
   ex_ub.push_count = 1;
   ex_ub.push_ptr = (uint64_t)(uintptr_t)&push_bad;
   long r_unbound = ioctl_((int)fd, NVSHIM_DRM_IOC_EXEC, &ex_ub);
-  begin(37, "exec_unbound_va");
+  begin(40, "exec_unbound_va");
   r_s("push_va=0x80000 errno=");
   r_dec(err_of(r_unbound));
   done(r_unbound == -22);
@@ -1024,7 +1128,7 @@ int main(void) {
                     (long)map_handle);
   long g_exec = sc6(SYS_MMAP, 0, 4096, PROT_READ | 4 /*EXEC*/, MAP_SHARED, fd,
                     (long)map_handle);
-  begin(38, "mmap_geometry");
+  begin(41, "mmap_geometry");
   r_s("len_past_object=");
   r_dec(err_of(g_len));
   r_s(" private=");
@@ -1044,7 +1148,7 @@ int main(void) {
     for (int i = 0; i < 8 && alias_ok; i++)
       if (bo[i] != (unsigned char)(0x11 * (i + 1))) alias_ok = 0;
   }
-  begin(39, "mmap_alias");
+  begin(42, "mmap_alias");
   r_s("va2=");
   if (mva2 > 0) {
     r_hex((unsigned long)mva2);
@@ -1069,7 +1173,7 @@ int main(void) {
   gn2.info.size = 4096;
   long r_new2 = fd2 >= 0 ? ioctl_((int)fd2, NVSHIM_DRM_IOC_GEM_NEW, &gn2) : -999;
   unsigned long h2 = gn2.info.handle;
-  begin(40, "two_clients");
+  begin(43, "two_clients");
   r_s("fd2=");
   r_dec(fd2);
   r_s(" old_handle_errno=");
@@ -1104,7 +1208,7 @@ int main(void) {
     (void)sc6(SYS_WAIT4, cpid, (long)&st, 0, 0, 0, 0);
     cst = st;
   }
-  begin(41, "gem_close_unmaps");
+  begin(44, "gem_close_unmaps");
   r_s("close_ret=");
   r_dec(r_closebo);
   r_s(" child_status=");
@@ -1138,7 +1242,7 @@ int main(void) {
     (void)sc6(SYS_WAIT4, fpid, (long)&st, 0, 0, 0, 0);
     fst = st;
   }
-  begin(42, "fork_inherit_fd");
+  begin(45, "fork_inherit_fd");
   r_s("inherited_fd=");
   r_dec(fd);
   r_s(" child_exit=");
@@ -1151,7 +1255,7 @@ int main(void) {
    * fd is gone) hides a use-after-close from the caller. */
   (void)sc1(SYS_CLOSE, fd);
   long r_after = ioctl_((int)fd, NVSHIM_DRM_IOC_GETPARAM, &q);
-  begin(43, "close_ioctl");
+  begin(46, "close_ioctl");
   r_s("closed_fd=");
   r_dec(fd);
   r_s(" errno=");
@@ -1164,7 +1268,7 @@ int main(void) {
   bzero_n(&g3, sizeof g3);
   g3.handle = (uint32_t)bo_handle;
   long r_reuse2 = fd3 >= 0 ? ioctl_((int)fd3, NVSHIM_DRM_IOC_GEM_INFO, &g3) : -999;
-  begin(44, "fd_lifetime");
+  begin(47, "fd_lifetime");
   r_s("new_fd=");
   r_dec(fd3);
   r_s(" old_handle=");

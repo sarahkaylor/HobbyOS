@@ -1,0 +1,125 @@
+# EL0 wave on nv/wp-units -- SKIP_KVM=1 tools/nv/el0_wave.sh --out evidence/nv/el0-units-47of47.log
+# (MODE=test, /WAVE.CFG = NVABI.ELF; trimmed to [EL0], [NVSHIM] and loader rows)
+[WAVE-TRY] NVABI.ELF
+v2 loader: PID=2 entry=0x1000014170 sp=0x1800000000 resident=40 tables=7 abi=0x1 native=0 interp=0x0
+[ARRIVED] NVABI.ELF rc>0
+[EL0] nvabi_probe: /dev/nvshim DRM face from ring 3 (WP-EL0)
+[EL0] 01 open path=/dev/nvshim fd=3 PASS
+[EL0] 02 version name=nouveau v=1.3.1 name_len=8 PASS
+[EL0] 03 get_cap capability=SYNCOBJ value=1 PASS
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm getparam param=11 value=0x192
+[NVSHIM] drm getparam param=4 value=0x2684
+[NVSHIM] drm getparam param=8 value=0x100000000
+[EL0] 04 getparam chipset=0x192 pci=0x2684 fb_size=0x100000000 PASS
+[NVSHIM] drm refuse size nr=80 want=16 got=8
+[EL0] 05 arg_size vm_init_enc_size=8 ret_errno=22 PASS
+[NVSHIM] drm vm vm=1 umd_end=0x8000000000 total=0x10000000000
+[EL0] 06 vm_init umd_end=0x8000000000 total=0x10000000000 errno=0 PASS
+[NVSHIM] drm gem_new handle=1 size=0x2000 offset=0x204c40000 domain=0x9 map=0x1000
+[EL0] 07 gem_new handle=1 size=0x2000 bus=0x204c40000 map_handle=0x1000 PASS
+[NVSHIM] drm gem_info handle=1 offset=0x204c40000 size=0x2000 map=0x1000
+[EL0] 08 gem_info map_handle=0x1000 size=0x2000 foreign_errno=22 PASS
+[NVSHIM] drm mmap refused off=0x0 reason=no_such_object
+[EL0] 09 mmap_off0 errno=22 PASS
+[NVSHIM] drm mmap refused handle=778 reason=not_this_clients_object
+[EL0] 10 mmap_foreign offset=0x30a000 errno=22 PASS
+[NVSHIM] drm mmap handle=1 va=0x1080000000 len=0x2000 phys=0x204c40000 domain=0x9
+[EL0] 11 mmap offset=0x1000 len=0x2000 va=0x1080000000 errno=0 PASS
+[EL0] 12 bo_write bytes=64 digest=0x80bce9ae last_byte=0x5a PASS
+[NVSHIM] drm bind vm=1 ops=1 first_addr=0x10000 first_range=0x2000
+[EL0] 13 vm_bind ops=1 addr=0x10000 range=0x2000 handle=1 PASS
+[NVSHIM] drm channel ch=1 pushbuf=0x2054ad000 size=0x10000
+[EL0] 14 channel ch=1 domains=0x2 nr_subchan=0 PASS
+[NVSHIM] drm syncobj create handle=1 signaled=0
+[EL0] 15 syncobj_create handle=1 PASS
+[NVSHIM] drm exec ch=1 pushes=1 sigs=1 bytes=64 stream=0x80bce9ae fence=0x1
+[EL0] 16 exec ch=1 push_va=0x10000 push_len=64 digest=0x80bce9ae errno=0 PASS
+[NVSHIM] drm syncobj wait n=1 retired=1
+[EL0] 17 syncobj_wait handles=1 first_signaled=0 errno=0 PASS
+[NVSHIM] drm syncobj wait n=1 retired=0 timeout=poll
+[EL0] 18 syncobj_reset_wait reset_ret=0 wait_errno=62 PASS
+[NVSHIM] drm syncobj wait n=1 retired=1
+[EL0] 19 syncobj_signal_wait signal_ret=0 wait_errno=0 PASS
+[NVSHIM] nvif new class=0x80 cookie=0x17fffffa48 dev=1 served=device
+[EL0] 20 nvif_new_device class=0x80 cookie=0x17fffffa48 len=72 errno=0 PASS
+[NVSHIM] nvif info chip=AD102 chipset=0x192 fam=0xe ram=0x100000000
+[EL0] 21 nvif_info chip=AD102 chipset=0x192 fam=0xe ram=0x100000000 PASS
+[NVSHIM] nvif mthd refused method=1 name=device_time need=ptimer
+[NVSHIM] nvif mthd refused reason=object
+[NVSHIM] nvif mthd refused reason=size
+[EL0] 22 nvif_mthd_refusals time_errno=38 unknown_object=22 short_payload=22 PASS
+[NVSHIM] nvif new class=0x80 refused reason=cookie_exists
+[NVSHIM] nvif new refused reason=cookie
+[EL0] 23 nvif_new_cookie duplicate_errno=17 zero_cookie=22 PASS
+[NVSHIM] nvif sclass refused reason=channel
+[NVSHIM] nvif sclass refused reason=route
+[EL0] 24 nvif_sclass_controls no_parent=22 route0=22 PASS
+[NVSHIM] nvif sclass ch=1 count=6 first=0x902d 3d=0xc797
+[EL0] 25 nvif_sclass ch=1 count=6 2d=0x902d 3d=0xc797 copy=0xc6b5 PASS
+[NVSHIM] nvif sclass ch=1 count=6 first=0x902d 3d=0xc797
+[EL0] 26 nvif_sclass_truncated slots=2 reported=6 e0=0x902d e1=0xa140 PASS
+[NVSHIM] nvif new refused class=0xc797 name=ampere_b_gr need=gsp_rm missing=rm_chan_object alloc=rm_alloc engine=eng3d
+[EL0] 27 nvif_new_engine class=0xc797 errno=38 need=gsp_rm PASS
+[NVSHIM] nvif new refused class=0x902d name=fermi_twod_a need=gsp_rm missing=rm_chan_object alloc=rm_alloc engine=eng2d
+[NVSHIM] nvif new refused class=0xa140 name=kepler_inline_m2mf need=gsp_rm missing=rm_chan_object alloc=rm_alloc engine=m2mf
+[NVSHIM] nvif new refused class=0xc797 name=ampere_b_gr need=gsp_rm missing=rm_chan_object alloc=rm_alloc engine=eng3d
+[NVSHIM] nvif new refused class=0xc7c0 name=ampere_compute_b need=gsp_rm missing=rm_chan_object alloc=rm_alloc engine=compute
+[NVSHIM] nvif new refused class=0xc6b5 name=ampere_dma_copy_a need=gsp_rm missing=rm_chan_object alloc=ce_alloc engine=copy0
+[NVSHIM] nvif new refused class=0xc7b5 name=ampere_dma_copy_b need=gsp_rm missing=rm_chan_object alloc=ce_alloc engine=copy1
+[NVSHIM] nvif new refused class=0x1234 reason=no_such_class
+[EL0] 28 nvif_new_classes refused=6/6 no_such_class=22 PASS
+[NVSHIM] nvif new refused reason=channel
+[NVSHIM] nvif new refused reason=channel
+[NVSHIM] nvif refused reason=version
+[NVSHIM] nvif refused reason=route
+[NVSHIM] nvif refused reason=size
+[EL0] 29 nvif_new_shapes foreign_ch=22 no_channel=22 bad_version=22 bad_route=22 short=22 PASS
+[NVSHIM] drm getparam param=4 value=0x2684
+[NVSHIM] nvif new class=0x80 cookie=0x17fffff8c0 dev=1 served=device
+[NVSHIM] nvif info chip=AD102 chipset=0x192 fam=0xe ram=0x100000000
+[NVSHIM] drm getparam param=17 value=0x40
+[NVSHIM] drm getparam param=18 value=0x0
+[NVSHIM] drm getparam param=13 value=0x400b gpc=11 tpc=64 src=declared
+[NVSHIM] nvif sclass ch=1 count=6 first=0x902d 3d=0xc797
+[NVSHIM] nvif new refused class=0xc7b5 name=ampere_dma_copy_b need=gsp_rm missing=rm_chan_object alloc=ce_alloc engine=copy1
+[EL0] 30 nvif_winsys_walk getparam(4)=0 nvif_new=0 info=0 pushmax=0 bar=0 units=0 sclass=0 stop=nvif_new(copy 0xc7b5)=38 PASS
+[EL0] 31 getparam_graph_units gpc=11 tpc=64 sm=128 rop_bits=0x0 PASS
+[NVSHIM] nvif new refused class=0xc7b5 name=ampere_dma_copy_b need=gsp_rm missing=rm_chan_object alloc=ce_alloc engine=copy1
+[NVSHIM] nvif new refused class=0x902d name=fermi_twod_a need=gsp_rm missing=rm_chan_object alloc=rm_alloc engine=eng2d
+[NVSHIM] nvif new refused class=0xc797 name=ampere_b_gr need=gsp_rm missing=rm_chan_object alloc=rm_alloc engine=eng3d
+[NVSHIM] nvif new refused class=0xa140 name=kepler_inline_m2mf need=gsp_rm missing=rm_chan_object alloc=rm_alloc engine=m2mf
+[NVSHIM] nvif new refused class=0xc7c0 name=ampere_compute_b need=gsp_rm missing=rm_chan_object alloc=rm_alloc engine=compute
+[EL0] 32 nvif_engine_order copy=0xc7b5/38 2d=0x902d/38 3d=0xc797/38 m2mf=0xa140/38 compute=0xc7c0/38 refused=5/5 PASS
+[NVSHIM] drm getparam param=18 value=0x0
+[NVSHIM] drm getparam param=8 value=0x100000000
+[EL0] 33 getparam_bar_size bar=0x0 vram=0x100000000 full_bar=0 PASS
+[NVSHIM] nvif del object=0x17fffff8c0 found=1
+[NVSHIM] nvif mthd refused reason=object
+[NVSHIM] nvif del object=0x17fffff8c0 found=0
+[EL0] 34 nvif_del del=0 info_after=22 del_again=0 PASS
+[EL0] 35 unknown_nr nr=0x7e errno=25 PASS
+[NVSHIM] drm vm refused reason=objects_exist
+[EL0] 36 vm_reinit reason=objects_exist errno=38 PASS
+[EL0] 37 ptr_arg arg=0xdead0000 errno=14 PASS
+[EL0] 38 ptr_inner op_ptr=0xdead1000 errno=14 PASS
+[EL0] 39 ptr_exec_push push_ptr=0xdead2000 errno=14 PASS
+[NVSHIM] drm exec refused push_index=0 va=0x80000 rm=-22 reason=stream_not_in_memory
+[EL0] 40 exec_unbound_va push_va=0x80000 errno=22 PASS
+[NVSHIM] drm mmap refused handle=1 len=0x3000 size=0x2000 reason=beyond_object
+[NVSHIM] drm mmap refused flags=0x2 reason=needs_shared
+[NVSHIM] drm mmap refused prot=0x5 reason=protection
+[EL0] 41 mmap_geometry len_past_object=22 private=22 exec=22 PASS
+[NVSHIM] drm mmap handle=1 va=0x1080002000 len=0x1000 phys=0x204c40000 domain=0x9
+[EL0] 42 mmap_alias va2=0x1080002000 errno=0 PASS
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm gem_new handle=3 size=0x1000 offset=0x206b42000 domain=0x9 map=0x3000
+[EL0] 43 two_clients fd2=4 old_handle_errno=22 new_handle=3 PASS
+[NVSHIM] drm gem_close handle=1
+[EL0] 44 gem_close_unmaps close_ret=0 child_status=11 PASS
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm getparam param=11 value=0x192
+[EL0] 45 fork_inherit_fd inherited_fd=3 child_exit=0 PASS
+[EL0] 46 close_ioctl closed_fd=3 errno=9 PASS
+[EL0] 47 fd_lifetime new_fd=3 old_handle=1 errno=22 PASS
+[EL0] RESULT PASS 47/47

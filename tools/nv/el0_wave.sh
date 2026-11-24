@@ -10,6 +10,9 @@
 #
 # Usage: tools/nv/el0_wave.sh [--skip-build] [--timeout SECS] [--out FILE]
 # Env:   ARCH (intel), NVABI_ELF, T3-style overrides unused.
+#        SKIP_KVM=1 boots under TCG even when /dev/kvm exists (a box where the
+#        device node is present but the user is not in group `kvm`); same
+#        spelling as run_unit_tests_intel.sh.  EXTRA_QEMU_ARGS overrides it.
 # Exit:  0 = the program printed "[EL0] RESULT PASS", 1 = it failed or never ran,
 #        2 = environment/build failure (never a code verdict).
 set -u
@@ -65,8 +68,9 @@ STAGE="mcopy -o -i disk.img '$ELF' ::/NVABI.ELF && mcopy -o -i disk.img /tmp/el0
 say "staged /WAVE.CFG = NVABI.ELF ($(stat -c%s "$ELF" 2>/dev/null || echo '?') B)"
 
 KVM=""
-[ -e /dev/kvm ] && KVM="-enable-kvm"
-say "booting (deadline ${TO}s, log $OUT)"
+if [ -e /dev/kvm ] && [ "${SKIP_KVM:-0}" != "1" ]; then KVM="-enable-kvm"; fi
+[ -n "${EXTRA_QEMU_ARGS:-}" ] && KVM="$EXTRA_QEMU_ARGS"
+say "booting (deadline ${TO}s, qemu args '${KVM}', log $OUT)"
 ( timeout "$TO" make ARCH="$ARCH" MODE=test TOOLS_SKIP=1 BROWSER_SKIP=1 \
     RUN_STAGE="$STAGE" run QEMU_ARGS="-display none $KVM" ) >"$OUT" 2>&1
 rc=$?

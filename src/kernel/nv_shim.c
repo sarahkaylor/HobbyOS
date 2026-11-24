@@ -233,11 +233,20 @@ static int r_dev = SHIM_ROW_BUDGET, r_alloc = SHIM_ROW_BUDGET,
            r_mmap = 12, /* WP-F3: the CPU-mapping stage, success AND refusal -- a
                     * refused mapping names itself, and the tier exercises every
                     * refusal shape, so 8 was one short */
-           r_drm = 64; /* the 'd' face: one row per stage.  8 truncated the gate
+           r_param = 8, /* WP-UNITS: GETPARAM refusals get their own budget, one
+                    * row per refusal.  Sharing r_refuse hid the one row that
+                    * proves WHY a node without a topology refuses GRAPH_UNITS
+                    * (mock_has_no_topo): by the last suite that bucket had been
+                    * spent on other stages.  A refusal that cannot be seen is
+                    * the failure mode this project keeps paying for. */
+           r_drm = 128; /* the 'd' face: one row per stage.  8 truncated the gate
                         * probe's evidence; 32 was exhausted by the time the
                         * WP-F3 mapping test ran, which suppressed the very
                         * `drm exec ... stream=` row that proves EXEC read the
-                        * client's bytes.  Each row is still one line. */
+                        * client's bytes; 64 then ran out before WP-UNITS' last
+                        * suite, hiding the `drm getparam param=13 ... src=
+                        * declared` row this lane exists to produce.  Each row
+                        * is still one line, and the budget is per BOOT. */
 
 static void row_end(void) {
   uint32_t cpu = row_cpu();
@@ -606,6 +615,10 @@ void nv_shim_release_fd(struct process *p, int fd) { (void)device_release(p, fd,
 
 /* ---- 2. getparam ------------------------------------------------------- */
 
+/* Defined with the param table below; declared here because the 'N' face
+ * answers through it too. */
+const char *nv_shim_param_refusal_reason(uint64_t param);
+
 static int op_get_param(struct process *p, int fd, uint64_t arg) {
   struct nvshim_param q;
   if (vm_user_read(p, arg, &q, (int)sizeof q) != 0) return -EFAULT;
@@ -624,10 +637,11 @@ static int op_get_param(struct process *p, int fd, uint64_t arg) {
   uint64_t value = 0;
   int rc = drm_param_value(&info, q.param, &value);
   if (rc == -ENOSYS) {
-    row_begin("getparam refused", &r_refuse);
+    row_begin("getparam refused", &r_param);
     row_s("param=");
     row_say((int)q.param);
-    row_s(" reason=mock_has_no_card");
+    row_s(" reason=");
+    row_s(nv_shim_param_refusal_reason(q.param));
     row_end();
     return -ENOSYS;
   }
@@ -1291,6 +1305,35 @@ static int drm_client_ensure(struct process *p, int fd, uint32_t *dev) {
 
 /* Param table for both faces: 0 = answered, -ENOSYS = needs the card,
  * -EINVAL = not a nouveau param number. */
+
+/* The value GETPARAM GRAPH_UNITS carries, packed exactly the way this
+ * hardware's stack packs it.  SOURCE: nvkm/subdev/gsp/rm/r535/gr.c
+ *     r535_gr_units():  return (gsp->gr.tpcs << 8) | gsp->gr.gpcs;
+ * -- TPC TOTAL in bits 8-23, GPC count in bits 0-7, no ROP field.  (The
+ * pre-Turing gf100_gr_units() adds rops at bit 32; Mesa masks those bits away,
+ * and on Ada r535_gr_units never sets them, so a GSP-shaped answer is 32-bit.)
+ * Where the two numbers come from is the RM's business: on this hardware they
+ * exist only inside GSP-RM's GET_GSP_STATIC_INFO reply.  This function only
+ * packs what the RM declares -- it cannot invent a topology, and
+ * source == NV_RM_TOPO_NONE does not reach here at all. */
+uint64_t nv_shim_gr_units_value(const struct nv_rm_gpu_topo *t) {
+  if (!t || t->source == NV_RM_TOPO_NONE) return 0;
+  return ((uint64_t)(t->tpc_total & 0xffffu) << 8) | (uint64_t)(t->gpc_nr & 0xffu);
+}
+
+/* Why a param has no answer here.  Two different absences, two names: a
+ * topology the RM never received, versus a card this node does not have.
+ * Exported so the tier holds the NAME to a value (a refusal whose reason is
+ * only in a console string is not tested; mutation M2 exists to prove it). */
+const char *nv_shim_param_refusal_reason(uint64_t param) {
+  return param == NVSHIM_PARAM_GRAPH_UNITS ? "mock_has_no_topo" : "mock_has_no_card";
+}
+
+/* The word in the GRAPH_UNITS row that says where the number came from. */
+static const char *topo_source_name(uint32_t source) {
+  return source == NV_RM_TOPO_DECLARED ? "declared" : "none";
+}
+
 static int drm_param_value(const struct nv_rm_device_info *info, uint64_t param,
                            uint64_t *value) {
   switch (param) {
@@ -1298,15 +1341,22 @@ static int drm_param_value(const struct nv_rm_device_info *info, uint64_t param,
   case NVSHIM_PARAM_PCI_DEVICE: *value = info->device_id; return 0;
   case NVSHIM_PARAM_FB_SIZE: *value = info->fb_size; return 0;
   case NVSHIM_PARAM_CHIPSET_ID: *value = info->chipset; return 0;
-  case NVSHIM_PARAM_VRAM_BAR_SIZE: *value = info->fb_size; return 0;
+  /* An aperture size, not an amount of memory (see nv_rm.h). */
+  case NVSHIM_PARAM_VRAM_BAR_SIZE: *value = info->bar1_fb_size; return 0;
   case NVSHIM_DRM_PARAM_EXEC_PUSH_MAX: *value = NVSHIM_DRM_MAX_PUSH; return 0;
   /* Tile mode / PTE kind are not accepted by VM_BIND here, so the honest
    * answer is 0 (nouveau's own "feature absent" spelling). */
   case NVSHIM_DRM_PARAM_HAS_VMA_TILEMODE: *value = 0; return 0;
+  /* The one param on this path a stock winsys cannot continue without.  It is
+   * answered from the RM's topology -- a declared model when there is one, a
+   * named refusal when there is not. */
+  case NVSHIM_PARAM_GRAPH_UNITS:
+    if (info->topo.source == NV_RM_TOPO_NONE) return -ENOSYS;
+    *value = nv_shim_gr_units_value(&info->topo);
+    return 0;
   case NVSHIM_PARAM_BUS_TYPE:
   case NVSHIM_PARAM_AGP_SIZE:
   case NVSHIM_PARAM_VM_VRAM_BASE:
-  case NVSHIM_PARAM_GRAPH_UNITS:
   case NVSHIM_PARAM_PTIMER_TIME:
   case NVSHIM_PARAM_HAS_BO_USAGE:
   case NVSHIM_PARAM_HAS_PAGEFLIP:
@@ -1381,10 +1431,11 @@ static int op_drm_getparam(struct process *p, int fd, uint64_t arg) {
   uint64_t value = 0;
   rc = drm_param_value(&info, q.param, &value);
   if (rc == -ENOSYS) {
-    row_begin("drm getparam refused", &r_refuse);
+    row_begin("drm getparam refused", &r_param);
     row_s("param=");
     row_say((int)q.param);
-    row_s(" reason=mock_has_no_card");
+    row_s(" reason=");
+    row_s(nv_shim_param_refusal_reason(q.param));
     row_end();
     return rc;
   }
@@ -1396,6 +1447,18 @@ static int op_drm_getparam(struct process *p, int fd, uint64_t arg) {
   row_say((int)q.param);
   row_s(" value=");
   row_hex(value);
+  /* GRAPH_UNITS is a decomposition, and which decomposition matters: a client
+   * (and this project's own reports) must be able to see the GPC/TPC split and
+   * that the number is DECLARED rather than measured.  Same row, three more
+   * tokens -- the value alone would hide both facts. */
+  if (q.param == NVSHIM_PARAM_GRAPH_UNITS) {
+    row_s(" gpc=");
+    row_say((int)info.topo.gpc_nr);
+    row_s(" tpc=");
+    row_say((int)info.topo.tpc_total);
+    row_s(" src=");
+    row_s(topo_source_name(info.topo.source));
+  }
   row_end();
   return 0;
 }
@@ -2673,21 +2736,51 @@ int nv_shim_test_last_exec(struct process *p, int fd, uint32_t *sum, uint32_t *l
 
 /* The engine classes an AD102 channel offers, in the order nouveau's engine
  * tables list them (gr/ga102.c then ce/ga102.c).  Names are ours -- a row has
- * to say WHICH class it refused in words -- and the ids are class.h's. */
+ * to say WHICH class it refused in words -- and the ids are class.h's.
+ *
+ * The last two columns are what the refusal must name, because "need=gsp_rm"
+ * alone does not say what to build.  SOURCE, the Ada path:
+ *   NVIF NEW <engine class> -> nvkm_rm_gr_obj_ctor / nvkm_rm_engine_obj_ctor
+ *   -> nvkm_rm_engine_obj_new(&chan->rm.object, chan->id, oclass)
+ *   -> GR/2D/M2MF:  nvkm_gsp_rm_alloc(chan, handle, class, 0, &obj->rm)
+ *      CE:          rm->api->ce->alloc() -> nvkm_gsp_rm_alloc_get/wr with
+ *                   NVC0B5_ALLOCATION_PARAMETERS{engineType = COPY0 + inst}
+ * (nvkm/subdev/gsp/rm/engine.c, .../r535/ce.c).  So every engine object is one
+ * RM allocation parented on the CHANNEL's RM object, and neither exists here:
+ * this node's channel is bookkeeping.  The two missing things are therefore
+ * GSP-RM itself and that channel RM object -- and that is what the row says. */
 struct nvif_class_row {
   int32_t oclass;
   char name[24];
+  const char *engine; /* engine instance the class runs on, as nvk names it */
+  const char *alloc;  /* the RM allocation that would create the object */
 };
 
 static const struct nvif_class_row g_nvif_engines[] = {
-    {NVSHIM_NVIF_CLASS_FERMI_TWOD_A, "fermi_twod_a"},
-    {NVSHIM_NVIF_CLASS_KEPLER_INLINE_TO_MEM_B, "kepler_inline_m2mf"},
-    {NVSHIM_NVIF_CLASS_AMPERE_B, "ampere_b_gr"},
-    {NVSHIM_NVIF_CLASS_AMPERE_COMPUTE_B, "ampere_compute_b"},
-    {NVSHIM_NVIF_CLASS_AMPERE_DMA_COPY_A, "ampere_dma_copy_a"},
-    {NVSHIM_NVIF_CLASS_AMPERE_DMA_COPY_B, "ampere_dma_copy_b"},
+    {NVSHIM_NVIF_CLASS_FERMI_TWOD_A, "fermi_twod_a", "eng2d", "rm_alloc"},
+    {NVSHIM_NVIF_CLASS_KEPLER_INLINE_TO_MEM_B, "kepler_inline_m2mf", "m2mf", "rm_alloc"},
+    {NVSHIM_NVIF_CLASS_AMPERE_B, "ampere_b_gr", "eng3d", "rm_alloc"},
+    {NVSHIM_NVIF_CLASS_AMPERE_COMPUTE_B, "ampere_compute_b", "compute", "rm_alloc"},
+    {NVSHIM_NVIF_CLASS_AMPERE_DMA_COPY_A, "ampere_dma_copy_a", "copy0", "ce_alloc"},
+    {NVSHIM_NVIF_CLASS_AMPERE_DMA_COPY_B, "ampere_dma_copy_b", "copy1", "ce_alloc"},
 };
 #define NVIF_ENGINE_CLASSES (int)(sizeof g_nvif_engines / sizeof g_nvif_engines[0])
+
+/* The same table, as data a test can assert on: class -> (row name, engine,
+ * RM allocation).  -1 for a class SCLASS does not report.  The refusal row is
+ * printed from these fields, so a change to what the wall claims cannot pass
+ * the tier without changing the table. */
+int nv_shim_nvif_engine_class(int32_t oclass, const char **name,
+                              const char **engine, const char **alloc) {
+  for (int i = 0; i < NVIF_ENGINE_CLASSES; i++) {
+    if (g_nvif_engines[i].oclass != oclass) continue;
+    if (name) *name = g_nvif_engines[i].name;
+    if (engine) *engine = g_nvif_engines[i].engine;
+    if (alloc) *alloc = g_nvif_engines[i].alloc;
+    return 0;
+  }
+  return -1;
+}
 
 /* The product name a PCI id table would supply.  0x2684 is the RTX 4090
  * (PLAN.md §0); a winsys overwrites this from its own table, so it is
@@ -2788,7 +2881,9 @@ static int nvif_new(struct process *p, int fd, uint32_t argc, uint64_t arg,
   if (!owns) return nvif_refuse("nvif new", "channel", -EINVAL);
 
   /* SCLASS reported these; instantiating one is an RM object (a GR/CE/etc
-   * context) on a real channel, so it is refused BY NAME, with the id. */
+   * context) on a real channel, so it is refused BY NAME, with the id -- and
+   * with the two things that are actually missing: an RM channel object to
+   * parent the allocation on, and the RM allocation itself. */
   for (int i = 0; i < NVIF_ENGINE_CLASSES; i++) {
     if (g_nvif_engines[i].oclass != nw.oclass) continue;
     row_begin("nvif new", &r_nvif);
@@ -2796,7 +2891,10 @@ static int nvif_new(struct process *p, int fd, uint32_t argc, uint64_t arg,
     row_hex((uint64_t)(uint32_t)nw.oclass);
     row_s(" name=");
     row_s(g_nvif_engines[i].name);
-    row_s(" need=gsp_rm");
+    row_s(" need=gsp_rm missing=rm_chan_object alloc=");
+    row_s(g_nvif_engines[i].alloc);
+    row_s(" engine=");
+    row_s(g_nvif_engines[i].engine);
     row_end();
     return -ENOSYS;
   }

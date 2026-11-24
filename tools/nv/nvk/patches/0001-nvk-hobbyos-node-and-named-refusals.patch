@@ -1,0 +1,217 @@
+--- a/src/nouveau/vulkan/nvk_instance.c
++++ b/src/nouveau/vulkan/nvk_instance.c
+@@ -20,6 +20,89 @@
+ #include "vk_android.h"
+ #endif
+ 
++#include <errno.h>
++#include <fcntl.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++#include <xf86drm.h>
++
++#include "drm-uapi/nouveau_drm.h"
++
++/* ---- HobbyOS: the DRM node is /dev/nvshim, discovered by name -----------
++ *
++ * HobbyOS has no sysfs and no /dev/dri, so libdrm's drmGetDevices2() -- the
++ * only device discovery this driver has -- finds nothing and nvk would
++ * enumerate zero physical devices with no explanation.  This hook builds the
++ * one-element drmDevice that a named node describes and runs it through the
++ * normal per-DRM path (drm_fd_is_nouveau(), VERSION, GETPARAM, VM_INIT, NVIF),
++ * so everything below this hook is stock nvk.
++ *
++ * The node is $NVK_HOBBYOS_NODE when set, else /dev/nvshim.  Absent node means
++ * "not HobbyOS": VK_ERROR_INCOMPATIBLE_DRIVER lets the libdrm scan run.
++ *
++ * The PCI device id is read back from the node with GETPARAM(PCI_DEVICE)
++ * rather than assumed; the vendor is NVIDIA by construction because this is
++ * the NVIDIA driver.  Any failure is reported on stderr and returned to the
++ * caller, never turned into a silent "0 devices".
++ */
++static VkResult
++nvk_hobbyos_enumerate(struct vk_instance *vk_inst)
++{
++   const char *env_path = getenv("NVK_HOBBYOS_NODE");
++   const char *path = (env_path != NULL && env_path[0] != '\0') ?
++                      env_path : "/dev/nvshim";
++
++   int fd = open(path, O_RDWR | O_CLOEXEC);
++   if (fd < 0) {
++      /* Only noisy when the node was named explicitly: otherwise this is a
++       * Linux host without /dev/nvshim and the libdrm scan should just run. */
++      if (env_path != NULL && env_path[0] != '\0') {
++         fprintf(stderr, "nvk: NVK_HOBBYOS_NODE=%s: open: %s\n", path,
++                 strerror(errno));
++      }
++      return VK_ERROR_INCOMPATIBLE_DRIVER;
++   }
++
++   struct drm_nouveau_getparam q = { .param = NOUVEAU_GETPARAM_PCI_DEVICE };
++   int ret = drmCommandWriteRead(fd, DRM_NOUVEAU_GETPARAM, &q, sizeof(q));
++   int saved = errno;
++   close(fd);
++   if (ret) {
++      fprintf(stderr, "nvk: %s: GETPARAM(PCI_DEVICE): %s\n", path,
++              strerror(saved));
++      return VK_ERROR_INCOMPATIBLE_DRIVER;
++   }
++
++   char *nodes[DRM_NODE_MAX] = { NULL };
++   drmPciBusInfo bus = { 0 };
++   drmPciDeviceInfo pci = {
++      .vendor_id = 0x10de, /* NVIDIA: the driver this ICD is */
++      .device_id = (uint16_t)q.value,
++   };
++   struct _drmDevice dev = {
++      .nodes = nodes,
++      .available_nodes = 1 << DRM_NODE_RENDER,
++      .bustype = DRM_BUS_PCI,
++      .businfo.pci = &bus,
++      .deviceinfo.pci = &pci,
++   };
++   nodes[DRM_NODE_RENDER] = (char *)path;
++
++   struct vk_physical_device *pdev = NULL;
++   VkResult result =
++      nvk_create_drm_physical_device(vk_inst, &dev, &pdev);
++   if (result != VK_SUCCESS) {
++      fprintf(stderr, "nvk: %s: physical device create failed: VkResult %d\n",
++              path, result);
++      return result;
++   }
++
++   list_addtail(&pdev->link, &vk_inst->physical_devices.list);
++   return VK_SUCCESS;
++}
++
++
+ VKAPI_ATTR VkResult VKAPI_CALL
+ nvk_EnumerateInstanceVersion(uint32_t *pApiVersion)
+ {
+@@ -167,6 +250,9 @@
+    instance->vk.physical_devices.try_create_for_drm =
+       nvk_create_drm_physical_device;
+    instance->vk.physical_devices.destroy = nvk_physical_device_destroy;
++   /* HobbyOS: a named DRM node replaces libdrm's sysfs/`/dev/dri` scan.  The
++    * hook itself falls back to the libdrm path when /dev/nvshim is absent. */
++   instance->vk.physical_devices.enumerate = nvk_hobbyos_enumerate;
+ 
+    const struct build_id_note *note =
+       build_id_find_nhdr_for_addr(nvk_CreateInstance);
+--- a/src/nouveau/winsys/nouveau_device.c
++++ b/src/nouveau/winsys/nouveau_device.c
+@@ -11,6 +11,8 @@
+ #include "util/os_misc.h"
+ 
+ #include <fcntl.h>
++#include <stdio.h>
++#include <string.h>
+ #include "nvif/cl0080.h"
+ #include "nvif/class.h"
+ #include "nvif/ioctl.h"
+@@ -341,8 +343,14 @@
+        !nouveau_ws_param(fd, NOUVEAU_GETPARAM_VRAM_BAR_SIZE, &value))
+       device->info.bar_size_B = value;
+ 
+-   if (nouveau_ws_param(fd, NOUVEAU_GETPARAM_GRAPH_UNITS, &value))
++   int gu_ret = nouveau_ws_param(fd, NOUVEAU_GETPARAM_GRAPH_UNITS, &value);
++   if (gu_ret) {
++      /* Name the step: without this the driver just disappears. */
++      fprintf(stderr,
++              "nvk: GETPARAM(GRAPH_UNITS=%d) failed: %s (%d); no physical device\n",
++              NOUVEAU_GETPARAM_GRAPH_UNITS, strerror(-gu_ret), gu_ret);
+       goto out_err;
++   }
+ 
+    device->info.gpc_count = (value >> 0) & 0x000000ff;
+    device->info.tpc_count = (value >> 8) & 0x0000ffff;
+--- a/src/nouveau/winsys/nouveau_context.c
++++ b/src/nouveau/winsys/nouveau_context.c
+@@ -6,6 +6,8 @@
+ #include "nvif/ioctl.h"
+ 
+ #include <errno.h>
++#include <stdio.h>
++#include <string.h>
+ #include <xf86drm.h>
+ 
+ static void
+@@ -109,6 +111,24 @@
+    return drmCommandWrite(fd, DRM_NOUVEAU_NVIF, &args, sizeof(args));
+ }
+ 
++/* Same call, but a refusal is named on stderr.  Without this a driver that
++ * cannot get an engine object just disappears: nvk reports "0 devices" and
++ * the reason (which NVIF class, which errno) is only visible in the kernel's
++ * own console rows. */
++static int
++nouveau_ws_subchan_alloc_named(int fd, int channel, uint32_t handle,
++                               uint16_t oclass, struct nouveau_ws_object *obj,
++                               const char *engine)
++{
++   int ret = nouveau_ws_subchan_alloc(fd, channel, handle, oclass, obj);
++   if (ret != 0) {
++      fprintf(stderr,
++              "nvk: %s engine class object 0x%04x refused: %s (%d)\n",
++              engine, oclass, strerror(-ret), ret);
++   }
++   return ret;
++}
++
+ static void
+ nouveau_ws_channel_dealloc(int fd, int channel)
+ {
+@@ -145,24 +165,24 @@
+ 
+    if (engines & NOUVEAU_WS_ENGINE_COPY) {
+       uint32_t obj_class = nouveau_ws_context_find_class(classes, 0xb5);
+-      ret = nouveau_ws_subchan_alloc(dev->fd, req.channel, 0,
+-                                     obj_class, &(*out)->copy);
++      ret = nouveau_ws_subchan_alloc_named(dev->fd, req.channel, 0,
++                                           obj_class, &(*out)->copy, "copy");
+       if (ret)
+          goto fail_subchan;
+    }
+ 
+    if (engines & NOUVEAU_WS_ENGINE_2D) {
+       uint32_t obj_class = nouveau_ws_context_find_class(classes, 0x2d);
+-      ret = nouveau_ws_subchan_alloc(dev->fd, req.channel, base | 0x902d,
+-                                     obj_class, &(*out)->eng2d);
++      ret = nouveau_ws_subchan_alloc_named(dev->fd, req.channel, base | 0x902d,
++                                           obj_class, &(*out)->eng2d, "2d");
+       if (ret)
+          goto fail_subchan;
+    }
+ 
+    if (engines & NOUVEAU_WS_ENGINE_3D) {
+       uint32_t obj_class = nouveau_ws_context_find_class(classes, 0x97);
+-      ret = nouveau_ws_subchan_alloc(dev->fd, req.channel, base | 0x003d,
+-                                     obj_class, &(*out)->eng3d);
++      ret = nouveau_ws_subchan_alloc_named(dev->fd, req.channel, base | 0x003d,
++                                           obj_class, &(*out)->eng3d, "3d");
+       if (ret)
+          goto fail_subchan;
+    }
+@@ -171,16 +191,16 @@
+       uint32_t obj_class = nouveau_ws_context_find_class(classes, 0x40);
+       if (!obj_class)
+          obj_class = nouveau_ws_context_find_class(classes, 0x39);
+-      ret = nouveau_ws_subchan_alloc(dev->fd, req.channel, base | 0x323f,
+-                                     obj_class, &(*out)->m2mf);
++      ret = nouveau_ws_subchan_alloc_named(dev->fd, req.channel, base | 0x323f,
++                                           obj_class, &(*out)->m2mf, "m2mf");
+       if (ret)
+          goto fail_subchan;
+    }
+ 
+    if (engines & NOUVEAU_WS_ENGINE_COMPUTE) {
+       uint32_t obj_class = nouveau_ws_context_find_class(classes, 0xc0);
+-      ret = nouveau_ws_subchan_alloc(dev->fd, req.channel, base | 0x00c0,
+-                                     obj_class, &(*out)->compute);
++      ret = nouveau_ws_subchan_alloc_named(dev->fd, req.channel, base | 0x00c0,
++                                           obj_class, &(*out)->compute, "compute");
+       if (ret)
+          goto fail_subchan;
+    }
