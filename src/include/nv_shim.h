@@ -305,6 +305,19 @@ int nv_shim_drm_req_size(unsigned long req);
 /* NULL unless the number is a named refusal. */
 const char *nv_shim_drm_refusal_name(unsigned long req);
 
+/* WP-F3: mmap(2) of a GEM object on /dev/nvshim.  vm_mmap() routes here when
+ * the fd is this node; `offset` is the object's map_handle (handle << 12), the
+ * only way a bare mmap names which object it means.  Returns the mapping's base
+ * VA or a negative errno, and answers -EINVAL / -ENOTSUP with a named console
+ * row when the object's domain never offered a CPU mapping.
+ *
+ * The mapping's pages ARE the object's pool frames (one vm_object of kind
+ * VM_OBJ_NVBO names them, and the ordinary demand fault installs them), so the
+ * first store through the mapping and the bytes a submit reads are the same
+ * memory -- there is no write-back and no flush step to forget. */
+int64_t nv_shim_mmap(struct process *grp, int fd, uint64_t offset, uint64_t len,
+                     uint16_t prot, uint32_t flags);
+
 /* Pure helpers, exported for the kernel unit suite. */
 int nv_shim_req_size(unsigned long req);          /* -1 = not a request */
 const char *nv_shim_refusal_name(unsigned long req); /* NULL = not refused */
@@ -316,5 +329,17 @@ int nv_shim_submit_ok(const struct nvshim_submit *s);
 
 void nv_shim_test_suite(void);
 void nv_shim_drm_test_suite(void);
+
+/* --- kernel-tier observation seams (not ABI) ----------------------------
+ * What the last successful DRM EXEC actually FETCHED from the push buffers it
+ * was given: an FNV-1a 32 over the bytes, and how many bytes.  The EXEC path
+ * has no user pointer, so this is the only honest answer to "did the kernel
+ * read the bytes the client wrote" -- and it is read from the RM's memory, not
+ * from the client's mapping.  Returns 0 and fills both outputs when this client
+ * has completed an EXEC, -ENODATA when it has not. */
+int nv_shim_test_last_exec(struct process *p, int fd, uint32_t *sum, uint32_t *len);
+/* FNV-1a 32 over a buffer -- the same function the EXEC path digests with, so a
+ * test's expected value comes from the bytes, not from a copy of the code. */
+uint32_t nv_shim_test_sum(const void *buf, uint32_t len);
 
 #endif /* NV_SHIM_H */

@@ -14,11 +14,18 @@
  *  needs to know whether real hardware is behind it asks DEVICE_ALLOC and
  *  reads `mock`.
  *
- *  Deliberately NOT here: mmap of an allocation (a client would need pages
- *  behind the bus address, and there are none), GSP-RM objects, and every row
- *  in the refusal table of nv_shim.h -- each answered -ENOSYS and named on the
- *  console, because a missing handler that silently succeeds is the failure
- *  mode this project shoots itself in the foot with.
+ *  Deliberately NOT here: GSP-RM objects, and every row in the refusal table of
+ *  nv_shim.h -- each answered -ENOSYS and named on the console, because a
+ *  missing handler that silently succeeds is the failure mode this project
+ *  shoots itself in the foot with.
+ *
+ *  CPU-MAPPED BOs (WP-F3).  A GEM object whose domain asks for a CPU mapping
+ *  (CPU | MAPPABLE) is backed by pool RAM the RM owns, and mmap(2) of this node
+ *  maps THOSE frames into the client: the mapping is the object, not a copy of
+ *  it.  The offset names the object (map_handle = handle << 12, DRM's
+ *  drm_vma_node_offset_addr spelling), so no new ioctl number was invented --
+ *  DRM has never had a mmap request row, and adding one would have been a
+ *  second way to say the same thing.
  * ========================================================================== */
 
 #include "nv_shim.h"
@@ -60,6 +67,21 @@ struct shim_sigpend {
   uint64_t fence;
 };
 
+/* WP-F3: one live CPU mapping of a GEM object.  Tracked so GEM_CLOSE (or the
+ * fd going away) can take the mapping down BEFORE the RM frees the frames --
+ * a leaf that outlives its frame would point at whatever the allocator hands
+ * out next.  Linux keeps the object alive while a VMA refers to it; the mock
+ * has no object refcount, so the order is inverted instead, and a test asserts
+ * the mapping is gone after GEM_CLOSE. */
+struct shim_map {
+  int used;
+  int pid;
+  int fd;
+  uint64_t handle;
+  uint64_t va;
+  uint64_t len;
+};
+
 struct shim_client {
   int used;
   int pid; /* process-group pid: threads share ownership */
@@ -93,10 +115,20 @@ struct shim_client {
   uint8_t sobj_sig[SHIM_MAX_SYNCOBJS];
   int npend;
   struct shim_sigpend pend[SHIM_MAX_SIGPEND];
+
+  /* WP-F3: what the last EXEC fetched out of the push buffers it was given
+   * (bytes + FNV-1a 32).  Read only by the kernel unit tier's seam. */
+  int exec_have;
+  uint32_t exec_sum;
+  uint32_t exec_len;
 };
 
 static struct shim_client g_clients[SHIM_MAX_CLIENTS];
 static spinlock_t g_shim_lock;
+/* WP-F3: live BO mappings, process-global because a mapping outlives the ioctl
+ * that made it and has to be found from GEM_CLOSE / fd close. */
+#define SHIM_MAX_MAPS 16
+static struct shim_map g_maps[SHIM_MAX_MAPS];
 /* One bounce buffer for command streams: the RM (and later GSP-RM) takes a
  * kernel pointer, and SUBMIT is the only variable-length request. */
 static uint8_t g_cs_buf[NVSHIM_MAX_CS] __attribute__((aligned(16)));
@@ -172,8 +204,14 @@ static int r_dev = SHIM_ROW_BUDGET, r_alloc = SHIM_ROW_BUDGET,
            r_vm = SHIM_ROW_BUDGET, r_bind = SHIM_ROW_BUDGET,
            r_ch = SHIM_ROW_BUDGET, r_submit = SHIM_ROW_BUDGET,
            r_fence = SHIM_ROW_BUDGET, r_refuse = SHIM_ROW_BUDGET,
-           r_drm = 32; /* the 'd' face: one row per stage, and the gate probe
-                        * touches every stage, so 8 truncated the evidence */
+           r_mmap = 12, /* WP-F3: the CPU-mapping stage, success AND refusal -- a
+                    * refused mapping names itself, and the tier exercises every
+                    * refusal shape, so 8 was one short */
+           r_drm = 64; /* the 'd' face: one row per stage.  8 truncated the gate
+                        * probe's evidence; 32 was exhausted by the time the
+                        * WP-F3 mapping test ran, which suppressed the very
+                        * `drm exec ... stream=` row that proves EXEC read the
+                        * client's bytes.  Each row is still one line. */
 
 static void row_end(void) {
   uint32_t cpu = row_cpu();
@@ -321,6 +359,9 @@ static void client_clear(struct shim_client *c) {
     c->pend[i].ch = 0;
     c->pend[i].fence = 0;
   }
+  c->exec_have = 0;
+  c->exec_sum = 0;
+  c->exec_len = 0;
   for (unsigned i = 0; i < sizeof(c->info); i++) ((unsigned char *)&c->info)[i] = 0;
 }
 
@@ -484,6 +525,11 @@ static int op_device_alloc(struct process *p, int fd, uint64_t arg) {
 
 /* Shared body of DEVICE_FREE / fd close: `expect` 0 means "whatever is there".
  * Returns 0 or -EINVAL (no such device on this client). */
+
+/* WP-F3: defined with the CPU-mapping block; teardown must take mappings down
+ * before any frame is freed, and it runs before that block is compiled. */
+static void shim_maps_drop(struct process *p, int fd, uint64_t handle);
+
 static int device_release(struct process *p, int fd, uint32_t expect) {
   int pid = shim_pid(p);
   struct shim_client snap;
@@ -504,6 +550,9 @@ static int device_release(struct process *p, int fd, uint32_t expect) {
   spinlock_release(&g_shim_lock);
 
   if (!found) return -EINVAL;
+  /* WP-F3: mappings first -- their leaves name the RM's frames, so the frames
+   * must not be freed while a mapping is live. */
+  shim_maps_drop(p, fd, 0);
   client_teardown(&snap);
   return 0;
 }
@@ -1316,11 +1365,54 @@ static int op_drm_getparam(struct process *p, int fd, uint64_t arg) {
 
 /* ---- memory objects ---------------------------------------------------- */
 
-/* DRM_NOUVEAU_GEM_DOMAIN_* bits that describe a CPU mapping, which this
- * subset does not offer: asking for one must fail rather than be dropped. */
+/* DRM_NOUVEAU_GEM_DOMAIN_* bits that describe a CPU mapping.  Round 2 refused
+ * them all; WP-F3 serves one shape of them (CPU|MAPPABLE) and names every other
+ * shape, because "the client asked for something I did not do" must never look
+ * like success.
+ *
+ *  domain bits          meaning here
+ *  ------------------   ----------------------------------------------------
+ *  VRAM, GART           object memory; no CPU mapping (no BAR is mapped)
+ *  CPU | MAPPABLE       pool-backed and CPU-mappable: mmap(2) may name it
+ *  ... | COHERENT       allowed alongside MAPPABLE; it asserts the mapping
+ *                       needs no cache maintenance, which is true of this
+ *                       memory (Normal-NC pool RAM the device already sees)
+ *  MAPPABLE w/o CPU     refused: there is no BAR to map VRAM through
+ *  COHERENT w/o MAPPABLE refused: a coherence promise with no mapping
+ *  NO_SHARE             refused: it tells PRIME not to export the object, and
+ *                       PRIME is refused by name -- accepting it would be the
+ *                       silent drop this project forbids
+ */
 #define DRM_DOMAIN_CPU_BITS                                                        \
   (NVSHIM_DOMAIN_CPU | NVSHIM_DOMAIN_MAPPABLE | NVSHIM_DOMAIN_COHERENT |           \
    NVSHIM_DOMAIN_NO_SHARE)
+
+/* 0 = a domain this node can serve; -1 = refused (caller names the reason). */
+static int drm_domain_ok(uint32_t domain) {
+  if ((domain & (NVSHIM_DOMAIN_VRAM | NVSHIM_DOMAIN_GART | NVSHIM_DOMAIN_CPU)) == 0)
+    return -1; /* nothing to allocate from */
+  if (domain & NVSHIM_DOMAIN_NO_SHARE) return -1;
+  if ((domain & NVSHIM_DOMAIN_MAPPABLE) && !(domain & NVSHIM_DOMAIN_CPU))
+    return -1; /* no BAR: VRAM cannot be CPU-mapped here */
+  if ((domain & NVSHIM_DOMAIN_COHERENT) && !(domain & NVSHIM_DOMAIN_MAPPABLE))
+    return -1;
+  return 0;
+}
+
+/* Does this domain promise a CPU mapping the client may mmap?  Only the shape
+ * drm_domain_ok() accepts is ever asked about. */
+static int drm_domain_cpu_mappable(uint32_t domain) {
+  return (domain & (NVSHIM_DOMAIN_CPU | NVSHIM_DOMAIN_MAPPABLE)) ==
+         (NVSHIM_DOMAIN_CPU | NVSHIM_DOMAIN_MAPPABLE);
+}
+
+/* DRM's fake offset for an object: drm_vma_node_offset_addr() hands userspace
+ * (handle << PAGE_SHIFT) and expects it back in mmap(2)'s offset.  0 means "this
+ * object is not CPU-mappable", which is what round 2 always answered. */
+static uint64_t drm_map_handle(uint32_t domain, uint64_t handle) {
+  if (!drm_domain_cpu_mappable(domain)) return 0;
+  return handle << 12;
+}
 
 static int op_drm_gem_new(struct process *p, int fd, uint64_t arg) {
   struct nvshim_drm_gem_new g;
@@ -1329,8 +1421,7 @@ static int op_drm_gem_new(struct process *p, int fd, uint64_t arg) {
   uint32_t domain = g.info.domain;
   int bad = 0;
   if (g.info.size == 0 || g.info.size > SHIM_MAX_VM_SIZE) bad = 1;
-  if ((domain & (NVSHIM_DOMAIN_VRAM | NVSHIM_DOMAIN_GART)) == 0) bad = 1;
-  if (domain & DRM_DOMAIN_CPU_BITS) bad = 1;
+  if (drm_domain_ok(domain) != 0) bad = 1;
   if (g.channel_hint != 0) bad = 1;
   if (g.align != 0 && g.align != 4096u) bad = 1; /* the arena is 4 KiB-granular */
   if (bad) {
@@ -1408,7 +1499,7 @@ static int op_drm_gem_new(struct process *p, int fd, uint64_t arg) {
   g.info.handle = (uint32_t)handle;
   g.info.size = granted;
   g.info.offset = bus;
-  g.info.map_handle = 0;
+  g.info.map_handle = drm_map_handle(domain, handle);
   g.info.tile_mode = 0;
   g.info.tile_flags = 0;
   if (vm_kwrite(p, arg, &g, (int)sizeof g) != 0) return -EFAULT;
@@ -1422,6 +1513,8 @@ static int op_drm_gem_new(struct process *p, int fd, uint64_t arg) {
   row_hex(bus);
   row_s(" domain=");
   row_hex(domain);
+  row_s(" map=");
+  row_hex(g.info.map_handle);
   row_end();
   return 0;
 }
@@ -1448,7 +1541,7 @@ static int op_drm_gem_info(struct process *p, int fd, uint64_t arg) {
   gi.domain = domain;
   gi.size = size;
   gi.offset = bus;
-  gi.map_handle = 0;
+  gi.map_handle = drm_map_handle(domain, gi.handle);
   if (vm_kwrite(p, arg, &gi, (int)sizeof gi) != 0) return -EFAULT;
   row_begin("drm gem_info", &r_drm);
   row_s("handle=");
@@ -1457,8 +1550,224 @@ static int op_drm_gem_info(struct process *p, int fd, uint64_t arg) {
   row_hex(bus);
   row_s(" size=");
   row_hex(size);
+  row_s(" map=");
+  row_hex(gi.map_handle);
   row_end();
   return 0;
+}
+
+/* ---- CPU mappings (WP-F3) ---------------------------------------------- */
+
+/* Take down every mapping this (pid, fd[, handle]) made.  Always before the RM
+ * frees the object's frames: a leaf is a raw frame address, so a mapping that
+ * outlived its object would read (and write) whatever the frame allocator
+ * hands out next.  Collection happens under the lock, the unmapping outside it
+ * -- vm_munmap_range takes vm_lock, and no path may hold vm_lock then want the
+ * shim's (docs/lock-scope.md). */
+static void shim_maps_drop(struct process *p, int fd, uint64_t handle) {
+  uint64_t va[SHIM_MAX_MAPS], len[SHIM_MAX_MAPS];
+  int n = 0;
+  int pid = shim_pid(p);
+  struct process *grp = process_group(p);
+  if (!grp) return;
+  spinlock_acquire(&g_shim_lock);
+  for (int i = 0; i < SHIM_MAX_MAPS; i++) {
+    struct shim_map *m = &g_maps[i];
+    if (!m->used || m->pid != pid || m->fd != fd) continue;
+    if (handle && m->handle != handle) continue;
+    va[n] = m->va;
+    len[n] = m->len;
+    n++;
+    m->used = 0;
+    m->va = 0;
+    m->len = 0;
+    m->handle = 0;
+  }
+  spinlock_release(&g_shim_lock);
+  for (int i = 0; i < n; i++) (void)vm_munmap_range(grp, va[i], len[i]);
+}
+
+/* mmap(2) of a GEM object (declared in nv_shim.h; vm_mmap routes here). */
+int64_t nv_shim_mmap(struct process *grp, int fd, uint64_t offset, uint64_t len,
+                     uint16_t prot, uint32_t flags) {
+  if (!grp || !grp->as) return -EINVAL;
+  /* A GPU buffer mapping is MAP_SHARED or it is a lie: MAP_PRIVATE would mean
+   * "give me a copy", and the whole point is that there is no copy. */
+  if ((flags & VM_MAP_SHARED) == 0 ||
+      (flags & (VM_MAP_PRIVATE | VM_MAP_ANONYMOUS | VM_MAP_FIXED | VM_MAP_NOREPLACE))) {
+    row_begin("drm mmap refused", &r_mmap);
+    row_s("flags=");
+    row_hex(flags);
+    row_s(" reason=needs_shared");
+    row_end();
+    return -EINVAL;
+  }
+  if (offset == 0 || (offset & (SHIM_PAGE - 1))) {
+    row_begin("drm mmap refused", &r_mmap);
+    row_s("off=");
+    row_hex(offset);
+    row_s(" reason=no_such_object");
+    row_end();
+    return -EINVAL;
+  }
+  if (len == 0 || (len & (SHIM_PAGE - 1))) {
+    row_begin("drm mmap refused", &r_mmap);
+    row_s("len=");
+    row_hex(len);
+    row_s(" reason=length");
+    row_end();
+    return -EINVAL;
+  }
+  if (!(prot & VM_PROT_READ) || (prot & VM_PROT_EXEC)) {
+    row_begin("drm mmap refused", &r_mmap);
+    row_s("prot=");
+    row_hex(prot);
+    row_s(" reason=protection");
+    row_end();
+    return -EINVAL;
+  }
+  uint64_t handle = offset >> 12; /* drm_vma_node_offset_addr's encoding */
+  if (handle == 0 || handle > 0xFFFFFFFFull) return -EINVAL;
+
+  int pid = shim_pid(grp);
+  spinlock_acquire(&g_shim_lock);
+  struct shim_client *c = client_find(pid, fd);
+  int at = c ? client_find_alloc(c, (uint32_t)handle) : -1;
+  uint32_t domain = 0, dev = 0;
+  uint64_t size = 0;
+  if (at >= 0) {
+    domain = c->alloc_domain[at];
+    size = c->alloc_size[at];
+    dev = c->dev_id;
+  }
+  spinlock_release(&g_shim_lock);
+
+  if (at < 0) {
+    row_begin("drm mmap refused", &r_mmap);
+    row_s("handle=");
+    row_say((int)handle);
+    row_s(" reason=not_this_clients_object");
+    row_end();
+    return -EINVAL;
+  }
+  if (!drm_domain_cpu_mappable(domain)) {
+    row_begin("drm mmap refused", &r_mmap);
+    row_s("handle=");
+    row_say((int)handle);
+    row_s(" domain=");
+    row_hex(domain);
+    row_s(" reason=domain_never_offered_a_cpu_mapping");
+    row_end();
+    return -EINVAL;
+  }
+  if (len > size) {
+    row_begin("drm mmap refused", &r_mmap);
+    row_s("handle=");
+    row_say((int)handle);
+    row_s(" len=");
+    row_hex(len);
+    row_s(" size=");
+    row_hex(size);
+    row_s(" reason=beyond_object");
+    row_end();
+    return -EINVAL;
+  }
+
+  uint64_t phys = 0, plen = 0;
+  int rc = rm()->mem_phys(dev, handle, &phys, &plen);
+  if (rc != 0 || !phys || plen < len) {
+    row_begin("drm mmap refused", &r_mmap);
+    row_s("handle=");
+    row_say((int)handle);
+    row_s(" rm=");
+    row_say(rc);
+    row_s(" reason=no_cpu_memory");
+    row_end();
+    return rc == -ENOTSUP ? -ENOTSUP : -EINVAL;
+  }
+
+  /* One vm_object names the object's page list; the ordinary fault path maps
+   * leaf pages from it.  Nothing is copied, and no page is touched until the
+   * client touches it. */
+  struct vm_object *obj = vm_object_create(VM_OBJ_NVBO, len);
+  if (!obj) return -ENOMEM;
+  for (uint64_t off = 0; off < len; off += SHIM_PAGE) {
+    if (!vm_object_install_foreign(obj, off, phys + off)) {
+      vm_object_unref(obj);
+      row_begin("drm mmap refused", &r_mmap);
+      row_s("handle=");
+      row_say((int)handle);
+      row_s(" reason=page_list");
+      row_end();
+      return -ENOMEM;
+    }
+  }
+  uint64_t base = 0;
+  int hrc = vm_region_alloc_hole(grp->as, USER_MMAP_BASE_V2, USER_MMAP_LIMIT_V2,
+                                len, prot, VMK_SHARED, VM_MAP_SHARED, obj, 0,
+                                &base);
+  vm_object_unref(obj); /* the region record holds its own reference (S4) */
+  if (hrc != 0) {
+    row_begin("drm mmap refused", &r_mmap);
+    row_s("len=");
+    row_hex(len);
+    row_s(" reason=no_va");
+    row_end();
+    return -ENOMEM;
+  }
+
+  /* The object must still be the one we validated: the client could have closed
+   * it while the region was being built.  Cheap re-check, and the mapping is
+   * taken down rather than left pointing at freed frames. */
+  int still = 0, slot = -1;
+  spinlock_acquire(&g_shim_lock);
+  c = client_find(pid, fd);
+  at = c ? client_find_alloc(c, (uint32_t)handle) : -1;
+  still = (at >= 0 && c->dev_id == dev && c->alloc_size[at] == size &&
+           c->alloc_domain[at] == domain);
+  if (still) {
+    for (int i = 0; i < SHIM_MAX_MAPS; i++)
+      if (!g_maps[i].used) { slot = i; break; }
+    if (slot >= 0) {
+      g_maps[slot].used = 1;
+      g_maps[slot].pid = pid;
+      g_maps[slot].fd = fd;
+      g_maps[slot].handle = handle;
+      g_maps[slot].va = base;
+      g_maps[slot].len = len;
+    }
+  }
+  spinlock_release(&g_shim_lock);
+  if (!still) {
+    (void)vm_munmap_range(grp, base, len);
+    row_begin("drm mmap refused", &r_mmap);
+    row_s("handle=");
+    row_say((int)handle);
+    row_s(" reason=object_closed_during_map");
+    row_end();
+    return -EBADF;
+  }
+  if (slot < 0) {
+    (void)vm_munmap_range(grp, base, len);
+    row_begin("drm mmap refused", &r_mmap);
+    row_s("reason=map_table_full");
+    row_end();
+    return -ENOSPC;
+  }
+
+  row_begin("drm mmap", &r_mmap);
+  row_s("handle=");
+  row_say((int)handle);
+  row_s(" va=");
+  row_hex(base);
+  row_s(" len=");
+  row_hex(len);
+  row_s(" phys=");
+  row_hex(phys);
+  row_s(" domain=");
+  row_hex(domain);
+  row_end();
+  return (int64_t)base;
 }
 
 static int op_drm_gem_close(struct process *p, int fd, uint64_t arg) {
@@ -1486,6 +1795,9 @@ static int op_drm_gem_close(struct process *p, int fd, uint64_t arg) {
   c->nalloc--;
   spinlock_release(&g_shim_lock);
 
+  /* WP-F3: the mapping's leaves name frames of this object; take it down before
+   * the RM frees them. */
+  shim_maps_drop(p, fd, handle);
   int rc = rm()->mem_free(dev, handle);
   if (rc != 0) return -EIO;
   row_begin("drm gem_close", &r_drm);
@@ -2060,6 +2372,25 @@ static int op_drm_syncobj_set(struct process *p, int fd, uint64_t arg, int signa
 
 /* ---- EXEC -------------------------------------------------------------- */
 
+/* FNV-1a 32, byte at a time: a command stream is arbitrary bytes, and the kernel
+ * may not take wide loads at odd offsets on any arch (hobbyos-kernel-
+ * constraints).  The unit tier digests with the same function, so its expected
+ * value comes from the bytes rather than from a copy of the loop. */
+static uint32_t shim_sum_update(uint32_t h, const uint8_t *p, uint32_t n) {
+  for (uint32_t i = 0; i < n; i++) {
+    h ^= (uint32_t)p[i];
+    h *= 16777619u;
+  }
+  return h;
+}
+
+uint32_t nv_shim_test_sum(const void *buf, uint32_t len) {
+  if (!buf || len == 0) return 2166136261u;
+  return shim_sum_update(2166136261u, (const uint8_t *)buf, len);
+}
+
+#define SHIM_EXEC_CHUNK 4096u
+
 static int op_drm_exec(struct process *p, int fd, uint64_t arg) {
   struct nvshim_drm_exec ex;
   if (vm_user_read(p, arg, &ex, (int)sizeof ex) != 0) return -EFAULT;
@@ -2140,6 +2471,39 @@ static int op_drm_exec(struct process *p, int fd, uint64_t arg) {
   }
   if (!sobj_ok) return -EINVAL;
 
+  /* WP-F3: READ every push buffer before enqueuing any of them.  A GPU VA is
+   * the only name EXEC has for the bytes (there is no user pointer on this
+   * request), so this is where the kernel finally looks at what it is
+   * accepting -- and where a push that was written through a CPU mapping is
+   * seen exactly as the client wrote it, because the mapping IS this memory.
+   * Fetching the whole batch first also means a bad push cannot leave the
+   * earlier ones enqueued. */
+  uint32_t sum = 2166136261u;
+  uint32_t bytes = 0;
+  for (uint32_t i = 0; i < ex.push_count; i++) {
+    uint32_t off = 0;
+    while (off < pushes[i].va_len) {
+      uint32_t chunk = pushes[i].va_len - off;
+      if (chunk > SHIM_EXEC_CHUNK) chunk = SHIM_EXEC_CHUNK;
+      rc = rm()->read_va(ch, pushes[i].va + (uint64_t)off, g_cs_buf, chunk);
+      if (rc != 0) {
+        row_begin("drm exec refused", &r_refuse);
+        row_s("push_index=");
+        row_say((int)i);
+        row_s(" va=");
+        row_hex(pushes[i].va + (uint64_t)off);
+        row_s(" rm=");
+        row_say(rc);
+        row_s(" reason=stream_not_in_memory");
+        row_end();
+        return rc == -EFAULT ? -EFAULT : -EINVAL;
+      }
+      sum = shim_sum_update(sum, g_cs_buf, chunk);
+      bytes += chunk;
+      off += chunk;
+    }
+  }
+
   uint64_t fence = 0;
   for (uint32_t i = 0; i < ex.push_count; i++) {
     rc = rm()->submit_va(ch, pushes[i].va, pushes[i].va_len, &fence);
@@ -2163,6 +2527,12 @@ static int op_drm_exec(struct process *p, int fd, uint64_t arg) {
   spinlock_acquire(&g_shim_lock);
   c = client_find(pid, fd);
   if (c) {
+    /* WP-F3: record what this EXEC fetched, for the unit tier's seam.  It is
+     * written under the same lock as every other client field, and it is the
+     * client's own record: another client's EXEC cannot overwrite it. */
+    c->exec_have = 1;
+    c->exec_sum = sum;
+    c->exec_len = bytes;
     client_reap_locked(c);
     for (uint32_t i = 0; i < ex.sig_count; i++) {
       int at = client_find_sobj(c, syncs[i].handle);
@@ -2190,10 +2560,31 @@ static int op_drm_exec(struct process *p, int fd, uint64_t arg) {
   row_say((int)ex.push_count);
   row_s(" sigs=");
   row_say((int)ex.sig_count);
+  row_s(" bytes=");
+  row_say((int)bytes);
+  row_s(" stream=");
+  row_hex(sum);
   row_s(" fence=");
   row_hex(fence);
   row_end();
   return 0;
+}
+
+/* ---- kernel-tier observation seams (not ABI) --------------------------- */
+
+/* -ENOENT: this client has not completed an EXEC yet.  (errno.h has no
+ * ENODATA; the distinction that matters is "recorded" vs "never recorded".) */
+int nv_shim_test_last_exec(struct process *p, int fd, uint32_t *sum, uint32_t *len) {
+  int rc = -ENOENT;
+  spinlock_acquire(&g_shim_lock);
+  struct shim_client *c = client_find(shim_pid(p), fd);
+  if (c && c->exec_have) {
+    if (sum) *sum = c->exec_sum;
+    if (len) *len = c->exec_len;
+    rc = 0;
+  }
+  spinlock_release(&g_shim_lock);
+  return rc;
 }
 
 /* ---- entry ------------------------------------------------------------- */

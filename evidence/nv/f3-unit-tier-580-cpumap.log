@@ -1,0 +1,57 @@
+WP-F3 gate, kernel unit tier (intel, KVM). Source: the full run, trimmed to the
+stage under test.  Command:
+  nvswarm sh wp-f3 'TOOLS_SKIP=1 BROWSER_SKIP=1 ./run_unit_tests_intel.sh'
+
+  Running test_nvshim_drm_cpu_map...
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm vm vm=1 umd_end=0x8000000000 total=0x10000000000
+[NV-DMA] map phys=0x0000000209500000 bus=0x0000000209500000 pages=2 identity=1
+[NVSHIM] drm gem_new handle=1 size=0x2000 offset=0x209500000 domain=0x9 map=0x1000
+[NVSHIM] drm gem_info handle=1 offset=0x209500000 size=0x2000 map=0x1000
+[NVSHIM] drm bind vm=1 ops=1 first_addr=0x10000 first_range=0x2000
+[NV-DMA] map phys=0x0000000209511000 bus=0x0000000209511000 pages=16 identity=1
+[NVSHIM] drm channel ch=1 pushbuf=0x209511000 size=0x10000
+[NVSHIM] drm mmap handle=1 va=0x1080004000 len=0x2000 phys=0x209500000 domain=0x9
+[NVSHIM] drm exec ch=1 pushes=1 sigs=0 bytes=64 stream=0x6957b385 fence=0x1
+[NVSHIM] drm exec ch=1 pushes=1 sigs=0 bytes=64 stream=0x392d7385 fence=0x2
+[NVSHIM] drm mmap handle=1 va=0x1080006000 len=0x1000 phys=0x209500000 domain=0x9
+[NV-DMA] unmap phys=0x0000000209511000 pages=16
+[NVSHIM] drm channel_free ch=1
+[NV-DMA] unmap phys=0x0000000209500000 pages=2
+[NVSHIM] drm gem_close handle=1
+  [NVSHIM] cpu-mapped BO: fault+write+kernel-view+exec digest: PASS
+[KERNEL] Process 51:  exited (signal 9).
+[EXITPC] pid=51 last_user_pc=0x0 code=0x9 killed
+  Running test_nvshim_drm_cpu_map_refusals...
+  Running test_nvshim_drm_cpu_map_refusals...
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm vm vm=1 umd_end=0x8000000000 total=0x10000000000
+[NV-DMA] map phys=0x0000000209500000 bus=0x0000000209500000 pages=1 identity=1
+[NVSHIM] drm gem_new handle=1 size=0x1000 offset=0x209500000 domain=0x19 map=0x1000
+[NV-DMA] map phys=0x0000000209501000 bus=0x0000000209501000 pages=1 identity=1
+[NVSHIM] drm gem_new handle=2 size=0x1000 offset=0x209501000 domain=0x2 map=0x0
+[NVSHIM] drm mmap refused off=0x0 reason=no_such_object
+[NVSHIM] drm mmap refused off=0x1001 reason=no_such_object
+[NVSHIM] drm mmap refused flags=0x2 reason=needs_shared
+[NVSHIM] drm mmap refused prot=0x0 reason=protection
+[NVSHIM] drm mmap refused prot=0x7 reason=protection
+[NVSHIM] drm mmap refused handle=1 len=0x2000 size=0x1000 reason=beyond_object
+[NVSHIM] drm mmap refused handle=2 domain=0x2 reason=domain_never_offered_a_cpu_mapping
+[NVSHIM] drm mmap refused handle=778 reason=not_this_clients_object
+[NVSHIM] drm mmap handle=1 va=0x1080004000 len=0x1000 phys=0x209500000 domain=0x19
+[NV-DMA] unmap phys=0x0000000209500000 pages=1
+[NVSHIM] drm gem_close handle=1
+[NV-DMA] unmap phys=0x0000000209501000 pages=1
+[NVSHIM] drm gem_close handle=2
+[KERNEL] Process 52:  exited (signal 9).
+[EXITPC] pid=52 last_user_pc=0x0 code=0x9 killed
+virtio_input_test_suite:
+  Running test_virtio_input
+
+[LOCKHEALTH] blockhold=0 selflock=0 classerr=0 irqsave_proc=0 irqoff_max_us=41634 irqoff_total_us=509686 reg_used=531 reg_dropped=0
+[LOCKHEALTH-IRQOFF] cpu=0 max_us=41634 total_us=509686 worst_lock=- pc=0x0
+==================================
+Tests run:    580
+Tests failed: 0
+UNIT TESTS PASSED
+==================================

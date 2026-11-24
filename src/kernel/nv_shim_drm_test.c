@@ -725,7 +725,8 @@ static void test_nvshim_drm_limits(void) {
   vmi.kernel_managed_size = 1ull << 39;
   EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_VM_INIT, &vmi, (int)sizeof vmi), -ENOSYS);
 
-  /* GEM_NEW geometry: zero size, CPU domain, a domain with no space, a
+  /* GEM_NEW geometry: zero size, a CPU domain (WP-F3: legal, it is system
+   * memory without a CPU mapping), a coherence promise with no mapping, a
    * non-arena alignment, a foreign channel hint, over the per-client cap. */
   struct nvshim_drm_gem_new bad;
   for (unsigned i = 0; i < sizeof(bad); i++) ((unsigned char *)&bad)[i] = 0;
@@ -733,8 +734,12 @@ static void test_nvshim_drm_limits(void) {
   bad.info.size = 0;
   EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_NEW, &bad, (int)sizeof bad), -EINVAL);
   bad.info.size = 4096;
+  /* Round 2 refused every CPU bit.  WP-F3 serves CPU memory -- but only a
+   * domain that ALSO says MAPPABLE may be mapped into the client, so plain CPU
+   * is an object with memory and map_handle == 0. */
   bad.info.domain = NVSHIM_DOMAIN_CPU;
-  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_NEW, &bad, (int)sizeof bad), -EINVAL);
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_NEW, &bad, (int)sizeof bad), 0);
+  EXPECT_EQ((int)bad.info.map_handle, 0);
   bad.info.domain = NVSHIM_DOMAIN_VRAM | NVSHIM_DOMAIN_COHERENT;
   EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_NEW, &bad, (int)sizeof bad), -EINVAL);
   bad.info.domain = NVSHIM_DOMAIN_VRAM;
@@ -927,12 +932,335 @@ static void test_nvshim_drm_limits(void) {
   EXPECT_EQ(nv_rm_mock_live(), 0);
 }
 
+/* ---- 6. CPU-mapped BOs (WP-F3) ----------------------------------------- */
+
+/* The mock has one device (MOCK_DEV_ID, nv_rm_mock.c), so the seams that take
+ * a dev_id can name it.  It is not assumed: GEM_NEW below only succeeds if a
+ * device is open, and it is the only device this RM ever hands out. */
+#define DDEV 1u
+
+/* The gate.  A BO is created, mmap'd, written through the mapping, and then read
+ * back through the KERNEL's view of the object -- not through the client's
+ * pointer -- and submitted to EXEC, which digests the bytes it fetched.
+ *
+ * Three things must all hold, and each rules out a different fake:
+ *   - nv_rm_mock_read_bo() (the RM's own frame address) sees the bytes: the
+ *     mapping is the object, not a copy of it;
+ *   - no leaf exists before the first store and one exists after: the ordinary
+ *     fault path is what populated it (an eager map would show present/present);
+ *   - the EXEC digest equals the pattern, and changes when the pattern at a
+ *     different object offset changes: the submit path read the VA it was given.
+ */
+static void test_nvshim_drm_cpu_map(void) {
+  uart_puts("  Running test_nvshim_drm_cpu_map...\n");
+  tests_run++;
+
+  /* The three spellings of the domain bits are one contract (nv_rm.h,
+   * nv_shim.h, nouveau's uAPI).  Drift here would silently change which
+   * objects are mappable. */
+  EXPECT_EQ((int)NV_RM_DOM_CPU, (int)NVSHIM_DOMAIN_CPU);
+  EXPECT_EQ((int)NV_RM_DOM_VRAM, (int)NVSHIM_DOMAIN_VRAM);
+  EXPECT_EQ((int)NV_RM_DOM_GART, (int)NVSHIM_DOMAIN_GART);
+  EXPECT_EQ((int)NV_RM_DOM_MAPPABLE, (int)NVSHIM_DOMAIN_MAPPABLE);
+  EXPECT_EQ((int)NV_RM_DOM_COHERENT, (int)NVSHIM_DOMAIN_COHERENT);
+  EXPECT_EQ((int)NV_RM_DOM_NO_SHARE, (int)NVSHIM_DOMAIN_NO_SHARE);
+
+  struct drm_probe pr;
+  EXPECT_EQ(drm_probe_up(&pr, 95), 0);
+  if (!pr.up) return;
+
+  /* No EXEC yet: the digest seam must say so.  A digest that answered 0 here
+   * would be true by construction and worthless below. */
+  uint32_t sum = 0, dlen = 0;
+  EXPECT_EQ(nv_shim_test_last_exec(pr.p, pr.fd, &sum, &dlen), -ENOENT);
+
+  /* VM_INIT first: the uAPI refuses it once a BO exists. */
+  struct nvshim_drm_vm_init vmi;
+  vmi.kernel_managed_addr = 1ull << 39;
+  vmi.kernel_managed_size = 1ull << 39;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_VM_INIT, &vmi, (int)sizeof vmi), 0);
+
+  /* Two pages, so a mapping that shifted by a page cannot pass unnoticed. */
+  struct nvshim_drm_gem_new gn;
+  for (unsigned i = 0; i < sizeof(gn); i++) ((unsigned char *)&gn)[i] = 0;
+  gn.info.domain = NVSHIM_DOMAIN_CPU | NVSHIM_DOMAIN_MAPPABLE;
+  gn.info.size = 8192;
+  gn.info.handle = 0xFFFFFFFFu;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_NEW, &gn, (int)sizeof gn), 0);
+  uint32_t h = gn.info.handle;
+  uint64_t moff = gn.info.map_handle;
+  EXPECT_EQ((h != 0 && h != 0xFFFFFFFFu), 1);
+  EXPECT_EQ((int)gn.info.size, 8192);
+  EXPECT_EQ((int)(gn.info.offset != 0), 1);  /* the device address exists */
+  /* map_handle is DRM's fake offset, handle << PAGE_SHIFT, and never 0 for an
+   * object that offered a CPU mapping. */
+  EXPECT_EQ((int)(moff == ((uint64_t)h << 12)), 1);
+  EXPECT_EQ((int)(moff != 0), 1);
+
+  struct nvshim_drm_gem_info gi;
+  for (unsigned i = 0; i < sizeof(gi); i++) ((unsigned char *)&gi)[i] = 0xFF;
+  gi.handle = h;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_INFO, &gi, (int)sizeof gi), 0);
+  EXPECT_EQ(gi.map_handle, moff);
+  EXPECT_EQ(gi.offset, gn.info.offset);
+
+  /* Binding and a channel: EXEC names a GPU VA, so the object needs a VA and a
+   * channel before the submit below means anything. */
+  struct nvshim_drm_vm_bind_op op;
+  for (unsigned i = 0; i < sizeof(op); i++) ((unsigned char *)&op)[i] = 0;
+  op.op = NVSHIM_DRM_VM_BIND_OP_MAP;
+  op.handle = h;
+  op.addr = 0x10000;
+  op.range = 8192;
+  EXPECT_EQ(vm_kwrite(pr.p, DREQ_OPS, &op, (int)sizeof op), 0);
+  struct nvshim_drm_vm_bind vb;
+  for (unsigned i = 0; i < sizeof(vb); i++) ((unsigned char *)&vb)[i] = 0;
+  vb.op_count = 1;
+  vb.op_ptr = DREQ_OPS;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_VM_BIND, &vb, (int)sizeof vb), 0);
+
+  struct nvshim_drm_channel_alloc ca;
+  for (unsigned i = 0; i < sizeof(ca); i++) ((unsigned char *)&ca)[i] = 0;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_CHANNEL_ALLOC, &ca, (int)sizeof ca), 0);
+  int32_t ch = ca.channel;
+  EXPECT_EQ((ch > 0), 1);
+
+  /* --- the mapping --- */
+  int64_t mva = vm_mmap(pr.p, 0, 8192, VM_PROT_READ | VM_PROT_WRITE,
+                        VM_MAP_SHARED, pr.fd, moff);
+  EXPECT_EQ((mva > 0), 1);
+  if (mva <= 0) {
+    drm_probe_down(&pr);
+    return;
+  }
+  EXPECT_EQ((int)((uint64_t)mva >= USER_MMAP_BASE_V2 &&
+                  (uint64_t)mva < USER_MMAP_LIMIT_V2), 1);
+
+  struct vm_region *r = vm_region_find(pr.as, (uint64_t)mva);
+  EXPECT_EQ((int)(r != 0), 1);
+  EXPECT_EQ((int)(r && r->kind == VMK_SHARED), 1);
+  EXPECT_EQ((int)(r && r->flags == VM_MAP_SHARED), 1);
+  EXPECT_EQ((int)(r && r->obj != 0), 1); /* the page list is an object */
+  EXPECT_EQ((int)(r && r->len == 8192), 1);
+
+  /* Demand-paged: absent before the first touch. */
+  uint64_t leaf = 0;
+  EXPECT_EQ((int)(vm_arch_walk(pr.as, (uint64_t)mva, &leaf) != 0), 1);
+
+  uint8_t pat[256], got[256];
+  for (int i = 0; i < 256; i++) pat[i] = (uint8_t)(0xA5 ^ ((i * 7 + 1) & 0xFF));
+  EXPECT_EQ(vm_kwrite(pr.p, (uint64_t)mva, pat, 256), 0);
+  /* ... and present after it, installed by the fault path. */
+  EXPECT_EQ((int)(vm_arch_walk(pr.as, (uint64_t)mva, &leaf) == 0), 1);
+
+  /* THE GATE: the same bytes read through the kernel's view of the OBJECT. */
+  for (int i = 0; i < 256; i++) got[i] = 0;
+  EXPECT_EQ(nv_rm_mock_read_bo(DDEV, h, 0, got, 256), 0);
+  int diff = 0;
+  for (int i = 0; i < 256; i++)
+    if (got[i] != pat[i]) diff++;
+  EXPECT_EQ(diff, 0);
+
+  /* The mapping's own read path agrees (same frames, not a coincidence). */
+  for (int i = 0; i < 256; i++) got[i] = 0;
+  EXPECT_EQ(vm_user_read(pr.p, (uint64_t)mva, got, 256), 0);
+  diff = 0;
+  for (int i = 0; i < 256; i++)
+    if (got[i] != pat[i]) diff++;
+  EXPECT_EQ(diff, 0);
+
+  /* The object was zeroed when it was allocated and only 256 bytes were
+   * written.  Prefilled with 0xFF first: "still zero" is then an observation,
+   * not an initialisation. */
+  for (int i = 0; i < 64; i++) got[i] = 0xFF;
+  EXPECT_EQ(nv_rm_mock_read_bo(DDEV, h, 256, got, 64), 0);
+  int nz = 0;
+  for (int i = 0; i < 64; i++)
+    if (got[i]) nz++;
+  EXPECT_EQ(nz, 0);
+
+  /* --- EXEC sees the bytes --- */
+  struct nvshim_drm_exec_push push;
+  push.va = 0x10000;
+  push.va_len = 64;
+  push.flags = 0;
+  EXPECT_EQ(vm_kwrite(pr.p, DREQ_PUSH, &push, (int)sizeof push), 0);
+  struct nvshim_drm_exec ex;
+  for (unsigned i = 0; i < sizeof(ex); i++) ((unsigned char *)&ex)[i] = 0;
+  ex.channel = (uint32_t)ch;
+  ex.push_count = 1;
+  ex.push_ptr = DREQ_PUSH;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_EXEC, &ex, (int)sizeof ex), 0);
+  EXPECT_EQ(nv_shim_test_last_exec(pr.p, pr.fd, &sum, &dlen), 0);
+  EXPECT_EQ((int)dlen, 64);
+  EXPECT_EQ((int)sum, (int)nv_shim_test_sum(pat, 64));
+
+  /* A second pattern at object offset 64, written through the SAME mapping, and
+   * a push that names that VA.  The digest must become the second pattern: a
+   * submit path that always read offset 0, or that cached the first stream,
+   * cannot produce both values. */
+  uint8_t pat2[64];
+  for (int i = 0; i < 64; i++) pat2[i] = (uint8_t)(0x3C + i);
+  EXPECT_EQ(vm_kwrite(pr.p, (uint64_t)mva + 64, pat2, 64), 0);
+  EXPECT_EQ((int)(nv_shim_test_sum(pat2, 64) != nv_shim_test_sum(pat, 64)), 1);
+  push.va = 0x10000 + 64;
+  push.va_len = 64;
+  EXPECT_EQ(vm_kwrite(pr.p, DREQ_PUSH, &push, (int)sizeof push), 0);
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_EXEC, &ex, (int)sizeof ex), 0);
+  EXPECT_EQ(nv_shim_test_last_exec(pr.p, pr.fd, &sum, &dlen), 0);
+  EXPECT_EQ((int)dlen, 64);
+  EXPECT_EQ((int)sum, (int)nv_shim_test_sum(pat2, 64));
+  for (int i = 0; i < 64; i++) got[i] = 0;
+  EXPECT_EQ(nv_rm_mock_read_bo(DDEV, h, 64, got, 64), 0);
+  diff = 0;
+  for (int i = 0; i < 64; i++)
+    if (got[i] != pat2[i]) diff++;
+  EXPECT_EQ(diff, 0);
+
+  /* A second, shorter mapping of the same object is the same memory: a store
+   * through it must be visible through the first mapping and in the object. */
+  int64_t mva2 = vm_mmap(pr.p, 0, 4096, VM_PROT_READ | VM_PROT_WRITE,
+                         VM_MAP_SHARED, pr.fd, moff);
+  EXPECT_EQ((mva2 > 0), 1);
+  if (mva2 > 0) {
+    EXPECT_EQ((int)(mva2 != mva), 1);
+    const uint8_t one[8] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};
+    EXPECT_EQ(vm_kwrite(pr.p, (uint64_t)mva2, one, 8), 0);
+    for (int i = 0; i < 8; i++) got[i] = 0;
+    EXPECT_EQ(nv_rm_mock_read_bo(DDEV, h, 0, got, 8), 0);
+    diff = 0;
+    for (int i = 0; i < 8; i++)
+      if (got[i] != one[i]) diff++;
+    EXPECT_EQ(diff, 0);
+    for (int i = 0; i < 8; i++) got[i] = 0;
+    EXPECT_EQ(vm_user_read(pr.p, (uint64_t)mva, got, 8), 0);
+    diff = 0;
+    for (int i = 0; i < 8; i++)
+      if (got[i] != one[i]) diff++;
+    EXPECT_EQ(diff, 0);
+  }
+
+  /* --- teardown: the mapping must not outlive the object --- */
+  struct nvshim_drm_channel_free cf;
+  cf.channel = ch;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_CHANNEL_FREE, &cf, (int)sizeof cf), 0);
+  struct nvshim_drm_gem_close gc;
+  gc.handle = h;
+  gc.pad = 0;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_CLOSE, &gc, (int)sizeof gc), 0);
+  /* GEM_CLOSE took both mappings down before the frames went back to the pool;
+   * either VA now answers -EFAULT instead of reading a recycled frame. */
+  EXPECT_EQ(vm_user_read(pr.p, (uint64_t)mva, got, 8), -1);
+  EXPECT_EQ((int)(vm_region_find(pr.as, (uint64_t)mva) == 0), 1);
+  if (mva2 > 0) {
+    EXPECT_EQ(vm_user_read(pr.p, (uint64_t)mva2, got, 8), -1);
+    EXPECT_EQ((int)(vm_region_find(pr.as, (uint64_t)mva2) == 0), 1);
+  }
+
+  uart_puts("  [NVSHIM] cpu-mapped BO: fault+write+kernel-view+exec digest: PASS\n");
+  drm_probe_down(&pr);
+  EXPECT_EQ(nv_rm_mock_live(), 0);
+}
+
+/* Every shape a client can get wrong, answered by name.  The point of the
+ * MAPPABLE-without-CPU and NO_SHARE cases is that they are refused rather than
+ * silently dropped: a domain is a promise, and this node only makes the ones it
+ * keeps. */
+static void test_nvshim_drm_cpu_map_refusals(void) {
+  uart_puts("  Running test_nvshim_drm_cpu_map_refusals...\n");
+  tests_run++;
+
+  struct drm_probe pr;
+  EXPECT_EQ(drm_probe_up(&pr, 96), 0);
+  if (!pr.up) return;
+
+  struct nvshim_drm_vm_init vmi;
+  vmi.kernel_managed_addr = 1ull << 39;
+  vmi.kernel_managed_size = 1ull << 39;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_VM_INIT, &vmi, (int)sizeof vmi), 0);
+
+  struct nvshim_drm_gem_new gn;
+  for (unsigned i = 0; i < sizeof(gn); i++) ((unsigned char *)&gn)[i] = 0;
+  gn.info.size = 4096;
+
+  gn.info.domain = NVSHIM_DOMAIN_VRAM | NVSHIM_DOMAIN_MAPPABLE;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_NEW, &gn, (int)sizeof gn), -EINVAL);
+  gn.info.domain = NVSHIM_DOMAIN_NO_SHARE | NVSHIM_DOMAIN_CPU | NVSHIM_DOMAIN_MAPPABLE;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_NEW, &gn, (int)sizeof gn), -EINVAL);
+  gn.info.domain = NVSHIM_DOMAIN_COHERENT; /* a coherence promise, no mapping */
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_NEW, &gn, (int)sizeof gn), -EINVAL);
+  gn.info.domain = 0;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_NEW, &gn, (int)sizeof gn), -EINVAL);
+
+  /* The accepted shape, COHERENT included: pool memory the device already sees,
+   * so "coherent" is a fact here rather than a flag to honour. */
+  gn.info.domain = NVSHIM_DOMAIN_CPU | NVSHIM_DOMAIN_MAPPABLE | NVSHIM_DOMAIN_COHERENT;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_NEW, &gn, (int)sizeof gn), 0);
+  uint32_t mh = gn.info.handle;
+  uint64_t mo = gn.info.map_handle;
+  EXPECT_EQ((int)(mo == ((uint64_t)mh << 12)), 1);
+
+  /* A plain VRAM object: real memory (EXEC can read it), no CPU mapping. */
+  gn.info.domain = NVSHIM_DOMAIN_VRAM;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_NEW, &gn, (int)sizeof gn), 0);
+  uint32_t vh = gn.info.handle;
+  EXPECT_EQ((int)gn.info.map_handle, 0);
+  uint64_t vphys = 0, vlen = 0;
+  EXPECT_EQ(nv_rm_mock.mem_phys(DDEV, vh, &vphys, &vlen), -ENOTSUP);
+  EXPECT_EQ((int)(vphys == 0), 1); /* nothing filled in on a refusal */
+
+  /* mmap shapes. */
+  EXPECT_EQ(vm_mmap(pr.p, 0, 4096, VM_PROT_READ | VM_PROT_WRITE, VM_MAP_SHARED,
+                    pr.fd, 0), -EINVAL);                   /* offset 0: no object */
+  EXPECT_EQ(vm_mmap(pr.p, 0, 4096, VM_PROT_READ | VM_PROT_WRITE, VM_MAP_SHARED,
+                    pr.fd, mo + 1), -EINVAL);              /* unaligned offset */
+  EXPECT_EQ(vm_mmap(pr.p, 0, 4096, VM_PROT_READ | VM_PROT_WRITE, VM_MAP_PRIVATE,
+                    pr.fd, mo), -EINVAL);                  /* a copy is not a mapping */
+  EXPECT_EQ(vm_mmap(pr.p, 0, 4096, 0, VM_MAP_SHARED, pr.fd, mo), -EINVAL);
+  EXPECT_EQ(vm_mmap(pr.p, 0, 4096, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC,
+                    VM_MAP_SHARED, pr.fd, mo), -EINVAL);
+  EXPECT_EQ(vm_mmap(pr.p, 0, 8192, VM_PROT_READ | VM_PROT_WRITE, VM_MAP_SHARED,
+                    pr.fd, mo), -EINVAL);                  /* past the object */
+  EXPECT_EQ(vm_mmap(pr.p, 0, 4096, VM_PROT_READ | VM_PROT_WRITE, VM_MAP_SHARED,
+                    pr.fd, (uint64_t)vh << 12), -EINVAL);  /* domain said no */
+  EXPECT_EQ(vm_mmap(pr.p, 0, 4096, VM_PROT_READ | VM_PROT_WRITE, VM_MAP_SHARED,
+                    pr.fd, (uint64_t)(mh + 777) << 12), -EINVAL); /* foreign */
+
+  /* A read-only mapping is legal; the protection is the mapping's, so a store
+   * through it fails and a read works. */
+  int64_t ro = vm_mmap(pr.p, 0, 4096, VM_PROT_READ, VM_MAP_SHARED, pr.fd, mo);
+  EXPECT_EQ((ro > 0), 1);
+  if (ro > 0) {
+    const uint8_t eight[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+    uint8_t got[8];
+    EXPECT_EQ(vm_kwrite(pr.p, (uint64_t)ro, eight, 8), -1);
+    for (int i = 0; i < 8; i++) got[i] = 0x77;
+    EXPECT_EQ(vm_user_read(pr.p, (uint64_t)ro, got, 8), 0);
+    int nz = 0;
+    for (int i = 0; i < 8; i++)
+      if (got[i]) nz++;
+    EXPECT_EQ(nz, 0); /* untouched by the refused store */
+  }
+
+  struct nvshim_drm_gem_close gc;
+  gc.handle = mh;
+  gc.pad = 0;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_CLOSE, &gc, (int)sizeof gc), 0);
+  gc.handle = vh;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_CLOSE, &gc, (int)sizeof gc), 0);
+
+  drm_probe_down(&pr);
+  EXPECT_EQ(nv_rm_mock_live(), 0);
+}
+
 void nv_shim_drm_test_suite(void) {
   test_nvshim_drm_layout();
   test_nvshim_drm_refusals();
   test_nvshim_drm_probe();
   test_nvshim_drm_ownership();
   test_nvshim_drm_limits();
+  test_nvshim_drm_cpu_map();
+  test_nvshim_drm_cpu_map_refusals();
 }
 
 #endif /* KERNEL_MODE_UNIT_TEST */

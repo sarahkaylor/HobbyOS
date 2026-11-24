@@ -22,6 +22,16 @@
  *  Object model -- exactly what a probe touches, nothing more:
  *      device -> memory object -> GPU VA space (bind) -> channel -> fence
  *
+ *  WHAT "MEMORY OBJECT" MEANS SINCE WP-F3.  An object is backed by real,
+ *  physically contiguous pool RAM (nv_dma_alloc: zeroed frames, bus address
+ *  resolved through nv_dma_bus), not by a software address range.  That is
+ *  what makes a CPU mapping possible at all: the frames an object owns are the
+ *  frames a user mapping points at, so a store through the mapping is the same
+ *  memory the submit path reads.  Domains still select *mappability*: an
+ *  object whose domain asked for a CPU mapping (NV_RM_DOM_CPU/MAPPABLE/
+ *  COHERENT) may be named to mmap; one that did not has frames but no CPU
+ *  mapping, and mem_phys() refuses it.
+ *
  *  Every id below is RM-global and nonzero.  A fence id is per-channel (a
  *  channel's own monotonic sequence, like nouveau's channel fence and like the
  *  (ctx, ring, seqno) triple in docs/gpu-abi.md §10.5), so a fence is always
@@ -39,6 +49,20 @@
  * ========================================================================== */
 
 #include <stdint.h>
+
+/* Domain bits (the values of NOUVEAU_GEM_DOMAIN_* in nouveau's uAPI, and of
+ * NVSHIM_DOMAIN_* in nv_shim.h -- the three spellings are asserted equal in
+ * src/kernel/nv_shim_drm_test.c so they cannot drift).  An implementation
+ * decides backing from these; the ABI layer never invents a domain. */
+#define NV_RM_DOM_CPU      (1u << 0)
+#define NV_RM_DOM_VRAM     (1u << 1)
+#define NV_RM_DOM_GART     (1u << 2)
+#define NV_RM_DOM_MAPPABLE (1u << 3)
+#define NV_RM_DOM_COHERENT (1u << 4)
+#define NV_RM_DOM_NO_SHARE (1u << 5)
+
+/* The bit set that says "this object will be CPU-mapped by its client". */
+#define NV_RM_DOM_CPU_MAP (NV_RM_DOM_CPU | NV_RM_DOM_MAPPABLE | NV_RM_DOM_COHERENT)
 
 /* Identity the ABI's device row reports.  Filled by the RM, not by ioctl
  * code, so a future GSP-RM backend reports the card it actually found. */
@@ -61,12 +85,20 @@ struct nv_rm_if {
   int (*device_open)(uint32_t *dev_id, struct nv_rm_device_info *info);
   void (*device_close)(uint32_t dev_id);
 
-  /* `domain` is a NOUVEAU_GEM_DOMAIN_* value (VRAM or GART).  `size` is the
-   * rounded-up byte size, `bus` the address the RM assigned (the only address
-   * a submit path would ever see). */
+  /* `domain` is a NOUVEAU_GEM_DOMAIN_* value (any of VRAM / GART / CPU, plus
+   * the MAPPABLE/COHERENT hints).  `size` is the rounded-up byte size, `bus`
+   * the address the RM assigned (the only address a submit path would ever
+   * see).  The object is backed by pool RAM; a domain that names a CPU mapping
+   * additionally authorises mem_phys() below. */
   int (*mem_alloc)(uint32_t dev_id, uint64_t len, uint32_t domain,
                    uint64_t *handle, uint64_t *bus, uint64_t *size);
   int (*mem_free)(uint32_t dev_id, uint64_t handle);
+  /* The CPU view of an object: pool physical address of its first byte and the
+   * length of that run.  0 when the object may be CPU-mapped, -ENOTSUP when it
+   * may not (its domain did not ask for a CPU mapping -- its pages exist for
+   * the device, and mapping them into a client would be a promise this object
+   * never made), -EINVAL for an unknown handle. */
+  int (*mem_phys)(uint32_t dev_id, uint64_t handle, uint64_t *phys, uint64_t *len);
 
   int (*vm_create)(uint32_t dev_id, uint64_t size, uint32_t *vm_id);
   void (*vm_destroy)(uint32_t dev_id, uint32_t vm_id);
@@ -91,6 +123,15 @@ struct nv_rm_if {
    * reason this is a separate op from submit(): the ABI layer cannot see the
    * mappings, and a mock that accepted any VA would make EXEC untestable. */
   int (*submit_va)(uint32_t ch_id, uint64_t va, uint32_t len, uint64_t *fence);
+  /* Read a command stream OUT of memory: `va` is resolved through the
+   * channel's VA space to the object(s) mapped there, and `len` bytes are
+   * copied into `dst` (a kernel buffer).  This is the call that makes EXEC's
+   * validation see the client's bytes -- there is no user pointer on the EXEC
+   * path, so the only way the kernel can look at a push buffer is through this.
+   *   -EINVAL  no such channel, or the range is not covered by mappings
+   *   -EFAULT  covered by a binding whose object has no pool memory behind it
+   * Returns 0 when every byte came from memory. */
+  int (*read_va)(uint32_t ch_id, uint64_t va, void *dst, uint32_t len);
   /* 0 = retired, -EAGAIN = still pending, -EINVAL = this channel never issued
    * that fence. */
   int (*fence_test)(uint32_t ch_id, uint64_t fence);
@@ -114,5 +155,12 @@ const struct nv_rm_if *nv_rm_mock_if(void);
 void nv_rm_mock_hold(int on);
 int nv_rm_mock_live(void);
 int nv_rm_mock_pending(void);
+/* Copy object bytes out through the KERNEL's view of the object's pool run --
+ * not through the client's user pointer.  This is the seam a CPU-mapping test
+ * needs: it is the only way to answer "did the store through the mapping reach
+ * the memory the device will read" without trusting the mapping it is testing.
+ * 0, -EINVAL (unknown handle / bad range), -EFAULT (object has no memory). */
+int nv_rm_mock_read_bo(uint32_t dev_id, uint64_t handle, uint64_t off,
+                       void *dst, uint32_t len);
 
 #endif /* NV_RM_H */

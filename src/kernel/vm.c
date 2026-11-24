@@ -25,6 +25,7 @@
 #include "lock.h"
 #include "nfs.h" /* L54: VM_OBJ_NFS page source */
 #include "ext2_obj.h" /* cp/ext2b: VM_OBJ_EXT2 page source */
+#include "nv_shim.h" /* WP-F3: /dev/nvshim BO mmap (nv_shim_mmap) */
 #include "process.h"
 #include "virtio_gpu.h" /* GB-025 / M3: the scanout framebuffer address */
 #include "vdisplay.h"   /* L84: a hosted process maps its private surface */
@@ -721,12 +722,20 @@ struct vm_object *vm_object_create(int kind, uint64_t size) {
  * and the object's refs are already 0. */
 static void vm_object_free_locked(struct vm_object *o) {
   /* cp/wine2: the whole array, not only [0, nr_frames): a shrink parks the
-     frames it cut off past nr_frames until remote TLBs are flushed
-     (vm_object_truncate), and they are the object's until then. */
+   * frames it cut off past nr_frames until remote TLBs are flushed
+   * (vm_object_truncate), and they are the object's until then.
+   *
+   * WP-F3: a VM_OBJ_NVBO owns no frames.  Its page list names pool memory the
+   * RM allocated (nv_dma_alloc) and frees at GEM_CLOSE; freeing those frames
+   * here -- when the last mapping goes, possibly before the object does --
+   * would hand the RM's memory to the frame allocator while the device still
+   * has the address.  The array itself is still ours and still freed. */
   uint64_t cap = o->frames ? (uint64_t)o->arr_frames * (FRAME_SIZE / sizeof(uint64_t)) : 0;
-  for (uint64_t i = 0; i < cap; i++) {
-    if (o->frames[i])
-      frame_free(o->frames[i]);
+  if (o->kind != VM_OBJ_NVBO) {
+    for (uint64_t i = 0; i < cap; i++) {
+      if (o->frames[i])
+        frame_free(o->frames[i]);
+    }
   }
   if (o->frames) {
     for (int i = 0; i < o->arr_frames; i++)
@@ -782,15 +791,19 @@ void vm_object_unref(struct vm_object *o) {
      [LOCKHEALTH-IRQOFF] worst_lock=vm_lock); a 1 GiB one would be ~5x. */
   uint64_t *arr = o->frames;
   int af = o->arr_frames;
+  int kind = o->kind; /* free_locked() clears the slot; keep what we need after */
   o->frames = 0;
   o->arr_frames = 0;
   vm_object_free_locked(o); /* no array left: only resets the slot */
   vm_lock_rel(flags);
   if (arr) {
     uint64_t cap = (uint64_t)af * (FRAME_SIZE / sizeof(uint64_t));
-    for (uint64_t i = 0; i < cap; i++)
-      if (arr[i])
-        frame_free(arr[i]);
+    /* WP-F3: a VM_OBJ_NVBO's frames are the RM's (see vm_object_free_locked). */
+    if (kind != VM_OBJ_NVBO) {
+      for (uint64_t i = 0; i < cap; i++)
+        if (arr[i])
+          frame_free(arr[i]);
+    }
     for (int i = 0; i < af; i++)
       frame_free(virt_to_phys(arr) + (uint64_t)i * FRAME_SIZE);
   }
@@ -804,6 +817,18 @@ uint64_t vm_object_page_locked(struct vm_object *o, uint64_t off) {
      text, so refuse instead. */
   if (o->kind == VM_OBJ_FILE || o->kind == VM_OBJ_EXT2) /* cp/ext2b */
     return 0;
+  /* WP-F3: a VM_OBJ_NVBO's pages are an RM object's frames, installed when the
+     mapping was created (vm_object_install_foreign).  The page list is the
+     answer -- there is no zero-fill: a page with no frame is a hole in memory
+     the device owns, and handing out a fresh anonymous page here would give the
+     client memory the device does not see, which is the opposite of what a CPU
+     mapping promises (the fault path turns a 0 into BUS). */
+  if (o->kind == VM_OBJ_NVBO) {
+    uint64_t idx = off / FRAME_SIZE;
+    if (idx >= (uint64_t)o->nr_frames || !o->frames)
+      return 0;
+    return o->frames[idx];
+  }
   uint64_t idx = off / FRAME_SIZE;
   if (idx >= (uint64_t)o->nr_frames)
     return 0; /* past the capacity */
@@ -855,6 +880,24 @@ uint64_t vm_object_install_page(struct vm_object *o, uint64_t off, uint64_t fr) 
   o->frames[idx] = fr;
   vm_lock_rel(flags);
   return fr;
+}
+
+/* WP-F3: record `fr` as object page `off` without taking ownership of it.  The
+ * caller keeps the frame's lifetime (a VM_OBJ_NVBO's frames belong to the RM),
+ * so nothing here frees `fr` -- see vm.h.  Returns 1 installed, 0 refused. */
+int vm_object_install_foreign(struct vm_object *o, uint64_t off, uint64_t fr) {
+  if (!o || !fr || (off & (FRAME_SIZE - 1)))
+    return 0;
+  vm_lock_init_once();
+  uint64_t flags = vm_lock_acq(__LINE__);
+  uint64_t idx = off / FRAME_SIZE;
+  int ok = 0;
+  if (o->used && idx < (uint64_t)o->nr_frames && o->frames && !o->frames[idx]) {
+    o->frames[idx] = fr;
+    ok = 1;
+  }
+  vm_lock_rel(flags);
+  return ok;
 }
 
 /* cp/pfx: FAT16 write coherence (file_obj_note_write, docs/cp-pfx.md). */
@@ -5312,6 +5355,20 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
        * USER_FB_SIZE, so a 1 MiB mmap claimed 10 MiB and the slot walked
        * 2,191,360 B past the 8,294,400 B framebuffer. */
       return vm_map_fb_len(grp, kimg_pa(virtio_gpu_get_framebuffer()), mlen);
+    }
+    if (file_is_devnvshim(grp, fd)) {
+      /* WP-F3 (PLAN.md §3 WP-F, "CPU-mapped BOs"): a GEM object of
+       * /dev/nvshim.  DRM has no mmap ioctl -- the object is named by the
+       * mmap(2) offset (map_handle = handle << PAGE_SHIFT), exactly as
+       * drm_vma_node_offset_addr() encodes it for nouveau -- so this is the
+       * one place a client can ask for the mapping.
+       *
+       * vm.c only routes.  nv_shim_mmap() owns the policy (which object, which
+       * domain, how long, what protection) and builds a region whose pages are
+       * the RM's pool frames, so a store through the mapping lands in the
+       * memory the submit path reads -- no flush, because it is the same
+       * memory, not a copy of it. */
+      return nv_shim_mmap(grp, fd, offset, len, p, fl2);
     }
     obj = file_memfd_obj(grp, fd);
     if (obj) {

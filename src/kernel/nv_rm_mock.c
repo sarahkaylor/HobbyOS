@@ -2,16 +2,19 @@
  *  nv_rm_mock: the mock Resource Manager behind /dev/nvshim.
  *
  *  This is the smallest RM that can answer the ABI honestly: it hands out
- *  object handles, a software bus-address arena, a GPU VA space with real
+ *  object handles backed by real pool memory, a GPU VA space with real
  *  interval bookkeeping (double maps and partial unmaps are refused), a
  *  channel per allocation, and a per-channel fence sequence whose retirement
  *  is an explicit state transition.
  *
  *  What it is NOT: an engine, an RM object model, or a model of VRAM.  No
- *  command stream is parsed or executed -- submit counts the bytes and drops
- *  them -- and no address it returns is ever dereferenced.  A test that passes
- *  against this proves the ABI's bookkeeping and sequencing, nothing about the
- *  card; that is what [NV] rows from a real boot are for.
+ *  command stream is parsed or executed -- submit counts the bytes, reads them
+ *  (read_va) and drops them -- but an object's *memory* is real since WP-F3:
+ *  nv_dma_alloc()'s frames, zeroed, and the same frames a client's CPU mapping
+ *  points at.  That is what makes "write it through the mapping, read it in the
+ *  kernel" a statement about memory rather than about bookkeeping.  Nothing
+ *  here proves anything about the card; that is what [NV] rows from a real boot
+ *  are for.
  *
  *  Fence retirement is deliberately two steps: submit() ENQUEUES, kick()
  *  RETIRES.  nv_shim.c kicks right after submit (the mock's "the engine made
@@ -28,7 +31,10 @@
 
 #include "nv_rm.h"
 #include "errno.h"
+#include "frame.h"  /* the object's pool memory: allocated, zeroed, freed here */
+#include "kmem.h"   /* phys_to_virt: the kernel's view of an object          */
 #include "lock.h"
+#include "nv_dma.h" /* nv_dma_alloc / nv_dma_bus / nv_dma_free               */
 
 #define MOCK_MAX_ALLOC   64
 #define MOCK_MAX_VM      8
@@ -37,12 +43,12 @@
 #define MOCK_MAX_PENDING 64 /* fences enqueued but not retired */
 
 #define MOCK_PAGE 4096ull
-/* The arena is a software address range, not memory.  Its size is what
- * GET_PARAM FB_SIZE reports, so it is also the number a client would size a
- * heap from; 4 GiB is enough for a probe and small enough to exhaust in a
- * test. */
+/* The arena is a byte budget, not an address range: each object's memory is a
+ * real run of pool frames (nv_dma_alloc) and the device address is resolved
+ * from it.  This number is what GET_PARAM FB_SIZE reports -- the quantity a
+ * client sizes a heap from -- and 4 GiB is enough for a probe and small enough
+ * to exhaust in a test. */
 #define MOCK_VRAM_SIZE (4ull << 30)
-#define MOCK_VRAM_BUS  0x100000000ull /* first bus address handed out */
 /* A VA space is bookkeeping, not memory, so its size is independent of the
  * arena.  1 TiB because that is the total a stock nouveau client asks for
  * (drm_nouveau_vm_init {1<<39, 1<<39}); the objects mapped into it still get
@@ -54,8 +60,10 @@
 struct mock_alloc {
   int used;
   uint32_t dev;
+  uint32_t mappable; /* domain asked for a CPU mapping: mem_phys() may name it */
   uint64_t handle;
   uint64_t bus;
+  uint64_t phys; /* first byte of the object's pool run */
   uint64_t size;
 };
 
@@ -64,6 +72,7 @@ struct mock_range {
   uint64_t va;
   uint64_t range;
   uint64_t handle;
+  uint64_t bo_offset; /* offset inside the object this binding starts at */
 };
 
 struct mock_vm {
@@ -119,8 +128,10 @@ static void mock_reset(void) {
   for (int i = 0; i < MOCK_MAX_ALLOC; i++) {
     g_mock.alloc[i].used = 0;
     g_mock.alloc[i].dev = 0;
+    g_mock.alloc[i].mappable = 0;
     g_mock.alloc[i].handle = 0;
     g_mock.alloc[i].bus = 0;
+    g_mock.alloc[i].phys = 0;
     g_mock.alloc[i].size = 0;
   }
   for (int i = 0; i < MOCK_MAX_VM; i++) {
@@ -133,6 +144,7 @@ static void mock_reset(void) {
       g_mock.vm[i].r[k].va = 0;
       g_mock.vm[i].r[k].range = 0;
       g_mock.vm[i].r[k].handle = 0;
+      g_mock.vm[i].r[k].bo_offset = 0;
     }
   }
   for (int i = 0; i < MOCK_MAX_CHANNEL; i++) {
@@ -200,8 +212,22 @@ static int mock_mem_alloc(uint32_t dev, uint64_t len, uint32_t domain,
                           uint64_t *handle, uint64_t *bus, uint64_t *size) {
   if (!handle || !bus || !size) return -EINVAL;
   if (len == 0 || (len & (MOCK_PAGE - 1))) return -EINVAL;
-  if (!(domain & (2u | 4u))) return -EINVAL; /* VRAM or GART only */
-  int rc = 0;
+  if (!(domain & (NV_RM_DOM_VRAM | NV_RM_DOM_GART | NV_RM_DOM_CPU)))
+    return -EINVAL; /* no domain at all: neither device- nor CPU-visible */
+
+  /* The object's memory is REAL since WP-F3: a contiguous run of pool frames,
+   * zeroed, with the device address resolved by the DMA facility.  Allocated
+   * before the table lock -- nv_dma_alloc takes the frame allocator's lock and
+   * zeroes the run, which is not work to do under the mock's own lock. */
+  struct nv_dma_map m;
+  int rc = nv_dma_alloc(len, &m);
+  if (rc != 0) return rc; /* -ENOMEM / -E2BIG / -ENOTSUP / -EIO, named by nv_dma */
+  uint64_t b = nv_dma_bus(&m);
+  if (b == NV_DMA_BUS_INVALID) {
+    nv_dma_free(&m);
+    return -ENOTSUP; /* translation is live: there is no address to publish */
+  }
+
   spinlock_acquire(&g_mock.lock);
   if (!g_mock.ready) {
     rc = -ENODEV;
@@ -220,8 +246,10 @@ static int mock_mem_alloc(uint32_t dev, uint64_t len, uint32_t domain,
   }
   a->used = 1;
   a->dev = dev;
+  a->mappable = (domain & NV_RM_DOM_CPU_MAP) ? 1u : 0u;
   a->handle = ++g_mock.next_handle;
-  a->bus = MOCK_VRAM_BUS + g_mock.bump;
+  a->bus = b;
+  a->phys = m.phys;
   a->size = len;
   g_mock.bump += len;
   *handle = a->handle;
@@ -229,22 +257,57 @@ static int mock_mem_alloc(uint32_t dev, uint64_t len, uint32_t domain,
   *size = a->size;
 out:
   spinlock_release(&g_mock.lock);
+  if (rc != 0) nv_dma_free(&m); /* the frames were never published */
   return rc;
 }
 
 static int mock_mem_free(uint32_t dev, uint64_t handle) {
   int rc = -EINVAL;
+  struct nv_dma_map m;
+  m.phys = 0;
+  m.bus = 0;
+  m.len = 0;
+  m.pages = 0;
   spinlock_acquire(&g_mock.lock);
   struct mock_alloc *a = mock_alloc_find(dev, handle);
   if (a) {
+    m.phys = a->phys;
+    m.len = a->size;
+    m.pages = (uint32_t)(a->size / NV_DMA_PAGE);
     a->used = 0;
     a->dev = 0;
+    a->mappable = 0;
+    a->phys = 0;
     rc = 0;
   }
   spinlock_release(&g_mock.lock);
-  /* The arena is a bump allocator: a freed object's range is not reused until
-   * the last device reference closes.  Documented, and enough for a probe;
-   * the shim's own per-client accounting is what stops a real leak. */
+  /* Frames go back outside the lock: nv_dma_free walks the run. */
+  if (rc == 0 && m.phys) nv_dma_free(&m);
+  /* The arena counter is a bump allocator: a freed object's range is not
+   * reused until the last device reference closes.  Documented, and enough for
+   * a probe; the shim's own per-client accounting is what stops a real leak. */
+  return rc;
+}
+
+/* The CPU view of an object: the shim's mmap path calls this, and nothing else
+ * may.  A domain that did not ask for a CPU mapping is refused by name (-ENOTSUP)
+ * rather than mapped -- that refusal is what keeps "VRAM" from quietly meaning
+ * "system memory a client can write". */
+static int mock_mem_phys(uint32_t dev, uint64_t handle, uint64_t *phys,
+                         uint64_t *len) {
+  if (!phys || !len) return -EINVAL;
+  int rc = 0;
+  spinlock_acquire(&g_mock.lock);
+  struct mock_alloc *a = mock_alloc_find(dev, handle);
+  if (!a) {
+    rc = -EINVAL;
+  } else if (!a->mappable) {
+    rc = -ENOTSUP;
+  } else {
+    *phys = a->phys;
+    *len = a->size;
+  }
+  spinlock_release(&g_mock.lock);
   return rc;
 }
 
@@ -319,6 +382,7 @@ static int mock_vm_bind(uint32_t dev, uint32_t vm_id, uint32_t op,
     slot->va = va;
     slot->range = range;
     slot->handle = handle;
+    slot->bo_offset = bo_offset;
   } else if (op == 1) { /* unmap: exact match only */
     struct mock_range *slot = 0;
     for (int i = 0; i < MOCK_MAX_RANGE; i++)
@@ -457,6 +521,63 @@ out:
   return rc;
 }
 
+/* The kernel's view of a command stream.  A push buffer on the EXEC path is
+ * named by GPU VA and by nothing else -- there is no user pointer -- so a
+ * submit that never looked here would be accepting bytes it had not seen.
+ *
+ * Resolution is page-wise on purpose: a push may start mid-object (a binding
+ * carries a bo_offset) and may cross from one binding into another, and both
+ * shapes must read the object bytes the GPU VA actually names.  A binding whose
+ * object has no pool memory (an object the RM never backed) is -EFAULT: that is
+ * the control for "mapped bookkeeping is not memory". */
+static int mock_read_va(uint32_t ch_id, uint64_t va, void *dst, uint32_t len) {
+  if (!dst || len == 0) return -EINVAL;
+  uint8_t *out = (uint8_t *)dst;
+  int rc = 0;
+  spinlock_acquire(&g_mock.lock);
+  struct mock_channel *c = mock_ch_find(ch_id);
+  struct mock_vm *v = c ? mock_vm_find(c->dev, c->vm) : 0;
+  if (!c || !v) {
+    rc = -EINVAL;
+    goto out;
+  }
+  uint32_t done = 0;
+  while (done < len) {
+    uint64_t at = va + (uint64_t)done;
+    struct mock_range *r = 0;
+    for (int i = 0; i < MOCK_MAX_RANGE; i++) {
+      struct mock_range *cand = &v->r[i];
+      if (cand->used && at >= cand->va && at < cand->va + cand->range) {
+        r = cand;
+        break;
+      }
+    }
+    if (!r) {
+      rc = -EINVAL; /* a hole in the VA space: nothing to submit */
+      goto out;
+    }
+    struct mock_alloc *a = mock_alloc_find(c->dev, r->handle);
+    if (!a || !a->phys) {
+      rc = -EFAULT; /* bound, but no memory behind the binding */
+      goto out;
+    }
+    uint64_t bo = r->bo_offset + (at - r->va);
+    if (bo >= a->size) {
+      rc = -EFAULT;
+      goto out;
+    }
+    uint32_t span = (uint32_t)(MOCK_PAGE - (at & (MOCK_PAGE - 1)));
+    if (span > len - done) span = len - done;
+    if (span > a->size - bo) span = (uint32_t)(a->size - bo);
+    const uint8_t *src = (const uint8_t *)phys_to_virt(a->phys + bo);
+    for (uint32_t k = 0; k < span; k++) out[done + k] = src[k];
+    done += span;
+  }
+out:
+  spinlock_release(&g_mock.lock);
+  return rc;
+}
+
 static int mock_fence_test(uint32_t ch_id, uint64_t fence) {
   int rc = 0;
   spinlock_acquire(&g_mock.lock);
@@ -542,6 +663,7 @@ static void mock_if_fill(void) {
   g_rm_if.device_close = mock_device_close;
   g_rm_if.mem_alloc = mock_mem_alloc;
   g_rm_if.mem_free = mock_mem_free;
+  g_rm_if.mem_phys = mock_mem_phys;
   g_rm_if.vm_create = mock_vm_create;
   g_rm_if.vm_destroy = mock_vm_destroy;
   g_rm_if.vm_bind = mock_vm_bind;
@@ -549,6 +671,7 @@ static void mock_if_fill(void) {
   g_rm_if.channel_destroy = mock_channel_destroy;
   g_rm_if.submit = mock_submit;
   g_rm_if.submit_va = mock_submit_va;
+  g_rm_if.read_va = mock_read_va;
   g_rm_if.fence_test = mock_fence_test;
   g_rm_if.kick = mock_kick;
 }
@@ -565,4 +688,23 @@ const struct nv_rm_if *nv_rm_mock_if(void) {
   }
   spinlock_release(&g_rm_if_lock);
   return &g_rm_if;
+}
+
+int nv_rm_mock_read_bo(uint32_t dev_id, uint64_t handle, uint64_t off,
+                       void *dst, uint32_t len) {
+  if (!dst || len == 0) return -EINVAL;
+  uint8_t *out = (uint8_t *)dst;
+  int rc = 0;
+  spinlock_acquire(&g_mock.lock);
+  struct mock_alloc *a = mock_alloc_find(dev_id, handle);
+  if (!a || !a->phys) {
+    rc = -EINVAL;
+  } else if (off > a->size || (uint64_t)len > a->size - off) {
+    rc = -EINVAL;
+  } else {
+    const uint8_t *src = (const uint8_t *)phys_to_virt(a->phys + off);
+    for (uint32_t k = 0; k < len; k++) out[k] = src[k];
+  }
+  spinlock_release(&g_mock.lock);
+  return rc;
 }
