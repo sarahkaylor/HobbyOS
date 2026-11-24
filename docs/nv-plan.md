@@ -46,6 +46,12 @@ L1 stands on its own: a from-scratch driver that identifies the part, brings up
 the register window, reads 38 MB of vendor firmware from disk and proves it
 byte-for-byte, and lays out VRAM the way the vendor booter expects. L2 is the wall.
 
+L2 is now **time-boxed** (decision, 2026-11-24; §2.10): 3 hours extendable to 5 on
+finding a vendor-signed booter SEC2 will authenticate, then the plan re-scopes past
+GSP-RM to a register-level bring-up. Read §2.10 before starting anything on rung N3:
+until that box closes, the ladder above L2 is not the critical path — the 5090 lanes,
+nvk/shim rows and the Cyberpunk harness are.
+
 ---
 
 ## 1. What is true today (measured; each row cites its log line)
@@ -422,6 +428,62 @@ questions. The AD102 campaign keeps `01:00.0` and VM 300 to itself.
 
 
 ---
+
+### 2.10 The booter question is time-boxed (decision, 2026-11-24): 5 hours on option 1, then re-scope
+
+`t_9bf9bc0c` is blocked `kind: capability`: SEC2's boot ROM rejects the signed booter
+image with `0x840094 = 0x002B0009` on **two vendor images**, exits by `INTR`, and
+`t_c724a763` measured that no host-supplied input moves it (the signed identity/digest
+lives inside the 384-byte block, which the host cannot write). Everything else on that
+path is finished and measured to the gate: publish + pre-boot 72/73 + round trip, build
+exit 0, intel unit **600/0**, `lk14a`/`lk15a` rows identical (`wr=2, pw=0, statq 0/8`,
+canary `SEPARATE-WORDS`). Layout and entry are *not* the problem — a correct aligned
+SEC=1 load accepts entry 0 and entry `0x100`, and the contract layout
+(`os_code+app 0x7700` / entry `0x100`) starts too.
+
+The owner's decision (2026-11-24): **spend at most 3 hours, extendable to 5, on
+option 1 — find a vendor-signed booter the BROM accepts. If none moves the gate by
+then, accept the wall and execute option 2 — re-scope past GSP-RM.** The box exists
+because this is the one part of the ladder where effort buys nothing without a signed
+blob; every other rung has work that pays off regardless of how this ends.
+
+| Item | Value |
+|---|---|
+| Opened | 2026-11-24 **21:20 UTC** (15:20 CST) |
+| 3-hour review | 2026-11-25 **00:20 UTC** — keep going only if a candidate has moved `0x840094` |
+| Hard stop | 2026-11-25 **02:20 UTC** — option 2 begins whether or not a candidate was found |
+| Boot budget | ≈45 boots. The harness cycles VM 300 in ~6.5 min, so the box is boot-bound, not thought-bound |
+| Per-candidate cap | 2 boots, ~13 min. A candidate that cannot be checked inside its cap is not checked |
+
+**Option 1 in order (each step cheaper than the next).** (a) Enumerate every
+`booter_load*` blob reachable from the machines already in play — the driver `.run`
+packages on r1/Proxmox c2/c3/c4, `/lib/firmware/nvidia/*` on the strix host
+`192.168.0.123`, and `linux-firmware`'s `nvidia/` tree — recording sha256, size and the
+gate word if one is readable statically. (b) Read each candidate's signing identity
+statically where possible and drop the ones that cannot be for ucode id 3 / fuse
+version 1 *before* booting them. (c) Boot only the survivors, two at a time at most,
+recording `0x840094` after START and whether SEC2 leaves `INTR`. (d) If a newer
+*generation* of `booter_load` is the lever (the A13 read), prefer breadth across
+generations over depth on one.
+
+**Acceptance for option 1:** one candidate produces `0x840094 != 0x002B0009` and SEC2
+progresses past `INTR` far enough for the booter to write the status header. Nothing
+weaker counts — a boot that merely lasts longer is not evidence, and no synthetic reply
+may stand in for the header (§6).
+
+**Option 2 (backup, and the default after the hard stop): re-scope past GSP-RM.**
+Bring up engines without RM firmware — VBIOS/PMU path, host-side engine classes, the
+`gf100`-style register programming that Ada's `ga102_gr_new()` short-circuits *because*
+GSP-RM is present. What this costs: the reference behaviour stops being "what the
+proprietary stack does", the GRAM_UNITS topology stays a DECLARED model (§2.7) instead
+of a measured one, and the ladder's games rungs keep their fps targets but lose the
+"same as NVIDIA's driver" claim. What it keeps: vkcube, RimWorld and the Cyberpunk
+benchmark remain the data points; they just measure our driver against a register-level
+bring-up rather than against GSP-RM.
+
+**What does not stop during the box.** The 5090 lanes, the nvk/shim rows, the Cyberpunk
+harness and the present-path work are independent of how the booter question resolves,
+so they keep dispatching; only the ladder's GSP-RM-dependent rungs (N3 onward) wait.
 
 ## 3. Work packages (parallel, each with a gate)
 
