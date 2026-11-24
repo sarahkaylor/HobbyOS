@@ -74,8 +74,9 @@ against the descriptor's `SignatureVersions` (`0x0003`). If the image is not val
 for this part's fuses, the boot ROM rejects it and no amount of transport fixing
 helps.
 
-**Sequencing rule:** no more SEC2 work until FWSEC's channel says it ran. SEC2's
-fence is privilege-gated (measured twice); engine pokes will not lift it.
+**Sequencing rule:** no FWSEC-first shortcut — but note the §2.5 correction: SEC2's
+blocker is its **RISC-V core select** (`0x841668` reading `0x110`), not a privilege fence.
+Rounds 1-4 misread that as a privilege wall.
 
 ### 2.1 Round 1 of the local swarm (2026-11-23): what eight deploys actually showed
 
@@ -205,6 +206,65 @@ two implementations, one buffer. It found a real defect: `ioctl(closed_fd, …)`
 A native `.BIN` cannot issue a DRM request at all — there is no `SYS_IOCTL` row — so the
 honest caller is a Linux ELF, which is what nvk is.
 
+### 2.5 Round 5 (2026-11-23/24): SEC2 was never privilege-fenced, and Cyberpunk has numbers
+
+Merged and re-gated on both arches. Four lanes: the booter attempt, NVIF, the Cyberpunk
+benchmark, and an independent soak.
+
+**A5 — the booter was negative twice over, but the wall was misdiagnosed in the plan.**
+All eight runs: metadata `verified` stayed at its `0x5EC2A0A0` prefill, the bootbin at
+`0x5FE2F8000` stayed `0x2000/0x2000` words of the host's `0xA5A5A5A5` (page map
+`MMMMMMMMMP` before *and* after, so no WPR2 either), no metadata copy at `gspFwWprStart`,
+DMEM untouched (0/0x1800 words), MAILBOX0 still holding our argument. The premise held
+every run (FRTS carve, halt 105.73-105.92 ms, edges `MMMMPPPPP`/`PPPPPMMMM`).
+
+What actually changed: **`0x841668` read `0x110`** — RISCV|BRFETCH, the same word the GSP's
+`0x111668` read before F3. Clearing it gave `ctl=0x10`, `transcfg=0x5`, and with the GSP's
+pre-load DMA configuration (`0x624` `0x110 -> 0x190`) SEC2 **loaded and executed for the
+first time** (`halted=1`, DMEM landing 8/8 LANDED) — writing nothing.
+
+> **Correction to §2 and §5.** "SEC2's fence is privilege-gated (measured twice)" is
+> **wrong**. Rounds 1-4 were reading a *core-select* state as a privilege wall. SEC2 sits
+> on its RISC-V core; nothing about privilege had to be dropped for it to run. The
+> sequencing rule stands (FWSEC first), but its stated reason does not.
+
+Three transport defects were fixed on the way: the load header's offsets used as file
+rather than data-region offsets (signature bytes landing at the head of IMEM), the DMA
+destination never advancing, and the missing DMA configuration that stalled the queue at
+block 19. Next: measure START->STOPPED now that `ctl` answers (microseconds = START never
+reached the core; milliseconds = the ROM ran and rejected), then settle whether the file's
+`0x7600` app-code bytes are ciphertext or plaintext, then the cheap `(engid,ucode)` variants.
+
+**NVIF — served from ring 3.** `DRM_IOCTL_NOUVEAU_NVIF` (nr `0x47`) answers `NEW` route
+`0x00` class `0x0080` NV_DEVICE (object keyed by the client's cookie, as nouveau does),
+`MTHD NV_DEVICE_V0_INFO` (AD102, chipset `0x192`, rev `0xa1`, family ADA), and `SCLASS`;
+six engine classes are refused **by name** with `need=gsp_rm`. Unit tier 588/0, EL0
+`[EL0] RESULT PASS 44/44`, both mutations red. And the honest answer to "where does a stock
+nvk stop": **`GETPARAM GRAPH_UNITS` first** (Mesa's `goto out_err`), then the engine class
+object, which is GSP-RM. Also found: NVIF's encoded `_IOC` size is a *buffer length*, not a
+struct width — the only row on that surface that cannot use an equality check.
+
+**Cyberpunk 2077's own benchmark, three stacks, one machine, one game copy** (1280x720,
+`strix`, capture from the game's result page and its `summary.json`/`frames.csv`):
+
+| stack | avg / median / p90 / 1%-low fps | settings | what it is |
+|---|---|---|---|
+| host native (Proton, RADV, 9070 XT) — *control* | 139.41 / 145.6 / 108.2 / 77.3 | Custom=Low, 720p, FSR off, RT off | instrument check: reproduces P0's 141.6-142.9 / 74.1-76.1 |
+| **HobbyOS on Venus** | **29.19 / 29.7 / 22.6 / 18.2** | Custom, scaling **Off**, 720p | **platform**, not driver: the `nv` driver has no 3D engine |
+| Linux guest on Venus | 25.86 / 27.0 / 20.4 / 16.5 | Low, FSR 2.1 Auto | the row `docs/cyberpunk.md` had left unrun |
+
+HobbyOS **reached and completed** the benchmark: it wrote `benchmarkResults/*/{summary,frames}`
+to the ext2 prefix (`e2fsck -fn` rc 0). The three columns are not averaged or ranked — the
+two guests differ in upscaling and vkd3d-proton version.
+
+**SOAK — the merged tree holds, and the click instrument was broken.** Intel 584/0 and ARM
+468/0, three runs each, identical counts; `[RELOC] entries=0x1A1 applied=0x1A1 slide=0x3FA400000`
+on every ARM link; desktop boots and paints (frame inspected); RimWorld menu at 50.51 fps on
+the merged kernel. It also found that `tools/gate/xptr_click.py` as committed could not have
+produced the PASS its own report quoted — its regex required `exposes=(\d+) rc=` adjacent
+while the client prints `exposes=... to_container=... rc=...`, so it graded a passing run as
+FAIL. Fixed with a tolerant parse plus a QEMU-free `--self-test`.
+
 ---
 
 ## 3. Work packages (parallel, each with a gate)
@@ -238,7 +298,7 @@ stuck.
 | N5 | nvk enumerates AD102 | `vulkaninfo` lists `AD102 (NVK)` | absent |
 | N6 | **first frame** (`vkcube`) | draws + presents | absent |
 | N7 | RimWorld via Zink+nvk | menu ≥30 fps, world loads | 170.9 fps synthetic only |
-| N8 | Cyberpunk via vkd3d+nvk | P9 script end to end | 29.8 fps on Venus |
+| N8 | Cyberpunk via vkd3d+nvk | P9 script end to end | **benchmark run on HobbyOS (2026-11-24)**: 29.19 avg / 29.7 median / 18.2 1%-low at 720p, Custom preset, scaling off — on **Venus** (platform), not the nv driver; host native control 139.41 avg. The nv driver cannot run it: no 3D engine |
 | N9 | "reasonable performance" | 720p ≥30 fps incl. present | unmeasurable today |
 
 **Highest-leverage rung: N6** — the one observation where VRAM, VA, submit,
