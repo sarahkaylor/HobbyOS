@@ -105,6 +105,17 @@ die()  { say "ERROR: $*"; exit "${2:-1}"; }
 need() { for t in "$@"; do command -v "$t" >/dev/null || die "missing host tool: $t"; done; }
 sha_ok() { echo "$2  $1" | sha256sum -c --quiet - >/dev/null 2>&1; }
 
+# The configured vulkan-drivers of a build dir, read from meson's own option
+# table rather than from our command line -- the point is that an empty or
+# missing driver list must fail loudly.  No early `exit` inside the awk: meson
+# is Python, closing its stdout early makes its final flush fail (exit 120),
+# and `pipefail` then turns an innocent probe into a script exit (measured).
+meson_vulkan_drivers() {
+  meson configure "$1" 2>/dev/null | awk '
+     $1=="vulkan-drivers" && !seen { v=$2; gsub(/[][ ]/,"",v); seen=1 }
+     END { if (seen) print v }' || true
+}
+
 mkdir -p "$W/src" "$W/log" "$DL"
 
 # --- 1. glibc 2.31 sysroot ---------------------------------------------------
@@ -351,7 +362,7 @@ EOF
   # Assert the configuration actually names a Vulkan driver, so a regression to
   # an empty -Dvulkan-drivers= can never be silent again.
   local vd
-  vd=$(meson configure "$B" 2>/dev/null | awk '$1=="vulkan-drivers"{gsub(/[][ ]/,"",$2); print $2; exit}')
+  vd=$(meson_vulkan_drivers "$B")
   [ "$vd" = "nouveau" ] || die "configured vulkan-drivers='$vd', expected nouveau"
   say "mesa: configured vulkan-drivers=$vd (llvm=disabled, platforms=none)"
   ninja -C "$B" -j"$(nproc)" \
@@ -385,7 +396,7 @@ do_audit() {
   soname=$(readelf -dW "$icd" | awk '/SONAME/{gsub(/[][ ]/,"",$NF); print $NF}')
   say "SONAME: ${soname:-<none>}"
   [ "$soname" = libvulkan_nouveau.so ] || { say "  FAIL: SONAME is '${soname}'"; bad=1; }
-  vd=$(meson configure "$B" 2>/dev/null | awk '$1=="vulkan-drivers"{gsub(/[][ ]/,"",$2); print $2; exit}')
+  vd=$(meson_vulkan_drivers "$B")
   say "vulkan-drivers: ${vd:-<not configured>}"
   [ "$vd" = nouveau ] || { say "  FAIL: configured vulkan-drivers='$vd'"; bad=1; }
   local needed
