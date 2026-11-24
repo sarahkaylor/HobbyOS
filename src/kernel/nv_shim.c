@@ -196,7 +196,7 @@ static inline void shim_cpu_relax(void) {
 #endif
 }
 
-static const struct nv_rm_if *rm(void) { return &nv_rm_mock; }
+static const struct nv_rm_if *rm(void) { return nv_rm_mock_if(); }
 
 /* Shared by the 'N' and 'd' faces (defined with the DRM section below): one
  * param table, so an answer cannot depend on which magic the client used. */
@@ -1075,9 +1075,17 @@ static const struct drm_row g_drm_rows[] = {
     {0xc5, 16}, /* SYNCOBJ_SIGNAL              struct drm_syncobj_array     */
 };
 
+/* The refusal rows' names are FIXED-SIZE ARRAYS, not `const char *`.  The
+ * kernel applies no load-time relocations to static data, and the AArch64 image
+ * runs at Limine's slide, so a `const char *` member would hold the link address
+ * of the string (which names unrelated memory at runtime).  This is the hazard
+ * blk_cache_press_test.c documents for the same kind of table; the arrays keep
+ * the names inside the table itself, which the code addresses PC-relative. */
+#define DRM_REFUSAL_NAME_MAX 28 /* longest row is 23 bytes + NUL */
+
 static const struct {
   uint8_t nr;
-  const char *name;
+  char name[DRM_REFUSAL_NAME_MAX];
 } g_drm_refusals[] = {
     {NVSHIM_DRM_NR_GEM_FLINK, "gem_flink"},
     {NVSHIM_DRM_NR_PRIME_HANDLE_TO_FD, "prime_handle_to_fd"},
