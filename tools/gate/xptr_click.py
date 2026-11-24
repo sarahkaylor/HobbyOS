@@ -257,6 +257,69 @@ def serial_text():
         return ""
 
 
+# ---- grading -------------------------------------------------------------
+# The client's verdict row is built in tests/fixtures/ptr/xptr.c.  It gained a
+# `to_container=` field and may gain more `name=value` fields, so the grader
+# parses tolerantly: a hard-coded field list marks a *green* run FAIL, which is
+# what this file did on the merged tree (presses=3 releases=3 rc=0, gate exit
+# 1, client_rc=-).  Require the fields the verdict depends on, ignore the rest.
+# `--self-test` runs the same parser and the same grade on literal rows without
+# QEMU, so a format drift on either side is caught by a one-second check.
+DONE_FIELDS = ("presses", "releases", "motions", "exposes", "to_container", "rc")
+
+
+def parse_done(text):
+    for line in text.splitlines():
+        m = re.search(r"\[XP\] done (.*)$", line)
+        if not m:
+            continue
+        kv = dict(re.findall(r"(\w+)=(-?\d+)", m.group(1)))
+        if "rc" not in kv:
+            continue
+        return {k: int(kv[k]) for k in DONE_FIELDS if k in kv}
+    return None
+
+
+def grade(text):
+    d = parse_done(text)
+    pressed = "[XP] ButtonPress" in text
+    released = "[XP] ButtonRelease" in text
+    ok = bool(d and d.get("presses", 0) >= 1 and d.get("rc") == 0
+              and d.get("to_container", 0) == 0 and pressed and released)
+    return ok, d, pressed, released
+
+
+def self_test():
+    """The parser and the verdict, on literal rows: no QEMU, no guest."""
+    cases = [
+        # name, text, expected ok
+        ("green (merged tree, 3 presses)",
+         "[XP] ButtonPress n=1\n[XP] ButtonRelease n=1\n"
+         "[XP] done presses=3 releases=3 motions=3 exposes=1 to_container=0 rc=0",
+         True),
+        ("pre-fix red (no press)",
+         "[XP] done presses=0 releases=0 motions=0 exposes=1 to_container=0 rc=3",
+         False),
+        ("presses delivered to the container",
+         "[XP] ButtonPress n=1\n[XP] ButtonRelease n=1\n"
+         "[XP] done presses=3 releases=3 motions=3 exposes=1 to_container=3 rc=0",
+         False),
+        ("client row without to_container (older client)",
+         "[XP] ButtonPress n=1\n[XP] ButtonRelease n=1\n"
+         "[XP] done presses=3 releases=3 motions=3 exposes=1 rc=0",
+         True),
+        ("no verdict row at all", "[XP] up shape=container+child", False),
+    ]
+    bad = 0
+    for name, text, want in cases:
+        ok, d, _, _ = grade(text)
+        good = ok == want
+        bad += 0 if good else 1
+        print(f"  {'PASS' if good else 'FAIL'}  {name}: ok={ok} want={want} parsed={d}")
+    print(f"xptr self-test: {'PASS' if bad == 0 else 'FAIL'} ({len(cases) - bad}/{len(cases)})")
+    return 0 if bad == 0 else 1
+
+
 def wait_serial(needles, timeout, since=0):
     if isinstance(needles, str):
         needles = [needles]
@@ -382,16 +445,14 @@ def main():
         for l in rows:
             log(l)
         dm = None
-        for line in txt.splitlines():
-            dm = re.search(r"\[XP\] done presses=(\d+) releases=(\d+) motions=(\d+) "
-                           r"exposes=(\d+) rc=(\d+)", line) or dm
-        pressed = any("[XP] ButtonPress" in l for l in txt.splitlines())
-        released = any("[XP] ButtonRelease" in l for l in txt.splitlines())
+        ok, d, pressed, released = grade(txt)
+        dm = d
         motions = any("[XP] MotionNotify" in l for l in txt.splitlines())
         log("")
         log(f"[INFO] motion={motions} press={pressed} release={released} "
-            f"client_rc={dm.group(5) if dm else '-'}")
-        ok = bool(done and pressed and released and dm and dm.group(5) == "0")
+            f"presses={dm.get('presses', '-') if dm else '-'} "
+            f"to_container={dm.get('to_container', '-') if dm else '-'} "
+            f"client_rc={dm.get('rc', '-') if dm else '-'}")
         log("xptr: PASS — a compat X11 client received ButtonPress/ButtonRelease"
             if ok else "xptr: FAIL — no button event reached the client")
         return 0 if ok else 1
@@ -409,4 +470,6 @@ def main():
 
 
 if __name__ == "__main__":
+    if "--self-test" in sys.argv:
+        sys.exit(self_test())
     sys.exit(main())
