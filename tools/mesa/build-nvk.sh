@@ -72,6 +72,19 @@ STEP="${1:-all}"
 # NAK's proc-macro crate.  Put them on PATH before the tool check below.
 PATH="${CARGO_BIN:-$HOME/.cargo/bin}:$PATH"
 export PATH
+# Mesa's configure runs its own generators through `python3` from PATH and
+# requires mako + yaml.  A virtualenv earlier on PATH (a dev/Hermes shell) can
+# shadow /usr/bin/python3 and meson then stops with "Python (3.x) mako module
+# >= 0.8.0 required to build mesa" -- measured here, and not something a clean
+# checkout should have to guess at.  Pick the first python3 that has them.
+if ! python3 -c 'import mako, yaml' >/dev/null 2>&1; then
+  for d in /usr/bin /usr/local/bin; do
+    if [ -x "$d/python3" ] && "$d/python3" -c 'import mako, yaml' >/dev/null 2>&1; then
+      printf 'nvk-build: python3: %s has mako+yaml; prepending %s to PATH\n' "$d/python3" "$d"
+      PATH="$d:$PATH"; export PATH; break
+    fi
+  done
+fi
 
 MESA_VER=25.0.7
 # sha256 of the release container as fetched 2026-11-24 (archive.mesa3d.org
@@ -297,6 +310,7 @@ do_mesa() {
 [binaries]
 c = ['clang', '--sysroot=$SYS']
 cpp = ['clang++', '--sysroot=$SYS', '-stdlib=libc++', '-nostdinc++', '-isystem', '$LCXX/include/c++/v1']
+rust = 'rustc'
 ar = 'llvm-ar'
 strip = 'llvm-strip'
 pkg-config = 'pkg-config'
