@@ -142,6 +142,8 @@ int desktop_abs_to_px(uint32_t value, int dim) {
  * can drive them directly. */
 
 static int drag_win_id = -1;   /* window that received the press (-1 = none) */
+/* WP-PTR probe: bounded rows for the BTN_LEFT path (see the [BTN] prints). */
+static int btn_trace_rows;
 static int drag_last_x = -1;   /* last cell/pixel reported to that window   */
 static int drag_last_y = -1;
 
@@ -2194,6 +2196,19 @@ int main(void) {
         }
         if (ev->code == 0x110) { // BTN_LEFT (mouse click)
 
+          if (btn_trace_rows < 14) {
+            btn_trace_rows++;
+            print_console("[BTN] raw value=");
+            print_dec(ev->value);
+            print_console(" mx=");
+            print_dec(mouse_x);
+            print_console(" my=");
+            print_dec(mouse_y);
+            print_console(" win=");
+            print_dec(wm_get_window_at(mouse_x, mouse_y));
+            print_console("\n");
+          }
+
           if (ev->value == 0) {  // release: close any drag session
             desktop_drag_end(mouse_x, mouse_y);
             needs_redraw = 1;
@@ -2313,7 +2328,24 @@ int main(void) {
                         wm_mouse_local(&windows[w], mouse_x, mouse_y, &x, &y);
                         int n = wm_build_mouse_seq(seq, sizeof seq, 'P', x, y, 1);
                         desktop_send_hook(win_id, seq, n);
+                        if (btn_trace_rows < 14) {
+                          btn_trace_rows++;
+                          print_console("[BTN] fwd win=");
+                          print_dec(win_id);
+                          print_console(" x=");
+                          print_dec(x);
+                          print_console(" y=");
+                          print_dec(y);
+                          print_console("\n");
+                        }
                         desktop_drag_begin(win_id, x, y);
+                      } else if (btn_trace_rows < 14) {
+                        btn_trace_rows++;
+                        print_console("[BTN] drop mev=");
+                        print_dec(windows[w].mouse_events);
+                        print_console(" dy=");
+                        print_dec(mouse_y - windows[w].y);
+                        print_console("\n");
                       }
                     }
                     needs_redraw = 1;

@@ -153,6 +153,21 @@ static int vmmouse_enable(void) {
   return 1;
 }
 
+/* WP-PTR probe: the first N vmmouse packets, verbatim.  The status word is
+   where QEMU puts the button bits (0x20 left, 0x10 right, 0x08 middle), so a
+   press that never appears here was never queued by the device; one that
+   appears here and not in the desktop's [BTN] row was lost in the decode. */
+static int vmw_trace_rows;
+static void vmw_trace(uint32_t st, uint32_t x, uint32_t y, uint32_t z) {
+  if (vmw_trace_rows >= 24) return;
+  vmw_trace_rows++;
+  uart_puts("[VMW] st=0x"); uart_print_hex(st);
+  uart_puts(" x=0x"); uart_print_hex(x);
+  uart_puts(" y=0x"); uart_print_hex(y);
+  uart_puts(" z=0x"); uart_print_hex(z);
+  uart_puts("\n");
+}
+
 /* Drain queued vmmouse packets (4 words each).  Under input_lock. */
 static void vmmouse_drain_nolock(void) {
   if (!vmmouse_present) return;
@@ -169,6 +184,7 @@ static void vmmouse_drain_nolock(void) {
     if (queued < 4) return;
     vmw_call(VMW_CMD_ABSPOINTER_DATA, 4, &r);
     vmmouse_packets++;
+    vmw_trace(r.eax, r.ebx, r.ecx, r.edx);
     /* QEMU (and VMware) report x/y in 0..0xFFFF. */
     evdev_vmmouse_packet(&input_decoder, r.eax, r.ebx, r.ecx, r.edx, 0xFFFF,
                          decoder_emit, 0);
