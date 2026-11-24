@@ -352,6 +352,41 @@ topology into a measured one — read `0x409604` and `GPC_UNIT(i,0x2608)` before
 GSP-RM, with a known-good register in the same block as the control, because
 "unreadable" and "zero GPCs" both look like `0xBADF5620` (§6 rule 1).
 
+### 2.8 Round 6b (2026-11-24): the nvk build is part of the tree, not a lane
+
+Task `t_5aa1c27f`. The round-6 ICD came from a lane script with its own Mesa pin,
+its own patch directory and its own audit. It is now the tree's Mesa configuration:
+`tools/mesa/build-nvk.sh` (next to `build-hobbyos.sh`) configures
+`-Dvulkan-drivers=nouveau`, the one Mesa change is
+`tools/mesa/patches/0014-nvk-hobbyos-node-and-named-refusals.patch` with the other
+thirteen, and `tools/nv/nvk/build.sh` is a three-line driver of it. The old hole in
+`tools/mesa` — an empty `-Dvulkan-drivers=` and nothing else — is gone: the build reads
+the configured driver list back out of meson and fails if it is not `nouveau`.
+
+**Reproduced from a clean worktree** (detached, no lane artifacts; `obj/mesa-nvk` is the
+only output): sysroot → zlib → libelf → libcxx → libdrm → mesa → probe → audit, 65 s
+cold on 48 cores, `audit: PASS`, ICD 24,451,584 B. Against the lane's 24,449,664 B
+artifact: SONAME identical, `DT_NEEDED` set identical (the glibc five), exported dynamic
+symbol set identical (2188; `nm -D` diff empty), every defined symbol the same size
+(13,904 symbols; `nm -S` diff empty); only the embedded build paths differ (the `strings`
+delta is 1,197 path-shaped strings), which is why the build-id and `.text` bytes differ.
+Same source, same patch, same flags.
+
+**Three gaps the lane script did not have to pass**, all now handled and reported: its
+cross file had no `[binaries] rust` entry (meson 1.10 stops with `'rust' compiler binary
+not defined in cross file`; the lane had hand-edited `~/cp/vk-build/mesa-nvk-cross.ini`),
+Mesa's generators need a `python3` with `mako`+`yaml` which a venv earlier on PATH
+shadows, and a `meson configure | awk … exit` in this task's own audit killed meson's
+final stdout flush (exit 120) under `pipefail`. The first two are why "it built in the
+lane" was not evidence that it builds from the tree.
+
+**The ICD still reaches the same wall** (MEASURED, guest boot under TCG with
+`SKIP_KVM=1`): `createInstance` VK_SUCCESS, NVIF `NV_DEVICE_V0_INFO` → AD102 / 0x192 /
+4 GiB, `GETPARAM GRAPH_UNITS` 0x400b `src=declared`, channel + SCLASS, then
+`nvif new refused class=0xc7b5 name=ampere_dma_copy_b need=gsp_rm missing=rm_chan_object`
+and enumeration 0. Making the build permanent changes nothing about where nvk stops;
+that is still rung N3.
+
 ---
 
 ## 3. Work packages (parallel, each with a gate)
@@ -363,7 +398,7 @@ GSP-RM, with a known-good register in the same block as the control, because
 | **C. RPC (offline)** | `docs/nv-rpc-implementation-spec.md` — pure half only | the spec's 24 cases pass in the kernel unit tier on synthetic queues | **no** | **done**: T-01…T-24, two mutation runs recorded; wired into the boot path by G |
 | **D. DMA facility** | `nv_dma.{c,h}`: bus address ≠ phys, identity guard, translation probe | a unit test rejects a mapping whose `bus != phys` under translation | **no** | **done**: 13 cases, two red runs |
 | **E. Present gate** | `/dev/fb0` mmap over an 8,294,400 B framebuffer | pixel at (1919,1079) in a QMP screendump | **no** | **done**: pixel red, 535-page over-map closed, one word past the frame now faults |
-| **F. `/dev/nv*` shim** | nouveau-subset ABI over a mock RM | probe creates device/VM/channel; fence retires | **no** | **done**: 16 real `DRM_IOCTL_NOUVEAU_*` rows + 21 named refusals, CPU-mapped BOs + `mmap` (583/0 on intel, 465/0 on ARM); NVIF served (§2.5) and, since round 6, `GETPARAM GRAPH_UNITS` too — a stock nvk now stops at the first engine class object (copy `0xc7b5`), refused by name; PRIME still missing |
+| **F. `/dev/nv*` shim** | nouveau-subset ABI over a mock RM | probe creates device/VM/channel; fence retires | **no** | **done**: 16 real `DRM_IOCTL_NOUVEAU_*` rows + 21 named refusals, CPU-mapped BOs + `mmap` (583/0 on intel, 465/0 on ARM); NVIF served (§2.5) and, since round 6, `GETPARAM GRAPH_UNITS` too — a stock nvk now stops at the first engine class object (copy `0xc7b5`), refused by name; the ICD that drives it is built by the tree's own `tools/mesa/build-nvk.sh` (§2.8); PRIME still missing |
 | **G. SEC2 booter / glue** | `nv_gsp_sec2_start_booter` + the transport seam | metadata `verified` == `0xA0A0…`; block PTE[0] == `nv_dma_bus()`, one doorbell | yes / **no** for the seam | **seam done** (`nv_gsp_rpc_setup/notify/stage8`, 568/0, two mutations red); booter still blocked: two forced attempts left `verified` at its sentinel |
 
 Ordering by leverage: D unblocks C; C unblocks the driver's upper half; E unblocks
