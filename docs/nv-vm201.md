@@ -68,7 +68,7 @@ nor the WebKit staging.
 | Assignee | Lane |
 |---|---|
 | `nv-card` | the RTX 4090 (r1 VM 300, PCI `01:00.0`): SEC2, booter, GSP-RM, BAR1 reads |
-| `nv-card2` | the two RTX 5090s (r1 PCI `41:00.0`, `82:00.0`, GB202): second bring-up target + sacrificial lab |
+| `nv-card2` | the two RTX 5090s (r1 PCI `41:00.0`, `82:00.0`, GB202): second bring-up target + sacrificial lab. Runs as unix account **`nvcard2`** with its own Hermes home and dispatch timer |
 | `nv-shim` | `/dev/nvshim`: NVIF, PRIME, mmap semantics, DRM ABI |
 | `nv-plat` | platform 3D: nvk build/enumeration, RimWorld audio, Cyberpunk recipe |
 | `nv-verify` | merge gate, nightly soak, docs-in-step |
@@ -110,3 +110,29 @@ All six functions are on `vfio-pci`. IOMMU groups: 41/42 (4090), 58/59 and 22/23
 — no group is shared between lanes, so passthrough is per-GPU. r1's host has **no**
 NVIDIA driver installed; host-rendered (Venus/virgl) measurement on r1 is a blocked
 card awaiting approval, and today those measurements run on `strix` or llvmpipe.
+
+## The 5090 lane's boundary (2026-11-24)
+
+`nvcard2` (uid 1002, home 0700, locked password, no sudo) owns the 5090 work, mirroring
+the `nvcard` pattern: its own `~/.hermes` (board reached through the shared
+`/srv/hermes-kanban` symlink), its own `kanban.dispatch_profiles = nv-card2`, its own
+`hermes-nv-card2-dispatch.timer`.
+
+Its r1 key is a **forced command**: `authorized_keys` runs `/usr/local/bin/nv5090`, which
+accepts only `status | config | start | stop | reset | serial | push-image` and hardcodes
+**VM 313** (`hobbyos-nv5090`, `hostpci0 0000:41:00`, disk `/root/hobbyos5090/disk.img`,
+serial `/root/hobbyos5090/serial.log`). It cannot run `qm`, cannot reconfigure the VM,
+cannot read files, and cannot reach VM 300/311/312.
+
+Measured on the day it was installed: `status` → `status: stopped`;
+`ssh r1 "qm stop 300"` → `refused`; `ssh r1 "cat /etc/shadow"` → `refused`.
+
+Deploy from that lane with `tools/nv/deploy5090.sh` (it pushes the gzipped image and asks
+the wrapper to start the VM — it never runs `qm` itself).
+
+## Plan ownership
+
+`docs/nv-plan.md` is coordinator-owned. Workers write `SWARM-REPORT-<lane>.md` and
+`docs/<topic>.md`; the pre-commit hook `tools/nv/hooks/pre-commit-plan` (installed by
+`tools/nv/install-hooks.sh`, and by running that after any fresh clone) refuses a commit
+that touches the plan unless `ALLOW_PLAN_EDIT=1` is set.
