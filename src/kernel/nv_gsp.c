@@ -3764,6 +3764,150 @@ static void sec2_core_select(struct nv_dev *d) {
   }
 }
 
+/* ---- one SEC2 attempt, end to end -------------------------------------
+ *
+ * Everything from "put the signature in" to "did the metadata move", in one
+ * place so the same code can run twice with one variable between the runs: the
+ * 384 signature bytes.  That is the only choice this driver makes that the
+ * container does not state (it carries two slots and no SignatureVersions
+ * dword), and the fuse rule that picks between them is inherited from FWSEC --
+ * where the descriptor *did* carry the mask.  Rather than spend a deploy per
+ * guess, attempt A uses the fuse-derived slot and attempt B the other one, in
+ * one boot, with identical image and identical transport.  If A works B never
+ * runs; if neither works the slot is ruled out in one run.
+ *
+ * DMEM is loaded by PIO here, for both attempts, so that the transport cannot
+ * differ between them: the index register plus the data register, one word at a
+ * time, no queue and no status word (round 2 measured this path on this card).
+ */
+struct sec2_img {
+  uint8_t *file;      /* the whole booter file, host virtual (patched in place) */
+  uint32_t dmem_file; /* file offset of the DMEM image */
+  uint32_t dmem_len;
+  uint32_t sig_off;   /* file offset of the production-signature block */
+  uint32_t sig_slot;  /* bytes per slot */
+  uint32_t patch_off; /* DMEM-image offset the signature goes to */
+  uint32_t bootvec;
+  uint32_t ucode_id;
+  uint64_t meta_phys;
+  uint8_t *meta;      /* host virtual; the verified word lives inside */
+};
+
+static int sec2_attempt(struct nv_dev *d, const struct sec2_img *im,
+                        uint32_t sig_idx, const char *tag) {
+  uint8_t *dmem = im->file + im->dmem_file;
+  const uint8_t *sig = im->file + im->sig_off + sig_idx * im->sig_slot;
+
+  for (uint32_t i = 0; i < im->sig_slot; i++)
+    dmem[im->patch_off + i] = sig[i];
+  uart_puts("[NV-SEC2] attempt=");
+  uart_puts(tag);
+  uart_puts(" sig_slot=");
+  print_int((int)sig_idx);
+  uart_puts(" head=");
+  for (uint32_t i = 0; i < 8; i++) nv_hex_byte(sig[i]);
+  uart_puts(" dmem+0x");
+  uart_print_hex(im->patch_off);
+  uart_puts("\n");
+
+  int rc = falcon_pio_block(d, NV_FALCON_SEC2_BASE, dmem, im->dmem_len, 0, 0, 0);
+  if (rc != 0) {
+    uart_puts("[NV-SEC2] attempt=");
+    uart_puts(tag);
+    uart_puts(" DMEM PIO FAILED rc=");
+    print_int(rc);
+    uart_puts("\n");
+    return -1;
+  }
+
+  /* Boot ROM parameters: where the signature is, which engine and ucode id it
+   * must cover, and which algorithm. */
+  nv_wr32(d, NV_BROM_PARAADDR0, im->patch_off);
+  nv_wr32(d, NV_BROM_ENGIDMASK, 1);
+  nv_wr32(d, NV_BROM_CURR_UCODE_ID, im->ucode_id);
+  nv_wr32(d, NV_BROM_MOD_SEL, 1);
+  nv_wr32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_ENTRY, im->bootvec);
+  uart_puts("[NV-SEC2] attempt=");
+  uart_puts(tag);
+  uart_puts(" brom para=");
+  uart_print_hex(nv_rd32(d, NV_BROM_PARAADDR0));
+  uart_puts(" engid=");
+  uart_print_hex(nv_rd32(d, NV_BROM_ENGIDMASK));
+  uart_puts(" ucode=");
+  uart_print_hex(nv_rd32(d, NV_BROM_CURR_UCODE_ID));
+  uart_puts(" modsel=");
+  uart_print_hex(nv_rd32(d, NV_BROM_MOD_SEL));
+  uart_puts(" bootvec=");
+  uart_print_hex(nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_ENTRY));
+  uart_puts("\n");
+
+  /* MAILBOX0/1 carry the metadata block's address -- the booter's only
+   * argument, and the word it overwrites with its return code (0 = success).
+   * That makes the argument its own sentinel: a mailbox still holding the
+   * address is "no code written", which is a different fact from "code 0". */
+  nv_wr32(d, NV_FALCON_SEC2_BASE + 0x040, (uint32_t)im->meta_phys);
+  nv_wr32(d, NV_FALCON_SEC2_BASE + 0x044, (uint32_t)(im->meta_phys >> 32));
+
+  nv_wr32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL, NV_FALCON_UC_CTRL_START);
+  uint32_t ctl = 0, mb0 = 0;
+  int halted = 0;
+  for (int i = 0; i < 400000; i++) {
+    ctl = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL);
+    mb0 = nv_rd32(d, NV_FALCON_SEC2_BASE + 0x040);
+    if (ctl & NV_FALCON_UC_CTRL_STOPPED) {
+      halted = 1;
+      break;
+    }
+  }
+
+  /* The verdict that needs no register: did the booter write its own
+   * acknowledgement into the metadata block?  Polled for a bounded time,
+   * because the booter builds WPR2 before it answers. */
+  int verified = 0;
+  uint64_t v = 0;
+  if (im->meta) {
+    uint64_t t0 = 0, now = 0;
+    int have_t = nv_timer_read(d, &t0) == 0;
+    for (int i = 0; i < 200000; i++) {
+      v = nv_meta_get64(im->meta + NV_WPR_OFF_VERIFIED);
+      if (v == NV_WPR_VERIFIED_WORD) break;
+      if (have_t && (i & 0x3f) == 0 && nv_timer_read(d, &now) == 0 &&
+          now - t0 > 300000000ULL)
+        break; /* 300 ms: the reference's own budget for this step */
+    }
+    if (v == NV_WPR_VERIFIED_WORD) verified = 1;
+  }
+  uart_puts("[NV-SEC2] attempt=");
+  uart_puts(tag);
+  uart_puts(" start ctl=");
+  uart_print_hex(ctl);
+  uart_puts(" halted=");
+  print_int(halted);
+  uart_puts(" mailbox0=");
+  uart_print_hex(mb0);
+  uart_puts(" mailbox1=");
+  uart_print_hex(nv_rd32(d, NV_FALCON_SEC2_BASE + 0x044));
+  uart_puts(" verified=");
+  uart_print_hex(v);
+  if (verified) {
+    uart_puts(" verdict=RAN (0xA0A0... in the metadata: the block was accepted "
+              "and WPR2 is built)\n");
+  } else if (v == 0x5EC2A0A0ULL) {
+    uart_puts(" verdict=NOTHING-WRITTEN");
+    if (mb0 == (uint32_t)im->meta_phys)
+      uart_puts(" (the mailbox still holds the argument: the booter wrote no "
+                "return code either, which is what a boot ROM rejection looks "
+                "like from this side)\n");
+    else
+      uart_puts(" (mailbox0 changed to a return code: authentication or layout "
+                "rejection, code above)\n");
+  } else {
+    uart_puts(" verdict=THIRD-STATE (neither sentinel nor 0xA0A0: report raw)\n");
+  }
+  (void)halted;
+  return verified ? 1 : 0;
+}
+
 /* `force` runs the attempt even when the SEC2 window refuses to be read.
  *
  * Why that is worth a deploy: the fence is READ-side only (measured on the GSP
@@ -3979,17 +4123,11 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
     }
   }
 
-  /* Patch it into the frames in place (we own them) before the DMA. */
-  uint8_t *dmem_img = (uint8_t *)booter + dmem_file;
-  const uint8_t *sig = booter + (cparsed && bhs.sig_prod_off ? bhs.sig_prod_off
-                                                            : 0x3Cu) +
-                       sig_idx * sig_slot;
-  if (patch_off + sig_slot <= dmem_len) {
-    for (uint32_t i = 0; i < sig_slot; i++) dmem_img[patch_off + i] = sig[i];
-  }
-  uart_puts("[NV-SEC2] sig slot=");
-  print_int((int)sig_idx);
-  uart_puts(" of ");
+  /* The signature choice, printed once: the helper patches and logs per
+   * attempt, but the derivation belongs in the log before either runs. */
+  uart_puts("[NV-SEC2] sig block@");
+  uart_print_hex((cparsed && bhs.sig_prod_off) ? bhs.sig_prod_off : 0x3Cu);
+  uart_puts(" slots=");
   print_int((int)bhs.num_sig);
   uart_puts(" bytes=");
   uart_print_hex(sig_slot);
@@ -4001,8 +4139,8 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
   uart_print_hex(patch_site);
   uart_puts(" -> dmem+0x");
   uart_print_hex(patch_off);
-  uart_puts(" head=");
-  for (uint32_t i = 0; i < 8; i++) nv_hex_byte(sig[i]);
+  uart_puts(" fuse_rule_slot=");
+  print_int((int)sig_idx);
   uart_puts("\n");
 
   /* ---- the DMA engine's configuration, the same three writes the GSP path
@@ -4107,104 +4245,54 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
   uart_puts(" transport=");
   uart_puts(via_pio ? "PIO\n" : "DMA (destination advances, IMEM SEC pages)\n");
 
-  /* Boot ROM parameters: where the signature is, which engine/user id it must
-   * cover, and which algorithm.  BOOTVEC is the app's own entry offset inside
-   * the image (measured 0x100), so it is derived above instead of literal. */
-  nv_wr32(d, NV_BROM_PARAADDR0, patch_off);
-  nv_wr32(d, NV_BROM_ENGIDMASK, 1);
-  nv_wr32(d, NV_BROM_CURR_UCODE_ID, ucode_id);
-  nv_wr32(d, NV_BROM_MOD_SEL, 1);
-  nv_wr32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_ENTRY, bootvec);
-  uart_puts("[NV-SEC2] brom para=");
-  uart_print_hex(nv_rd32(d, NV_BROM_PARAADDR0));
-  uart_puts(" engid=");
-  uart_print_hex(nv_rd32(d, NV_BROM_ENGIDMASK));
-  uart_puts(" ucode=");
-  uart_print_hex(nv_rd32(d, NV_BROM_CURR_UCODE_ID));
-  uart_puts(" modsel=");
-  uart_print_hex(nv_rd32(d, NV_BROM_MOD_SEL));
-  uart_puts(" bootvec=");
-  uart_print_hex(nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_ENTRY));
-  uart_puts("\n");
+  /* ---- the attempts -----------------------------------------------------
+   *
+   * A: the slot the fuse rule picks.  B: the other slot, and only if A left the
+   * metadata untouched -- one boot, one variable, and if neither works the
+   * signature slot is ruled out rather than queued for another deploy. */
+  struct sec2_img sim;
+  sim.file = (uint8_t *)booter;
+  sim.dmem_file = dmem_file;
+  sim.dmem_len = dmem_len;
+  sim.sig_off = (cparsed && bhs.sig_prod_off) ? bhs.sig_prod_off : 0x3Cu;
+  sim.sig_slot = sig_slot;
+  sim.patch_off = patch_off;
+  sim.bootvec = bootvec;
+  sim.ucode_id = ucode_id;
+  sim.meta_phys = meta_phys;
+  sim.meta = meta;
 
-  /* MAILBOX0/1 carry the metadata block's physical address: the booter's only
-   * argument.  A sentinel first, because 0 means success and a core that never
-   * started would otherwise look successful. */
-  nv_wr32(d, NV_FALCON_SEC2_BASE + 0x040, (uint32_t)meta_phys);
-  nv_wr32(d, NV_FALCON_SEC2_BASE + 0x044, (uint32_t)(meta_phys >> 32));
-  uart_puts("[NV-SEC2] mailbox0/1 = ");
-  uart_print_hex(meta_phys);
-  uart_puts("\n");
-
-  /* Start, then bound the wait: the booter halts when it is done. */
-  nv_wr32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL, NV_FALCON_UC_CTRL_START);
-  uint32_t mb0 = 0;
-  int halted = 0;
-  for (int i = 0; i < 400000; i++) {
-    ctl = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL);
-    mb0 = nv_rd32(d, NV_FALCON_SEC2_BASE + 0x040);
-    if (ctl & NV_FALCON_UC_CTRL_STOPPED) {
-      halted = 1;
-      break;
+  int verified = sec2_attempt(d, &sim, sig_idx, "A");
+  if (verified == 0 && bhs.num_sig > 1) {
+    uart_puts("[NV-SEC2] attempt A left the metadata at its sentinel.  The "
+              "signature slot is the one thing this driver chooses that the "
+              "container does not state (two slots, no SignatureVersions dword), "
+              "and the fuse rule used above is inherited from FWSEC, whose "
+              "descriptor carries that mask.  Trying the other slot in this "
+              "same boot: same image, same IMEM, same transport, only the 384 "
+              "signature bytes differ\n");
+    /* A clean start: halt, then let the core come back STOPPED. */
+    nv_wr32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL,
+            NV_FALCON_UC_CTRL_RESET_TLB | NV_FALCON_UC_CTRL_RESET_UNK2 |
+                NV_FALCON_UC_CTRL_RESET_UNK3);
+    uint32_t c2 = 0;
+    for (int i = 0; i < 100000; i++) {
+      c2 = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL);
+      if (c2 & NV_FALCON_UC_CTRL_STOPPED) break;
     }
-  }
-  uart_puts("[NV-SEC2] start ctl=");
-  uart_print_hex(ctl);
-  uart_puts(" halted=");
-  print_int(halted);
-  uart_puts(" mailbox0=");
-  uart_print_hex(mb0);
-  uart_puts(" mailbox1=");
-  uart_print_hex(nv_rd32(d, NV_FALCON_SEC2_BASE + 0x044));
-  uart_puts(" (the mailboxes READ on this window even when the rest answers "
-            "the fence word, so a booter status would be visible here)\n");
-
-  /* The verdict that does not need the fenced window: did the booter write its
-   * own acknowledgement into the metadata block?  Polled for a bounded time,
-   * because the booter builds WPR2 before it answers. */
-  int verified = 0;
-  if (meta) {
-    uint64_t v = nv_meta_get64(meta + NV_WPR_OFF_VERIFIED);
-    uint64_t t0 = 0, now = 0;
-    int have_t = nv_timer_read(d, &t0) == 0;
-    for (int i = 0; i < 200000; i++) {
-      v = nv_meta_get64(meta + NV_WPR_OFF_VERIFIED);
-      if (v == NV_WPR_VERIFIED_WORD) break;
-      if (have_t && (i & 0x3f) == 0 && nv_timer_read(d, &now) == 0 &&
-          now - t0 > 300000000ULL)
-        break; /* 300 ms: the reference's own budget for this step */
-    }
-    uart_puts("[NV-SEC2] meta verified=");
-    uart_print_hex(v);
-    uart_puts(" (radix3=");
-    uart_print_hex(nv_meta_get64(meta + 0x10));
-    uart_puts(" size=");
-    uart_print_hex(nv_meta_get64(meta + 0x18));
-    uart_puts(")");
-    if (v == NV_WPR_VERIFIED_WORD) {
-      verified = 1;
-      uart_puts(" verdict=0xA0A0... THE BOOTER RAN AND WPR2 IS BUILT\n");
-    } else if (v == 0x5EC2A0A0ULL) {
-      uart_puts(" verdict=STILL THE SENTINEL (nothing wrote the metadata block: "
-                "the booter did not run, or could not reach host memory)\n");
-    } else {
-      uart_puts(" verdict=NEITHER THE SENTINEL NOR 0xA0A0 (a third state: report "
-                "it as raw)\n");
-    }
+    uart_puts("[NV-SEC2] re-halt before B: ctl=");
+    uart_print_hex(c2);
+    uart_puts("\n");
+    verified = sec2_attempt(d, &sim, (sig_idx + 1u) % bhs.num_sig, "B");
   }
   if (verified) return 0;
-  if (!halted) {
-    uart_puts("[NV-SEC2] the booter never halted: it is spinning or the start "
-              "did not take\n");
-    return -ETIMEDOUT;
-  }
-  if (mb0 != 0) {
-    uart_puts("[NV-SEC2] booter returned a non-zero status: authentication or "
-              "layout rejection (the code values are not published)\n");
-    return -EPERM;
-  }
-  uart_puts("[NV-SEC2] booter reported success (mailbox0=0)\n");
-  return 0;
+  uart_puts("[NV-SEC2] neither signature slot produced a verdict: the metadata "
+            "block was not written, so the booter did not reach it.  With the "
+            "window readable, the transport validated and every host write "
+            "echoing back, what is left is the image the boot ROM sees (the "
+            "signature's coverage, the ucode id/engine mask, or the IMEM layout "
+            "and entry point)\n");
+  return -EPERM;
 }
 
 int nv_gsp_firmware_check(struct nv_dev *d) {
