@@ -36,6 +36,7 @@
 #ifdef __aarch64__
 
 #include "nv_shim.h"
+#include "reloc.h"
 
 /* ---- the deliberately folded tables (do not "fix" these) ---------------- */
 
@@ -125,9 +126,28 @@ static void test_reloc_real_table(void) {
   EXPECT_EQ(reloc_streq(nv_shim_refusal_name(NVSHIM_IOC_SETPARAM), "setparam"), 1);
 }
 
+/* ---- 3. the pass itself: it ran, and it applied what the link emitted --- */
+
+static void test_reloc_pass_stats(void) {
+  uart_puts("  Running test_reloc_pass_stats...\n");
+  tests_run++;
+
+  /* A non-zero status means boot.s saw a relocation it could not apply; the
+   * [RELOC] row would have halted, so a running image expects 0 here. */
+  EXPECT_EQ((int)arch_reloc_status(), (int)RELOC_ST_OK);
+  /* The table is not empty and every entry in it was an R_AARCH64_RELATIVE:
+   * an entry this pass did not apply is a pointer left at its link address. */
+  EXPECT_EQ((int)(arch_reloc_entries() > 0), 1);
+  EXPECT_EQ((int)(arch_reloc_applied() == arch_reloc_entries()), 1);
+  /* Limine loads the image page-aligned, so a slide that is not page-aligned
+   * would mean KIMAGE_LINK_BASE in reloc.c disagreed with linker.ld. */
+  EXPECT_EQ((int)((arch_reloc_slide() & 0xfff) == 0), 1);
+}
+
 void reloc_test_suite(void) {
   test_reloc_folded_rodata();
   test_reloc_real_table();
+  test_reloc_pass_stats();
 }
 
 #endif /* __aarch64__ */

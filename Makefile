@@ -67,6 +67,12 @@ else
   QEMU_DISPLAY = gtk
 endif
 
+# Post-link audit of pointer words baked into kernel static data (see
+# tools/kernel_reloc_audit.py).  Runs after every AArch64 kernel link; it is a
+# build dependency the same way fat16img.py is (python3, stdlib only).
+PYTHON ?= python3
+RELOC_AUDIT ?= $(PYTHON) tools/kernel_reloc_audit.py
+
 # Mode selection (desktop or test)
 ifneq ($(filter lo_test_run lo_test_build,$(MAKECMDGOALS)),)
   MODE ?= lo_test
@@ -359,7 +365,19 @@ else
   # (no compiler-emitted SIMD at EL1).
   USER_CFLAGS = -O2 -Wall -Wextra -g -Isrc/user_include -Isrc/user_include/graphics -Isrc/include -Isrc/libc/include --target=aarch64-none-elf -ffreestanding -mcpu=cortex-a53
   ARCH_DIR = src/kernel/arch/arm
-  LDFLAGS = -T linker.ld
+  # The AArch64 image is linked as a position-independent executable: Limine
+  # loads it at a slide (measured 0x3FA400000 in the unit tier), code survives
+  # that on adrp/adr alone, and *only* a `-pie` link makes `ld.lld` emit one
+  # R_AARCH64_RELATIVE per pointer word in static data (`.rela.dyn`) so
+  # boot.s -> arch/arm/reloc.c can apply them.  Without it a `const` table of
+  # function/string pointers keeps its LINK address and a call through it
+  # faults with ESR EC=0 ("unknown reason"; see SWARM-REPORT-WP-RELOC.md).
+  # -z notext: the pointer slots live in .rodata, which is a read-only
+  # segment.  The pass runs before mmu_init(), so the slots are writable when
+  # they are patched and read-only afterwards, which is the intent.
+  # --no-dynamic-linker: no interpreter -- there is no loader below us.
+  LDFLAGS = -T linker.ld -pie -z notext --no-dynamic-linker
+
   # QEMU parameters for ARM: 8 cores, 16GB RAM, booting with UEFI (RAM x2,
   # see the VM RAM comment at the top).
   # GX (§3-D5): GX_GPU_DEV/GX_GPU_DISPLAY resolve after the MODE/QEMU_ARGS
@@ -1064,6 +1082,15 @@ $(TARGET): .EXTRA_PREREQS = FORCE_ARCH
 $(TARGET): $(OBJS)
 	@if [ "$$(cat .arch-stamp 2>/dev/null)" != "$(ARCH)" ]; then rm -f $@; printf '%s' "$(ARCH)" > .arch-stamp; fi
 	$(LD) $(LDFLAGS) -o $@ $^
+ifeq ($(ARCH),arm)
+	@# Post-link reloc gate (docs/... ; SWARM-REPORT-WP-RELOC.md): a word in
+	@# static data that holds a kernel link address must be covered by an
+	@# R_AARCH64_RELATIVE entry arch/arm/reloc.c applies, or the image would
+	@# boot with a pointer that is wrong under the Limine slide.  This is the
+	@# "break the build, not the boot" half of the fix -- a reintroduced
+	@# folded table stops here instead of faulting with ESR EC=0.
+	$(RELOC_AUDIT) --gate $@
+endif
 ifeq ($(ARCH),intel)
 	$(OBJCOPY) -I elf64-x86-64 -O elf32-i386 $@
 endif
