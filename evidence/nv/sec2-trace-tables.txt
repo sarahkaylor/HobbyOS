@@ -1,0 +1,422 @@
+====================================================================================================
+LOG evidence/nv/t7a.log trace rows: 31
+
+### register trace (one row per phase)
+| att | phase | dt_ns | ctl | bcr | tcfg624 | tcfg600 | ent | alias130 | pc |
+|---|---|---|---|---|---|---|---|---|---|
+| A | pre | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| A | post | 0x9FA7A0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| A | at10ms | 0xD70520 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| A | at100ms | 0x5F5FD60 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | pre | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | post | 0x9FC9E0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | at10ms | 0xD64B60 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | at100ms | 0x5F5F5A0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| R | before-reset | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| R | after-reset | 0x1313400 | 0xBADF5620 | 0x110 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 |
+| R | after-bcr | 0x1810C20 | 0x10 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| R | pre | 0x0 | 0x10 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| R | post | 0x9F9E80 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| R | at10ms | 0xD6CEE0 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| R | at100ms | 0x5F5EA80 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| R | after-reset | None | None | None | None | None | None | None | None |
+
+### the read nearest each trigger
+| att | ctl_first | at_ns | read_cost_ns | bit1 | running |
+|---|---|---|---|---|---|
+| A | 0x10 | 0x376D20 | 0x260 | 0 | 0 |
+| B | 0x10 | 0x36B1E0 | 0x25F | 0 | 0 |
+| R | 0x12 | 0x36B8E0 | 0x260 | 1 | 0 |
+
+### burst (ptimer stamp : ctl) and summaries
+  A burst 0x00000000004CC040:0x0000000000000010 0x00000000004CC960:0x0000000000000010 0x00000000004CD200:0x0000000000000010 0x00000000004CDAC0:0x0000000000000010 0x00000000004CE360:0x0000000000000010 0x00000000004CEC20:0x0000000000000010 0x00000000004CF4E0:0x0000000000000010 0x00000000004CFDA0:0x0000000000000010 0x00000000004D0660:0x0000000000000010 0x00000000004D0F00:0x0000000000000010 0x00000000004D17C0:0x0000000000000010 0x00000000004D2080:0x0000000000000010
+  A summary bit1_ever=0 running_ever=0 polls=0x0000000000020AE1 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-NEVER-VISIBLE (bit 1 was 0 in every sample and the core never left STOPPED: the write was either discarded by the control logic or taken and refused within the first read; the write-lands row above is what separates those)
+  B burst 0x00000000004C0300:0x0000000000000010 0x00000000004C0BE0:0x0000000000000010 0x00000000004C14A0:0x0000000000000010 0x00000000004C1D60:0x0000000000000010 0x00000000004C2600:0x0000000000000010 0x00000000004C2EC0:0x0000000000000010 0x00000000004C3760:0x0000000000000010 0x00000000004C4020:0x0000000000000010 0x00000000004C4900:0x0000000000000010 0x00000000004C51A0:0x0000000000000010 0x00000000004C5A60:0x0000000000000010 0x00000000004C6320:0x0000000000000010
+  B summary bit1_ever=0 running_ever=0 polls=0x0000000000020AA1 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-NEVER-VISIBLE (bit 1 was 0 in every sample and the core never left STOPPED: the write was either discarded by the control logic or taken and refused within the first read; the write-lands row above is what separates those)
+  R burst 0x00000000004CAE00:0x0000000000000012 0x00000000004CB700:0x0000000000000012 0x00000000004CBFC0:0x0000000000000012 0x00000000004CC880:0x0000000000000012 0x00000000004CD140:0x0000000000000012 0x00000000004CD9E0:0x0000000000000012 0x00000000004CE2A0:0x0000000000000012 0x00000000004CEB40:0x0000000000000012 0x00000000004CF400:0x0000000000000012 0x00000000004CFCC0:0x0000000000000012 0x00000000004D0580:0x0000000000000012 0x00000000004D0E20:0x0000000000000012
+  R summary bit1_ever=1 running_ever=0 polls=0x0000000000020AE1 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-BIT-WAS-VISIBLE (the register held bit 1 at least once after the write)
+
+### write-lands control and other verdict rows
+  A  write-lands    WRITE-PATH-LIVE
+  B  write-lands    WRITE-PATH-LIVE
+  R  bcr-after-reset=0x0000000000000110 VALID
+  R  reload         RELOADED
+  R  after-reset    NOWRITE-AFTER-RESET
+  R ctl-write-sweep w=0x0000000000000001->0x0000000000000010 w=0x0000000000000002->0x0000000000000012 w=0x0000000000000004->0x0000000000000010 w=0x0000000000000008->0x0000000000000010 w=0x0000000000000010->0x0000000000000010 w=0x0000000000000040->0x0000000000000050 (one write per bit, read back; 0x10 is STOPPED, RO)
+====================================================================================================
+LOG evidence/nv/t7b.log trace rows: 31
+
+### register trace (one row per phase)
+| att | phase | dt_ns | ctl | bcr | tcfg624 | tcfg600 | ent | alias130 | pc |
+|---|---|---|---|---|---|---|---|---|---|
+| A | pre | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| A | post | 0xA1C020 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| A | at10ms | 0xD9AF80 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| A | at100ms | 0x5F609E0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | pre | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | post | 0xA1FA80 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | at10ms | 0xD9B700 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | at100ms | 0x5F5EC20 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| R | before-reset | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| R | after-reset | 0x1313380 | 0xBADF5620 | 0x110 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 |
+| R | after-bcr | 0x181DDA0 | 0x10 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| R | pre | 0x0 | 0x10 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| R | post | 0xA19740 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| R | at10ms | 0xD91D40 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| R | at100ms | 0x5F5EEC0 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| R | after-reset | None | None | None | None | None | None | None | None |
+
+### the read nearest each trigger
+| att | ctl_first | at_ns | read_cost_ns | bit1 | running |
+|---|---|---|---|---|---|
+| A | 0x10 | 0x3798E0 | 0x262 | 0 | 0 |
+| B | 0x10 | 0x385760 | 0x265 | 0 | 0 |
+| R | 0x12 | 0x379FE0 | 0x262 | 1 | 0 |
+
+### burst (ptimer stamp : ctl) and summaries
+  A burst 0x00000000004DE600:0x0000000000000010 0x00000000004DF040:0x0000000000000010 0x00000000004DF9A0:0x0000000000000010 0x00000000004E02E0:0x0000000000000010 0x00000000004E0CE0:0x0000000000000010 0x00000000004E1640:0x0000000000000010 0x00000000004E1F60:0x0000000000000010 0x00000000004E2880:0x0000000000000010 0x00000000004E3140:0x0000000000000010 0x00000000004E3A20:0x0000000000000010 0x00000000004E4320:0x0000000000000010 0x00000000004E4BC0:0x0000000000000010
+  A summary bit1_ever=0 running_ever=0 polls=0x0000000000020421 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-NEVER-VISIBLE (bit 1 was 0 in every sample and the core never left STOPPED: the write was either discarded by the control logic or taken and refused within the first read; the write-lands row above is what separates those)
+  B burst 0x00000000004D9840:0x0000000000000010 0x00000000004DA140:0x0000000000000010 0x00000000004DAA00:0x0000000000000010 0x00000000004DB2C0:0x0000000000000010 0x00000000004DBB80:0x0000000000000010 0x00000000004DC440:0x0000000000000010 0x00000000004DCD00:0x0000000000000010 0x00000000004DD5C0:0x0000000000000010 0x00000000004DDE60:0x0000000000000010 0x00000000004DE720:0x0000000000000010 0x00000000004DEFE0:0x0000000000000010 0x00000000004DF8A0:0x0000000000000010
+  B summary bit1_ever=0 running_ever=0 polls=0x0000000000020501 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-NEVER-VISIBLE (bit 1 was 0 in every sample and the core never left STOPPED: the write was either discarded by the control logic or taken and refused within the first read; the write-lands row above is what separates those)
+  R burst 0x00000000004CF8A0:0x0000000000000012 0x00000000004D0200:0x0000000000000012 0x00000000004D0AC0:0x0000000000000012 0x00000000004D1380:0x0000000000000012 0x00000000004D1C40:0x0000000000000012 0x00000000004D2500:0x0000000000000012 0x00000000004D2DC0:0x0000000000000012 0x00000000004D3680:0x0000000000000012 0x00000000004D3F40:0x0000000000000012 0x00000000004D47E0:0x0000000000000012 0x00000000004D50A0:0x0000000000000012 0x00000000004D5980:0x0000000000000012
+  R summary bit1_ever=1 running_ever=0 polls=0x0000000000020501 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-BIT-WAS-VISIBLE (the register held bit 1 at least once after the write)
+
+### write-lands control and other verdict rows
+  A  write-lands    WRITE-PATH-LIVE
+  B  write-lands    WRITE-PATH-LIVE
+  R  bcr-after-reset=0x0000000000000110 VALID
+  R  reload         RELOADED
+  R  after-reset    NOWRITE-AFTER-RESET
+  R ctl-write-sweep w=0x0000000000000001->0x0000000000000010 w=0x0000000000000002->0x0000000000000012 w=0x0000000000000004->0x0000000000000010 w=0x0000000000000008->0x0000000000000010 w=0x0000000000000010->0x0000000000000010 w=0x0000000000000040->0x0000000000000050 (one write per bit, read back; 0x10 is STOPPED, RO)
+====================================================================================================
+LOG evidence/nv/t7c.log trace rows: 31
+
+### register trace (one row per phase)
+| att | phase | dt_ns | ctl | bcr | tcfg624 | tcfg600 | ent | alias130 | pc |
+|---|---|---|---|---|---|---|---|---|---|
+| A | pre | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| A | post | 0xA05A00 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| A | at10ms | 0xD73420 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| A | at100ms | 0x5F5F540 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | pre | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | post | 0xA0CCC0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | at10ms | 0xD84020 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | at100ms | 0x5F60D60 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| R | before-reset | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| R | after-reset | 0x1313740 | 0xBADF5620 | 0x110 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 |
+| R | after-bcr | 0x1825320 | 0x10 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| R | pre | 0x0 | 0x10 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| R | post | 0xA09EE0 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| R | at10ms | 0xD792A0 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| R | at100ms | 0x5F62AE0 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| R | after-reset | None | None | None | None | None | None | None | None |
+
+### the read nearest each trigger
+| att | ctl_first | at_ns | read_cost_ns | bit1 | running |
+|---|---|---|---|---|---|
+| A | 0x10 | 0x36DA60 | 0x265 | 0 | 0 |
+| B | 0x10 | 0x3732C0 | 0x266 | 0 | 0 |
+| R | 0x12 | 0x36E1C0 | 0x267 | 1 | 0 |
+
+### burst (ptimer stamp : ctl) and summaries
+  A burst 0x00000000004C4480:0x0000000000000010 0x00000000004C4D80:0x0000000000000010 0x00000000004C5640:0x0000000000000010 0x00000000004C5F00:0x0000000000000010 0x00000000004C67C0:0x0000000000000010 0x00000000004C7080:0x0000000000000010 0x00000000004C7940:0x0000000000000010 0x00000000004C8200:0x0000000000000010 0x00000000004C8AC0:0x0000000000000010 0x00000000004C9380:0x0000000000000010 0x00000000004C9C40:0x0000000000000010 0x00000000004CA500:0x0000000000000010
+  A summary bit1_ever=0 running_ever=0 polls=0x0000000000020521 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-NEVER-VISIBLE (bit 1 was 0 in every sample and the core never left STOPPED: the write was either discarded by the control logic or taken and refused within the first read; the write-lands row above is what separates those)
+  B burst 0x00000000004D34A0:0x0000000000000010 0x00000000004D3DA0:0x0000000000000010 0x00000000004D4660:0x0000000000000010 0x00000000004D4F20:0x0000000000000010 0x00000000004D57E0:0x0000000000000010 0x00000000004D60A0:0x0000000000000010 0x00000000004D6960:0x0000000000000010 0x00000000004D7220:0x0000000000000010 0x00000000004D7AC0:0x0000000000000010 0x00000000004D8380:0x0000000000000010 0x00000000004D8C60:0x0000000000000010 0x00000000004D9500:0x0000000000000010
+  B summary bit1_ever=0 running_ever=0 polls=0x00000000000203E1 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-NEVER-VISIBLE (bit 1 was 0 in every sample and the core never left STOPPED: the write was either discarded by the control logic or taken and refused within the first read; the write-lands row above is what separates those)
+  R burst 0x00000000004C6340:0x0000000000000012 0x00000000004C6C60:0x0000000000000012 0x00000000004C7520:0x0000000000000012 0x00000000004C7DE0:0x0000000000000012 0x00000000004C86A0:0x0000000000000012 0x00000000004C8F60:0x0000000000000012 0x00000000004C9820:0x0000000000000012 0x00000000004CA0E0:0x0000000000000012 0x00000000004CA9A0:0x0000000000000012 0x00000000004CB280:0x0000000000000012 0x00000000004CBB40:0x0000000000000012 0x00000000004CC400:0x0000000000000012
+  R summary bit1_ever=1 running_ever=0 polls=0x00000000000204A1 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-BIT-WAS-VISIBLE (the register held bit 1 at least once after the write)
+
+### write-lands control and other verdict rows
+  A  write-lands    WRITE-PATH-LIVE
+  B  write-lands    WRITE-PATH-LIVE
+  R  bcr-after-reset=0x0000000000000110 VALID
+  R  reload         RELOADED
+  R  after-reset    NOWRITE-AFTER-RESET
+  R ctl-write-sweep w=0x0000000000000001->0x0000000000000010 w=0x0000000000000002->0x0000000000000012 w=0x0000000000000004->0x0000000000000010 w=0x0000000000000008->0x0000000000000010 w=0x0000000000000010->0x0000000000000010 w=0x0000000000000040->0x0000000000000050 (one write per bit, read back; 0x10 is STOPPED, RO)
+====================================================================================================
+LOG evidence/nv/t8a.log trace rows: 51
+
+### register trace (one row per phase)
+| att | phase | dt_ns | ctl | bcr | tcfg624 | tcfg600 | ent | alias130 | pc |
+|---|---|---|---|---|---|---|---|---|---|
+| A | pre | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| A | post | 0xABA9C0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| A | at10ms | 0xE25EA0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| A | at100ms | 0x5F5F280 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | pre | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | post | 0xAB76C0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | at10ms | 0xE20FA0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | at100ms | 0x5F605C0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| R | before-reset | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| R | after-reset | 0x13135C0 | 0xBADF5620 | 0x110 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 |
+| R | after-bcr | 0x229EA00 | 0x10 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| R | pre | 0x0 | 0x10 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| R | post | 0xABE140 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| R | at10ms | 0xE24F60 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| R | at100ms | 0x5F5FFC0 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| S | before-reset | 0x0 | 0x50 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| S | after-bcr | 0x16722C0 | 0x10 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| S | pre | 0x0 | 0x10 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| S | post | 0xAB5A60 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| S | at10ms | 0xE2E240 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| S | at100ms | 0x5F5FD20 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+
+### the read nearest each trigger
+| att | ctl_first | at_ns | read_cost_ns | bit1 | running |
+|---|---|---|---|---|---|
+| A | 0x10 | None | 0x260 | 0 | 0 |
+| B | 0x10 | None | 0x260 | 0 | 0 |
+| R | 0x12 | None | 0x268 | 1 | 0 |
+| S | 0x12 | None | 0x261 | 1 | 0 |
+
+### burst (ptimer stamp : ctl) and summaries
+  A burst 0x00000000005799C0:0x0000000000000010 0x000000000057A300:0x0000000000000010 0x000000000057ABA0:0x0000000000000010 0x000000000057B460:0x0000000000000010 0x000000000057BD20:0x0000000000000010 0x000000000057C5E0:0x0000000000000010 0x000000000057CE80:0x0000000000000010 0x000000000057D740:0x0000000000000010 0x000000000057E000:0x0000000000000010 0x000000000057E8A0:0x0000000000000010 0x000000000057F160:0x0000000000000010 0x000000000057FA20:0x0000000000000010
+  A summary bit1_ever=0 running_ever=0 polls=0x00000000000204A1 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-NEVER-VISIBLE (bit 1 was 0 in every sample and the core never left STOPPED: the write was either discarded by the control logic or taken and refused within the first read; the write-lands row above is what separates those)
+  B burst 0x0000000000578AC0:0x0000000000000010 0x00000000005793C0:0x0000000000000010 0x0000000000579C80:0x0000000000000010 0x000000000057A540:0x0000000000000010 0x000000000057AE00:0x0000000000000010 0x000000000057B6C0:0x0000000000000010 0x000000000057BF80:0x0000000000000010 0x000000000057C820:0x0000000000000010 0x000000000057D0E0:0x0000000000000010 0x000000000057D9A0:0x0000000000000010 0x000000000057E260:0x0000000000000010 0x000000000057EB20:0x0000000000000010
+  B summary bit1_ever=0 running_ever=0 polls=0x00000000000204E1 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-NEVER-VISIBLE (bit 1 was 0 in every sample and the core never left STOPPED: the write was either discarded by the control logic or taken and refused within the first read; the write-lands row above is what separates those)
+  R burst 0x00000000005780C0:0x0000000000000012 0x00000000005789A0:0x0000000000000012 0x0000000000579260:0x0000000000000012 0x0000000000579B20:0x0000000000000012 0x000000000057A3E0:0x0000000000000012 0x000000000057ACA0:0x0000000000000012 0x000000000057B540:0x0000000000000012 0x000000000057BE20:0x0000000000000012 0x000000000057C6C0:0x0000000000000012 0x000000000057CF80:0x0000000000000012 0x000000000057D840:0x0000000000000012 0x000000000057E100:0x0000000000000012
+  R summary bit1_ever=1 running_ever=0 polls=0x00000000000204C1 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-BIT-WAS-VISIBLE (the register held bit 1 at least once after the write: the write landed and the bit was NOT taken -- a pending trigger the core never executed)
+  S burst 0x0000000000584960:0x0000000000000012 0x0000000000585280:0x0000000000000012 0x0000000000585B40:0x0000000000000012 0x00000000005863E0:0x0000000000000012 0x0000000000586CA0:0x0000000000000012 0x0000000000587560:0x0000000000000012 0x0000000000587E20:0x0000000000000012 0x00000000005886E0:0x0000000000000012 0x0000000000588FA0:0x0000000000000012 0x0000000000589860:0x0000000000000012 0x000000000058A100:0x0000000000000012 0x000000000058A9C0:0x0000000000000012
+  S summary bit1_ever=1 running_ever=0 polls=0x00000000000204E1 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-BIT-WAS-VISIBLE (the register held bit 1 at least once after the write: the write landed and the bit was NOT taken -- a pending trigger the core never executed)
+
+### write-lands control and other verdict rows
+  A  write-lands    WRITE-PATH-LIVE
+  B  write-lands    WRITE-PATH-LIVE
+  R  bcr-after-reset=0x0000000000000110 VALID
+  R  reload         RELOADED
+  R  verified=0x000000005EC2A0A0 NOWRITE
+  R  alias-door     ALIAS-NO-EFFECT
+  S  bcr-after-reset=0x0000000000000110 VALID
+  S  reload         RELOADED
+  S  verified=0x000000005EC2A0A0 NOWRITE
+  R ctl-write-sweep w=0x0000000000000001->0x0000000000000010 w=0x0000000000000002->0x0000000000000012 w=0x0000000000000004->0x0000000000000010 w=0x0000000000000008->0x0000000000000010 w=0x0000000000000010->0x0000000000000010 w=0x0000000000000040->0x0000000000000050 (one write per bit, read back; 0x10 is STOPPED, RO)
+====================================================================================================
+LOG evidence/nv/t8b.log trace rows: 51
+
+### register trace (one row per phase)
+| att | phase | dt_ns | ctl | bcr | tcfg624 | tcfg600 | ent | alias130 | pc |
+|---|---|---|---|---|---|---|---|---|---|
+| A | pre | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| A | post | 0xACAE20 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| A | at10ms | 0xE340E0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| A | at100ms | 0x5F621A0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | pre | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | post | 0xABFD60 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | at10ms | 0xE2D300 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | at100ms | 0x5F5F4A0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| R | before-reset | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| R | after-reset | 0x13135A0 | 0xBADF5620 | 0x110 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 |
+| R | after-bcr | 0x22A2880 | 0x10 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| R | pre | 0x0 | 0x10 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| R | post | 0xABD1A0 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| R | at10ms | 0xE33E80 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| R | at100ms | 0x5F5FE40 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| S | before-reset | 0x0 | 0x50 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| S | after-bcr | 0x16751C0 | 0x10 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| S | pre | 0x0 | 0x10 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| S | post | 0xABC720 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| S | at10ms | 0xE2AC60 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| S | at100ms | 0x5F61A80 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+
+### the read nearest each trigger
+| att | ctl_first | at_ns | read_cost_ns | bit1 | running |
+|---|---|---|---|---|---|
+| A | 0x10 | None | 0x267 | 0 | 0 |
+| B | 0x10 | None | 0x268 | 0 | 0 |
+| R | 0x12 | None | 0x267 | 1 | 0 |
+| S | 0x12 | None | 0x268 | 1 | 0 |
+
+### burst (ptimer stamp : ctl) and summaries
+  A burst 0x0000000000586A80:0x0000000000000010 0x00000000005873E0:0x0000000000000010 0x0000000000587CA0:0x0000000000000010 0x0000000000588560:0x0000000000000010 0x0000000000588E40:0x0000000000000010 0x0000000000589700:0x0000000000000010 0x0000000000589FC0:0x0000000000000010 0x000000000058A880:0x0000000000000010 0x000000000058B140:0x0000000000000010 0x000000000058BA00:0x0000000000000010 0x000000000058C2C0:0x0000000000000010 0x000000000058CB80:0x0000000000000010
+  A summary bit1_ever=0 running_ever=0 polls=0x000000000001FFE1 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-NEVER-VISIBLE (bit 1 was 0 in every sample and the core never left STOPPED: the write was either discarded by the control logic or taken and refused within the first read; the write-lands row above is what separates those)
+  B burst 0x0000000000580E60:0x0000000000000010 0x0000000000581760:0x0000000000000010 0x0000000000582020:0x0000000000000010 0x00000000005828E0:0x0000000000000010 0x00000000005831A0:0x0000000000000010 0x0000000000583A60:0x0000000000000010 0x0000000000584320:0x0000000000000010 0x0000000000584C00:0x0000000000000010 0x00000000005854C0:0x0000000000000010 0x0000000000585D80:0x0000000000000010 0x0000000000586640:0x0000000000000010 0x0000000000586F00:0x0000000000000010
+  B summary bit1_ever=0 running_ever=0 polls=0x000000000001FEE1 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-NEVER-VISIBLE (bit 1 was 0 in every sample and the core never left STOPPED: the write was either discarded by the control logic or taken and refused within the first read; the write-lands row above is what separates those)
+  R burst 0x0000000000588340:0x0000000000000012 0x0000000000588C20:0x0000000000000012 0x0000000000589500:0x0000000000000012 0x0000000000589DC0:0x0000000000000012 0x000000000058A680:0x0000000000000012 0x000000000058AF40:0x0000000000000012 0x000000000058B800:0x0000000000000012 0x000000000058C0A0:0x0000000000000012 0x000000000058C960:0x0000000000000012 0x000000000058D240:0x0000000000000012 0x000000000058DB00:0x0000000000000012 0x000000000058E3C0:0x0000000000000012
+  R summary bit1_ever=1 running_ever=0 polls=0x0000000000020001 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-BIT-WAS-VISIBLE (the register held bit 1 at least once after the write: the write landed and the bit was NOT taken -- a pending trigger the core never executed)
+  S burst 0x000000000057F800:0x0000000000000012 0x0000000000580100:0x0000000000000012 0x00000000005809E0:0x0000000000000012 0x00000000005812C0:0x0000000000000012 0x0000000000581B80:0x0000000000000012 0x0000000000582420:0x0000000000000012 0x0000000000582CE0:0x0000000000000012 0x00000000005835A0:0x0000000000000012 0x0000000000583E60:0x0000000000000012 0x0000000000584740:0x0000000000000012 0x0000000000585000:0x0000000000000012 0x00000000005858C0:0x0000000000000012
+  S summary bit1_ever=1 running_ever=0 polls=0x0000000000020001 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-BIT-WAS-VISIBLE (the register held bit 1 at least once after the write: the write landed and the bit was NOT taken -- a pending trigger the core never executed)
+
+### write-lands control and other verdict rows
+  A  write-lands    WRITE-PATH-LIVE
+  B  write-lands    WRITE-PATH-LIVE
+  R  bcr-after-reset=0x0000000000000110 VALID
+  R  reload         RELOADED
+  R  verified=0x000000005EC2A0A0 NOWRITE
+  R  alias-door     ALIAS-NO-EFFECT
+  S  bcr-after-reset=0x0000000000000110 VALID
+  S  reload         RELOADED
+  S  verified=0x000000005EC2A0A0 NOWRITE
+  R ctl-write-sweep w=0x0000000000000001->0x0000000000000010 w=0x0000000000000002->0x0000000000000012 w=0x0000000000000004->0x0000000000000010 w=0x0000000000000008->0x0000000000000010 w=0x0000000000000010->0x0000000000000010 w=0x0000000000000040->0x0000000000000050 (one write per bit, read back; 0x10 is STOPPED, RO)
+====================================================================================================
+LOG evidence/nv/t8c.log trace rows: 51
+
+### register trace (one row per phase)
+| att | phase | dt_ns | ctl | bcr | tcfg624 | tcfg600 | ent | alias130 | pc |
+|---|---|---|---|---|---|---|---|---|---|
+| A | pre | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| A | post | 0xABC120 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| A | at10ms | 0xE2EB20 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| A | at100ms | 0x5F5F900 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | pre | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | post | 0xABA900 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | at10ms | 0xE2E240 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | at100ms | 0x5F61C60 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| R | before-reset | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| R | after-reset | 0x1313960 | 0xBADF5620 | 0x110 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 |
+| R | after-bcr | 0x22935E0 | 0x10 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| R | pre | 0x0 | 0x10 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| R | post | 0xAB60A0 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| R | at10ms | 0xE1EAA0 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| R | at100ms | 0x5F61000 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| S | before-reset | 0x0 | 0x50 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| S | after-bcr | 0x167F020 | 0x10 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| S | pre | 0x0 | 0x10 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| S | post | 0xAC6880 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| S | at10ms | 0xE2FBE0 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| S | at100ms | 0x5F5F9A0 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+
+### the read nearest each trigger
+| att | ctl_first | at_ns | read_cost_ns | bit1 | running |
+|---|---|---|---|---|---|
+| A | 0x10 | None | 0x260 | 0 | 0 |
+| B | 0x10 | None | 0x31B | 0 | 0 |
+| R | 0x12 | None | 0x260 | 1 | 0 |
+| S | 0x12 | None | 0x25F | 1 | 0 |
+
+### burst (ptimer stamp : ctl) and summaries
+  A burst 0x0000000000587A00:0x0000000000000010 0x0000000000588320:0x0000000000000010 0x0000000000588BE0:0x0000000000000010 0x00000000005894A0:0x0000000000000010 0x0000000000589D60:0x0000000000000010 0x000000000058A600:0x0000000000000010 0x000000000058AEC0:0x0000000000000010 0x000000000058B780:0x0000000000000010 0x000000000058C040:0x0000000000000010 0x000000000058C8E0:0x0000000000000010 0x000000000058D1A0:0x0000000000000010 0x000000000058DA60:0x0000000000000010
+  A summary bit1_ever=0 running_ever=0 polls=0x00000000000205E1 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-NEVER-VISIBLE (bit 1 was 0 in every sample and the core never left STOPPED: the write was either discarded by the control logic or taken and refused within the first read; the write-lands row above is what separates those)
+  B burst 0x0000000000588120:0x0000000000000010 0x0000000000588A00:0x0000000000000010 0x00000000005892C0:0x0000000000000010 0x0000000000589B80:0x0000000000000010 0x000000000058A420:0x0000000000000010 0x000000000058ACE0:0x0000000000000010 0x000000000058B5A0:0x0000000000000010 0x000000000058BE60:0x0000000000000010 0x000000000058C700:0x0000000000000010 0x000000000058CFA0:0x0000000000000010 0x000000000058D860:0x0000000000000010 0x000000000058E120:0x0000000000000010
+  B summary bit1_ever=0 running_ever=0 polls=0x0000000000020601 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-NEVER-VISIBLE (bit 1 was 0 in every sample and the core never left STOPPED: the write was either discarded by the control logic or taken and refused within the first read; the write-lands row above is what separates those)
+  R burst 0x0000000000584460:0x0000000000000012 0x0000000000584D40:0x0000000000000012 0x0000000000585600:0x0000000000000012 0x0000000000585EC0:0x0000000000000012 0x0000000000586760:0x0000000000000012 0x0000000000587020:0x0000000000000012 0x00000000005878C0:0x0000000000000012 0x0000000000588180:0x0000000000000012 0x0000000000588A60:0x0000000000000012 0x0000000000589300:0x0000000000000012 0x0000000000589BC0:0x0000000000000012 0x000000000058A480:0x0000000000000012
+  R summary bit1_ever=1 running_ever=0 polls=0x0000000000020601 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-BIT-WAS-VISIBLE (the register held bit 1 at least once after the write: the write landed and the bit was NOT taken -- a pending trigger the core never executed)
+  S burst 0x00000000005884E0:0x0000000000000012 0x0000000000588DE0:0x0000000000000012 0x0000000000589680:0x0000000000000012 0x0000000000589F40:0x0000000000000012 0x000000000058A800:0x0000000000000012 0x000000000058B0A0:0x0000000000000012 0x000000000058B960:0x0000000000000012 0x000000000058C220:0x0000000000000012 0x000000000058CAC0:0x0000000000000012 0x000000000058D380:0x0000000000000012 0x000000000058DC40:0x0000000000000012 0x000000000058E500:0x0000000000000012
+  S summary bit1_ever=1 running_ever=0 polls=0x0000000000020601 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-BIT-WAS-VISIBLE (the register held bit 1 at least once after the write: the write landed and the bit was NOT taken -- a pending trigger the core never executed)
+
+### write-lands control and other verdict rows
+  A  write-lands    WRITE-PATH-LIVE
+  B  write-lands    WRITE-PATH-LIVE
+  R  bcr-after-reset=0x0000000000000110 VALID
+  R  reload         RELOADED
+  R  verified=0x000000005EC2A0A0 NOWRITE
+  R  alias-door     ALIAS-NO-EFFECT
+  S  bcr-after-reset=0x0000000000000110 VALID
+  S  reload         RELOADED
+  S  verified=0x000000005EC2A0A0 NOWRITE
+  R ctl-write-sweep w=0x0000000000000001->0x0000000000000010 w=0x0000000000000002->0x0000000000000012 w=0x0000000000000004->0x0000000000000010 w=0x0000000000000008->0x0000000000000010 w=0x0000000000000010->0x0000000000000010 w=0x0000000000000040->0x0000000000000050 (one write per bit, read back; 0x10 is STOPPED, RO)
+====================================================================================================
+LOG evidence/nv/t9a.log trace rows: 51
+
+### register trace (one row per phase)
+| att | phase | dt_ns | ctl | bcr | tcfg624 | tcfg600 | ent | alias130 | pc |
+|---|---|---|---|---|---|---|---|---|---|
+| A | pre | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| A | post | 0xB241C0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| A | at10ms | 0xED8FA0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| A | at100ms | 0x5F615C0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | pre | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | post | 0xB1D400 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | at10ms | 0xED5A80 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | at100ms | 0x5F62A00 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| R | before-reset | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| R | after-reset | 0x13133C0 | 0xBADF5620 | 0x110 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 |
+| R | after-bcr | 0x2311960 | 0x10 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| R | pre | 0x0 | 0x10 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| R | post | 0xB2A500 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| R | at10ms | 0xEE3BE0 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| R | at100ms | 0x5F63400 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| S | before-reset | 0x0 | 0x10 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| S | after-bcr | 0x167F080 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| S | pre | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| S | post | 0xB16EC0 | 0x0 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 |
+| S | at10ms | 0xEDEBA0 | 0x0 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 |
+| S | at100ms | 0x5F60C60 | 0x0 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 |
+
+### the read nearest each trigger
+| att | ctl_first | at_ns | read_cost_ns | bit1 | running |
+|---|---|---|---|---|---|
+| A | 0x10 | None | 0x267 | 0 | 0 |
+| B | 0x10 | None | 0x267 | 0 | 0 |
+| R | 0x12 | None | 0x267 | 1 | 0 |
+| S | 0x0 | None | 0x268 | 0 | 1 |
+
+### burst (ptimer stamp : ctl) and summaries
+  A burst 0x00000000005DA180:0x0000000000000010 0x00000000005DAAC0:0x0000000000000010 0x00000000005DB380:0x0000000000000010 0x00000000005DBC60:0x0000000000000010 0x00000000005DC520:0x0000000000000010 0x00000000005DCDE0:0x0000000000000010 0x00000000005DD6A0:0x0000000000000010 0x00000000005DDF60:0x0000000000000010 0x00000000005DE840:0x0000000000000010 0x00000000005DF100:0x0000000000000010 0x00000000005DF9C0:0x0000000000000010 0x00000000005E0280:0x0000000000000010
+  A summary bit1_ever=0 running_ever=0 polls=0x000000000001F961 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-NEVER-VISIBLE (bit 1 was 0 in every sample and the core never left STOPPED: the write was either discarded by the control logic or taken and refused within the first read; the write-lands row above is what separates those)
+  B burst 0x00000000005D5480:0x0000000000000010 0x00000000005D5D80:0x0000000000000010 0x00000000005D6660:0x0000000000000010 0x00000000005D6F20:0x0000000000000010 0x00000000005D77E0:0x0000000000000010 0x00000000005D80A0:0x0000000000000010 0x00000000005D8960:0x0000000000000010 0x00000000005D9220:0x0000000000000010 0x00000000005D9AE0:0x0000000000000010 0x00000000005DA3A0:0x0000000000000010 0x00000000005DAC60:0x0000000000000010 0x00000000005DB520:0x0000000000000010
+  B summary bit1_ever=0 running_ever=0 polls=0x000000000001F901 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-NEVER-VISIBLE (bit 1 was 0 in every sample and the core never left STOPPED: the write was either discarded by the control logic or taken and refused within the first read; the write-lands row above is what separates those)
+  R burst 0x00000000005DC8C0:0x0000000000000012 0x00000000005DD1C0:0x0000000000000012 0x00000000005DDA80:0x0000000000000012 0x00000000005DE340:0x0000000000000012 0x00000000005DEC00:0x0000000000000012 0x00000000005DF4C0:0x0000000000000012 0x00000000005DFD80:0x0000000000000012 0x00000000005E0640:0x0000000000000012 0x00000000005E0F00:0x0000000000000012 0x00000000005E3820:0x0000000000000012 0x00000000005E4120:0x0000000000000012 0x00000000005E4A20:0x0000000000000012
+  R summary bit1_ever=1 running_ever=0 polls=0x000000000001F921 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-BIT-WAS-VISIBLE (the register held bit 1 at least once after the write: the write landed and the bit was NOT taken -- a pending trigger the core never executed)
+  S burst 0x00000000005DC860:0x0000000000000000 0x00000000005DD160:0x0000000000000000 0x00000000005DDA20:0x0000000000000000 0x00000000005DE2E0:0x0000000000000000 0x00000000005DEBA0:0x0000000000000000 0x00000000005DF460:0x0000000000000000 0x00000000005DFD20:0x0000000000000000 0x00000000005E05E0:0x0000000000000000 0x00000000005E0EA0:0x0000000000000000 0x00000000005E1760:0x0000000000000000 0x00000000005E2020:0x0000000000000000 0x00000000005E28E0:0x0000000000000000
+  S summary bit1_ever=0 running_ever=1 polls=0x000000000001F921 running_samples=0x000000000001F921 ctl_changes=0x0000000000000000 verdict=START-TOOK (bit 1 self-cleared because the core left STOPPED: the trigger reached the core)
+
+### write-lands control and other verdict rows
+  A  write-lands    WRITE-PATH-LIVE
+  B  write-lands    WRITE-PATH-LIVE
+  R  bcr-after-reset=0x0000000000000110 VALID
+  R  reload         RELOADED
+  R  verified=0x000000005EC2A0A0 NOWRITE
+  R  alias-door     ALIAS-NO-EFFECT
+  S  bcr-after-reset=0x0000000000000110 VALID
+  S  reload         RELOADED
+  S  verified=0x000000005EC2A0A0 NOWRITE
+  R ctl-write-sweep w=0x0000000000000001->0x0000000000000010 w=0x0000000000000002->0x0000000000000012 w=0x0000000000000004->0x0000000000000010 w=0x0000000000000008->0x0000000000000010 w=0x0000000000000010->0x0000000000000010 w=0x0000000000000040->0x0000000000000050 (one write per bit, read back; 0x10 is STOPPED, RO)
+====================================================================================================
+LOG evidence/nv/t9b.log trace rows: 51
+
+### register trace (one row per phase)
+| att | phase | dt_ns | ctl | bcr | tcfg624 | tcfg600 | ent | alias130 | pc |
+|---|---|---|---|---|---|---|---|---|---|
+| A | pre | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| A | post | 0xB08840 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| A | at10ms | 0xEBD040 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| A | at100ms | 0x5F60F00 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | pre | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | post | 0xB06460 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | at10ms | 0xEC5DC0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| B | at100ms | 0x5F61C80 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| R | before-reset | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| R | after-reset | 0x13139A0 | 0xBADF5620 | 0x110 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 |
+| R | after-bcr | 0x22EA000 | 0x10 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| R | pre | 0x0 | 0x10 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| R | post | 0xB0D600 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| R | at10ms | 0xEC2480 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| R | at100ms | 0x5F61B80 | 0x12 | 0x1 | 0x110 | 0x110 | 0x0 | 0x2 | 0xBADF5040 |
+| S | before-reset | 0x0 | 0x10 | 0x1 | 0x110 | 0x110 | 0x0 | 0x0 | 0xBADF5040 |
+| S | after-bcr | 0x167B0A0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| S | pre | 0x0 | 0x10 | 0x1 | 0x190 | 0x5 | 0x0 | 0x0 | 0xBADF5040 |
+| S | post | 0xB05A40 | 0x0 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 |
+| S | at10ms | 0xEB8B80 | 0x0 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 |
+| S | at100ms | 0x5F62940 | 0x0 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 | 0xBADF5620 |
+
+### the read nearest each trigger
+| att | ctl_first | at_ns | read_cost_ns | bit1 | running |
+|---|---|---|---|---|---|
+| A | 0x10 | None | 0x262 | 0 | 0 |
+| B | 0x10 | None | 0x25F | 0 | 0 |
+| R | 0x12 | None | 0x268 | 1 | 0 |
+| S | 0x0 | None | 0x25F | 0 | 1 |
+
+### burst (ptimer stamp : ctl) and summaries
+  A burst 0x00000000005CFF20:0x0000000000000010 0x00000000005D0860:0x0000000000000010 0x00000000005D1120:0x0000000000000010 0x00000000005D19E0:0x0000000000000010 0x00000000005D2280:0x0000000000000010 0x00000000005D2B40:0x0000000000000010 0x00000000005D3400:0x0000000000000010 0x00000000005D3CC0:0x0000000000000010 0x00000000005D4580:0x0000000000000010 0x00000000005D4E40:0x0000000000000010 0x00000000005D56E0:0x0000000000000010 0x00000000005D5FA0:0x0000000000000010
+  A summary bit1_ever=0 running_ever=0 polls=0x000000000001FE61 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-NEVER-VISIBLE (bit 1 was 0 in every sample and the core never left STOPPED: the write was either discarded by the control logic or taken and refused within the first read; the write-lands row above is what separates those)
+  B burst 0x00000000005D3480:0x0000000000000010 0x00000000005D3D60:0x0000000000000010 0x00000000005D4620:0x0000000000000010 0x00000000005D4EE0:0x0000000000000010 0x00000000005D57A0:0x0000000000000010 0x00000000005D6060:0x0000000000000010 0x00000000005D6900:0x0000000000000010 0x00000000005D71C0:0x0000000000000010 0x00000000005D7A80:0x0000000000000010 0x00000000005D8340:0x0000000000000010 0x00000000005D8C00:0x0000000000000010 0x00000000005D94A0:0x0000000000000010
+  B summary bit1_ever=0 running_ever=0 polls=0x000000000001FDC1 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-NEVER-VISIBLE (bit 1 was 0 in every sample and the core never left STOPPED: the write was either discarded by the control logic or taken and refused within the first read; the write-lands row above is what separates those)
+  R burst 0x00000000005CA260:0x0000000000000012 0x00000000005CAB60:0x0000000000000012 0x00000000005CB420:0x0000000000000012 0x00000000005CBCC0:0x0000000000000012 0x00000000005CC580:0x0000000000000012 0x00000000005CCEE0:0x0000000000000012 0x00000000005CD7E0:0x0000000000000012 0x00000000005CE0A0:0x0000000000000012 0x00000000005CE980:0x0000000000000012 0x00000000005CF240:0x0000000000000012 0x00000000005CFB00:0x0000000000000012 0x00000000005D0400:0x0000000000000012
+  R summary bit1_ever=1 running_ever=0 polls=0x000000000001FEC1 running_samples=0x0000000000000000 ctl_changes=0x0000000000000000 verdict=START-BIT-WAS-VISIBLE (the register held bit 1 at least once after the write: the write landed and the bit was NOT taken -- a pending trigger the core never executed)
+  S burst 0x00000000005C7F00:0x0000000000000000 0x00000000005C8800:0x0000000000000000 0x00000000005C90C0:0x0000000000000000 0x00000000005C9960:0x0000000000000000 0x00000000005CA220:0x0000000000000000 0x00000000005CAAE0:0x0000000000000000 0x00000000005CB3A0:0x0000000000000000 0x00000000005CBC60:0x0000000000000000 0x00000000005CC500:0x0000000000000000 0x00000000005CCDC0:0x0000000000000000 0x00000000005CD680:0x0000000000000000 0x00000000005CDF40:0x0000000000000000
+  S summary bit1_ever=0 running_ever=1 polls=0x0000000000020001 running_samples=0x0000000000020001 ctl_changes=0x0000000000000000 verdict=START-TOOK (bit 1 self-cleared because the core left STOPPED: the trigger reached the core)
+
+### write-lands control and other verdict rows
+  A  write-lands    WRITE-PATH-LIVE
+  B  write-lands    WRITE-PATH-LIVE
+  R  bcr-after-reset=0x0000000000000110 VALID
+  R  reload         RELOADED
+  R  verified=0x000000005EC2A0A0 NOWRITE
+  R  alias-door     ALIAS-NO-EFFECT
+  S  bcr-after-reset=0x0000000000000110 VALID
+  S  reload         RELOADED
+  S  verified=0x000000005EC2A0A0 NOWRITE
+  R ctl-write-sweep w=0x0000000000000001->0x0000000000000010 w=0x0000000000000002->0x0000000000000012 w=0x0000000000000004->0x0000000000000010 w=0x0000000000000008->0x0000000000000010 w=0x0000000000000010->0x0000000000000010 w=0x0000000000000040->0x0000000000000050 (one write per bit, read back; 0x10 is STOPPED, RO)
+
+wrote evidence/nv/sec2-trace.json

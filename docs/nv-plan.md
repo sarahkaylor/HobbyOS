@@ -17,7 +17,7 @@ driver VM 300, ROM-work VM 312. Build host `sarah@192.168.0.123`.
 | Level | Claim | Status |
 |---|---|---|
 | L1 | HobbyOS owns the card, verifies NVIDIA's firmware, and builds every structure GSP-RM will consume | **done, measured** |
-| L2 | FWSEC runs → SEC2 unfences → booter runs → GSP-RM reports `INIT_DONE` | **moved: FWSEC now addresses its image into IMEM and writes the verdict word; SEC2 still fenced** |
+| L2 | FWSEC runs → SEC2 unfences → booter runs → GSP-RM reports `INIT_DONE` | **moved: SEC2's START is now taken — reset, then the GSP's four fixups, and the core runs (round 7, execution measured). The booter's own verdict at ≥105 ms is the open measurement** |
 | L3 | A kernel submit reaches the 3-D engine and a clear reads back | not started |
 | L4 | nvk enumerates AD102; `vkcube` draws and presents | not started |
 | L5 | RimWorld / Cyberpunk render at 720p ≥30 fps | not started |
@@ -267,11 +267,56 @@ FAIL. Fixed with a tolerant parse plus a QEMU-free `--self-test`.
 
 ---
 
+### 2.6 Round 7 (2026-11-24): the START write lands — the sequence was refusing it
+
+Full report: `SWARM-REPORT-WP-A7.md`. Instrument: one register row per phase
+(`[NV-SEC2T]`), `ctl` + `0x841668` + `0x840624` + `0x840600` in the same row,
+read before the write, at the read nearest the write (2.27-2.43 us later), and
+at 10 ms / 100 ms; 8 boots on three images, every claim repeated in ≥3.
+
+Three states, one variable between each:
+
+| sequence | bit 1 after the write | core |
+|---|---|---|
+| A/B: the four fixups, **no falcon reset** (rounds 1-6) | cleared by 2.3 us | never leaves STOPPED (0 of ~131 k samples) |
+| R: falcon reset (`0x048 &= ~3`, `0x014 = ones`, pulse `0x3C0`), no fixups | **latched** (`ctl=0x12` at 100 ms, `0x130` mirrors it) | still stopped |
+| S: reset, **then** select clear, **then** the four fixups | **consumed** (`ctl=0x0`) | **runs**: 129,313/129,313 and 131,073/131,073 samples running over 100 ms |
+
+So the trigger was being refused (cleared without a start) in every state this
+project had run, and it is a real start once the falcon has been reset and the
+GSP's four fixups — `0x624 |= bit 7`, `0x10C = 0`, `0x600 = 5`,
+`0x084 <- PMC_BOOT_0` — are written **after** that reset. Both halves are
+load-bearing; the halt step is what skips the first (it issues UC_CTRL's reset
+bits only when ctl is unreadable or not already STOPPED, and on this card ctl is
+always readable and STOPPED).
+
+Three corrections this round makes to earlier rounds:
+
+* **2.3 us is the instrument.** `wr_to_read_ns` = 2272-2304 ns in all three
+  states, including the one where the core runs. Round 6's "START → STOPPED at
+  2.3 us" was the write+read round trip.
+* **The fence follows state, not privilege.** After a reset `0x841668` reads
+  `0x110` (RISCV|BRFETCH) and the whole falcon page answers `0xBADF5620` until
+  the select is cleared; once the core runs, everything except `ctl` fences
+  again. Both are visibility states, grounded in rows.
+* **A read-back is not evidence, but a latch is.** `0x104` and `0x084` take a
+  value that cannot occur spontaneously and read it back (16/16 attempts), the
+  post-reset START bit latches and is plain RW in a one-write-per-bit sweep, and
+  `0x130` mirrors bit 1 but does not set it. The write reaches the block in
+  every state; what changes is whether the core takes it.
+
+Open: does the booter complete (poll the metadata `verified` word ≥300 ms — S's
+core is still running at +100 ms and the reference's own halt is ~105.8 ms);
+which of the four fixups is load-bearing (one per boot); and the entry/IMEM
+layout if the core runs but never writes the verdict.
+
+---
+
 ## 3. Work packages (parallel, each with a gate)
 
 | WP | Scope | Gate | Needs 4090? | Status 2026-11-23 |
 |---|---|---|---|---|
-| **A. FWSEC** | F1-F5, then the launch | `0x1438` hi16 becomes a real code **and** SEC2 unfences | yes | **partial**: 3 mechanisms fixed, image lands, verdict word written; SEC2 still fenced |
+| **A. FWSEC** | F1-F5, then the launch | `0x1438` hi16 becomes a real code **and** SEC2 unfences | yes | **partial**: 3 mechanisms fixed, image lands, verdict word written; and (round 7) SEC2's START is taken once the falcon is reset then given the GSP's four fixups — the core runs. **Next: the booter's own verdict at ≥105 ms** |
 | **B. fuses** | fuse bitmask vs `SignatureVersions` | non-zero AND, documented | yes, read-only | **done**: `COMPATIBLE`, sig index 1 |
 | **C. RPC (offline)** | `docs/nv-rpc-implementation-spec.md` — pure half only | the spec's 24 cases pass in the kernel unit tier on synthetic queues | **no** | **done**: T-01…T-24, two mutation runs recorded; wired into the boot path by G |
 | **D. DMA facility** | `nv_dma.{c,h}`: bus address ≠ phys, identity guard, translation probe | a unit test rejects a mapping whose `bus != phys` under translation | **no** | **done**: 13 cases, two red runs |

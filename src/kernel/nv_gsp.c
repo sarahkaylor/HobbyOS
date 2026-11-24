@@ -3783,6 +3783,7 @@ static void sec2_core_select(struct nv_dev *d) {
 struct sec2_img {
   uint8_t *file;      /* the whole booter file, host virtual (patched in place) */
   uint32_t imem_file; /* file offset of the IMEM image (the landing map's base) */
+  uint32_t imem_len;  /* IMEM image size (needed to reload after a scrub) */
   uint32_t dmem_file; /* file offset of the DMEM image */
   uint32_t dmem_len;
   uint32_t sig_off;   /* file offset of the production-signature block */
@@ -3793,6 +3794,538 @@ struct sec2_img {
   uint64_t meta_phys;
   uint8_t *meta;      /* host virtual; the verified word lives inside */
 };
+
+/* ---- register trace: does the START write reach the core? ---------------
+ *
+ * Round 6 measured START -> STOPPED at 2.3 us and found transitions=0: ctl
+ * carried STOPPED (bit 4, RO) before the write and in every one of ~2.7 M
+ * samples after it.  That says the core never left STOPPED.  It does not say
+ * why, and the three causes lead to different next moves:
+ *
+ *   refused   the falcon's control logic discards the trigger because the core
+ *             is held (RISC-V selected, engine still in reset).  Fix: the
+ *             select/reset sequence, not the image.
+ *   dropped   the write never reaches the register file (dead window or a write
+ *             gate).  Fix: another door (the 0x130 alias) or another engine.
+ *   consumed  the bit latched and was taken: the core started and died inside
+ *             the ROM before the first read.  Fix: the image, or the ROM's own
+ *             rejection channel -- the only one of the three that puts a boot
+ *             ROM rejection on the table.
+ *
+ * A read-back alone cannot decide: no bit of ctl is sticky (the trigger
+ * self-clears when taken and is discarded when not), so "wrote 0x2, read 0x10"
+ * proves nothing by itself.  Two things make the rows mean something:
+ *
+ *   1. the same window is proved writable first, with registers that ARE
+ *      sticky: UC_ENTRY (0x104) and FALCON_RM (0x084) written with a value that
+ *      cannot appear there by themselves, read back, then restored;
+ *   2. the trigger is judged by what the core DID (STOPPED clearing, DMEM
+ *      changing, the booter's own verdict word), never by the bit alone.
+ *
+ * Every row carries ctl, the core-select word (0x841668) and the two FBIF
+ * words the DMA configuration lives in (0x840624 ALLOW_PHYS_NO_CTX, 0x840600
+ * TRANSCFG[0]), so a select or a context that differs between boots shows up
+ * in the same row as the trigger.  UC_CTRL_ALIAS (0x130) is carried too: it
+ * mirrors the trigger latch, which is what distinguishes "the bit never landed"
+ * from "the bit is being held".
+ */
+#define NV_SEC2_BCR 0x841668u
+#define NV_SEC2_FBIF_CFG624 (NV_FALCON_SEC2_BASE + 0x624)
+#define NV_SEC2_UC_CTRL_ALIAS (NV_FALCON_SEC2_BASE + 0x130)
+
+/* One row of the trace.  `ctl`/`ctl_known` let a caller print the value it read
+ * immediately after the trigger as that row's ctl, so the row nearest the write
+ * is the read nearest the write rather than the next one. */
+static void sec2_row(struct nv_dev *d, const char *tag, const char *phase,
+                     uint64_t t0, int have_t, uint32_t ctl, int ctl_known) {
+  const uint32_t b = NV_FALCON_SEC2_BASE;
+  uint64_t now = 0;
+  int have_now = have_t && nv_timer_read(d, &now) == 0;
+  uart_puts("[NV-SEC2T] ");
+  uart_puts(tag);
+  uart_puts(" ");
+  uart_puts(phase);
+  uart_puts(" dt_ns=");
+  uart_print_hex(have_now ? (now - t0) : 0u);
+  uart_puts(" ctl=");
+  uart_print_hex(ctl_known ? ctl : nv_rd32(d, b + NV_FALCON_UC_CTRL));
+  uart_puts(" bcr=");
+  uart_print_hex(nv_rd32(d, NV_SEC2_BCR));
+  uart_puts(" tcfg624=");
+  uart_print_hex(nv_rd32(d, NV_SEC2_FBIF_CFG624));
+  uart_puts(" tcfg600=");
+  uart_print_hex(nv_rd32(d, b + 0x600));
+  uart_puts(" ent=");
+  uart_print_hex(nv_rd32(d, b + NV_FALCON_UC_ENTRY));
+  uart_puts(" st4c=");
+  uart_print_hex(nv_rd32(d, b + 0x04C));
+  uart_puts(" hw0f4=");
+  uart_print_hex(nv_rd32(d, b + 0x0F4));
+  uart_puts(" rm84=");
+  uart_print_hex(nv_rd32(d, b + 0x084));
+  uart_puts(" sec240=");
+  uart_print_hex(nv_rd32(d, b + 0x240));
+  uart_puts(" alias130=");
+  uart_print_hex(nv_rd32(d, NV_SEC2_UC_CTRL_ALIAS));
+  uart_puts(" pc=");
+  uart_print_hex(nv_rd32(d, b + NV_FALCON_PC));
+  uart_puts(" mb0=");
+  uart_print_hex(nv_rd32(d, b + 0x040));
+  uart_puts("\n");
+}
+
+/* Is this window's register file accepting host writes at all?  Two registers
+ * whose value can only come from us, written and read back, then restored.  A
+ * positive row here is what makes a later "the START bit never appeared" a
+ * statement about the control logic instead of about a dead window. */
+static void sec2_write_land_control(struct nv_dev *d, const char *tag) {
+  const uint32_t b = NV_FALCON_SEC2_BASE;
+  const uint32_t kA = 0xA5C33C5Au, kB = 0x5A3CC3A5u;
+  uint32_t e_pre = nv_rd32(d, b + NV_FALCON_UC_ENTRY);
+  nv_wr32(d, b + NV_FALCON_UC_ENTRY, kA);
+  uint32_t e_back = nv_rd32(d, b + NV_FALCON_UC_ENTRY);
+  nv_wr32(d, b + NV_FALCON_UC_ENTRY, e_pre);
+  uint32_t r_pre = nv_rd32(d, b + 0x084);
+  nv_wr32(d, b + 0x084, kB);
+  uint32_t r_back = nv_rd32(d, b + 0x084);
+  nv_wr32(d, b + 0x084, r_pre);
+  uart_puts("[NV-SEC2T] ");
+  uart_puts(tag);
+  uart_puts(" write-lands ent_pre=");
+  uart_print_hex(e_pre);
+  uart_puts(" wrote=");
+  uart_print_hex(kA);
+  uart_puts(" ent_back=");
+  uart_print_hex(e_back);
+  uart_puts(" rm_pre=");
+  uart_print_hex(r_pre);
+  uart_puts(" wrote=");
+  uart_print_hex(kB);
+  uart_puts(" rm_back=");
+  uart_print_hex(r_back);
+  int landed = (e_back == kA) + (r_back == kB);
+  uart_puts(landed == 2
+                ? " verdict=WRITE-PATH-LIVE (two non-trigger registers took a "
+                  "value that could not appear there by themselves and read it "
+                  "back: the SEC2 register file accepts host writes, so a START "
+                  "that never appears is the control logic's decision, not a "
+                  "dead bus)\n"
+                : (landed ? " verdict=PARTIAL (one of the two restored: report "
+                            "which, the other register may be write-gated)\n"
+                          : " verdict=WRITE-PATH-DEAD (neither register took the "
+                            "value: no claim about START is meaningful until "
+                            "this is explained)\n"));
+}
+
+/* Fire START once and watch what the window and the core do with it.
+ *
+ * The first read after the write is taken as the row's ctl, then a burst of
+ * back-to-back reads bounds how long a transient bit could have been visible,
+ * then rows at 10 ms and 100 ms.  The write is bracketed by two ptimer reads
+ * so the gap between the write and the first look at the register is measured
+ * (at_ns is the interval from the write returning to the read returning), not
+ * inferred from a round-trip cost measured elsewhere.  Returns 1 when the core
+ * reacted in any sample (STOPPED cleared, or bit 1 was ever observable). */
+static int sec2_start_trace(struct nv_dev *d, const char *tag) {
+  const uint32_t b = NV_FALCON_SEC2_BASE;
+  uint64_t t0 = 0;
+  int have_t = nv_timer_read(d, &t0) == 0;
+
+  /* The cost of one ctl read through this window, in this boot: any interval
+   * at or below it is a bound, and the rows say so. */
+  uint64_t rc0 = 0, rc1 = 0, read_cost_ns = 0;
+  {
+    uint32_t sink = 0;
+    int have_c = nv_timer_read(d, &rc0) == 0;
+    for (int i = 0; i < 32; i++) sink ^= nv_rd32(d, b + NV_FALCON_UC_CTRL);
+    (void)sink;
+    if (have_c && nv_timer_read(d, &rc1) == 0) read_cost_ns = (rc1 - rc0) / 32u;
+  }
+
+  sec2_row(d, tag, "pre", 0, 0, 0, 0);
+
+  uint64_t tw = 0, tf = 0;
+  int have_tw = have_t && nv_timer_read(d, &tw) == 0;
+  nv_wr32(d, b + NV_FALCON_UC_CTRL, NV_FALCON_UC_CTRL_START);
+  uint32_t ctl_first = nv_rd32(d, b + NV_FALCON_UC_CTRL);
+  int have_tf = have_t && nv_timer_read(d, &tf) == 0;
+
+  int bit1_seen = (ctl_first & NV_FALCON_UC_CTRL_START) ? 1 : 0;
+  int ran_seen = !(ctl_first & NV_FALCON_UC_CTRL_STOPPED);
+
+  uart_puts("[NV-SEC2T] ");
+  uart_puts(tag);
+  uart_puts(" post_first ctl=");
+  uart_print_hex(ctl_first);
+  uart_puts(" wr_to_read_ns=");
+  uart_print_hex((have_tw && have_tf) ? (tf - tw) : 0u);
+  uart_puts(" since_t0_ns=");
+  uart_print_hex(have_tf ? (tf - t0) : 0u);
+  uart_puts(" read_cost_ns=");
+  uart_print_hex(read_cost_ns);
+  uart_puts(" alias130=");
+  uart_print_hex(nv_rd32(d, NV_SEC2_UC_CTRL_ALIAS));
+  uart_puts(" bit1=");
+  print_int(bit1_seen);
+  uart_puts(" running=");
+  print_int(ran_seen);
+  uart_puts("\n");
+
+  uart_puts("[NV-SEC2T] ");
+  uart_puts(tag);
+  uart_puts(" burst");
+  for (int i = 0; i < 12; i++) {
+    uint32_t v = nv_rd32(d, b + NV_FALCON_UC_CTRL);
+    uint64_t ts = 0;
+    int have_s = nv_timer_read(d, &ts) == 0;
+    if (v & NV_FALCON_UC_CTRL_START) bit1_seen = 1;
+    if (!(v & NV_FALCON_UC_CTRL_STOPPED)) ran_seen = 1;
+    uart_puts(" ");
+    uart_print_hex(have_s ? (ts - t0) : 0u);
+    uart_puts(":");
+    uart_print_hex(v);
+  }
+  uart_puts("\n");
+
+  sec2_row(d, tag, "post", t0, have_t, 0, 0);
+
+  /* 10 ms and 100 ms rows, plus a transition count over the whole span, so
+   * "already stopped, and still stopped" is a measurement rather than one
+   * sample's opinion. */
+  uint32_t last = ctl_first;
+  uint64_t polls = 0, run_samples = 0, changes = 0;
+  int did10 = 0, did100 = 0;
+  for (int i = 0; i < 4000000; i++) {
+    uint32_t v = nv_rd32(d, b + NV_FALCON_UC_CTRL);
+    polls++;
+    if (!(v & NV_FALCON_UC_CTRL_STOPPED)) {
+      run_samples++;
+      ran_seen = 1;
+    }
+    if (v & NV_FALCON_UC_CTRL_START) bit1_seen = 1;
+    if (v != last) {
+      changes++;
+      last = v;
+    }
+    if ((i & 0x1f) == 0 && have_t) {
+      uint64_t n = 0;
+      if (nv_timer_read(d, &n) == 0) {
+        if (!did10 && n - t0 >= 10000000ULL) {
+          did10 = 1;
+          sec2_row(d, tag, "at10ms", t0, have_t, 0, 0);
+        }
+        if (!did100 && n - t0 >= 100000000ULL) {
+          did100 = 1;
+          sec2_row(d, tag, "at100ms", t0, have_t, 0, 0);
+          break;
+        }
+      }
+    }
+  }
+  uart_puts("[NV-SEC2T] ");
+  uart_puts(tag);
+  uart_puts(" summary bit1_ever=");
+  print_int(bit1_seen);
+  uart_puts(" running_ever=");
+  print_int(ran_seen);
+  uart_puts(" polls=");
+  uart_print_hex(polls);
+  uart_puts(" running_samples=");
+  uart_print_hex(run_samples);
+  uart_puts(" ctl_changes=");
+  uart_print_hex(changes);
+  uart_puts(bit1_seen
+                ? " verdict=START-BIT-WAS-VISIBLE (the register held bit 1 at "
+                  "least once after the write: the write landed and the bit was "
+                  "NOT taken -- a pending trigger the core never executed)\n"
+                : (ran_seen ? " verdict=START-TOOK (bit 1 self-cleared because the "
+                              "core left STOPPED: the trigger reached the core)\n"
+                            : " verdict=START-NEVER-VISIBLE (bit 1 was 0 in every "
+                              "sample and the core never left STOPPED: the write "
+                              "was either discarded by the control logic or taken "
+                              "and refused within the first read; the write-lands "
+                              "row above is what separates those)\n"));
+  return bit1_seen || ran_seen;
+}
+
+/* ---- the reset, and the two things it changes ---------------------------
+ *
+ * The GSP's own path applies a full falcon reset before its load and records
+ * that the reset is REQUIRED for STARTCPU to be accepted ("without it the core
+ * answers START with 'still halted'").  SEC2 has never received it: the halt
+ * step only issues UC_CTRL's reset bits, and only when ctl is unreadable or not
+ * already stopped -- which on this card is never, because STOPPED is always
+ * set.  So the GSP sequence runs here: 0x048 &= ~3, 0x014 = all ones, pulse
+ * 0x3c0, then the ~20 ms scrub.
+ */
+static void sec2_reset_apply(struct nv_dev *d, const char *tag, uint64_t t0,
+                             int have_t) {
+  const uint32_t b = NV_FALCON_SEC2_BASE;
+  uint32_t v48 = nv_rd32(d, b + 0x048);
+  nv_wr32(d, b + 0x048, v48 & ~3u);
+  nv_wr32(d, b + 0x014, 0xffffffffu);
+  nv_wr32(d, b + 0x3C0, 1);
+  for (volatile int spin = 0; spin < 2000; spin++) {
+  }
+  nv_wr32(d, b + 0x3C0, 0);
+  uart_puts("[NV-SEC2T] ");
+  uart_puts(tag);
+  uart_puts(" reset-issued 48was=");
+  uart_print_hex(v48);
+  uart_puts(" 48now=");
+  uart_print_hex(nv_rd32(d, b + 0x048));
+  uart_puts(" 014now=");
+  uart_print_hex(nv_rd32(d, b + 0x014));
+  uart_puts(" (GSP sequence: 0x048 &= ~3, 0x014 = all ones, pulse 0x3c0)\n");
+  if (have_t) {
+    uint64_t n = 0;
+    for (int i = 0; i < 200000; i++) {
+      if (nv_timer_read(d, &n) == 0 && n - t0 > 20000000ULL) break;
+    }
+  } else {
+    for (volatile int spin = 0; spin < 2000000; spin++) {
+    }
+  }
+}
+
+/* The state fixups the GSP path applies at exactly this point in its load:
+ * FALCON_RM <- PMC_BOOT_0, 0x624 bit 7 (ALLOW_PHYS_NO_CTX), 0x10C = 0, and the
+ * context word in 0x600.  After a reset all four are back at their reset
+ * values (measured on this card: 0x624 0x190 -> 0x110, 0x600 0x5 -> 0x110,
+ * 0x084 pmc_boot0 -> 0), so a comparison of "reset only" against "reset plus
+ * the state the GSP leaves behind" is a real bisect and not a re-run. */
+static void sec2_state_fixups(struct nv_dev *d, const char *tag) {
+  const uint32_t b = NV_FALCON_SEC2_BASE;
+  uint32_t v624 = nv_rd32(d, NV_SEC2_FBIF_CFG624);
+  nv_wr32(d, NV_SEC2_FBIF_CFG624, v624 | (1u << 7));
+  nv_wr32(d, b + 0x10C, 0);
+  nv_wr32(d, b + 0x600, NV_LOCAL_TRANSCFG_COHERENT);
+  nv_wr32(d, b + 0x084, nv_rd32(d, 0x000000));
+  uart_puts("[NV-SEC2T] ");
+  uart_puts(tag);
+  uart_puts(" state-fixups 624=");
+  uart_print_hex(v624);
+  uart_puts("->");
+  uart_print_hex(nv_rd32(d, NV_SEC2_FBIF_CFG624));
+  uart_puts(" 600=");
+  uart_print_hex(nv_rd32(d, b + 0x600));
+  uart_puts(" 10c=");
+  uart_print_hex(nv_rd32(d, b + 0x10C));
+  uart_puts(" rm84=");
+  uart_print_hex(nv_rd32(d, b + 0x084));
+  uart_puts(" (the GSP's own pre-load state)\n");
+}
+
+/* Clear the core select AFTER the reset, and report what the reset put there.
+ * Measured: the reset re-arms 0x1668 to 0x110 (RISCV|BRFETCH) and the falcon
+ * page goes back to the fence word until the select is cleared again. */
+static void sec2_select_clear(struct nv_dev *d, const char *tag) {
+  uint32_t bcr = nv_rd32(d, NV_SEC2_BCR);
+  if (bcr == NV_REG_FENCED || bcr == 0xffffffffu) {
+    uart_puts("[NV-SEC2T] ");
+    uart_puts(tag);
+    uart_puts(" bcr unreadable=");
+    uart_print_hex(bcr);
+    uart_puts(" (the clear is still issued)\n");
+    nv_wr32(d, NV_SEC2_BCR, 0);
+    return;
+  }
+  if (!(bcr & NV_GSP_BCR_RISCV)) {
+    uart_puts("[NV-SEC2T] ");
+    uart_puts(tag);
+    uart_puts(" bcr=");
+    uart_print_hex(bcr);
+    uart_puts(" already-falcon-selected: no clear needed\n");
+    return;
+  }
+  nv_wr32(d, NV_SEC2_BCR, 0);
+  uint32_t b2 = bcr;
+  for (int i = 0; i < 100000; i++) {
+    b2 = nv_rd32(d, NV_SEC2_BCR);
+    if (b2 & NV_GSP_BCR_VALID) break;
+  }
+  uart_puts("[NV-SEC2T] ");
+  uart_puts(tag);
+  uart_puts(" bcr-after-reset=");
+  uart_print_hex(bcr);
+  uart_puts(" RE-ARMED-RISCV -> cleared: ");
+  uart_print_hex(b2);
+  uart_puts((b2 & NV_GSP_BCR_VALID)
+                ? " verdict=VALID (falcon core selected again)\n"
+                : " verdict=VALID-NEVER-SET\n");
+}
+
+/* What else lives in the select block?  Read-only, 0x1600..0x169c, taken while
+ * the RISC-V core is still the selected one -- i.e. the state the part comes up
+ * in after a real reset and the state this driver has never looked at. */
+static void sec2_select_block_dump(struct nv_dev *d, const char *tag) {
+  for (uint32_t off = 0x1600; off < 0x16A0; off += 0x20) {
+    uart_puts("[NV-SEC2T] ");
+    uart_puts(tag);
+    uart_puts(" selblk@");
+    uart_print_hex(NV_FALCON_SEC2_BASE + off);
+    for (uint32_t i = 0; i < 8; i++) {
+      uart_puts(" ");
+      uart_print_hex(nv_rd32(d, NV_FALCON_SEC2_BASE + off + i * 4));
+    }
+    uart_puts("\n");
+  }
+}
+
+static void sec2_reload(struct nv_dev *d, const struct sec2_img *im,
+                        const char *tag) {
+  const uint32_t b = NV_FALCON_SEC2_BASE;
+  int rc = falcon_pio_block(d, b, im->file + im->imem_file, im->imem_len, 0, 1, 1);
+  if (rc == 0)
+    rc = falcon_pio_block(d, b, im->file + im->dmem_file, im->dmem_len, 0, 0, 0);
+  uart_puts("[NV-SEC2T] ");
+  uart_puts(tag);
+  uart_puts(" reload imem=");
+  uart_print_hex(im->imem_len);
+  uart_puts(" dmem=");
+  uart_print_hex(im->dmem_len);
+  uart_puts(" rc=");
+  print_int(rc);
+  uart_puts(rc == 0 ? " verdict=RELOADED (after the reset, not before it)\n"
+                    : " verdict=RELOAD-FAILED (report the port, no start claim "
+                      "from this variant)\n");
+}
+
+/* The BROM parameters, the mailbox sentinel and the verdict word, exactly as
+ * the two signature attempts do them. */
+static void sec2_arm(struct nv_dev *d, const struct sec2_img *im) {
+  const uint32_t b = NV_FALCON_SEC2_BASE;
+  nv_wr32(d, NV_BROM_PARAADDR0, im->patch_off);
+  nv_wr32(d, NV_BROM_ENGIDMASK, 1);
+  nv_wr32(d, NV_BROM_CURR_UCODE_ID, im->ucode_id);
+  nv_wr32(d, NV_BROM_MOD_SEL, 1);
+  nv_wr32(d, b + NV_FALCON_UC_ENTRY, im->bootvec);
+  nv_wr32(d, b + 0x040, (uint32_t)im->meta_phys);
+  nv_wr32(d, b + 0x044, (uint32_t)(im->meta_phys >> 32));
+  if (im->meta) nv_meta_put64(im->meta + NV_WPR_OFF_VERIFIED, 0x5EC2A0A0ULL);
+}
+
+static void sec2_verdict_row(const struct sec2_img *im, const char *tag) {
+  uint64_t v = im->meta ? nv_meta_get64(im->meta + NV_WPR_OFF_VERIFIED) : 0;
+  uart_puts("[NV-SEC2T] ");
+  uart_puts(tag);
+  uart_puts(" verified=");
+  uart_print_hex(v);
+  uart_puts(v == NV_WPR_VERIFIED_WORD
+                ? " verdict=RAN (the booter wrote its own acknowledgement)\n"
+                : " verdict=NOWRITE (the metadata kept its sentinel: the boot "
+                  "ROM did not run, or ran and rejected before its verdict)\n");
+}
+
+/* ---- variant R: the reset, and nothing else -----------------------------
+ *
+ * Runs after both signature attempts, as the last thing this driver does to the
+ * card in the boot, so it cannot disturb their verdicts.  It answers three
+ * questions in one deploy: does a real falcon reset re-arm the core select,
+ * does it change what START does, and (if the trigger latches) is the latch the
+ * same state a second door -- the 0x130 alias -- also sees.
+ */
+static void sec2_reset_variant(struct nv_dev *d, const struct sec2_img *im) {
+  const uint32_t b = NV_FALCON_SEC2_BASE;
+  const char *tag = "R";
+  uint64_t t0 = 0;
+  int have_t = nv_timer_read(d, &t0) == 0;
+
+  sec2_row(d, tag, "before-reset", 0, 0, 0, 0);
+  sec2_reset_apply(d, tag, t0, have_t);
+  sec2_row(d, tag, "after-reset", t0, have_t, 0, 0);
+  sec2_select_block_dump(d, tag);
+  sec2_select_clear(d, tag);
+  sec2_row(d, tag, "after-bcr", t0, have_t, 0, 0);
+  sec2_reload(d, im, tag);
+  sec2_arm(d, im);
+  (void)sec2_start_trace(d, tag);
+  sec2_verdict_row(im, tag);
+
+  /* A second door to the same latch: UC_CTRL_ALIAS.  The latch is cleared
+   * first (write 0 to ctl) so the alias write is the only thing that could set
+   * it -- with bit 1 already set from the trace above, a no-op would read as
+   * "no effect" for the wrong reason (measured in the first cut of this
+   * variant: ctl 0x12 -> 0x12). */
+  {
+    nv_wr32(d, b + NV_FALCON_UC_CTRL, 0);
+    uint32_t ctl_clear = nv_rd32(d, b + NV_FALCON_UC_CTRL);
+    uint32_t al_clear = nv_rd32(d, NV_SEC2_UC_CTRL_ALIAS);
+    nv_wr32(d, NV_SEC2_UC_CTRL_ALIAS, NV_FALCON_UC_CTRL_START);
+    uint32_t ctl_post = nv_rd32(d, b + NV_FALCON_UC_CTRL);
+    uint32_t al_post = nv_rd32(d, NV_SEC2_UC_CTRL_ALIAS);
+    uart_puts("[NV-SEC2T] ");
+    uart_puts(tag);
+    uart_puts(" alias-door ctl-cleared=");
+    uart_print_hex(ctl_clear);
+    uart_puts(" alias-cleared=");
+    uart_print_hex(al_clear);
+    uart_puts(" after-alias-start ctl=");
+    uart_print_hex(ctl_post);
+    uart_puts(" alias=");
+    uart_print_hex(al_post);
+    uart_puts((ctl_post & NV_FALCON_UC_CTRL_START) ||
+                      (al_post & NV_FALCON_UC_CTRL_START)
+                  ? " verdict=ALIAS-SETS-THE-TRIGGER (a second register reaches "
+                    "the same latch)\n"
+                  : " verdict=ALIAS-NO-EFFECT (the alias write did not set the "
+                    "trigger that 0x840100 sets)\n");
+  }
+
+  /* ---- last: does ctl respond to ANY write? ----------------------------
+   *
+   * Destructive on purpose (the reset bits scrub memories) and therefore last:
+   * one write per bit, read back, with the window's own write path already
+   * proved live above.  A bit that sets and stays set is a latch the control
+   * logic keeps; a bit that never appears is one it clears. */
+  {
+    static const uint32_t kBits[6] = {1u, 2u, 4u, 8u, 0x10u, 0x40u};
+    uart_puts("[NV-SEC2T] ");
+    uart_puts(tag);
+    uart_puts(" ctl-write-sweep");
+    for (int i = 0; i < 6; i++) {
+      nv_wr32(d, b + NV_FALCON_UC_CTRL, kBits[i]);
+      uart_puts(" w=");
+      uart_print_hex(kBits[i]);
+      uart_puts("->");
+      uart_print_hex(nv_rd32(d, b + NV_FALCON_UC_CTRL));
+    }
+    uart_puts(" (one write per bit, read back; 0x10 is STOPPED, RO)\n");
+  }
+}
+
+/* ---- variant S: reset, then the state the GSP leaves behind -------------
+ *
+ * R says what a bare reset does.  S adds back the four state fixups the GSP
+ * path applies at the same point (0x624 bit 7, 0x10C = 0, 0x600 = 5,
+ * FALCON_RM <- PMC_BOOT_0) and repeats the identical START.  The difference
+ * between the two is then attributable to those writes and nothing else: same
+ * image, same transport, same entry, same mailbox, same boot.
+ */
+static void sec2_reset_fixup_variant(struct nv_dev *d,
+                                     const struct sec2_img *im) {
+  const char *tag = "S";
+  uint64_t t0 = 0;
+  int have_t = nv_timer_read(d, &t0) == 0;
+
+  /* R's one-write-per-bit sweep leaves ctl holding its last value (0x50); start
+   * from a cleared control word so this variant's "before" row is clean. */
+  nv_wr32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL, 0);
+  sec2_row(d, tag, "before-reset", 0, 0, 0, 0);
+  sec2_reset_apply(d, tag, t0, have_t);
+  /* Clear the select FIRST, then apply the fixups: while the RISC-V core is
+   * selected the falcon page answers the fence word, so a read-modify-write of
+   * 0x624 issued before the clear writes the fence word back (measured in the
+   * first cut of this variant: 0x624 read 0xBADF5620 and the write did not
+   * land at all). */
+  sec2_select_clear(d, tag);
+  sec2_state_fixups(d, tag);
+  sec2_row(d, tag, "after-bcr", t0, have_t, 0, 0);
+  sec2_reload(d, im, tag);
+  sec2_arm(d, im);
+  (void)sec2_start_trace(d, tag);
+  sec2_verdict_row(im, tag);
+}
 
 static int sec2_attempt(struct nv_dev *d, const struct sec2_img *im,
                         uint32_t sig_idx, const char *tag);
@@ -3964,27 +4497,14 @@ static int sec2_attempt(struct nv_dev *d, const struct sec2_img *im,
   nv_wr32(d, NV_FALCON_SEC2_BASE + 0x040, (uint32_t)im->meta_phys);
   nv_wr32(d, NV_FALCON_SEC2_BASE + 0x044, (uint32_t)(im->meta_phys >> 32));
 
-  nv_wr32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL, NV_FALCON_UC_CTRL_START);
-  /* Where does the core go?  PC (0xFF0) answers "did anything execute at all",
-   * which is the one question the verdicts cannot: a boot ROM rejection and a
-   * start that never reached the core both leave no write behind.  Sampled at
-   * fixed iteration counts so the series is comparable between runs. */
-  uint32_t pc_pre = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_PC);
-  uint32_t pc_s[5];
-  int pc_n = 0;
-  uint32_t ctl = 0, mb0 = 0;
-  int halted = 0;
-  for (int i = 0; i < 400000; i++) {
-    ctl = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL);
-    mb0 = nv_rd32(d, NV_FALCON_SEC2_BASE + 0x040);
-    if (i == 0 || i == 8 || i == 64 || i == 1024 || i == 16384) {
-      if (pc_n < 5) pc_s[pc_n++] = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_PC);
-    }
-    if (ctl & NV_FALCON_UC_CTRL_STOPPED) {
-      halted = 1;
-      break;
-    }
-  }
+  /* Does this window take writes, and what does the core do with START?
+   * Both rows are needed: the first is what makes the second mean something. */
+  sec2_write_land_control(d, tag);
+  int core_reacted = sec2_start_trace(d, tag);
+  (void)core_reacted;
+  uint32_t ctl = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL);
+  uint32_t mb0 = nv_rd32(d, NV_FALCON_SEC2_BASE + 0x040);
+  int halted = (ctl & NV_FALCON_UC_CTRL_STOPPED) ? 1 : 0;
 
   /* The verdict that needs no register: did the booter write its own
    * acknowledgement into the metadata block?  Polled for a bounded time,
@@ -4015,13 +4535,6 @@ static int sec2_attempt(struct nv_dev *d, const struct sec2_img *im,
   uart_print_hex(nv_rd32(d, NV_FALCON_SEC2_BASE + 0x044));
   uart_puts(" verified=");
   uart_print_hex(v);
-  uart_puts(" pc_pre=");
-  uart_print_hex(pc_pre);
-  uart_puts(" pc_samples=");
-  for (int k = 0; k < pc_n; k++) {
-    uart_puts(k ? "," : "");
-    uart_print_hex(pc_s[k]);
-  }
   uart_puts(" pc_after=");
   uart_print_hex(nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_PC));
   if (verified) {
@@ -4479,6 +4992,7 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
   struct sec2_img sim;
   sim.file = (uint8_t *)booter;
   sim.imem_file = imem_file;
+  sim.imem_len = imem_len;
   sim.dmem_file = dmem_file;
   sim.dmem_len = dmem_len;
   sim.sig_off = (cparsed && bhs.sig_prod_off) ? bhs.sig_prod_off : 0x3Cu;
@@ -4513,6 +5027,13 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
     verified = sec2_attempt(d, &sim, (sig_idx + 1u) % bhs.num_sig, "B");
   }
   if (verified) return 0;
+  /* Both signature attempts were refused at the trigger, so spend the rest of
+   * this boot on the one cause neither of them touched: the core may be held
+   * without the full falcon reset the GSP path applies (the halt step here only
+   * issues UC_CTRL's reset bits, and only when ctl is unreadable or not
+   * already stopped -- on this card it is always already stopped). */
+  sec2_reset_variant(d, &sim);
+  sec2_reset_fixup_variant(d, &sim);
   uart_puts("[NV-SEC2] neither signature slot produced a verdict: the metadata "
             "block was not written, so the booter did not reach it.  With the "
             "window readable, the transport validated and every host write "
