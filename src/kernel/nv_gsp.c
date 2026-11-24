@@ -3782,6 +3782,7 @@ static void sec2_core_select(struct nv_dev *d) {
  */
 struct sec2_img {
   uint8_t *file;      /* the whole booter file, host virtual (patched in place) */
+  uint32_t imem_file; /* file offset of the IMEM image (the landing map's base) */
   uint32_t dmem_file; /* file offset of the DMEM image */
   uint32_t dmem_len;
   uint32_t sig_off;   /* file offset of the production-signature block */
@@ -3818,6 +3819,101 @@ static int sec2_attempt(struct nv_dev *d, const struct sec2_img *im,
     print_int(rc);
     uart_puts("\n");
     return -1;
+  }
+
+  /* ---- landing map: does the port read back the bytes we just wrote? -----
+   *
+   * Round 2's lesson, applied to SEC2.  The port and the staged buffer are two
+   * implementations of the same bytes; a displaced, truncated or silently
+   * rewritten image is invisible unless they are compared word for word.  Pure
+   * reads through the same port the load used, so this cannot change what the
+   * core will see -- and the DMEM probe at +0x10 is also the check that the
+   * signature patch landed where the boot ROM looks.
+   */
+  {
+    static const uint32_t kOff[8] = {0x0,    0x10,   0x100,  0x1000,
+                                     0x2000, 0x4000, 0x5F00, 0x5FF0};
+    struct nv_falcon sf = d->falcon[NV_FALCON_IDX_SEC2];
+    if (!sf.base) sf.base = NV_FALCON_SEC2_BASE;
+    int match = 0, bad = -1, rerr = 0;
+    uint32_t bad_off = 0, bad_got = 0, bad_want = 0;
+    for (uint32_t i = 0; i < 8; i++) {
+      uint32_t w = 0;
+      if (nv_falcon_dmem_read(d, &sf, kOff[i], &w, 1) != 0) {
+        rerr++;
+        continue;
+      }
+      const uint8_t *p = dmem + kOff[i];
+      uint32_t want = (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+                      ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+      if (w == want)
+        match++;
+      else if (bad < 0) {
+        bad = (int)i;
+        bad_off = kOff[i];
+        bad_got = w;
+        bad_want = want;
+      }
+    }
+    uart_puts("[NV-SEC2] attempt=");
+    uart_puts(tag);
+    uart_puts(" dmem landing match=");
+    print_int(match);
+    uart_puts("/8 read_errors=");
+    print_int(rerr);
+    if (bad >= 0) {
+      uart_puts(" first_mismatch@");
+      uart_print_hex(bad_off);
+      uart_puts(" got=");
+      uart_print_hex(bad_got);
+      uart_puts(" want=");
+      uart_print_hex(bad_want);
+    }
+    uart_puts(match == 8 ? " verdict=LANDED (the port reads the staged image "
+                           "back word for word, signature patch included)\n"
+                         : " verdict=NOT-LANDED (report the raw counts above: "
+                           "the image the core sees is not the image we staged)\n");
+    /* IMEM with the same SECRET bit the load used.  A marker word is an
+     * unreadable page, not a mismatch, and is reported as such. */
+    uint32_t iunread = 0, imatch = 0;
+    int ihave_bad = 0;
+    uint32_t ibad_off = 0, ibad_got = 0;
+    for (uint32_t i = 0; i < 4; i++) {
+      static const uint32_t kI[4] = {0x0, 0x100, 0x4000, 0x7500};
+      uint32_t w = 0;
+      if (nv_falcon_imem_read_ex(d, &sf, kI[i], &w, 1, 1) != 0) {
+        iunread++;
+        continue;
+      }
+      const uint8_t *p = im->file + im->imem_file + kI[i];
+      uint32_t want = (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+                      ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+      if (w == want)
+        imatch++;
+      else if (!ihave_bad) {
+        ihave_bad = 1;
+        ibad_off = kI[i];
+        ibad_got = w;
+      }
+    }
+    uart_puts("[NV-SEC2] attempt=");
+    uart_puts(tag);
+    uart_puts(" imem landing match=");
+    print_int((int)imatch);
+    uart_puts("/4 read_errors=");
+    print_int(iunread);
+    if (ihave_bad) {
+      uart_puts(" first_mismatch@");
+      uart_print_hex(ibad_off);
+      uart_puts(" got=");
+      uart_print_hex(ibad_got);
+    }
+    uart_puts(iunread == 4 && imatch == 0
+                  ? " verdict=IMEM-UNREADABLE (all four probes refused: secure "
+                    "pages, no claim either way)\n"
+                  : (imatch == 4 ? " verdict=IMEM-LANDED\n"
+                                 : " verdict=IMEM-MISMATCH (the code the core "
+                                   "would fetch is not the code we staged)\n"));
   }
 
   /* Boot ROM parameters: where the signature is, which engine and ucode id it
@@ -4040,15 +4136,17 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
   uint32_t dmem_file = 0x7700, dmem_len = 0x6000;
   uint32_t bootvec = 0x100;
   if (cparsed) {
-    /* IMEM is everything in the data region before the DMEM image: os_code
-     * (0x100) then the app code, so the app's entry lands at IMEM 0x100 --
-     * which is the BOOTVEC the contract quotes, and which the old 0x7600 /
-     * 0x100 pair put at IMEM 0 instead. */
-    imem_file = bc.data_off;
-    imem_len = bhs.os.data_off;
+    /* IMEM is the APP code alone, at IMEM 0, with the entry at 0: the contract's
+     * own reading ("0x7600 bytes from image offset 0x100") and the value FWSEC's
+     * working launch uses for the entry (0x104 = 0, with its code at IMEM 0).
+     * r5c/r5d put os_code + app at IMEM 0 and set the entry to app[0].code_off
+     * (0x100) -- the same bytes, 0x100 out of place relative to the entry, and
+     * the boot ROM has no way to tell us which one it wanted. */
+    imem_file = bc.data_off + (bhs.num_apps ? bhs.app[0].code_off : 0x100u);
+    imem_len = bhs.num_apps ? bhs.app[0].code_size : 0x7600u;
     dmem_file = bc.data_off + bhs.os.data_off;
     dmem_len = bhs.os.data_size;
-    bootvec = bhs.num_apps ? bhs.app[0].code_off : 0x100u;
+    bootvec = 0;
     uart_puts("[NV-SEC2] image data_off=");
     uart_print_hex(bc.data_off);
     uart_puts(" imem@file=");
@@ -4065,11 +4163,9 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
     uart_print_hex(dmem_file + dmem_len);
     uart_puts(" file_size=");
     uart_print_hex(len);
-    uart_puts((dmem_file + dmem_len == len && imem_file == bc.data_off &&
-               imem_len == bhs.os.data_off)
-                  ? " verdict=TILES-THE-FILE (the load header's offsets are "
-                    "data-region-relative, and the image ends exactly at the "
-                    "end of the file)\n"
+    uart_puts((dmem_file + dmem_len == len && imem_file + imem_len == dmem_file)
+                  ? " verdict=TILES-THE-FILE (IMEM runs into the DMEM image and "
+                    "the image ends exactly at the end of the file)\n"
                   : " verdict=DOES-NOT-TILE (the offsets below do not line up "
                     "with the file: read them as raw)\n");
   } else {
@@ -4252,6 +4348,7 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
    * signature slot is ruled out rather than queued for another deploy. */
   struct sec2_img sim;
   sim.file = (uint8_t *)booter;
+  sim.imem_file = imem_file;
   sim.dmem_file = dmem_file;
   sim.dmem_len = dmem_len;
   sim.sig_off = (cparsed && bhs.sig_prod_off) ? bhs.sig_prod_off : 0x3Cu;
