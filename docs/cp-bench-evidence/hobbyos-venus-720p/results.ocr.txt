@@ -1,0 +1,115 @@
+Results
+
+Settings
+
+Average FPS
+
+29.19
+
+Custom
+
+20.61
+
+Low
+
+1280x720
+
+64.20
+
+Windowed Borderless
+
+1874
+
+No
+
+No
+
+‘System Specification
+
+Frame Generation
+
+25
+
+Virtio-GPU Venus (AMD Radeon RX 9070 XT (RADY GFXI..#<truncated>#
+
+Resolution Scaling
+
+16304 MB
+
+No
+
+‘<UNKNOWN VERSION>
+
+‘AMD RYZEN Al MAX+ 395 w/ Radeon 8060S
+
+XD Ray Tracing
+
+No
+
+11519 MB
+
+Windows 10 Pro
+
+10.0.19045
+
+Settings
+
+Exit to Main Menu
+
+i
+
+¥
+
+.
+
+—
+
+Frame Generation
+
+‘Game Version
+
+Frame Generation
+
+GPU Model Virtio-6PU Venus (AMD Radeon RX 9070 XT (RADY GFX1..#<truncated>#
+
+Resolution Scaling
+
+GPU Memory
+
+16304 MB
+
+=
+
+Resolution Scaling
+
+GPU Driver Version
+
+‘<UNKNOWN VERSION>
+
+CPU Model
+
+‘AMD RYZEN Al MAX+ 395 w/ Radeon 8060S
+
+YD Ray Tracing
+
+Ray Tracing Enabled
+
+‘System Memory
+
+11519 MB
+
+‘0S Name
+
+Windows 10 Pro
+
+OS Version
+
+10.0.19045
+
+Settings Exit to Main Menu
+
+==
+
+OTE ee
+
+——

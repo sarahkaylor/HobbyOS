@@ -1,0 +1,19 @@
+Results Settings
+Average FPS 25.86 tow
+1898 tow
+4032 veeox720
+65.85 Windowed Borderless
+103 No
+No
+‘System Specification Frame Generation
+25 No
+Virtio-BPU Venus (AMO Radeon RX 9070 XT (RADV GFX1..#'<truncated># Ey
+16204 MB rs
+Radeon software 99.102 ~ oso
+AMD RYZEN Al MAX+ 395 w/ Radeon 8050S
+Ray Tracing
+32087 MB
+No
+Windows 10 Pro
+1o.0.19045
+Settings Exit to Main Menu

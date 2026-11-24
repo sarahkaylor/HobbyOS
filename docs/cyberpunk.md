@@ -115,10 +115,20 @@ preset's own default), 60 s at the main menu:
 | menu fps median @720p | 388–399 | **142.8 / 144.4** | — |
 | menu fps median @1080p | 393.5 | 144.1 | — |
 | menu fps p90 @720p | 284–322 | 59.0 / 55.4 | — |
-| built-in benchmark median / 1%-low @720p | 141.6–142.9 / 74.1–76.1 | not run (user: skip) | — |
+| built-in benchmark @720p (avg / median / 1 %-low) | P0: — / 141.6–142.9 / 74.1–76.1 · 2026-11-24: 139.41 / 145.6 / 77.3 | **25.86 / 27.0 / 16.5** (Low, FSR 2.1 Auto) | **29.19 / 29.7 / 18.2** (Custom = Low rows, scaling Off) |
 | launch → menu (warm) | 36.7–47.6 s | 41.3–41.9 s | — |
 | game RSS at menu / peak | 2.2 / 3.9–4.0 GiB | 2.1 GiB | — |
 | game threads at menu | 90 | 68 | — |
+
+**The benchmark row is new (2026-11-24, `docs/cp-bench.md`) and each of its
+cells names the stack that produced it.**  The HobbyOS cell is the
+**platform** — Linux-ABI compat + XHOBBY + Wine + vkd3d-proton on **Venus over
+virtio-gpu** — not the `nv` driver, which has no 3D engine and cannot run this
+game.  The two guest cells are **not the same workload** (HobbyOS: resolution
+scaling Off; Linux guest: the Low preset's FSR 2.1 Auto), so they are not
+compared or averaged; n = 1 per stack.  The 2026-11-24 host re-run (139.41 avg
+/ 145.6 median / 77.3 1 %-low) reproduces P0's pair and is the control that
+validates the instrument.
 
 The guest median is identical at 720p and 1080p → the guest is bound by the
 present path (QEMU display), not by Venus; that is P7's target. GPU-heavy D3D12
