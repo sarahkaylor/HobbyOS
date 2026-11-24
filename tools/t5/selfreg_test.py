@@ -39,14 +39,31 @@ with open(tmp, "w") as f:
 try:
     check(rel in R.discover(),
           "new tools/t5/*_test.py auto-registers (no Makefile edit)")
-    ok, last = R.run_one(rel, R.ROOT)
-    check(ok, "runner runs the new test and sees its own PASSED line")
+    verdict, _last, _out = R.run_one(rel, R.ROOT)
+    check(verdict == "PASS", "runner runs the new test and sees its own PASSED line")
 finally:
     os.remove(tmp)
 
 # run_one verdict comes from the script's own PASSED line, not mere execution
-ok_fail, _ = R.run_one("tools/t5/feasibility_doc_test.py", R.ROOT)
-check(ok_fail is True, "run_one marks a genuinely passing script as PASS")
+verdict, _last, _out = R.run_one("tools/t5/feasibility_doc_test.py", R.ROOT)
+check(verdict == "PASS", "run_one marks a genuinely passing script as PASS")
+
+# ...and the SKIP half of the same contract: exit 77 + a named reason is neither
+# a pass nor a failure, and exit 77 with no reason is still a failure (2026-11-24).
+tmp = os.path.join(R.ROOT, "tools", "t5", "zz_skip_%d_test.py" % os.getpid())
+rel = os.path.relpath(tmp, R.ROOT)
+try:
+    with open(tmp, "w") as f:
+        f.write('print("SKIP: fixture absent")\nraise SystemExit(77)\n')
+    verdict, why, _out = R.run_one(rel, R.ROOT)
+    check(verdict == "SKIP" and "fixture absent" in why,
+          "run_one grades exit 77 + a reason as SKIP and carries the reason")
+    with open(tmp, "w") as f:
+        f.write('raise SystemExit(77)\n')
+    verdict, _why, _out = R.run_one(rel, R.ROOT)
+    check(verdict == "FAIL", "run_one still fails an exit-77 script that gives no reason")
+finally:
+    os.remove(tmp)
 
 print("\nTests:", "ALL PASSED" if fails == 0 else f"{fails} FAILED")
 sys.exit(1 if fails else 0)

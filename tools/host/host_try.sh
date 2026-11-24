@@ -7,10 +7,13 @@
 # Why (H4-kglitch, docs/cp-kglitch.md §4): the host_tests recipe ran its test
 # binaries as one command per recipe line, so the first red line ended the
 # recipe -- `make -k` keeps going across TARGETS, not across the lines of one
-# recipe.  The python suite (known red: the two gaming.md tests) sat in the
-# middle, so every binary after it (AUDIO_STUB_TEST, LINUX_SND_PARAMS_TEST, the
-# libc parity tests, ...) was built and never run by the gate, and a regression
-# in any of them could not turn anything red.
+# recipe.  The python suite used to be red here (two tests opened a gaming.md
+# that is no longer in the repo), so every binary after it (AUDIO_STUB_TEST,
+# LINUX_SND_PARAMS_TEST, the libc parity tests, ...) was built and never run by
+# the gate, and a regression in any of them could not turn anything red.  The
+# suite itself is green now (2026-11-24: the plan-dependent rows exit 77/SKIP
+# with a reason, docs/host-tests-skips.md), but the per-step reporting stays:
+# it is what makes a future red name its step instead of hiding the rest.
 #
 # Each step now runs under a timeout (default 40 s, as HOST_RUN did); a failing
 # step appends one line to FAILFILE and returns 0, so the recipe runs to its

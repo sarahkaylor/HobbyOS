@@ -20,6 +20,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sync_gaming_md as S  # noqa: E402
+import import_seed as P  # noqa: E402  (P.PLAN is the plan doc's path)
 
 fails = []
 
@@ -64,7 +65,19 @@ with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
     dup_path = f.name
 check("a doubled §8 row is named", S.plan_duplicate_ids(dup_path) == ["GB-196"])
 os.unlink(dup_path)
-check("the live plan has one row per id", S.plan_duplicate_ids() == [])
+
+# Everything above is fixture-driven and runs on any tree.  This one row needs the
+# live plan doc, and gaming.md is NOT in this repo any more: it was deleted with
+# the decommissioned swarm (c3f78668), so on a clean checkout open() raised
+# FileNotFoundError and reddened host_tests for every machine (linux-ci run
+# 45261954209).  A missing prerequisite is a SKIP naming what is missing, never a
+# pass and never a crash; the suite counts it apart and the exit below says 77.
+live_skip = None
+if os.path.exists(P.PLAN):
+    check("the live plan has one row per id", S.plan_duplicate_ids() == [])
+else:
+    live_skip = (f"{P.PLAN} is not in this tree — the live-plan row needs it, and the "
+                 "plan doc was removed with the decommissioned swarm (c3f78668)")
 
 # --- GB-193: --adopt-orphans row generation/insertion (pure, no board) -------
 
@@ -144,5 +157,8 @@ print()
 if fails:
     print(f"SYNC_GAMING_MD_TEST: FAIL — {len(fails)}")
     sys.exit(1)
+if live_skip:
+    print("SKIP: " + live_skip)
+    sys.exit(77)
 print("SYNC_GAMING_MD_TEST: PASS — seed gaps/duplicates fail, sparse mints pass")
 sys.exit(0)
