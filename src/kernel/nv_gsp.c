@@ -3923,11 +3923,17 @@ static int sec2_attempt(struct nv_dev *d, const struct sec2_img *im,
       uart_print_hex(ibad_got);
     }
     uart_puts(iunread == 4 && imatch == 0
-                  ? " verdict=IMEM-UNREADABLE (all four probes refused: secure "
-                    "pages, no claim either way)\n"
-                  : (imatch == 4 ? " verdict=IMEM-LANDED\n"
-                                 : " verdict=IMEM-MISMATCH (the code the core "
-                                   "would fetch is not the code we staged)\n"));
+                  ? " verdict=IMEM-UNREADABLE (all four probes refused)\n"
+                  : (imatch == 4
+                         ? " verdict=IMEM-LANDED\n"
+                         : (ihave_bad && ibad_got == 0xDEAD5EC1u
+                                ? " verdict=IMEM-SECURE-MARKER (0xDEAD5EC1 is "
+                                  "the code port's answer for a secure page -- "
+                                  "the page is present and secure, its bytes are "
+                                  "not readable, so this says nothing about the "
+                                  "content: the boot ROM is the only reader)\n"
+                                : " verdict=IMEM-MISMATCH (the code the core "
+                                  "would fetch is not the code we staged)\n")));
   }
 
   /* Boot ROM parameters: where the signature is, which engine and ucode id it
@@ -4166,6 +4172,27 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
     } else {
       uart_puts("\n");
     }
+  }
+
+  /* ---- FALCON_RM (0x084) <- PMC_BOOT_0 --------------------------------
+   *
+   * The GSP path writes this at the end of its reset and says why: "every falcon
+   * enable in the reference writes it, before the first load".  SEC2 never got
+   * it, which is the one state fixup of the GSP path this window was still
+   * missing (the other, the core select, is cleared just below).  One write, the
+   * same value the GSP carries, and the row prints both sides.
+   */
+  {
+    uint32_t rm = nv_rd32(d, 0x000000);
+    uint32_t was = nv_rd32(d, NV_FALCON_SEC2_BASE + 0x084);
+    nv_wr32(d, NV_FALCON_SEC2_BASE + 0x084, rm);
+    uart_puts("[NV-SEC2] falcon_rm(0x084) was=");
+    uart_print_hex(was);
+    uart_puts(" <- pmc_boot0=");
+    uart_print_hex(rm);
+    uart_puts(" now=");
+    uart_print_hex(nv_rd32(d, NV_FALCON_SEC2_BASE + 0x084));
+    uart_puts("\n");
   }
 
   /* ---- SEC2's RISC-V core select, cleared exactly where the GSP's was ----
