@@ -429,14 +429,14 @@ TEST(test_nv_gsp_rpc_stage8_publishes_and_holds_the_doorbell) {
   for (uint32_t i = 0; i < 8; i++)
     ASSERT(t_ld32(block + NV_RPC_STAT_OFF + i * 4u) == 0);
 
-  /* A second call reuses the same pages rather than taking another run, and
-   * rewrites the same two mailbox words. */
+  /* A second call reuses the same pages and writes NO mailbox word again:
+   * the publish already happened (in a boot, the pre-boot step does it before
+   * the launch), and MAILBOX0 is also FWSEC's error channel -- the publish is
+   * meant to be the last writer of it in a boot, not the second-to-last. */
   int pages_before = (int)r.block.pages;
   EXPECT_EQ(nv_gsp_rpc_stage8_into(&r, &d), -EAGAIN);
   EXPECT_EQ((int)r.block.pages, pages_before);
-  EXPECT_EQ(mmio.writes, 4);
-  ASSERT(mmio.off[2] == 0x110040u && mmio.off[3] == 0x110044u);
-  ASSERT(mmio.val[2] == mmio.val[0] && mmio.val[3] == mmio.val[1]);
+  EXPECT_EQ(mmio.writes, 2);
 
   nv_gsp_rpc_teardown(&r);
   EXPECT_EQ(frame_free_count(), before);
@@ -486,6 +486,115 @@ TEST(test_nv_gsp_rpc_publish_refuses_without_a_bus_address) {
   EXPECT_EQ(frame_free_count(), before);
 }
 
+/* ---- the pre-boot step (contract 4.1 rows 3-5) -------------------------
+ * The boot path must leave the ring holding TWO messages and the peer holding
+ * nothing: writePtr 2, the status header's writePtr 0, one doorbell.  That is
+ * the hardware discriminator the card asks the boot row to print, so the same
+ * numbers are asserted here against a counting register file. */
+TEST(test_nv_gsp_rpc_preboot_queues_two_and_rings_once) {
+  uart_puts("  Running test_nv_gsp_rpc_preboot_queues_two_and_rings_once...\n");
+  tests_run++;
+
+  struct t_mmio mmio;
+  t_zero(&mmio, (uint32_t)sizeof mmio);
+
+  struct nv_dev d;
+  t_zero(&d, (uint32_t)sizeof d);
+  d.ops.rd32 = t_rd32;
+  d.ops.wr32 = t_wr32;
+  d.ops_ctx = &mmio;
+  /* The identity the payload is built from.  Distinct numbers, so a field
+   * read from the wrong source variable is visible in the staged bytes. */
+  d.bar0_phys = 0x80000000ull;
+  d.bar1_phys = 0x8000000000ull;
+  d.bus = 1;
+  d.slot = 0;
+  d.func = 0;
+
+  struct nv_gsp_rpc r;
+  t_zero(&r, (uint32_t)sizeof r);
+  int before = frame_free_count();
+
+  ASSERT(nv_gsp_rpc_preboot(&r, &d) == 0);
+  EXPECT_EQ(r.preboot, 1);
+  EXPECT_EQ((int)r.sends, 2);
+  EXPECT_EQ((int)r.doorbells, 1);
+
+  const uint8_t *block = (const uint8_t *)phys_to_virt(r.block.phys);
+  const uint8_t *cmd = block + NV_RPC_CMD_OFF;
+  const uint8_t *stat = block + NV_RPC_STAT_OFF;
+  const uint8_t *slot0 = cmd + NV_RPC_SLOT + 0u;
+  const uint8_t *slot1 = cmd + NV_RPC_SLOT + NV_RPC_SLOT;
+
+  /* Producer: two messages.  Peer: still nothing. */
+  EXPECT_EQ((int)t_ld32(cmd + NV_RPC_Q_WRITE_PTR), 2);
+  EXPECT_EQ((int)t_ld32(stat + NV_RPC_Q_WRITE_PTR), 0);
+
+  /* Slot 0 is opcode 72, one slot, length 0x2E0, seq 0, and it folds to 0. */
+  EXPECT_EQ((int)t_ld32(slot0 + NV_RPC_R_FUNCTION), 72);
+  EXPECT_EQ((int)t_ld32(slot0 + NV_RPC_R_LENGTH), 0x2E0);
+  EXPECT_EQ((int)t_ld32(slot0 + NV_RPC_E_ELEMCOUNT), 1);
+  EXPECT_EQ((int)t_ld32(slot0 + NV_RPC_E_SEQ), 0);
+  ASSERT(nv_rpc_cksum(slot0, (uint32_t)NV_RPC_SLOT) == 0);
+  /* Its payload came from the CARD's identity, not from a literal. */
+  ASSERT(t_ld64(slot0 + NV_RPC_R_PAYLOAD + 0x000) == 0x80000000ull);
+  ASSERT(t_ld64(slot0 + NV_RPC_R_PAYLOAD + 0x008) == 0x8000000000ull);
+  ASSERT(t_ld64(slot0 + NV_RPC_R_PAYLOAD + 0x018) == 0x0100ull);
+  /* The three fields the contract leaves NOT ESTABLISHED are zero, not
+   * plausible numbers. */
+  ASSERT(t_ld64(slot0 + NV_RPC_R_PAYLOAD + 0x010) == 0); /* gpuPhysInstAddr */
+  ASSERT(t_ld64(slot0 + NV_RPC_R_PAYLOAD + 0x038) == 0); /* maxUserVa */
+  ASSERT(t_ld32(slot0 + NV_RPC_R_PAYLOAD + 0x040) == 0); /* mirrorBase */
+  ASSERT(t_ld32(slot0 + NV_RPC_R_PAYLOAD + 0x044) == 0); /* mirrorSize */
+
+  /* Slot 1 is opcode 73, seq 1, an empty but well-formed table (8 bytes). */
+  EXPECT_EQ((int)t_ld32(slot1 + NV_RPC_R_FUNCTION), 73);
+  EXPECT_EQ((int)t_ld32(slot1 + NV_RPC_R_LENGTH), 0x28);
+  EXPECT_EQ((int)t_ld32(slot1 + NV_RPC_E_ELEMCOUNT), 1);
+  EXPECT_EQ((int)t_ld32(slot1 + NV_RPC_E_SEQ), 1);
+  ASSERT(nv_rpc_cksum(slot1, (uint32_t)NV_RPC_SLOT) == 0);
+  ASSERT(t_ld32(slot1 + NV_RPC_R_PAYLOAD + NV_RPC_REG_O_SIZE) == 8u);
+  ASSERT(t_ld32(slot1 + NV_RPC_R_PAYLOAD + NV_RPC_REG_O_NUM) == 0u);
+
+  /* The status header is still the peer's: eight zero words, exactly as the
+   * link stage will read them.  Staging must not counterfeit it. */
+  for (uint32_t i = 0; i < 8; i++)
+    ASSERT(t_ld32(stat + i * 4u) == 0);
+
+  /* Exactly three register writes: MAILBOX0/1 (the publish) and the doorbell.
+   * The doorbell is last, once, at the contract's offset, value 0. */
+  EXPECT_EQ(mmio.writes, 3);
+  ASSERT(mmio.off[0] == 0x110040u && mmio.off[1] == 0x110044u);
+  ASSERT(mmio.off[2] == NV_RPC_DOORBELL_OFF);
+  ASSERT(mmio.val[2] == 0u);
+
+  /* The next send's sequence number follows the two MESSAGES, not the one
+   * notification. */
+  EXPECT_EQ((int)r.q.tx_seq, 2);
+
+  /* Idempotent: a second pre-boot stages nothing, rings nothing. */
+  ASSERT(nv_gsp_rpc_preboot(&r, &d) == 0);
+  EXPECT_EQ(mmio.writes, 3);
+  EXPECT_EQ((int)t_ld32(cmd + NV_RPC_Q_WRITE_PTR), 2);
+  EXPECT_EQ((int)r.doorbells, 1);
+  EXPECT_EQ((int)r.sends, 2);
+
+  nv_gsp_rpc_teardown(&r);
+  EXPECT_EQ(frame_free_count(), before);
+
+  /* A transport that cannot be built stages nothing: no message may be
+   * written into a block whose bus address does not exist. */
+  struct nv_gsp_rpc t;
+  t_zero(&t, (uint32_t)sizeof t);
+  nv_dma_test_set_translation(1);
+  int rc = nv_gsp_rpc_preboot(&t, &d);
+  nv_dma_test_set_translation(-1);
+  EXPECT_EQ(rc, -ENOTSUP);
+  EXPECT_EQ(t.preboot, 0);
+  EXPECT_EQ((int)t.doorbells, 0);
+  EXPECT_EQ(mmio.writes, 3);
+}
+
 void nv_gsp_glue_test_suite(void) {
   test_nv_gsp_rpc_setup_allocates_the_whole_block();
   test_nv_gsp_rpc_pte0_is_the_bus_address_nv_dma_issued();
@@ -495,6 +604,7 @@ void nv_gsp_glue_test_suite(void) {
   test_nv_gsp_rpc_notify_needs_a_built_queue_and_a_message();
   test_nv_gsp_rpc_stage8_publishes_and_holds_the_doorbell();
   test_nv_gsp_rpc_publish_refuses_without_a_bus_address();
+  test_nv_gsp_rpc_preboot_queues_two_and_rings_once();
 }
 
 #endif /* __x86_64__ */

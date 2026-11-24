@@ -1423,9 +1423,334 @@ static void test_t26_libos_page(void) {
 }
 
 /* ======================================================================== */
+/* T-27 GspSystemInfo (opcode 72, contract 5.1), offset by offset            */
+/* ======================================================================== */
+
+/* Two slots: enough for any one of these messages, and separate from the
+ * queue fixtures above so a bug in one cannot hide in the other. */
+static uint8_t pre_stage[0x2000] __attribute__((aligned(4096)));
+
+/* Every value distinct and non-zero, so a field written at a WRONG offset
+ * cannot pass by coincidence: a zero-at-the-right-place/zero-at-the-wrong-
+ * place pair would be indistinguishable.  The boot path supplies zeros for the
+ * three NOT ESTABLISHED fields; that is a value decision, not an encoding one,
+ * and it is tested by the glue case. */
+static void si_fixture(struct nv_rpc_system_info *si) {
+  si->gpu_phys_addr = 0x80000000ull;
+  si->gpu_phys_fb_addr = 0x8000000000ull;
+  si->gpu_phys_inst_addr = 0x7000000000ull;
+  si->nv_domain_bus_device_func = 0x0100ull;
+  si->max_user_va = 0x7FFFFFFF0000ull;
+  si->pci_config_mirror_base = 0xE0000000u;
+  si->pci_config_mirror_size = 0x1000u;
+  si->chipset = 0x162u;
+  si->sys_timer_offset_ns = 0x1234ABCDull;
+}
+
+static void test_t27_system_info_layout(void) {
+  uart_puts("  Running test_t27_system_info_layout...\n");
+  tests_run++;
+
+  struct nv_rpc_system_info si;
+  si_fixture(&si);
+
+  for (uint32_t i = 0; i < 0x2000; i++) pre_stage[i] = 0xCD;
+  ASSERT(nv_rpc_system_info_build(pre_stage, &si, 0) == 1);
+
+  /* The header, at the slot offsets the transport uses. */
+  ASSERT(get32(pre_stage + 0x30) == 0x03000000u);      /* header_version */
+  ASSERT(get32(pre_stage + 0x34) == 0x43505256u);      /* "VRPC" */
+  ASSERT(get32(pre_stage + 0x38) == 0x20u + 0x2C0u);   /* length = 0x2E0 */
+  ASSERT(get32(pre_stage + 0x3C) == 72u);              /* function */
+  ASSERT(get32(pre_stage + 0x40) == 0xFFFFFFFFu);      /* rpc_result pending */
+  ASSERT(get32(pre_stage + 0x44) == 0xFFFFFFFFu);      /* result_private */
+  ASSERT(get32(pre_stage + 0x48) == 0u);               /* sequence */
+  ASSERT(get32(pre_stage + 0x4C) == 0u);               /* spare */
+  ASSERT(get32(pre_stage + 0x24) == 0u);               /* elem seqNum */
+  ASSERT(get32(pre_stage + 0x28) == 1u);               /* elemCount */
+  ASSERT(get32(pre_stage + 0x2C) == 0u);               /* pad */
+
+  /* The payload, at every offset the contract's 5.1 table gives.  Literals
+   * from the table, never this file's #defines: an encoder tested through its
+   * own macros follows them off a cliff. */
+  const uint8_t *p = pre_stage + 0x50;
+  ASSERT(get64(p + 0x000) == si.gpu_phys_addr);              /* gpuPhysAddr */
+  ASSERT(get64(p + 0x008) == si.gpu_phys_fb_addr);           /* gpuPhysFbAddr */
+  ASSERT(get64(p + 0x010) == si.gpu_phys_inst_addr);         /* gpuPhysInstAddr */
+  ASSERT(get64(p + 0x018) == si.nv_domain_bus_device_func);  /* bus/dev/fn */
+  ASSERT(get64(p + 0x020) == 0);                             /* simAccess */
+  ASSERT(get64(p + 0x028) == 0);                             /* atomics */
+  ASSERT(get64(p + 0x030) == 0);                             /* consoleMemSize */
+  ASSERT(get64(p + 0x038) == si.max_user_va);                /* maxUserVa */
+  ASSERT(get32(p + 0x040) == si.pci_config_mirror_base);
+  ASSERT(get32(p + 0x044) == si.pci_config_mirror_size);
+  ASSERT(p[0x048] == 0);                                     /* oorArch */
+  for (uint32_t i = 0x049; i < 0x050; i++) ASSERT(p[i] == 0); /* its padding */
+  ASSERT(get64(p + 0x050) == 0);                             /* clPdbProperties */
+  ASSERT(get32(p + 0x058) == si.chipset);                    /* Chipset */
+  for (uint32_t i = 0x05C; i < 0x074; i++) ASSERT(p[i] == 0); /* 6 flags */
+  ASSERT(p[0x074] == 0);                                     /* upstreamValid */
+  for (uint32_t i = 0x075; i < 0x08C; i++) ASSERT(p[i] == 0); /* FHBBusInfo,
+                                                              * chipsetIDInfo */
+  /* The 488-byte ACPI blob, sampled at both ends and once in the middle. */
+  for (uint32_t i = 0x08C; i < 0x274; i++) ASSERT(p[i] == 0);
+  ASSERT(get32(p + 0x274) == 0);                             /* hypervisorType */
+  ASSERT(p[0x278] == 0 && p[0x279] == 0);                    /* virtualConfig */
+  ASSERT(get32(p + 0x27C) == 0);                             /* bIsPassthru */
+  ASSERT(get64(p + 0x280) == si.sys_timer_offset_ns);        /* sysTimerOffset */
+  for (uint32_t i = 0x288; i < 0x2B8; i++) ASSERT(p[i] == 0); /* gspVFInfo */
+  ASSERT(get32(p + 0x2B8) == 0);                             /* bTdrEvent */
+
+  /* Total size 0x2C0, and everything after it in the slot is zero (the
+   * checksum covers the whole slot, so a survivor there is a rejected
+   * element). */
+  for (uint32_t i = 0x50 + 0x2C0; i < 0x1000; i++) ASSERT(pre_stage[i] == 0);
+  ASSERT(nv_rpc_cksum(pre_stage, 0x1000) == 0);
+  enum nv_rpc_reason why = NV_RPC_OK;
+  ASSERT(nv_rpc_elem_check(pre_stage, 1, &why) == 0);
+  EXPECT_EQ((int)nv_rpc_system_info_check(pre_stage, &si), (int)NV_RPC_SI_F_OK);
+
+  /* ---- a WRONG OFFSET must fail, and name the field -------------------- *
+   * Shift gpuPhysAddr by one field (the classic off-by-8): +0x000 is then
+   * zero and +0x008 holds it twice.  The checker reads the bytes, so it sees
+   * the first half. */
+  put64(pre_stage + 0x50 + 0x000, 0);
+  put64(pre_stage + 0x50 + 0x008, si.gpu_phys_addr);
+  EXPECT_EQ((int)nv_rpc_system_info_check(pre_stage, &si),
+            (int)NV_RPC_SI_F_GPU_PHYS);
+  ASSERT(nv_rpc_system_info_build(pre_stage, &si, 0) == 1);
+
+  /* The field most likely to be shifted by the two fields a 535-only shape
+   * adds: sysTimerOffsetNs, 0x280 in. */
+  put64(pre_stage + 0x50 + 0x280, 0);
+  put64(pre_stage + 0x50 + 0x278, si.sys_timer_offset_ns);
+  EXPECT_EQ((int)nv_rpc_system_info_check(pre_stage, &si),
+            (int)NV_RPC_SI_F_TIMER_OFFSET);
+  ASSERT(nv_rpc_system_info_build(pre_stage, &si, 0) == 1);
+
+  /* A byte the contract pins at zero: an ACPI blob's bValid, an oorArch. */
+  pre_stage[0x50 + 0x08C] = 1;
+  EXPECT_EQ((int)nv_rpc_system_info_check(pre_stage, &si), (int)NV_RPC_SI_F_ZERO);
+  pre_stage[0x50 + 0x08C] = 0;
+  pre_stage[0x50 + 0x048] = 3;
+  EXPECT_EQ((int)nv_rpc_system_info_check(pre_stage, &si), (int)NV_RPC_SI_F_ZERO);
+  pre_stage[0x50 + 0x048] = 0;
+
+  /* Header mutations: the wrong function is a different message, and a wrong
+   * length is not a 0x2C0 payload however right the payload is. */
+  ASSERT(nv_rpc_system_info_build(pre_stage, &si, 0) == 1);
+  put32(pre_stage + 0x3C, 73u);
+  EXPECT_EQ((int)nv_rpc_system_info_check(pre_stage, &si),
+            (int)NV_RPC_SI_F_HEADER);
+  ASSERT(nv_rpc_system_info_build(pre_stage, &si, 0) == 1);
+  put32(pre_stage + 0x38, 0x2E0u - 8u);
+  EXPECT_EQ((int)nv_rpc_system_info_check(pre_stage, &si), (int)NV_RPC_SI_F_SIZE);
+
+  /* Refusals. */
+  EXPECT_EQ(nv_rpc_system_info_build(0, &si, 0), -EINVAL);
+  EXPECT_EQ(nv_rpc_system_info_build(pre_stage, 0, 0), -EINVAL);
+}
+
+/* ======================================================================== */
+/* T-28 PACKED_REGISTRY_TABLE (opcode 73, contract 5.2)                     */
+/* ======================================================================== */
+
+/* An independent parse of the table: this file must not borrow the encoder's
+ * idea of where a name or a value is.  Returns 1 when every name offset and
+ * value range is inside the table and NUL-terminated, 0 otherwise. */
+static int reg_parses(const uint8_t *t) {
+  uint32_t size = get32(t + 0x00);
+  uint32_t n = get32(t + 0x04);
+  if (size < 8u || size > 0x1000u) return 0;
+  uint32_t entries_end = 8u + n * 16u;
+  if (entries_end > size) return 0;
+  for (uint32_t i = 0; i < n; i++) {
+    const uint8_t *e = t + 8u + i * 16u;
+    uint32_t no = get32(e + 0x00);
+    uint32_t data = get32(e + 0x08);
+    uint32_t len = get32(e + 0x0C);
+    if (no < entries_end || no >= size) return 0;
+    uint32_t k = no;
+    while (k < size && t[k] != 0) k++;
+    if (k >= size) return 0; /* no NUL inside the table */
+    if (e[0x04] != 1u) {
+      if (data < entries_end || data + len > size) return 0;
+    } else if (len != 4u) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static void test_t28_registry_layout(void) {
+  uart_puts("  Running test_t28_registry_layout...\n");
+  tests_run++;
+
+  static const uint8_t blob[4] = {0xDE, 0xAD, 0xBE, 0xEF};
+  struct nv_rpc_registry_entry e[3];
+  e[0].name = "enable";
+  e[0].type = NV_RPC_REG_TYPE_DWORD;
+  e[0].dword = 0xCAFEBABEu;
+  e[0].blob = 0;
+  e[0].str = 0;
+  e[0].length = 0;
+  e[1].name = "pm";
+  e[1].type = NV_RPC_REG_TYPE_STRING;
+  e[1].dword = 0;
+  e[1].blob = 0;
+  e[1].str = "on";
+  e[1].length = 0; /* derived: strlen + 1 */
+  e[2].name = "blob";
+  e[2].type = NV_RPC_REG_TYPE_BINARY;
+  e[2].dword = 0;
+  e[2].blob = blob;
+  e[2].str = 0;
+  e[2].length = 4;
+
+  for (uint32_t i = 0; i < 0x2000; i++) pre_stage[i] = 0xCD;
+  ASSERT(nv_rpc_registry_build(pre_stage, e, 3, 0) == 1);
+
+  const uint8_t *t = pre_stage + 0x50;
+
+  /* header(8) + 3*16 = 0x38; names "enable\0"+"pm\0"+"blob\0" = 15 bytes, so
+   * values start at 0x47; "on\0" (3) + blob (4) = 7, total 0x4E. */
+  ASSERT(get32(t + 0x00) == 0x4Eu); /* size */
+  ASSERT(get32(t + 0x04) == 3u);    /* numEntries */
+  ASSERT(nv_rpc_registry_table_size(e, 3) == 0x4Eu);
+
+  /* Entry 0: 16 bytes at 0x08. */
+  ASSERT(get32(t + 0x08 + 0x00) == 0x38u);        /* nameOffset, table-relative */
+  ASSERT(t[0x08 + 0x04] == 1u);                   /* type = dword */
+  ASSERT(get32(t + 0x08 + 0x08) == 0xCAFEBABEu);  /* data = the dword */
+  ASSERT(get32(t + 0x08 + 0x0C) == 4u);           /* length = sizeof(u32) */
+  /* Entry 1 at 0x18: string, name after "enable\0". */
+  ASSERT(get32(t + 0x18 + 0x00) == 0x3Fu);
+  ASSERT(t[0x18 + 0x04] == 3u);                   /* type = string */
+  ASSERT(get32(t + 0x18 + 0x08) == 0x47u);        /* data = offset of "on" */
+  ASSERT(get32(t + 0x18 + 0x0C) == 3u);           /* length = "on" + NUL */
+  /* Entry 2 at 0x28: binary, name after "pm\0". */
+  ASSERT(get32(t + 0x28 + 0x00) == 0x42u);
+  ASSERT(t[0x28 + 0x04] == 2u);                   /* type = binary */
+  ASSERT(get32(t + 0x28 + 0x08) == 0x4Au);        /* data = offset of blob */
+  ASSERT(get32(t + 0x28 + 0x0C) == 4u);
+
+  /* Names, packed in entry order, each NUL-terminated. */
+  ASSERT(t[0x38] == 'e' && t[0x39] == 'n' && t[0x3A] == 'a' && t[0x3B] == 'b');
+  ASSERT(t[0x3C] == 'l' && t[0x3D] == 'e' && t[0x3E] == 0);
+  ASSERT(t[0x3F] == 'p' && t[0x40] == 'm' && t[0x41] == 0);
+  ASSERT(t[0x42] == 'b' && t[0x43] == 'l' && t[0x44] == 'o' && t[0x45] == 'b');
+  ASSERT(t[0x46] == 0);
+  /* Values, after the names: the string then the blob. */
+  ASSERT(t[0x47] == 'o' && t[0x48] == 'n' && t[0x49] == 0);
+  ASSERT(t[0x4A] == 0xDE && t[0x4B] == 0xAD && t[0x4C] == 0xBE &&
+         t[0x4D] == 0xEF);
+  /* Nothing after `size`. */
+  ASSERT(t[0x4E] == 0);
+
+  ASSERT(reg_parses(t) == 1);
+  ASSERT(get32(pre_stage + 0x38) == 0x20u + 0x4Eu); /* RPC length */
+  ASSERT(get32(pre_stage + 0x3C) == 73u);           /* function */
+  ASSERT(get32(pre_stage + 0x28) == 1u);            /* elemCount */
+  ASSERT(nv_rpc_cksum(pre_stage, 0x1000) == 0);
+  enum nv_rpc_reason why = NV_RPC_OK;
+  ASSERT(nv_rpc_elem_check(pre_stage, 1, &why) == 0);
+
+  /* A wrong nameOffset is caught by an independent parse, not by the encoder
+   * agreeing with itself. */
+  put32(pre_stage + 0x50 + 0x08 + 0x00, 0x39u);
+  ASSERT(reg_parses(pre_stage + 0x50) == 1); /* still inside, but ... */
+  ASSERT(get32(pre_stage + 0x50 + 0x08) != 0x38u); /* ... no longer "enable" */
+  ASSERT(pre_stage[0x50 + 0x39] != 'e');
+  /* A value offset that runs past the table is a parse failure. */
+  ASSERT(nv_rpc_registry_build(pre_stage, e, 3, 0) == 1);
+  put32(pre_stage + 0x50 + 0x08 + 0x0C, 0x100u); /* dword length 256 */
+  ASSERT(reg_parses(pre_stage + 0x50) == 0);
+
+  /* ---- the empty table: well-formed, and the honest default until the
+   * mandatory-key set is established (contract 5.2) --------------------- */
+  ASSERT(nv_rpc_registry_build(pre_stage, 0, 0, 1) == 1);
+  ASSERT(get32(pre_stage + 0x38) == 0x28u); /* 32 + 8 */
+  ASSERT(get32(pre_stage + 0x50 + 0x00) == 8u);
+  ASSERT(get32(pre_stage + 0x50 + 0x04) == 0u);
+  ASSERT(nv_rpc_cksum(pre_stage, 0x1000) == 0);
+  ASSERT(nv_rpc_registry_table_size(0, 0) == 8u);
+
+  /* ---- refusals ------------------------------------------------------- */
+  EXPECT_EQ(nv_rpc_registry_build(0, e, 3, 0), -EINVAL);
+  EXPECT_EQ(nv_rpc_registry_build(pre_stage, 0, 1, 0), -EINVAL);
+  struct nv_rpc_registry_entry b[1];
+  b[0] = e[0];
+  b[0].name = "";
+  EXPECT_EQ(nv_rpc_registry_build(pre_stage, b, 1, 0), -EINVAL);
+  b[0] = e[0];
+  b[0].type = 0;
+  EXPECT_EQ(nv_rpc_registry_build(pre_stage, b, 1, 0), -EINVAL);
+  b[0].type = 4;
+  EXPECT_EQ(nv_rpc_registry_build(pre_stage, b, 1, 0), -EINVAL);
+  b[0] = e[1];
+  b[0].str = 0;
+  EXPECT_EQ(nv_rpc_registry_build(pre_stage, b, 1, 0), -EINVAL);
+  b[0] = e[2];
+  b[0].blob = 0;
+  EXPECT_EQ(nv_rpc_registry_build(pre_stage, b, 1, 0), -EINVAL);
+  b[0].length = 0;
+  EXPECT_EQ(nv_rpc_registry_build(pre_stage, b, 1, 0), -EINVAL);
+  /* One message, 65456 payload bytes: a table that does not fit is refused
+   * rather than truncated into a table RM would misparse. */
+  b[0] = e[2];
+  b[0].length = NV_RPC_PAYLOAD_MAX;
+  EXPECT_EQ(nv_rpc_registry_build(pre_stage, b, 1, 0), -EMSGSIZE);
+  EXPECT_EQ(nv_rpc_registry_table_size(b, 1), 0u);
+}
+
+/* ======================================================================== */
+/* T-29 the framing both pre-boot messages share                            */
+/* ======================================================================== */
+
+static void test_t29_preboot_framing(void) {
+  uart_puts("  Running test_t29_preboot_framing...\n");
+  tests_run++;
+
+  struct nv_rpc_system_info si;
+  si_fixture(&si);
+
+  /* seqNum comes from the caller (per queue, per MESSAGE), and the element
+   * sequence is NOT the RPC sequence: the RPC header's own sequence stays 0
+   * for a fire-and-forget send (contract 2.4). */
+  ASSERT(nv_rpc_system_info_build(pre_stage, &si, 7) == 1);
+  EXPECT_EQ((int)get32(pre_stage + 0x24), 7);
+  EXPECT_EQ((int)get32(pre_stage + 0x48), 0);
+  ASSERT(nv_rpc_registry_build(pre_stage, 0, 0, 8) == 1);
+  EXPECT_EQ((int)get32(pre_stage + 0x24), 8);
+  EXPECT_EQ((int)get32(pre_stage + 0x48), 0);
+
+  /* A single corrupt payload byte breaks the fold -- the property the
+   * receiver relies on (contract 6 rows 9 and 12). */
+  ASSERT(nv_rpc_system_info_build(pre_stage, &si, 0) == 1);
+  ASSERT(nv_rpc_cksum(pre_stage, 0x1000) == 0);
+  pre_stage[0x50 + 0x2BF] ^= 0x01; /* the last byte of the payload */
+  ASSERT(nv_rpc_cksum(pre_stage, 0x1000) != 0);
+  enum nv_rpc_reason why = NV_RPC_OK;
+  EXPECT_EQ(nv_rpc_elem_check(pre_stage, 1, &why), -EIO);
+  EXPECT_EQ((int)why, (int)NV_RPC_CHECKSUM);
+
+  /* A corrupt header byte is a different failure and gets a different name.
+   * Re-fold afterwards, exactly as a sender that built a bad header would:
+   * then the checksum is valid and the signature check is what fires. */
+  ASSERT(nv_rpc_system_info_build(pre_stage, &si, 0) == 1);
+  pre_stage[0x34] ^= 0xFF; /* signature */
+  put32(pre_stage + 0x20, 0);
+  put32(pre_stage + 0x20, nv_rpc_cksum(pre_stage, 0x1000));
+  ASSERT(nv_rpc_cksum(pre_stage, 0x1000) == 0);
+  EXPECT_EQ(nv_rpc_elem_check(pre_stage, 1, &why), -EIO);
+  EXPECT_EQ((int)why, (int)NV_RPC_BAD_SIG);
+}
+
+/* ======================================================================== */
 
 void nv_rpc_test_suite(void) {
-  uart_puts("[NV-RPC] unit suite (spec section 7: T-01..T-24, contract T-25/26)\n");
+  uart_puts("[NV-RPC] unit suite (spec section 7: T-01..T-24, contract "
+            "T-25/26/27/28/29)\n");
   test_t01_block_geometry();
   test_t02_cmdq_header();
   test_t03_statq_not_written();
@@ -1452,6 +1777,9 @@ void nv_rpc_test_suite(void) {
   test_t24_link_msgcount();
   test_t25_args_page();
   test_t26_libos_page();
+  test_t27_system_info_layout();
+  test_t28_registry_layout();
+  test_t29_preboot_framing();
 }
 
 #endif /* KERNEL_MODE_UNIT_TEST */

@@ -39,6 +39,8 @@
  *    5 DMA the booter into SEC2 IMEM+DMEM         DONE (SEC2 xfer; row per half)
  *    6 start SEC2, wait for MAILBOX0 == 0         attempted every boot
  *    7 metadata `verified` == 0xA0A0...           not reached (booter stops)
+ *   7b RPC pre-boot: 72 then 73 queued, one      DONE (runs before the launch;
+ *      doorbell (contract 4.1 rows 3-5)           rows say wr=2 pw=0)
  *    8 build the RPC block (nv_dma + nv_rpc)      block built + published; the
  *                                                 link waits for RM's header,
  *                                                 and the send/doorbell with it
@@ -637,12 +639,20 @@ int nv_gsp_rpc_stage8_into(struct nv_gsp_rpc *r, struct nv_dev *d) {
    * arrived, and the check itself (the status header) is untouched by the
    * publish -- so a zero header after this point still means "RM has not
    * started", not "we scribbled on it".  No peer is needed: this is image
-   * construction plus two mailbox dwords. */
-  int prc = nv_gsp_rpc_publish(r, d);
-  if (prc != 0) {
-    uart_puts("[NV-ARG] stage=publish result=");
-    print_int(prc);
-    uart_puts(" (the firmware cannot be told where the block is)\n");
+   * construction plus two mailbox dwords.
+   *
+   * If the pre-boot step already published (it runs before the launch and
+   * writes MAILBOX0/1), do not write those two words a second time after the
+   * processor started: MAILBOX0 is also FWSEC's error channel and the publish
+   * is supposed to be the last writer of it in a boot. */
+  int prc = 0;
+  if (!r->published) {
+    prc = nv_gsp_rpc_publish(r, d);
+    if (prc != 0) {
+      uart_puts("[NV-ARG] stage=publish result=");
+      print_int(prc);
+      uart_puts(" (the firmware cannot be told where the block is)\n");
+    }
   }
 
   enum nv_rpc_link_field bad = NV_RPC_LINK_OK;
@@ -675,6 +685,290 @@ int nv_gsp_rpc_stage8_into(struct nv_gsp_rpc *r, struct nv_dev *d) {
 
 int nv_gsp_rpc_stage8(struct nv_dev *d) {
   return nv_gsp_rpc_stage8_into(&g_gsp_rpc, d);
+}
+
+/* ============================================================================
+ *  The pre-boot step: stage 72 and 73 BEFORE the processor starts
+ *  (docs/nv-gsp-rpc-contract.md 4.1 rows 3-5)
+ *
+ *  WHAT WAS MISSING.  The transport could build, publish, link and send, but
+ *  nothing ever put a message in the queue before the launch: RM would start
+ *  with an empty command queue and no reason to init.  Both messages are
+ *  "stuffed into the message queue before the GSP is booted" (the vendor
+ *  comment the contract quotes), so they are written here, while the processor
+ *  is stopped, and announced with ONE doorbell.
+ *
+ *  NEITHER IS WAITED ON.  There is no processor to answer; a reply would
+ *  arrive later, interleaved with GSP_INIT_DONE and other events (contract
+ *  3.5).  This function therefore has no clock and no poll.
+ *
+ *  THE ADDRESS RULE, again: nothing here spells phys.  The block's bus address
+ *  came from nv_dma_bus() in nv_gsp_rpc_build(), and the only device-facing
+ *  stores in this function are the one doorbell and (through the publish) the
+ *  two mailbox words.
+ * ========================================================================== */
+
+/* One message's staging area, reused: each message is committed to the ring
+ * before the next is built, so nothing outlives its commit.  The ceiling is
+ * the transport's (16 slots), not this card's (both messages are one slot). */
+static uint8_t g_pre_stage[NV_RPC_SLOT * NV_RPC_ELEM_MAX];
+
+/* Compact hex, the way the rows in this file read: 0x2E0, not
+ * 0x00000000000002E0. */
+static void nv_pre_hex(uint32_t v) {
+  static const char *d = "0123456789ABCDEF";
+  char s[12];
+  int n = 0, started = 0;
+  s[n++] = '0';
+  s[n++] = 'x';
+  for (int sh = 28; sh >= 0; sh -= 4) {
+    uint32_t nib = (v >> sh) & 0xFu;
+    if (nib || started || sh == 0) {
+      s[n++] = d[nib];
+      started = 1;
+    }
+  }
+  s[n] = 0;
+  uart_puts(s);
+}
+
+/* Slot `idx` of the command ring, addressed the way the header says (entryOff,
+ * then idx * msgSize) rather than by a literal 0x1000. */
+static const uint8_t *nv_pre_slot(const struct nv_rpc_queue *q, uint32_t idx) {
+  const uint8_t *cmdq = q->block + q->cmd_off;
+  uint32_t entry_off = glue_ld32(cmdq + NV_RPC_Q_ENTRY_OFF);
+  return cmdq + entry_off + (uint64_t)idx * NV_RPC_SLOT;
+}
+
+/* The whole-element fold over what is IN THE RING, across a wrap.  After
+ * nv_rpc_elem_build() stores the fold, the accumulator's two halves are equal;
+ * that is the "re-folds to 0" property, checked on the bytes the firmware will
+ * hash rather than on the staging copy. */
+static int nv_pre_fold_ok(const struct nv_rpc_queue *q, uint32_t idx,
+                          uint32_t ec) {
+  uint64_t a = 0;
+  for (uint32_t k = 0; k < ec; k++) {
+    uint32_t i = (idx + k) % q->msg_count;
+    a ^= nv_rpc_cksum_acc(nv_pre_slot(q, i), NV_RPC_SLOT);
+  }
+  return (uint32_t)a == (uint32_t)(a >> 32);
+}
+
+/* One row per staged message, every field read back from the ring:
+ *   [NV-PRE] stage=system_info fn=72 len=0x2E0 ec=1 wp_after=1 sum=OK */
+static void nv_pre_row(const char *what, uint32_t fn,
+                       const struct nv_rpc_queue *q, uint32_t idx) {
+  const uint8_t *slot = nv_pre_slot(q, idx);
+  uint32_t ec = glue_ld32(slot + NV_RPC_E_ELEMCOUNT);
+  uint32_t wp = glue_ld32(q->block + q->cmd_off + NV_RPC_Q_WRITE_PTR);
+
+  uart_puts("[NV-PRE] stage=");
+  uart_puts(what);
+  uart_puts(" fn=");
+  print_int((int)fn);
+  uart_puts(" len=");
+  nv_pre_hex(glue_ld32(slot + NV_RPC_R_LENGTH));
+  uart_puts(" ec=");
+  print_int((int)ec);
+  uart_puts(" wp_after=");
+  print_int((int)wp);
+  uart_puts(" sum=");
+  uart_puts(nv_pre_fold_ok(q, idx, ec) ? "OK" : "BAD");
+  uart_puts("\n");
+}
+
+int nv_gsp_rpc_preboot(struct nv_gsp_rpc *r, struct nv_dev *d) {
+  if (!r || !d) return -EINVAL;
+
+  if (r->preboot) {
+    /* Staging twice would queue 72/73 again behind whatever RM has already
+     * consumed, and ring a second doorbell for messages the peer did not ask
+     * for.  Say so and change nothing. */
+    uart_puts("[NV-PRE] stage=preboot already staged (wr=");
+    print_int((int)glue_ld32(r->q.block + r->q.cmd_off + NV_RPC_Q_WRITE_PTR));
+    uart_puts(" doorbells=");
+    print_int((int)r->doorbells);
+    uart_puts("): nothing queued, no doorbell\n");
+    return 0;
+  }
+
+  int rc = r->built ? 0 : nv_gsp_rpc_setup(r, g_rpc_rx_stage);
+  if (rc != 0) {
+    uart_puts("[NV-PRE] stage=preboot FAIL no transport rc=");
+    print_int(rc);
+    uart_puts(" (nothing is staged: a queue nobody could build is not a queue)\n");
+    return rc;
+  }
+  /* Publish BEFORE the first message: RM is told where the block is through
+   * the argument page and the mailboxes (contract 1.5/1.6), and it reads the
+   * command queue through that page.  A message in a block RM cannot find is
+   * a message nobody consumes. */
+  if (!r->published) {
+    rc = nv_gsp_rpc_publish(r, d);
+    if (rc != 0) {
+      uart_puts("[NV-PRE] stage=preboot FAIL publish rc=");
+      print_int(rc);
+      uart_puts(" (no message is staged)\n");
+      return rc;
+    }
+  }
+
+  struct nv_rpc_hw hw;
+  nv_rpc_hw_dev(d, &hw);
+
+  /* ---- the payload, and what it does NOT claim ------------------------ */
+  /* Every value below is either measured on this card or honest about being
+   * unknown; none of them is a number picked to look plausible. */
+  struct nv_rpc_system_info si;
+  si.gpu_phys_addr = d->bar0_phys;      /* BAR0 base, 0x80000000 on this card */
+  si.gpu_phys_fb_addr = d->bar1_phys;   /* BAR1 aperture base (above 4 GiB)   */
+  si.gpu_phys_inst_addr = 0;
+  si.nv_domain_bus_device_func =
+      ((uint64_t)d->bus << 8) | ((uint64_t)d->slot << 3) | (uint64_t)d->func;
+  si.max_user_va = 0;
+  si.sys_timer_offset_ns = 0;           /* 0 is safe: timestamped logs only   */
+  si.pci_config_mirror_base = 0;
+  si.pci_config_mirror_size = 0;
+  si.chipset = 0;                       /* tolerated; the vendor never sets it */
+
+  uart_puts("[NV-PRE] si gpuPhysAddr=");
+  uart_print_hex(si.gpu_phys_addr);
+  uart_puts(" gpuPhysFbAddr=");
+  uart_print_hex(si.gpu_phys_fb_addr);
+  uart_puts(" nvDomainBusDeviceFunc=");
+  uart_print_hex(si.nv_domain_bus_device_func);
+  uart_puts(" Chipset=");
+  print_int((int)si.chipset);
+  uart_puts("\n");
+  uart_puts("[NV-PRE] si gpuPhysInstAddr=0 NOT ESTABLISHED (no BAR2 on this "
+            "card; BAR3 is 32 MiB and was not tried)\n");
+  uart_puts("[NV-PRE] si maxUserVa=0 NOT ESTABLISHED (non-Linux host; the "
+            "vendor driver always sets it)\n");
+  uart_puts("[NV-PRE] si pciConfigMirrorBase=0 size=0 NOT ESTABLISHED (the pci "
+            "layer exposes no MMCONFIG physical base)\n");
+
+  /* Sequence numbers are per MESSAGE (contract 2.4); the doorbell is per
+   * notification.  Two messages therefore consume two numbers and one kick. */
+  uint32_t seq = r->q.tx_seq;
+
+  /* ---- row 3: GSP_SET_SYSTEM_INFO (72) -------------------------------- */
+  int ec = nv_rpc_system_info_build(g_pre_stage, &si, seq);
+  if (ec < 0) {
+    uart_puts("[NV-PRE] stage=system_info FAIL build rc=");
+    print_int(ec);
+    uart_puts("\n");
+    return ec;
+  }
+  uint32_t len = glue_ld32(g_pre_stage + NV_RPC_R_LENGTH);
+  enum nv_rpc_reason why = NV_RPC_OK;
+  uint32_t ec_tx = 0;
+  rc = nv_rpc_tx_prepare(&r->q, len, &ec_tx, &why);
+  if (rc != 0) {
+    uart_puts("[NV-PRE] stage=system_info FAIL prepare rc=");
+    print_int(rc);
+    uart_puts(" reason=");
+    uart_puts(nv_rpc_reason_name(why));
+    uart_puts("\n");
+    return rc;
+  }
+  rc = nv_rpc_tx_commit(&r->q, g_pre_stage, &hw);
+  if (rc != 0) {
+    uart_puts("[NV-PRE] stage=system_info FAIL commit rc=");
+    print_int(rc);
+    uart_puts("\n");
+    return rc;
+  }
+  r->sends++;
+  uint32_t wp72 = glue_ld32(r->q.block + r->q.cmd_off + NV_RPC_Q_WRITE_PTR);
+  nv_pre_row("system_info", NV_RPC_FN_SET_SYSTEM_INFO, &r->q, wp72 - ec_tx);
+  /* The payload is one slot, so the ring copy has the same layout as the
+   * staging copy and the checker can read it in place -- which is the point:
+   * it checks what the firmware will read. */
+  enum nv_rpc_si_field bad = nv_rpc_system_info_check(
+      nv_pre_slot(&r->q, wp72 - ec_tx), &si);
+  if (bad != NV_RPC_SI_F_OK) {
+    uart_puts("[NV-PRE] stage=system_info FAIL verify=");
+    uart_puts(nv_rpc_si_field_name(bad));
+    uart_puts(" (a field is not where the contract's table puts it)\n");
+    return -EIO;
+  }
+
+  /* ---- row 4: SET_REGISTRY (73) --------------------------------------- */
+  /* WHICH KEYS ARE MANDATORY IS NOT ESTABLISHED (contract 5.2): neither the
+   * vendor driver's list nor the independent implementation's documents a
+   * minimum.  An empty table is well-formed, so that is what is sent -- and
+   * the gap is named in the row rather than filled with invented keys, whose
+   * only symptom would be a non-zero GSP_INIT_DONE result later. */
+  ec = nv_rpc_registry_build(g_pre_stage, 0, 0, seq + 1u);
+  if (ec < 0) {
+    uart_puts("[NV-PRE] stage=registry FAIL build rc=");
+    print_int(ec);
+    uart_puts("\n");
+    return ec;
+  }
+  len = glue_ld32(g_pre_stage + NV_RPC_R_LENGTH);
+  rc = nv_rpc_tx_prepare(&r->q, len, &ec_tx, &why);
+  if (rc != 0) {
+    uart_puts("[NV-PRE] stage=registry FAIL prepare rc=");
+    print_int(rc);
+    uart_puts(" reason=");
+    uart_puts(nv_rpc_reason_name(why));
+    uart_puts("\n");
+    return rc;
+  }
+  rc = nv_rpc_tx_commit(&r->q, g_pre_stage, &hw);
+  if (rc != 0) {
+    uart_puts("[NV-PRE] stage=registry FAIL commit rc=");
+    print_int(rc);
+    uart_puts("\n");
+    return rc;
+  }
+  r->sends++;
+  uint32_t wp73 = glue_ld32(r->q.block + r->q.cmd_off + NV_RPC_Q_WRITE_PTR);
+  nv_pre_row("registry", NV_RPC_FN_SET_REGISTRY, &r->q, wp73 - ec_tx);
+
+  /* The table's own two words, read out of the ring: a `size` that disagrees
+   * with what was measured makes every offset in it a guess. */
+  const uint8_t *slot73 = nv_pre_slot(&r->q, wp73 - ec_tx);
+  uint32_t tbl = glue_ld32(slot73 + NV_RPC_R_PAYLOAD + NV_RPC_REG_O_SIZE);
+  uint32_t num = glue_ld32(slot73 + NV_RPC_R_PAYLOAD + NV_RPC_REG_O_NUM);
+  int tbl_ok = tbl == (uint32_t)nv_rpc_registry_table_size(0, 0) && num == 0;
+  uart_puts("[NV-PRE] stage=registry keys=");
+  print_int((int)num);
+  uart_puts(" table=");
+  nv_pre_hex(tbl);
+  uart_puts(tbl_ok ? " (NOT ESTABLISHED which keys are mandatory: an empty "
+                     "table is well-formed but may leave RM unbootable)\n"
+                   : " FAIL table header does not match the packed table\n");
+  if (!tbl_ok) return -EIO;
+
+  /* ---- row 5: the one doorbell ---------------------------------------- */
+  rc = nv_rpc_kick(&r->q, &hw);
+  if (rc != 0) {
+    uart_puts("[NV-PRE] stage=doorbell FAIL kick rc=");
+    print_int(rc);
+    uart_puts(" (the messages are in the ring and nobody was told)\n");
+    return rc;
+  }
+  r->doorbells++;
+  /* kick() advanced tx_seq by one notification; two MESSAGES were queued, and
+   * the next send's seqNum has to follow the ring, not the doorbell. */
+  r->q.tx_seq = seq + 2u;
+
+  /* THE DISCRIMINATOR.  wr is our producer word (cmdq + 0x10); pw is the
+   * peer's (statq + 0x10).  wr=2 with pw=0 says two messages are queued and
+   * no processor has started -- which is exactly the state a pre-boot step is
+   * supposed to leave behind.  The status header is never written by us. */
+  uart_puts("[NV-PRE] stage=doorbell wr=");
+  print_int((int)glue_ld32(r->q.block + r->q.cmd_off + NV_RPC_Q_WRITE_PTR));
+  uart_puts(" pw=");
+  print_int((int)glue_ld32(r->q.block + r->q.stat_off + NV_RPC_Q_WRITE_PTR));
+  uart_puts(" doorbells=");
+  print_int((int)r->doorbells);
+  uart_puts("\n");
+
+  r->preboot = 1;
+  return 0;
 }
 
 /* PFB: the write-protected-region block.  MEASURED (docs/nv-gsp-reference.md)
@@ -6335,6 +6629,25 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
     print_int(frc);
     uart_puts("\n");
   }
+  /* ---- the RPC pre-boot step, BEFORE the processor starts ----------------
+   * Contract 4.1 rows 3-5: publish the argument page (row 2), pre-queue
+   * GSP_SET_SYSTEM_INFO (72) and SET_REGISTRY (73), then ring the doorbell
+   * once.  This is the first thing that ever puts work in RM's command queue;
+   * without it a successful launch would leave RM with nothing to do.
+   *
+   * It sits here, after the GSP reset and the FWSEC attempt (so nothing later
+   * in the boot writes MAILBOX0 again and clobbers the argument page's
+   * address) and before the launch, because "pre-boot" is the whole point:
+   * the messages must be in the queue while the processor is not running.
+   * Nothing here waits -- there is no processor to answer yet. */
+  if (bldrc == 0 && lrc2 == 0) {
+    int prc2 = nv_gsp_rpc_preboot(&g_gsp_rpc, d);
+    uart_puts("[NV-GSP] stage4b (rpc pre-boot 72/73) result=");
+    print_int(prc2);
+    uart_puts(prc2 == 0 ? " (two messages queued, one doorbell)\n"
+                        : " (see the [NV-PRE] rows above)\n");
+  }
+
   if (bldrc == 0 && lrc2 == 0 && d->gsp_meta.pages != 0) {
     /* The booter's only argument is the metadata block's address, and the
      * address it must receive is the one the GPU uses.  nv_dma_bus() answers

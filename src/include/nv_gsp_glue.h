@@ -60,6 +60,7 @@ struct nv_gsp_rpc {
   uint32_t doorbells;      /* notifications rung (must equal sends)        */
   int built;
   int published;           /* the two mailbox words were written           */
+  int preboot;             /* 72 and 73 are queued and the doorbell rang   */
 };
 
 /* Allocate the block through nv_dma, build it, and point the queue at it.
@@ -126,6 +127,29 @@ int nv_gsp_rpc_notify(struct nv_gsp_rpc *r, const uint8_t *stage,
  * header validates, which only RM writes (spec 3 step 4): this stage cannot
  * ring the doorbell on a card where RM is not running, and it says so. */
 int nv_gsp_rpc_stage8(struct nv_dev *d);
+
+/* Pre-boot (contract 4.1 rows 3-5): build and publish if that has not happened
+ * yet, stage GSP_SET_SYSTEM_INFO (72) and then SET_REGISTRY (73) into the
+ * command queue (writePtr 0 -> 1 -> 2), and ring the doorbell ONCE for both.
+ *
+ * It runs BEFORE the processor starts and must: both messages are "stuffed
+ * into the message queue before the GSP is booted" (contract 4.1 notes), so
+ * firmware consumes them as its first work items.  Neither is waited on --
+ * there is no processor to answer yet.
+ *
+ * The doorbell is per NOTIFICATION, not per message: two messages are staged
+ * and the queue is announced once, which is why this function does not go
+ * through nv_gsp_rpc_notify() (that is one message, one kick).
+ *
+ * Everything the row prints is read back out of the block: length, elemCount,
+ * writePtr and the whole-element fold, so "staged" means "the ring holds a
+ * message that re-folds to zero", not "a function returned 0".
+ *
+ *   -EINVAL / -ENOTSUP / -ENOMEM  from setup or publish: nothing is staged.
+ *   -EIO                          a staged message does not read back.
+ * Idempotent: a second call stages nothing and rings nothing.
+ */
+int nv_gsp_rpc_preboot(struct nv_gsp_rpc *r, struct nv_dev *d);
 
 /* The same stage against caller-owned state, so the unit tier drives the exact
  * function the boot path calls (with a counting/fake MMIO device) instead of

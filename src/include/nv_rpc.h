@@ -363,6 +363,169 @@ int nv_rpc_libos_build(uint8_t *page, const struct nv_rpc_libos_region *e,
 int nv_rpc_libos_read(const uint8_t *page, uint32_t i,
                       struct nv_rpc_libos_region *out);
 
+/* ---- the pre-boot payloads (contract 4.1 rows 3-5, 5.1, 5.2) ----------
+ *
+ * Two messages exist before the firmware does: GSP_SET_SYSTEM_INFO (72) and
+ * SET_REGISTRY (73).  They are staged into the command queue while the
+ * processor is stopped and neither is waited on -- there is no processor to
+ * answer yet, and any reply arrives later interleaved with events.  The
+ * encoders here are PURE (bytes in, bytes out, no MMIO, no clock): the boot
+ * path owns the queue and the one doorbell.
+ *
+ * Both return the element's elemCount (> 0), or a negative errno.  The seqNum
+ * is a parameter and not something the encoder may invent: it is per queue and
+ * per MESSAGE (contract 2.4), so the caller that knows how many messages are
+ * already queued is the only one that can assign it.
+ * ---------------------------------------------------------------------- */
+
+#define NV_RPC_SYSTEM_INFO_SIZE 0x2C0u /* 704: the 535 shape of GspSystemInfo */
+
+/* Payload offsets, straight from the contract's table (5.1).  A byte written
+ * one field off is caught by nv_rpc_system_info_check(), which names the field
+ * -- the offsets here are what it checks against. */
+#define NV_RPC_SI_O_GPU_PHYS 0x000u      /* u64 gpuPhysAddr */
+#define NV_RPC_SI_O_GPU_FB 0x008u        /* u64 gpuPhysFbAddr */
+#define NV_RPC_SI_O_GPU_INST 0x010u      /* u64 gpuPhysInstAddr */
+#define NV_RPC_SI_O_BUSDEVFUNC 0x018u    /* u64 nvDomainBusDeviceFunc */
+#define NV_RPC_SI_O_SIM_ACCESS 0x020u    /* u64 simAccessBufPhysAddr */
+#define NV_RPC_SI_O_ATOMICS 0x028u       /* u64 pcieAtomicsOpMask */
+#define NV_RPC_SI_O_CONSOLE_SIZE 0x030u  /* u64 consoleMemSize */
+#define NV_RPC_SI_O_MAX_USER_VA 0x038u   /* u64 maxUserVa */
+#define NV_RPC_SI_O_PCI_MIRROR_BASE 0x040u /* u32 */
+#define NV_RPC_SI_O_PCI_MIRROR_SIZE 0x044u /* u32 */
+#define NV_RPC_SI_O_OOR_ARCH 0x048u      /* u8  oorArch */
+#define NV_RPC_SI_O_CL_PDB 0x050u        /* u64 clPdbProperties */
+#define NV_RPC_SI_O_CHIPSET 0x058u       /* u32 Chipset */
+#define NV_RPC_SI_O_FLAGS 0x05Cu         /* 4 x u32 PCIe topology flags */
+#define NV_RPC_SI_O_FLAGS2 0x06Cu        /* 2 x u32 */
+#define NV_RPC_SI_O_UPSTREAM 0x074u      /* u8  upstreamAddressValid */
+#define NV_RPC_SI_O_FHB_BUS_INFO 0x076u  /* 10 bytes */
+#define NV_RPC_SI_O_CHIPSET_ID 0x080u    /* 10 bytes */
+#define NV_RPC_SI_O_ACPI 0x08Cu          /* 488 bytes, all zero, bValid = 0 */
+#define NV_RPC_SI_O_HYPERVISOR 0x274u    /* u32 */
+#define NV_RPC_SI_O_VIRTUAL_CFG 0x278u   /* u16 virtualConfigBits */
+#define NV_RPC_SI_O_IS_PASSTHRU 0x27Cu   /* u32 */
+#define NV_RPC_SI_O_TIMER_OFFSET 0x280u  /* u64 sysTimerOffsetNs */
+#define NV_RPC_SI_O_VF_INFO 0x288u       /* 48 bytes */
+#define NV_RPC_SI_O_TDR 0x2B8u           /* u32 bTdrEventSupported */
+
+/* The fields WE fill.  Everything else in the structure is zero by
+ * construction: the contract's table says so for every remaining field
+ * (simulation, atomics, console, topology flags, ACPI, VF info), and a zero
+ * written by the builder is a decision while a zero left by luck is not. */
+struct nv_rpc_system_info {
+  uint64_t gpu_phys_addr;  /* +0x000 BAR0 base */
+  uint64_t gpu_phys_fb_addr; /* +0x008 BAR1 aperture base */
+  uint64_t gpu_phys_inst_addr; /* +0x010 NOT ESTABLISHED on this card (no BAR2) */
+  uint64_t nv_domain_bus_device_func; /* +0x018 (bus << 8) | devfn */
+  uint64_t max_user_va;    /* +0x038 NOT ESTABLISHED for a non-Linux host */
+  uint64_t sys_timer_offset_ns; /* +0x280 0 is safe (only timestamped logs) */
+  uint32_t pci_config_mirror_base; /* +0x040 0 = no mirror (not established) */
+  uint32_t pci_config_mirror_size; /* +0x044 */
+  uint32_t chipset;        /* +0x058 0: the vendor driver never assigns it */
+};
+
+/* Which field the checker disagreed with, by name, so a boot row says what is
+ * wrong instead of "verify failed". */
+enum nv_rpc_si_field {
+  NV_RPC_SI_F_OK = 0,
+  NV_RPC_SI_F_HEADER,
+  NV_RPC_SI_F_GPU_PHYS,
+  NV_RPC_SI_F_GPU_FB,
+  NV_RPC_SI_F_GPU_INST,
+  NV_RPC_SI_F_BUSDEVFUNC,
+  NV_RPC_SI_F_MAX_USER_VA,
+  NV_RPC_SI_F_PCI_MIRROR_BASE,
+  NV_RPC_SI_F_PCI_MIRROR_SIZE,
+  NV_RPC_SI_F_CHIPSET,
+  NV_RPC_SI_F_TIMER_OFFSET,
+  NV_RPC_SI_F_ZERO, /* a byte the contract says is zero is not */
+  NV_RPC_SI_F_SIZE   /* total size is not 0x2C0 */
+};
+
+const char *nv_rpc_si_field_name(enum nv_rpc_si_field f);
+
+/* Write one opcode-72 element: RPC header (version, signature, length
+ * 0x20 + 0x2C0, function 72, both PENDING sentinels), the 0x2C0-byte payload
+ * at every offset above, then the framing (elemCount, checksum over the whole
+ * element).  `stage` must hold NV_RPC_SLOT * 16 bytes.
+ *   -EINVAL  NULL stage/input.
+ * Returns the elemCount (1 for this payload) or a negative errno from
+ * nv_rpc_elem_build(). */
+int nv_rpc_system_info_build(uint8_t *stage,
+                             const struct nv_rpc_system_info *in, uint32_t seq);
+
+/* Check a built opcode-72 element against the contract's offset table and the
+ * values it was built from: header fields, every named field, every byte the
+ * contract says is zero, and the total size.  Reads the BYTES, never the
+ * input struct, so it catches a store that landed one field away.
+ * Returns NV_RPC_SI_F_OK or the first disagreement. */
+enum nv_rpc_si_field nv_rpc_system_info_check(
+    const uint8_t *stage, const struct nv_rpc_system_info *in);
+
+/* ---- SET_REGISTRY (contract 5.2): a packed table, not a list of structs --
+ *
+ *   +0x00 u32 size        total bytes of the table (header + entries + names
+ *                         + string/binary values)
+ *   +0x04 u32 numEntries
+ *   +0x08 16 x N entries  nameOffset (u32, from the table start), type (u8),
+ *                         data (u32: the dword value, or an offset for
+ *                         string/binary), length (u32)
+ *   then                  NUL-terminated key names, then values, packed
+ *
+ * The table starts immediately after the 32-byte RPC header, and both offsets
+ * are relative to the table's start.
+ *
+ * `length` for a dword entry is 4 -- the size of the value it describes.
+ * NEITHER source states it (contract 5.2 gives the field, not its value for
+ * type 1); RM reads `data` according to `type`, so the number is bookkeeping.
+ * It is pinned by T-28 and stated as INFERRED in the code, not presented as a
+ * documented constant.
+ *
+ * WHICH KEYS ARE MANDATORY IS NOT ESTABLISHED (contract 5.2).  nv_rpc_registry_build
+ * takes the list from the caller and accepts n == 0: an empty table is
+ * well-formed, and a driver that needs keys the source does not name has to
+ * find them from a firmware that answers, not from a guess.
+ */
+#define NV_RPC_REG_HDR 0x08u
+#define NV_RPC_REG_ENTRY 0x10u
+#define NV_RPC_REG_O_SIZE 0x00u
+#define NV_RPC_REG_O_NUM 0x04u
+#define NV_RPC_REG_E_NAMEOFF 0x00u
+#define NV_RPC_REG_E_TYPE 0x04u
+#define NV_RPC_REG_E_DATA 0x08u
+#define NV_RPC_REG_E_LENGTH 0x0Cu
+#define NV_RPC_REG_TYPE_DWORD 1u
+#define NV_RPC_REG_TYPE_BINARY 2u
+#define NV_RPC_REG_TYPE_STRING 3u
+
+struct nv_rpc_registry_entry {
+  const char *name; /* NUL-terminated key name; required */
+  uint8_t type;     /* NV_RPC_REG_TYPE_* */
+  uint32_t dword;   /* type 1: the value */
+  const void *blob; /* type 2: `length` bytes */
+  const char *str;  /* type 3: NUL-terminated, length derived (len + 1) */
+  uint32_t length;  /* type 2 only */
+};
+
+/* Write one opcode-73 element: the RPC header (function 73), the packed table
+ * with names after the entries and values after the names, then the framing.
+ *   -EINVAL   NULL stage, a NULL/empty name, a type outside 1..3, a string
+ *             entry without `str`, a binary entry with no blob or length 0.
+ *   -EMSGSIZE the table does not fit one message (65456 payload bytes);
+ *             splitting into CONTINUATION_RECORD (71) is the transport's, and
+ *             the pre-boot path has exactly one slot for this opcode.
+ * Returns the elemCount (> 0) or a negative errno. */
+int nv_rpc_registry_build(uint8_t *stage,
+                          const struct nv_rpc_registry_entry *e, uint32_t n,
+                          uint32_t seq);
+
+/* The table's total size in bytes for this entry list, or 0 when the list is
+ * malformed (same rules as the builder).  Exposed because the row that reports
+ * the staged message has to say what it expected before it reads it back. */
+uint32_t nv_rpc_registry_table_size(const struct nv_rpc_registry_entry *e,
+                                    uint32_t n);
+
 /* ---- link (spec 4.2) -------------------------------------------------- */
 
 struct nv_rpc_peer {

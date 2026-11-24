@@ -362,6 +362,252 @@ int nv_rpc_libos_read(const uint8_t *page, uint32_t i,
 }
 
 /* ======================================================================== */
+/* the pre-boot payloads: 72 GSP_SET_SYSTEM_INFO, 73 SET_REGISTRY            */
+/* ======================================================================== */
+
+static const char *const si_field_names[] = {
+    "ok",           "header",
+    "gpuPhysAddr",  "gpuPhysFbAddr",
+    "gpuPhysInstAddr", "nvDomainBusDeviceFunc",
+    "maxUserVa",    "pciConfigMirrorBase",
+    "pciConfigMirrorSize", "Chipset",
+    "sysTimerOffsetNs", "zeros",
+    "size",
+};
+
+const char *nv_rpc_si_field_name(enum nv_rpc_si_field f) {
+  if ((int)f < 0 || (unsigned)f >= sizeof(si_field_names) / sizeof(si_field_names[0]))
+    return "?";
+  return si_field_names[f];
+}
+
+/* Every byte of [from, to) is zero, which is what the contract's table says
+ * for every field this driver does not fill.  Split into ranges rather than
+ * one call so the failure can name "zeros" and the caller can see which region
+ * by the offsets quoted in the caller's own comment. */
+static int si_is_zero(const uint8_t *p, uint32_t from, uint32_t to) {
+  for (uint32_t i = from; i < to; i++)
+    if (p[i] != 0) return 0;
+  return 1;
+}
+
+int nv_rpc_system_info_build(uint8_t *stage,
+                             const struct nv_rpc_system_info *in,
+                             uint32_t seq) {
+  if (!stage || !in) return -EINVAL;
+
+  const uint32_t len = NV_RPC_RPC_HDR + NV_RPC_SYSTEM_INFO_SIZE;
+  if (nv_rpc_req_init(stage, NV_RPC_FN_SET_SYSTEM_INFO, len) != 0) return -EINVAL;
+
+  uint8_t *p = stage + NV_RPC_R_PAYLOAD;
+  /* Zero the whole 0x2C0 first: every field the contract leaves at zero is
+   * then zero because this wrote it, not because the buffer was fresh. */
+  memset(p, 0, NV_RPC_SYSTEM_INFO_SIZE);
+
+  st64(p + NV_RPC_SI_O_GPU_PHYS, in->gpu_phys_addr);
+  st64(p + NV_RPC_SI_O_GPU_FB, in->gpu_phys_fb_addr);
+  st64(p + NV_RPC_SI_O_GPU_INST, in->gpu_phys_inst_addr);
+  st64(p + NV_RPC_SI_O_BUSDEVFUNC, in->nv_domain_bus_device_func);
+  st64(p + NV_RPC_SI_O_MAX_USER_VA, in->max_user_va);
+  st32(p + NV_RPC_SI_O_PCI_MIRROR_BASE, in->pci_config_mirror_base);
+  st32(p + NV_RPC_SI_O_PCI_MIRROR_SIZE, in->pci_config_mirror_size);
+  st32(p + NV_RPC_SI_O_CHIPSET, in->chipset);
+  st64(p + NV_RPC_SI_O_TIMER_OFFSET, in->sys_timer_offset_ns);
+
+  /* The two fields whose displacement is easiest to get wrong: one at the
+   * start of the payload and one 0x280 in, past every structure that a
+   * "close enough" offset table would shift.  A store that landed elsewhere
+   * still returns from this function, so read it back. */
+  if (ld64(p + NV_RPC_SI_O_GPU_PHYS) != in->gpu_phys_addr) return -EIO;
+  if (ld64(p + NV_RPC_SI_O_TIMER_OFFSET) != in->sys_timer_offset_ns) return -EIO;
+
+  return nv_rpc_elem_build(stage, len, seq);
+}
+
+enum nv_rpc_si_field nv_rpc_system_info_check(
+    const uint8_t *stage, const struct nv_rpc_system_info *in) {
+  if (!stage || !in) return NV_RPC_SI_F_HEADER;
+
+  const uint8_t *p = stage + NV_RPC_R_PAYLOAD;
+
+  /* The header first: a message with the wrong function is not this message,
+   * however well its payload is laid out. */
+  if (ld32(stage + NV_RPC_R_HDRVER) != NV_RPC_VERSION) return NV_RPC_SI_F_HEADER;
+  if (ld32(stage + NV_RPC_R_SIG) != NV_RPC_SIG) return NV_RPC_SI_F_HEADER;
+  if (ld32(stage + NV_RPC_R_FUNCTION) != NV_RPC_FN_SET_SYSTEM_INFO)
+    return NV_RPC_SI_F_HEADER;
+  if (ld32(stage + NV_RPC_R_LENGTH) != NV_RPC_RPC_HDR + NV_RPC_SYSTEM_INFO_SIZE)
+    return NV_RPC_SI_F_SIZE;
+
+  if (ld64(p + NV_RPC_SI_O_GPU_PHYS) != in->gpu_phys_addr)
+    return NV_RPC_SI_F_GPU_PHYS;
+  if (ld64(p + NV_RPC_SI_O_GPU_FB) != in->gpu_phys_fb_addr)
+    return NV_RPC_SI_F_GPU_FB;
+  if (ld64(p + NV_RPC_SI_O_GPU_INST) != in->gpu_phys_inst_addr)
+    return NV_RPC_SI_F_GPU_INST;
+  if (ld64(p + NV_RPC_SI_O_BUSDEVFUNC) != in->nv_domain_bus_device_func)
+    return NV_RPC_SI_F_BUSDEVFUNC;
+  if (ld64(p + NV_RPC_SI_O_MAX_USER_VA) != in->max_user_va)
+    return NV_RPC_SI_F_MAX_USER_VA;
+  if (ld32(p + NV_RPC_SI_O_PCI_MIRROR_BASE) != in->pci_config_mirror_base)
+    return NV_RPC_SI_F_PCI_MIRROR_BASE;
+  if (ld32(p + NV_RPC_SI_O_PCI_MIRROR_SIZE) != in->pci_config_mirror_size)
+    return NV_RPC_SI_F_PCI_MIRROR_SIZE;
+  if (ld32(p + NV_RPC_SI_O_CHIPSET) != in->chipset) return NV_RPC_SI_F_CHIPSET;
+  if (ld64(p + NV_RPC_SI_O_TIMER_OFFSET) != in->sys_timer_offset_ns)
+    return NV_RPC_SI_F_TIMER_OFFSET;
+
+  /* Everything else the contract pins at zero, by range: simulation address,
+   * atomics mask, console size / maxUserVa / mirror / oorArch gap / clPdb,
+   * the four topology flags and the two following, upstreamAddressValid,
+   * FHBBusInfo, chipsetIDInfo, the 488-byte ACPI blob, hypervisorType,
+   * virtualConfigBits, bIsPassthru, gspVFInfo, bTdrEventSupported and the
+   * four-byte tail.  A field written one slot too far lands in one of these
+   * ranges and is caught here even if its "own" offset happens to hold a
+   * value that compares equal. */
+  if (!si_is_zero(p, NV_RPC_SI_O_SIM_ACCESS, NV_RPC_SI_O_MAX_USER_VA))
+    return NV_RPC_SI_F_ZERO;
+  /* 0x048 oorArch + its 7 pad bytes + 0x050 clPdb; Chipset at 0x058 is a
+   * field of ours, so the range stops before it and resumes at 0x05C. */
+  if (!si_is_zero(p, NV_RPC_SI_O_OOR_ARCH, NV_RPC_SI_O_CHIPSET))
+    return NV_RPC_SI_F_ZERO;
+  if (!si_is_zero(p, NV_RPC_SI_O_FLAGS, NV_RPC_SI_O_TIMER_OFFSET))
+    return NV_RPC_SI_F_ZERO;
+  if (!si_is_zero(p, NV_RPC_SI_O_VF_INFO, NV_RPC_SYSTEM_INFO_SIZE))
+    return NV_RPC_SI_F_ZERO;
+  return NV_RPC_SI_F_OK;
+}
+
+/* ---- the registry table ------------------------------------------------- */
+
+static uint32_t reg_strlen(const char *s) {
+  uint32_t n = 0;
+  if (!s) return 0;
+  while (s[n]) n++;
+  return n;
+}
+
+/* The bytes a value occupies in the table: 4 for a dword (the size of the
+ * value -- INFERRED, contract 5.2 names the field but not its value for
+ * type 1), `length` for a blob, strlen + 1 for a string. */
+static int reg_value_bytes(const struct nv_rpc_registry_entry *e,
+                           uint32_t *len_out) {
+  switch (e->type) {
+  case NV_RPC_REG_TYPE_DWORD:
+    *len_out = 4u;
+    return 0;
+  case NV_RPC_REG_TYPE_BINARY:
+    if (!e->blob || e->length == 0) return -EINVAL;
+    *len_out = e->length;
+    return 0;
+  case NV_RPC_REG_TYPE_STRING:
+    if (!e->str) return -EINVAL;
+    *len_out = reg_strlen(e->str) + 1u;
+    return 0;
+  default:
+    return -EINVAL;
+  }
+}
+
+/* names_at: where the first name goes; values_at: where the first string or
+ * blob goes; total: the table's size.  One pass, so the writer and the size
+ * cannot disagree. */
+static int reg_measure(const struct nv_rpc_registry_entry *e, uint32_t n,
+                       uint32_t *names_at, uint32_t *values_at,
+                       uint32_t *total) {
+  uint64_t off = (uint64_t)NV_RPC_REG_HDR + (uint64_t)n * NV_RPC_REG_ENTRY;
+  if (off > NV_RPC_PAYLOAD_MAX) return -EMSGSIZE;
+  if (n && !e) return -EINVAL;
+
+  *names_at = (uint32_t)off;
+  for (uint32_t i = 0; i < n; i++) {
+    uint32_t nl = reg_strlen(e[i].name);
+    uint32_t vl = 0;
+    if (!e[i].name || nl == 0) return -EINVAL;
+    if (reg_value_bytes(&e[i], &vl) != 0) return -EINVAL;
+    off += nl + 1u;
+    if (off > NV_RPC_PAYLOAD_MAX) return -EMSGSIZE;
+  }
+
+  *values_at = (uint32_t)off;
+  for (uint32_t i = 0; i < n; i++) {
+    uint32_t vl = 0;
+    (void)reg_value_bytes(&e[i], &vl); /* validated in the pass above */
+    if (e[i].type != NV_RPC_REG_TYPE_DWORD) off += vl;
+    if (off > NV_RPC_PAYLOAD_MAX) return -EMSGSIZE;
+  }
+
+  *total = (uint32_t)off;
+  if (*total < NV_RPC_REG_HDR) return -EINVAL;
+  return 0;
+}
+
+uint32_t nv_rpc_registry_table_size(const struct nv_rpc_registry_entry *e,
+                                    uint32_t n) {
+  uint32_t names_at = 0, values_at = 0, total = 0;
+  if (reg_measure(e, n, &names_at, &values_at, &total) != 0) return 0;
+  return total;
+}
+
+int nv_rpc_registry_build(uint8_t *stage,
+                          const struct nv_rpc_registry_entry *e, uint32_t n,
+                          uint32_t seq) {
+  if (!stage || (n && !e)) return -EINVAL;
+
+  uint32_t names_at = 0, values_at = 0, total = 0;
+  int mrc = reg_measure(e, n, &names_at, &values_at, &total);
+  if (mrc != 0) return mrc;
+
+  const uint32_t len = NV_RPC_RPC_HDR + total;
+  if (nv_rpc_req_init(stage, NV_RPC_FN_SET_REGISTRY, len) != 0) return -EINVAL;
+
+  /* The table starts immediately after the RPC header; every offset inside it
+   * is relative to this byte. */
+  uint8_t *t = stage + NV_RPC_R_PAYLOAD;
+  memset(t, 0, total);
+
+  st32(t + NV_RPC_REG_O_SIZE, total);
+  st32(t + NV_RPC_REG_O_NUM, n);
+
+  uint32_t name_cursor = names_at;
+  uint32_t value_cursor = values_at;
+  for (uint32_t i = 0; i < n; i++) {
+    uint8_t *ent = t + NV_RPC_REG_HDR + (uint64_t)i * NV_RPC_REG_ENTRY;
+    uint32_t nl = reg_strlen(e[i].name);
+    uint32_t vl = 0;
+    (void)reg_value_bytes(&e[i], &vl);
+
+    st32(ent + NV_RPC_REG_E_NAMEOFF, name_cursor);
+    ent[NV_RPC_REG_E_TYPE] = e[i].type;
+
+    if (e[i].type == NV_RPC_REG_TYPE_DWORD) {
+      st32(ent + NV_RPC_REG_E_DATA, e[i].dword);
+      st32(ent + NV_RPC_REG_E_LENGTH, 4u);
+    } else {
+      st32(ent + NV_RPC_REG_E_DATA, value_cursor);
+      st32(ent + NV_RPC_REG_E_LENGTH, vl);
+      memcpy(t + value_cursor, e[i].type == NV_RPC_REG_TYPE_STRING
+                                  ? (const void *)e[i].str
+                                  : e[i].blob,
+             vl);
+      value_cursor += vl;
+    }
+
+    /* The NUL after the name is part of the name's bytes and is already zero
+     * from the fill above; copy only the characters. */
+    memcpy(t + name_cursor, e[i].name, nl);
+    name_cursor += nl + 1u;
+  }
+
+  /* The two words a reader starts with: a wrong `size` makes the table
+   * unparseable and a wrong `numEntries` makes the tail look like entries. */
+  if (ld32(t + NV_RPC_REG_O_SIZE) != total) return -EIO;
+  if (ld32(t + NV_RPC_REG_O_NUM) != n) return -EIO;
+
+  return nv_rpc_elem_build(stage, len, seq);
+}
+
+/* ======================================================================== */
 /* link (spec 4.2)                                                           */
 /* ======================================================================== */
 
