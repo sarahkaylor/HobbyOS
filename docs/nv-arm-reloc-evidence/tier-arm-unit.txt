@@ -1,17 +1,15 @@
-# ARM unit tier on the tree with the gate (docs/nv-arm-reloc.md §3)
+# ARM unit tier on the tree with the gate (docs/nv-arm-reloc.md §7)
 command: TOOLS_SKIP=1 BROWSER_SKIP=1 UNIT_TESTS_TIMEOUT=900 ./run_unit_tests.sh
 image:  MODE=unit_tests, built inside the same script (the link above).
-result: 472 run / 0 failed / UNIT TESTS PASSED, exit 0 -- identical to the
-        documented ARM baseline at eaf006a9 (no test was added, so no
-        count may move; this is the measurement that says none did).
 
 Building unit test image (ARCH=arm)...
 Running unit tests...
-[RELOC] entries=0x00000000000001A1 applied=0x00000000000001A1 slide=0x00000003FA200000 outside=0x0000000000000000 status=0x0000000000000000 ok
+[RELOC] entries=0x00000000000001AD applied=0x00000000000001AD slide=0x00000003FA200000 outside=0x0000000000000000 status=0x0000000000000000 ok
     RUNNING KERNEL UNIT TESTS     
   Running test_reloc_folded_rodata...
   Running test_reloc_real_table...
   Running test_reloc_pass_stats...
-Tests run:    472
+Tests run:    473
 Tests failed: 0
 UNIT TESTS PASSED
+arm exit=0

@@ -1,26 +1,25 @@
 # RED 1 -- a reintroduced folded table (docs/nv-arm-reloc.md §7)
-tree: nv/wp-reloc-guard (docs/nv-arm-reloc.md §7)
+tree: nv/wp-reloc-guard, merged with origin/nv/integ-swarm bbca2514
 host: ~/Documents/GitHub/HobbyOS/.worktrees/t_4caf48a4, QEMU 10.2.1, clang/ld.lld cross build on this VM
 make: TOOLS_SKIP=1 BROWSER_SKIP=1 ARCH=arm MODE=unit_tests hobbyos.elf
 change: src/kernel/nv_rm_mock.c got the pre-round-3 static initializer
         back as `nv_rm_mock_static_probe` (`__attribute__((used))`),
         i.e. `const struct nv_rm_if x = {"mock", mock_device_open, ...}`.
         Reverted after the run (git checkout -- src/kernel/nv_rm_mock.c).
-result: make exit 2 -- the relocation COVERAGE check is green (433/433
-        applied, a -pie link relocates the new table's words by
+result: make exit 2 -- the relocation COVERAGE check is green (445/445
+        applied: a -pie link relocates the new table's words by
         construction); the INVENTORY check is what rejects it.
-        Raw build log: /tmp/ev_red_new.log on the build box.
 
 python3 tools/kernel_reloc_audit.py --gate --baseline tools/reloc_tables_baseline.json --mode unit_tests \
      hobbyos.elf
 # hobbyos.elf
-# kernel link range [0x40080000, 0x417B054C)   .rela.dyn=433 entries (present)
-# pointer words baked into static data (need relocating): 433
-#   applied at boot (R_AARCH64_RELATIVE, addend in image): 433
+# kernel link range [0x40080000, 0x417B060C)   .rela.dyn=445 entries (present)
+# pointer words baked into static data (need relocating): 445
+#   applied at boot (R_AARCH64_RELATIVE, addend in image): 445
 #   NOTHING WILL APPLY THEM (left at their link address):     0
-# folded-table inventory: 21 table(s) / 428 word(s), plus 5 linker-generated .got slot(s)
+# folded-table inventory: 22 table(s) / 440 word(s), plus 5 linker-generated .got slot(s)
 hobbyos.elf: FAIL -- folded table(s) not in the audited inventory [MODE=unit_tests]:
-  NEW   nv_rm_mock_static_probe              16 word(s)  .rodata  first slot 0x0000401F6DC8  nv_rm_mock_static_probe
+  NEW   nv_rm_mock_static_probe              16 word(s)  .rodata  first slot 0x0000401F7F48  nv_rm_mock_static_probe
 A folded const char*/function-pointer table is a link-address hazard: every word in it needs an R_AARCH64_RELATIVE at boot.  Two responses are legal:
   (a) build it at run time -- member assignment, not a static initializer (src/kernel/nv_rm_mock.c is the worked example); or
   (b) keep it and record the decision: python3 tools/kernel_reloc_audit.py --update-baseline --mode unit_tests hobbyos.elf

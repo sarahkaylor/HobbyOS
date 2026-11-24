@@ -5,13 +5,12 @@ why SKIP_KVM=1: this VM's /dev/kvm is root:kvm and this user is not in
   module: Permission denied` (kept in tier-intel-kvm-denied.txt).  The
   tier therefore ran under TCG, slower but the same binary and the same
   assertions; count parity is what this row is for.
-result: 589 run / 0 failed / UNIT TESTS PASSED, exit 0 -- identical to the
-        documented intel baseline at eaf006a9 (589/0), and the intel link
-        ran no reloc gate at all (0 `reloc gate` lines in build.log).
+note: the intel link runs no reloc gate at all (0 `reloc gate` lines in
+  its build.log) -- the x86_64 image is correct by construction (§8).
 
 Running unit tests with QEMU_ARGS: 
     RUNNING KERNEL UNIT TESTS     
-Tests run:    589
+Tests run:    590
 Tests failed: 0
 UNIT TESTS PASSED
 intel exit=0

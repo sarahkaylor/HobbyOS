@@ -3,7 +3,7 @@
  "generated_by": "tools/kernel_reloc_audit.py --update-baseline",
  "modes": {
   "desktop": {
-   "total": 411,
+   "total": 423,
    "tables": {
     "l_tab_fd": 108,
     "l_tab_proc": 94,
@@ -14,6 +14,7 @@
     "reason_names": 18,
     "cons_dtags": 13,
     "do_hw_params.nm": 12,
+    "g_nvif_engines": 12,
     "arg_names": 10,
     "cons_dnames": 9,
     "vm_pw_name": 9,
@@ -26,7 +27,7 @@
    }
   },
   "unit_tests": {
-   "total": 417,
+   "total": 429,
    "tables": {
     "l_tab_fd": 108,
     "l_tab_proc": 94,
@@ -37,6 +38,7 @@
     "reason_names": 18,
     "cons_dtags": 13,
     "do_hw_params.nm": 12,
+    "g_nvif_engines": 12,
     "arg_names": 10,
     "cons_dnames": 9,
     "vm_pw_name": 9,
@@ -51,7 +53,7 @@
    }
   },
   "test": {
-   "total": 411,
+   "total": 423,
    "tables": {
     "l_tab_fd": 108,
     "l_tab_proc": 94,
@@ -62,6 +64,7 @@
     "reason_names": 18,
     "cons_dtags": 13,
     "do_hw_params.nm": 12,
+    "g_nvif_engines": 12,
     "arg_names": 10,
     "cons_dnames": 9,
     "vm_pw_name": 9,

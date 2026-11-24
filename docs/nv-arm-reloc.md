@@ -53,8 +53,8 @@ Two shapes are indistinguishable at the source level and both are in scope:
   clear and before `main()`, and `halt()`s on anything it cannot apply;
 - `tools/kernel_reloc_audit.py --gate` runs after every AArch64 link and fails
   the build if a word holding an in-image address has no applied relocation
-  (measured rejection: reverting `-pie` gives `make exit 2` with 417 unapplied
-  words).
+  (measured rejection in `SWARM-REPORT-WP-RELOC.md`: reverting `-pie` gave
+  `make exit 2` with 417 unapplied words on the round-4 tree).
 
 So the tables in §4 are **not hazards** — they are the population the boot pass
 serves. They stay folded deliberately: their runtime-built form is hundreds of
@@ -91,21 +91,21 @@ Measured, unit tier, on the green tree (MEASURED):
 ```
 python3 tools/kernel_reloc_audit.py --gate --baseline tools/reloc_tables_baseline.json --mode unit_tests hobbyos.elf
 # hobbyos.elf
-# kernel link range [0x40080000, 0x417B054C)   .rela.dyn=417 entries (present)
-# pointer words baked into static data (need relocating): 417
-#   applied at boot (R_AARCH64_RELATIVE, addend in image): 417
+# kernel link range [0x40080000, 0x417B060C)   .rela.dyn=429 entries (present)
+# pointer words baked into static data (need relocating): 429
+#   applied at boot (R_AARCH64_RELATIVE, addend in image): 429
 #   NOTHING WILL APPLY THEM (left at their link address):     0
-# folded-table inventory: 20 table(s) / 412 word(s), plus 5 linker-generated .got slot(s)
-hobbyos.elf: reloc gate OK -- 417 kernel pointer word(s), every one applied at boot
-hobbyos.elf: folded-table inventory matches -- 20 table(s) / 412 word(s) as audited [MODE=unit_tests]
+# folded-table inventory: 21 table(s) / 424 word(s), plus 5 linker-generated .got slot(s)
+hobbyos.elf: reloc gate OK -- 429 kernel pointer word(s), every one applied at boot
+hobbyos.elf: folded-table inventory matches -- 21 table(s) / 424 word(s) as audited [MODE=unit_tests]
 ```
 
-`MODE=desktop` and `MODE=test` are audited too (18 tables / 406 words / 411
+`MODE=desktop` and `MODE=test` are audited too (19 tables / 418 words / 423
 pointer words each — they do not link the unit-tier test tables), and an
 unaudited mode lands on the union path:
 
 ```
-hobbyos.elf: folded-table inventory matches -- 18 table(s) / 406 word(s) as audited [union of desktop, test, unit_tests]
+hobbyos.elf: folded-table inventory matches -- 19 table(s) / 418 word(s) as audited [union of desktop, test, unit_tests]
 ```
 
 An image from another tree (or another arch) can still be audited without the
@@ -130,6 +130,7 @@ marked where it matters. Words = 8-byte pointer words needing relocation.
 | 18 / 18 | `reason_names` | `nv_rpc.c:94` | `const char *const[]` | **yes** — `nv_rpc_reason_name()` on every GSP-RPC error path |
 | 13 / 13 | `cons_dtags` | `kconsole.c:302` | `const struct cons_dtag[]` — `{const char *tag; const char *rest; uint32_t cls;}`; 10 tags + 3 `rest` strings | yes when `CP_DIAG=` is set |
 | 12 / 12 | `do_hw_params.nm` | `linux_snd.c:984` | `static const char *nm[12]` inside the function | no — `/dev/snd` is x86-only today |
+| 12 / 12 | `g_nvif_engines` | `nv_shim.c:2759` | `const struct nvif_class_row[]` — `{int32 oclass; char name[24]; const char *engine; const char *alloc;}` (2 pointer words per row) | **yes** — the NVIF class/GRAPH_UNITS rows `nvk` reads (§7.1: this one was caught by the gate when `nv/wp-units` merged) |
 | 10 / 10 | `arg_names` | `nv_rpc.c:108` | `const char *const[]` | **yes** — GSP-RPC argument validation |
 | 9 / 9 | `cons_dnames` | `kconsole.c:314` | `const char *const[]` | yes when `CP_DIAG=` is set |
 | 9 / 9 | `vm_pw_name` | `vm.c:1749` | `const char *const[]` | **yes** — page-walk `[MR]` rows |
@@ -143,8 +144,8 @@ marked where it matters. Words = 8-byte pointer words needing relocation.
 | 3 / — | `g_reloc_names` | `reloc_test.c:58` | same | yes, by the test |
 | (5 / 5) | `.got` | linker-generated | 5 slots (signal/epoll hooks) | yes — **not gated** (§3) |
 
-Totals (MEASURED): unit `412 + 5 .got = 417`; desktop and test
-`406 + 5 = 411`. Both match `.rela.dyn`'s entry count exactly, which is the
+Totals (MEASURED): unit `424 + 5 .got = 429`; desktop and test
+`418 + 5 = 423`. Both match `.rela.dyn`'s entry count exactly, which is the
 cross-check that the inventory is the whole population and not a sample.
 
 Three corrections to round 3's notes, all from this audit: `nv_rpc.c` is **not**
@@ -176,7 +177,7 @@ symbol.
 
 ```
 hobbyos.elf: FAIL -- folded table(s) not in the audited inventory [MODE=unit_tests]:
-  NEW   nv_rm_mock_static_probe              16 word(s)  .rodata  first slot 0x0000401F6DC8  nv_rm_mock_static_probe
+  NEW   nv_rm_mock_static_probe              16 word(s)  .rodata  first slot 0x0000401F7F48  nv_rm_mock_static_probe
 ```
 
 Two responses are legal, and the gate message names both:
@@ -206,19 +207,25 @@ runs in seconds on the build host, with no QEMU.
 
 ## 7. Red before green, measured
 
-Three runs, same tree, only the inputs changed. Raw output in
-`docs/nv-arm-reloc-evidence/`.
+All runs on the tree this landed on (`origin/nv/integ-swarm` at `bbca2514`), only
+the inputs changed. Raw output in `docs/nv-arm-reloc-evidence/`.
 
 **Red 1 — a reintroduced folded table.** `nv_rm_mock.c` got the pre-round-3
 static initializer back, as `nv_rm_mock_static_probe` (16 words: `"mock"` plus
 15 function pointers), `__attribute__((used))` so it could not be dropped:
 
 ```
-# folded-table inventory: 21 table(s) / 428 word(s), plus 5 linker-generated .got slot(s)
+# pointer words baked into static data (need relocating): 445
+#   applied at boot (R_AARCH64_RELATIVE, addend in image): 445      <- coverage green
+# folded-table inventory: 22 table(s) / 440 word(s), plus 5 linker-generated .got slot(s)
 hobbyos.elf: FAIL -- folded table(s) not in the audited inventory [MODE=unit_tests]:
   NEW   nv_rm_mock_static_probe              16 word(s)  .rodata  ...
 make: *** [Makefile:1100: hobbyos.elf] Error 1                 (make exit 2)
 ```
+
+445/445 applied is the point: the `-pie` link relocated the new table's words by
+construction, so the coverage half of the gate is green and only the inventory
+half can see it.
 
 **Red 2 — a table that grew.** `reloc_test.c`'s `g_reloc_names[]` gained a fourth
 name (`"delta"`); no new table, one more row:
@@ -232,25 +239,49 @@ make: *** [Makefile:1100: hobbyos.elf] Error 1                 (make exit 2)
 **Green — both reverted, nothing else changed** (`make exit 0`):
 
 ```
-hobbyos.elf: reloc gate OK -- 417 kernel pointer word(s), every one applied at boot
-hobbyos.elf: folded-table inventory matches -- 20 table(s) / 412 word(s) as audited [MODE=unit_tests]
+hobbyos.elf: reloc gate OK -- 429 kernel pointer word(s), every one applied at boot
+hobbyos.elf: folded-table inventory matches -- 21 table(s) / 424 word(s) as audited [MODE=unit_tests]
 ```
 
 The same gate is on the `MODE=desktop` and `MODE=test` links (measured green:
-18 tables / 406 words / 411 pointer words each), and on every other ARM mode via
+19 tables / 418 words / 423 pointer words each), and on every other ARM mode via
 the union path. `ARCH=intel` never runs it: the x86_64 image loads at its link
 address, so a folded table there is already correct (§8).
+
+### 7.1 The gate caught a real one, in the merge that landed this
+
+The first link after merging `origin/nv/integ-swarm` (`bbca2514`, which brought
+`nv/wp-units`' GRAPH_UNITS work) failed, unasked:
+
+```
+hobbyos.elf: FAIL -- folded table(s) not in the audited inventory [MODE=unit_tests]:
+  NEW   g_nvif_engines                       12 word(s)  .rodata  first slot 0x0000401F8318  g_nvif_engines+0x20
+make: *** [Makefile:1100: hobbyos.elf] Error 1                 (make exit 2)
+```
+
+That is `nv_shim.c:2759` — six `{oclass, name[24], engine, alloc}` rows, two
+`const char *` each, added by a lane that had no reason to know about this class.
+Its words *are* relocated at boot (the coverage check was green at 429/429), so
+it is not a bug — it is exactly the decision the gate exists to force. Recorded
+as response (b): `g_nvif_engines` is now a row in §4, its 12 words in every
+mode's inventory, and `MODE=desktop` / `MODE=test` (which also link it) were
+refreshed the same way. §4 and the baseline file are the record that somebody
+looked.
 
 Both tiers were run on this tree, with the gate live:
 
 | tier | command | result |
 |---|---|---|
-| ARM unit | `TOOLS_SKIP=1 BROWSER_SKIP=1 ./run_unit_tests.sh` | **472 run / 0 failed / UNIT TESTS PASSED**, exit 0 |
-| intel unit | `SKIP_KVM=1 TOOLS_SKIP=1 BROWSER_SKIP=1 ./run_unit_tests_intel.sh` | **589 run / 0 failed / UNIT TESTS PASSED**, exit 0 |
+| ARM unit | `TOOLS_SKIP=1 BROWSER_SKIP=1 ./run_unit_tests.sh` | **473 run / 0 failed / UNIT TESTS PASSED**, exit 0 |
+| intel unit | `SKIP_KVM=1 TOOLS_SKIP=1 BROWSER_SKIP=1 ./run_unit_tests_intel.sh` | **590 run / 0 failed / UNIT TESTS PASSED**, exit 0 |
 
-Both are *identical* to the documented baselines (`docs/nv-vm201.md`: ARM 472/0,
-intel 589/0 at `eaf006a9`; this tree is that tip plus one docs commit), and no
-test was added, so any movement would have been a regression.
+The same two tiers on the pre-merge tree (this change alone, no other lane) were
+**472 run / 0 failed** (ARM) and **589 run / 0 failed** (intel) — *identical* to
+the documented baselines (`docs/nv-vm201.md`: ARM 472/0, intel 589/0 at
+`eaf006a9`). This change adds no test and no kernel code, so the count can only
+move for the other lanes' reasons; the merged-tip numbers above are therefore
+the merged lanes' tests, green, with the guard live.
+
 The intel run is TCG, not KVM, for one environmental reason and not a code
 reason: this VM's `/dev/kvm` is `root:kvm` and this user is not in the `kvm`
 group, so `-enable-kvm` dies with `Could not access KVM kernel module`

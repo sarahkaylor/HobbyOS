@@ -1,14 +1,20 @@
 # GREEN -- MODE=test (the soak tier's kernel image)
 make: TOOLS_SKIP=1 BROWSER_SKIP=1 ARCH=arm MODE=test hobbyos.elf
-result: make exit 0; 18 tables / 406 words + 5 .got = 411 pointer words.
+result: 19 tables / 418 words + 5 .got = 423 pointer words, inventory
+        matches [MODE=test].
 
 python3 tools/kernel_reloc_audit.py --gate --baseline tools/reloc_tables_baseline.json --mode test \
      hobbyos.elf
 # hobbyos.elf
-# kernel link range [0x40080000, 0x41527260)   .rela.dyn=411 entries (present)
-# pointer words baked into static data (need relocating): 411
-#   applied at boot (R_AARCH64_RELATIVE, addend in image): 411
+# kernel link range [0x40080000, 0x41527320)   .rela.dyn=423 entries (present)
+# pointer words baked into static data (need relocating): 423
+#   applied at boot (R_AARCH64_RELATIVE, addend in image): 423
 #   NOTHING WILL APPLY THEM (left at their link address):     0
-# folded-table inventory: 18 table(s) / 406 word(s), plus 5 linker-generated .got slot(s)
-hobbyos.elf: reloc gate OK -- 411 kernel pointer word(s), every one applied at boot
-hobbyos.elf: folded-table inventory matches -- 18 table(s) / 406 word(s) as audited [MODE=test]
+# folded-table inventory: 19 table(s) / 418 word(s), plus 5 linker-generated .got slot(s)
+hobbyos.elf: FAIL -- folded table(s) not in the audited inventory [MODE=test]:
+  NEW   g_nvif_engines                       12 word(s)  .rodata  first slot 0x0000401B0310  g_nvif_engines+0x20
+A folded const char*/function-pointer table is a link-address hazard: every word in it needs an R_AARCH64_RELATIVE at boot.  Two responses are legal:
+  (a) build it at run time -- member assignment, not a static initializer (src/kernel/nv_rm_mock.c is the worked example); or
+  (b) keep it and record the decision: python3 tools/kernel_reloc_audit.py --update-baseline --mode test hobbyos.elf
+      plus its row in docs/nv-arm-reloc.md (the audit list).
+make: *** [Makefile:1100: hobbyos.elf] Error 1

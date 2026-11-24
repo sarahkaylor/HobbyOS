@@ -1,17 +1,17 @@
 # GREEN -- MODE=unit_tests, both reds reverted, nothing else changed
-tree: nv/wp-reloc-guard (docs/nv-arm-reloc.md §7)
+tree: nv/wp-reloc-guard, merged with origin/nv/integ-swarm bbca2514
 host: ~/Documents/GitHub/HobbyOS/.worktrees/t_4caf48a4, QEMU 10.2.1, clang/ld.lld cross build on this VM
 make: TOOLS_SKIP=1 BROWSER_SKIP=1 ARCH=arm MODE=unit_tests hobbyos.elf
-result: make exit 0; 20 tables / 412 words + 5 .got = 417 pointer words,
+result: make exit 0; 21 tables / 424 words + 5 .got = 429 pointer words,
         every one applied at boot, inventory matches the audited file.
 
 python3 tools/kernel_reloc_audit.py --gate --baseline tools/reloc_tables_baseline.json --mode unit_tests \
      hobbyos.elf
 # hobbyos.elf
-# kernel link range [0x40080000, 0x417B054C)   .rela.dyn=417 entries (present)
-# pointer words baked into static data (need relocating): 417
-#   applied at boot (R_AARCH64_RELATIVE, addend in image): 417
+# kernel link range [0x40080000, 0x417B060C)   .rela.dyn=429 entries (present)
+# pointer words baked into static data (need relocating): 429
+#   applied at boot (R_AARCH64_RELATIVE, addend in image): 429
 #   NOTHING WILL APPLY THEM (left at their link address):     0
-# folded-table inventory: 20 table(s) / 412 word(s), plus 5 linker-generated .got slot(s)
-hobbyos.elf: reloc gate OK -- 417 kernel pointer word(s), every one applied at boot
-hobbyos.elf: folded-table inventory matches -- 20 table(s) / 412 word(s) as audited [MODE=unit_tests]
+# folded-table inventory: 21 table(s) / 424 word(s), plus 5 linker-generated .got slot(s)
+hobbyos.elf: reloc gate OK -- 429 kernel pointer word(s), every one applied at boot
+hobbyos.elf: folded-table inventory matches -- 21 table(s) / 424 word(s) as audited [MODE=unit_tests]
