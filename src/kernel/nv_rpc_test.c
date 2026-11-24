@@ -1744,13 +1744,155 @@ static void test_t29_preboot_framing(void) {
   ASSERT(nv_rpc_cksum(pre_stage, 0x1000) == 0);
   EXPECT_EQ(nv_rpc_elem_check(pre_stage, 1, &why), -EIO);
   EXPECT_EQ((int)why, (int)NV_RPC_BAD_SIG);
+
+/* T-30 the peer's header is read, not remembered (the row's discriminator)  */
+/* ======================================================================== */
+
+static void test_t30_peer_snapshot_is_a_read(void) {
+  uart_puts("  Running test_t30_peer_snapshot_is_a_read...\n");
+  tests_run++;
+
+  struct nv_rpc_hw hw;
+  hw_reset(&hw);
+  struct nv_rpc_queue q;
+  ASSERT(link_queue(&q, &hw, NV_RPC_FLAGS_SWAP_RX) == 0);
+  EXPECT_EQ((int)q.linked, 1);
+
+  struct nv_rpc_peer_statq s;
+  nv_rpc_peer_snapshot(&q, &s);
+  /* Six of the eight words are nonzero: `version` and the producer `writePtr`
+   * are legitimately 0 in a fresh header, so "all eight nonzero" is NOT the
+   * test for a usable peer -- the count is only the -EAGAIN discriminator. */
+  EXPECT_EQ((int)s.nonzero, 6);
+  EXPECT_EQ((int)s.w[0], 0);          /* version */
+  EXPECT_EQ((int)s.w[1], 0x40000);    /* size */
+  EXPECT_EQ((int)s.w[2], 0x1000);     /* msgSize */
+  EXPECT_EQ((int)s.w[3], 63);         /* msgCount */
+  EXPECT_EQ((int)s.w[4], 0);          /* writePtr: the peer's, still 0 */
+  EXPECT_EQ((int)s.w[7], 0x1000);     /* entryOff */
+
+  /* Now the peer's header goes away (a reset, a reboot, a wrong block).  The
+   * cached struct still holds the last good fields -- that is what the old row
+   * printed -- while the words say nothing is there.  A row must believe the
+   * words: "peer=none" from the cache is an inference, from block+stat_off it
+   * is an observation. */
+  zero_bytes(blk + q.stat_off, NV_RPC_SLOT);
+  nv_rpc_peer_snapshot(&q, &s);
+  EXPECT_EQ((int)s.nonzero, 0);
+  EXPECT_EQ((int)q.linked, 1);          /* our stale verdict, unchanged */
+  EXPECT_EQ((int)q.peer.size, 0x40000); /* the cache the row must not print */
+
+  /* And the words now agree with the validating call, not with the cache. */
+  enum nv_rpc_link_field bad = NV_RPC_LINK_OK;
+  EXPECT_EQ(nv_rpc_link_validate(blk + q.stat_off, NV_RPC_QUEUE_BYTES,
+                                 NV_RPC_SLOT, 0, &bad),
+            -EAGAIN);
+  EXPECT_EQ((int)bad, (int)NV_RPC_LINK_OK);
+}
+
+/* ======================================================================== */
+/* T-31 the first request: GET_GSP_STATIC_INFO framing (contract 4.1 row 10) */
+/* ======================================================================== */
+
+static void test_t31_static_info_request(void) {
+  uart_puts("  Running test_t31_static_info_request...\n");
+  tests_run++;
+
+  /* The request's length is a size declaration, so the number is the contract:
+   * 0x20 header + 0xCF0 payload = 0xD10, which is one element. */
+  EXPECT_EQ((int)NV_RPC_STATIC_INFO_LEN, 0xD10);
+  zero_bytes(tx_stage, sizeof tx_stage);
+  ASSERT(nv_rpc_static_info_request(tx_stage, 7) == 1);
+
+  EXPECT_EQ((int)get32(tx_stage + NV_RPC_R_HDRVER), (int)NV_RPC_VERSION);
+  EXPECT_EQ((int)get32(tx_stage + NV_RPC_R_SIG), (int)NV_RPC_SIG);
+  EXPECT_EQ((int)get32(tx_stage + NV_RPC_R_LENGTH), 0xD10);
+  EXPECT_EQ((int)get32(tx_stage + NV_RPC_R_FUNCTION), 65);
+  EXPECT_EQ((int)get32(tx_stage + NV_RPC_R_RESULT), -1); /* PENDING */
+  EXPECT_EQ((int)get32(tx_stage + NV_RPC_R_RESULT_PRIV), -1);
+  EXPECT_EQ((int)get32(tx_stage + NV_RPC_E_SEQ), 7);
+  EXPECT_EQ((int)get32(tx_stage + NV_RPC_E_ELEMCOUNT), 1);
+
+  /* A framed request re-folds to zero (the receiver's acceptance test), and a
+   * single flipped payload byte breaks it -- so a stale tail cannot pass. */
+  EXPECT_EQ((int)nv_rpc_cksum(tx_stage, NV_RPC_SLOT), 0);
+  tx_stage[NV_RPC_ELEM_HDR + NV_RPC_RPC_HDR] ^= 0x01;
+  EXPECT_EQ((int)(nv_rpc_cksum(tx_stage, NV_RPC_SLOT) != 0), 1);
+  tx_stage[NV_RPC_ELEM_HDR + NV_RPC_RPC_HDR] ^= 0x01;
+  EXPECT_EQ((int)nv_rpc_cksum(tx_stage, NV_RPC_SLOT), 0);
+
+  /* NULL is a refusal, not a crash. */
+  EXPECT_EQ(nv_rpc_static_info_request(0, 0), -EINVAL);
+}
+
+/* ======================================================================== */
+/* T-32 the round trip: gate, one doorbell, event skipped, reply matched     */
+/* ======================================================================== */
+
+static void test_t32_roundtrip(void) {
+  uart_puts("  Running test_t32_roundtrip...\n");
+  tests_run++;
+
+  /* (a) Not linked: refused BEFORE any store and BEFORE the doorbell.  A send
+   * into a queue whose peer never published is a send nobody can see, and the
+   * acceptance row would have counted a doorbell for it. */
+  struct nv_rpc_hw hw;
+  hw_reset(&hw);
+  struct nv_rpc_queue q;
+  ASSERT(fresh_queue(&q) == 0);
+  ASSERT(nv_rpc_static_info_request(tx_stage, 0) == 1);
+  enum nv_rpc_reason why = NV_RPC_OK;
+  uint32_t result = 0;
+  EXPECT_EQ(nv_rpc_roundtrip(&q, &hw, tx_stage, 65, 4000, rx_out,
+                             sizeof(rx_out), &result, &why),
+            -EAGAIN);
+  EXPECT_EQ((int)why, (int)NV_RPC_NOT_LINKED);
+  EXPECT_EQ((int)fh.db_calls, 0);
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_WRITE_PTR), 0);
+  EXPECT_EQ((int)slot_bytes_not(&q, 0, 0), 0); /* no slot written at all */
+
+  /* (b) Linked, with the init event ahead of the reply: the event is consumed
+   * and logged, the reply is what comes back, and exactly one doorbell rings. */
+  ASSERT(link_queue(&q, &hw, NV_RPC_FLAGS_SWAP_RX) == 0);
+  ASSERT(fw_put(&q, 0, NV_RPC_FN_INIT_DONE, 0, 32, 0x00) == 1);
+  ASSERT(fw_put(&q, 1, 65, 1, NV_RPC_STATIC_INFO_LEN, 0x5A) == 1);
+  fw_set_wp(&q, 2);
+
+  /* The event first, exactly as the boot waits for it (step 9). */
+  EXPECT_EQ(nv_rpc_rx_wait(&q, &hw, NV_RPC_FN_INIT_DONE, 4000, rx_out,
+                           sizeof(rx_out), &result, &why),
+            32);
+  EXPECT_EQ((int)result, 0);
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_READ_PTR), 1);
+
+  ASSERT(nv_rpc_static_info_request(tx_stage, q.tx_seq) == 1);
+  int n = nv_rpc_roundtrip(&q, &hw, tx_stage, 65, 4000, rx_out, sizeof(rx_out),
+                           &result, &why);
+  EXPECT_EQ(n, (int)NV_RPC_STATIC_INFO_LEN);
+  EXPECT_EQ((int)result, 0);
+  EXPECT_EQ((int)get32(rx_out + NV_RPC_H_FUNCTION), 65);
+  EXPECT_EQ((int)get32(rx_out + NV_RPC_H_PAYLOAD), 0x5A5A5A5A);
+  EXPECT_EQ((int)fh.db_calls, 1);
+  EXPECT_EQ((int)q.tx_busy, 0);
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_WRITE_PTR), 1);
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_READ_PTR), 2);
+
+  /* (c) Linked, nothing comes back: a bounded wait ends it (the fake clock is
+   * what advances), the request stays counted, and there is no retry. */
+  ASSERT(nv_rpc_static_info_request(tx_stage, q.tx_seq) == 1);
+  EXPECT_EQ(nv_rpc_roundtrip(&q, &hw, tx_stage, 65, 4000, rx_out,
+                             sizeof(rx_out), &result, &why),
+            -ETIMEDOUT);
+  EXPECT_EQ((int)why, (int)NV_RPC_NO_REPLY);
+  EXPECT_EQ((int)fh.db_calls, 2);
+  EXPECT_EQ((int)q.tx_busy, 0);
 }
 
 /* ======================================================================== */
 
 void nv_rpc_test_suite(void) {
   uart_puts("[NV-RPC] unit suite (spec section 7: T-01..T-24, contract "
-            "T-25/26/27/28/29)\n");
+            "T-25/26/27/28/29 and first round trip T-30..T-32)\n");
   test_t01_block_geometry();
   test_t02_cmdq_header();
   test_t03_statq_not_written();
@@ -1780,6 +1922,9 @@ void nv_rpc_test_suite(void) {
   test_t27_system_info_layout();
   test_t28_registry_layout();
   test_t29_preboot_framing();
+  test_t30_peer_snapshot_is_a_read();
+  test_t31_static_info_request();
+  test_t32_roundtrip();
 }
 
 #endif /* KERNEL_MODE_UNIT_TEST */

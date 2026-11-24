@@ -96,7 +96,7 @@ static const char *const reason_names[] = {
     "no_space",     "too_big",        "peer_geom",  "big_elem",
     "bad_ec",       "checksum",       "seq_gap",    "seq_stale",
     "bad_sig",      "bad_len",        "event",      "unknown_fn",
-    "continuation", "busy",
+    "continuation", "busy",           "no_reply",
 };
 
 const char *nv_rpc_reason_name(enum nv_rpc_reason r) {
@@ -1287,6 +1287,134 @@ int nv_rpc_rx_release(struct nv_rpc_queue *q) {
 }
 
 /* ======================================================================== */
+/* the peer's header, read at call time (spec 4.2, 6.2 #2)                   */
+/* ======================================================================== */
+
+void nv_rpc_peer_snapshot(const struct nv_rpc_queue *q,
+                          struct nv_rpc_peer_statq *s) {
+  if (!s) return;
+  for (uint32_t i = 0; i < 8; i++) s->w[i] = 0;
+  s->nonzero = 0;
+  if (!q || !q->block) return;
+  /* The eight words are exactly what nv_rpc_link_validate() reads, in the
+   * order it reads them, so a row built from this snapshot explains that
+   * function's -EAGAIN without a second interpretation of the block. */
+  for (uint32_t i = 0; i < 8; i++) {
+    s->w[i] = ld32(q->block + q->stat_off + i * 4u);
+    if (s->w[i] != 0) s->nonzero++;
+  }
+}
+
+/* ======================================================================== */
+/* the first round trip (contract 4.1 steps 9-10)                            */
+/* ======================================================================== */
+
+int nv_rpc_static_info_request(uint8_t *stage, uint32_t seq) {
+  if (!stage) return -EINVAL;
+  const uint32_t len = NV_RPC_STATIC_INFO_LEN;
+  /* The payload is zeroed because the request is a size declaration, not data:
+   * the contract's rpcGetGspStaticInfo_v14_00 sends sizeof(GspStaticConfigInfo)
+   * zero bytes to tell firmware how much it may send back. */
+  memset(stage, 0, NV_RPC_ELEM_HDR + len);
+  int rc = nv_rpc_req_init(stage, NV_RPC_FN_GET_STATIC_INFO, len);
+  if (rc != 0) return rc;
+  /* The RPC's own sequence stays 0 (no source shows the firmware echoing it);
+   * the ELEMENT sequence is what the receiver orders messages by. */
+  return nv_rpc_elem_build(stage, len, seq);
+}
+
+int nv_rpc_rx_wait(struct nv_rpc_queue *q, const struct nv_rpc_hw *hw,
+                   uint32_t fn, uint32_t timeout_us, void *out, uint32_t cap,
+                   uint32_t *result, enum nv_rpc_reason *reason) {
+  if (reason) *reason = NV_RPC_OK;
+  if (!q || !q->block) return -EINVAL;
+
+  int have_clock = (hw && hw->now_us);
+  uint64_t start = have_clock ? hw->now_us(hw->ctx) : 0;
+  /* rx_take() matches on want_fn, so the wait is that function and nothing
+   * else.  Saved and restored: a caller's outstanding request is its own
+   * business, and this helper must not leave the queue pointed at an event. */
+  uint32_t saved = q->want_fn;
+  q->want_fn = fn;
+
+  for (;;) {
+    enum nv_rpc_reason why = NV_RPC_OK;
+    int n = nv_rpc_rx_take(q, hw, out, cap, &why);
+    if (n > 0) {
+      /* Read the verdict from the RPC stream (out + 0x10), not from a cached
+       * field: a reply that is a copy of our own PENDING request would report
+       * 0xFFFFFFFF, which is the "no reply" sentinel and not success. */
+      if (result) *result = ld32((const uint8_t *)out + NV_RPC_H_RESULT);
+      int rrc = nv_rpc_rx_release(q);
+      q->want_fn = saved;
+      if (rrc != 0) {
+        if (reason) *reason = NV_RPC_PEER_GEOM;
+        return rrc;
+      }
+      if (reason) *reason = NV_RPC_OK;
+      return n;
+    }
+    if (n != -EAGAIN) {
+      q->want_fn = saved;
+      if (reason) *reason = why;
+      return n;
+    }
+    if (!have_clock) {
+      q->want_fn = saved;
+      if (reason) *reason = why ? why : NV_RPC_NOTHING;
+      return -EAGAIN;
+    }
+    if (hw->now_us(hw->ctx) - start >= timeout_us) {
+      q->want_fn = saved;
+      if (reason) *reason = NV_RPC_NO_REPLY;
+      return -ETIMEDOUT;
+    }
+    fence(hw);
+  }
+}
+
+int nv_rpc_roundtrip(struct nv_rpc_queue *q, const struct nv_rpc_hw *hw,
+                     uint8_t *stage, uint32_t reply_fn, uint32_t timeout_us,
+                     void *out, uint32_t cap, uint32_t *result,
+                     enum nv_rpc_reason *reason) {
+  if (reason) *reason = NV_RPC_OK;
+  if (!q || !q->block || !hw || !stage) return -EINVAL;
+
+  /* The link gate comes before every store.  This is the difference between a
+   * monitored send and a send nobody can see: with no peer header there is no
+   * consumer, and a doorbell written into that window is not a delivery. */
+  if (!q->linked) {
+    if (reason) *reason = NV_RPC_NOT_LINKED;
+    return -EAGAIN;
+  }
+
+  uint32_t rpc_len = ld32(stage + NV_RPC_R_LENGTH);
+  uint32_t ec = 0;
+  int rc = nv_rpc_tx_prepare(q, rpc_len, &ec, reason);
+  if (rc != 0) return rc;
+
+  q->tx_busy = 1;
+  rc = nv_rpc_tx_commit(q, stage, hw);
+  if (rc != 0) {
+    q->tx_busy = 0;
+    return rc;
+  }
+  rc = nv_rpc_kick(q, hw);
+  if (rc != 0) {
+    q->tx_busy = 0;
+    return rc;
+  }
+
+  rc = nv_rpc_rx_wait(q, hw, reply_fn, timeout_us, out, cap, result, reason);
+  /* The one outstanding request ends here, answered or timed out.  A timeout is
+   * NOT a licence to resend: contract 6 row 2 says the message may have been
+   * consumed by a firmware that then died, and a resend turns one failure into
+   * two. */
+  q->tx_busy = 0;
+  return rc;
+}
+
+/* ======================================================================== */
 /* real seam + the log row (x86_64 only, like the rest of the driver)         */
 /* ======================================================================== */
 
@@ -1348,34 +1476,67 @@ void nv_rpc_dump(const char *stage, const struct nv_rpc_queue *q) {
   print_int((int)(q->block ? ld32(q->block + q->peer_readptr_off) : 0));
   uart_puts(" pw=");
   print_int((int)(q->block ? ld32(q->block + q->peer_writeptr_off) : 0));
+  /* The two words the acceptance row turns on, named by ADDRESS: `wr` is our
+   * producer pointer at block+cmd_off+0x10, `pw` is the peer's at
+   * block+stat_off+0x10.  They are different words 0x40000 apart, and a row
+   * that printed only their values could not show that. */
+  uart_puts(" wr_off=");
+  uart_print_hex(q->cmd_off + NV_RPC_Q_WRITE_PTR);
+  uart_puts(" pw_off=");
+  uart_print_hex(q->stat_off + NV_RPC_Q_WRITE_PTR);
   uart_puts(" txseq=");
   print_int((int)q->tx_seq);
   uart_puts(" rxseq=");
   print_int((int)q->rx_seq);
   uart_puts("\n");
 
-  if (!q->peer.size && !q->peer.msg_size && !q->peer.flags) {
-    uart_puts("[NV-RPC] peer=none\n");
+  /* The peer's own words, read NOW (not the cached struct nv_rpc_peer): a row
+   * that says "no peer" from our bookkeeping is an inference, the same row
+   * from block+stat_off is an observation.  This is the eight-word set
+   * nv_rpc_link_validate() starts from, so a nonzero count of 0 is exactly the
+   * -EAGAIN case. */
+  struct nv_rpc_peer_statq st;
+  nv_rpc_peer_snapshot(q, &st);
+  uart_puts("[NV-RPC] statq off=");
+  uart_print_hex(q->stat_off);
+  uart_puts(" nonzero=");
+  print_int((int)st.nonzero);
+  uart_puts("/8");
+  for (uint32_t i = 0; i < 8; i++) {
+    uart_puts(" w");
+    print_int((int)i);
+    uart_puts("=");
+    uart_print_hex(st.w[i]);
+  }
+  uart_puts(st.nonzero == 0 ? " (nothing has written the peer header)\n"
+                            : " (the peer header is written)\n");
+
+  if (st.nonzero == 0) {
+    uart_puts("[NV-RPC] peer=none (read from block+");
+    uart_print_hex(q->stat_off);
+    uart_puts(", not from the cached peer struct)\n");
     return;
   }
   /* All five fields verbatim: a wrong `size` means the RMARGS offsets were
    * wrong, a never-valid header means the firmware never found the block, and
    * those are different bugs. */
   uart_puts("[NV-RPC] peer version=");
-  print_int((int)q->peer.version);
+  print_int((int)st.w[0]);
   uart_puts(" size=");
-  uart_print_hex(q->peer.size);
+  uart_print_hex(st.w[1]);
   uart_puts(" msgSize=");
-  uart_print_hex(q->peer.msg_size);
+  uart_print_hex(st.w[2]);
   uart_puts(" msgCount=");
-  print_int((int)q->peer.msg_count);
+  print_int((int)st.w[3]);
   uart_puts(" entryOff=");
-  uart_print_hex(q->peer.entry_off);
+  uart_print_hex(st.w[7]);
   uart_puts(" rxHdrOff=");
-  uart_print_hex(q->peer.rx_hdr_off);
+  uart_print_hex(st.w[6]);
   uart_puts(" flags=");
-  print_int((int)q->peer.flags);
-  uart_puts("\n");
+  print_int((int)st.w[5]);
+  uart_puts(" (the peer's words; linked=");
+  print_int(q->linked);
+  uart_puts(" is our verdict on them)\n");
 }
 
 #else /* !__x86_64__ */

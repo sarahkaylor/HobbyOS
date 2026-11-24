@@ -125,8 +125,13 @@ int nv_gsp_rpc_notify(struct nv_gsp_rpc *r, const uint8_t *stage,
 /* Boot-path stage 8: build the block, log one [NV-RPC] row per stage, and
  * publish it.  The notification is withheld until the peer's status-queue
  * header validates, which only RM writes (spec 3 step 4): this stage cannot
- * ring the doorbell on a card where RM is not running, and it says so. */
-int nv_gsp_rpc_stage8(struct nv_dev *d);
+ * ring the doorbell on a card where RM is not running, and it says so.
+ *
+ * link_timeout_us == 0: one read, which is what a boot with no possible peer
+ * wants.  > 0: poll the peer's header for that long (contract 4.1 row 7 uses
+ * 4 s), so a boot whose booter DID report success gives RM the documented time
+ * to publish before the stage calls it absent. */
+int nv_gsp_rpc_stage8_wait(struct nv_dev *d, uint32_t link_timeout_us);
 
 /* Pre-boot (contract 4.1 rows 3-5): build and publish if that has not happened
  * yet, stage GSP_SET_SYSTEM_INFO (72) and then SET_REGISTRY (73) into the
@@ -155,6 +160,19 @@ int nv_gsp_rpc_preboot(struct nv_gsp_rpc *r, struct nv_dev *d);
  * function the boot path calls (with a counting/fake MMIO device) instead of
  * re-implementing it.  nv_gsp_rpc_stage8() is this, with the singleton. */
 int nv_gsp_rpc_stage8_into(struct nv_gsp_rpc *r, struct nv_dev *d);
+
+/* Boot-path stage 9, and the card's first round trip: wait for GSP_INIT_DONE
+ * (0x1001) and read its rpc_result, then send GET_GSP_STATIC_INFO (65) and
+ * wait for its reply.  Every send goes through nv_rpc_roundtrip(), so an
+ * unlinked queue is refused before any store and before any doorbell.
+ *
+ *   -EAGAIN   the link is not up: nothing was sent, no doorbell was rung.
+ *   -ETIMEDOUT  the peer is linked but did not answer within the contract's
+ *               4 s; `reason` names which wait ran out.
+ *   -EIO      INIT_DONE arrived with a nonzero rpc_result (RM's own verdict).
+ *   0         one message was answered: the row carries fn/len/result. */
+int nv_gsp_rpc_stage9(struct nv_dev *d);
+int nv_gsp_rpc_stage9_into(struct nv_gsp_rpc *r, struct nv_dev *d);
 
 /* The singleton state, for a reader (the log rows and the unit tier are the
  * only readers).  One card, one GSP: the driver is a singleton by design. */
