@@ -49,6 +49,11 @@ extern void uart_print_hex(uint64_t v);
 #define SHIM_MAX_CHANNELS 8
 #define SHIM_MAX_SYNCOBJS NVSHIM_DRM_MAX_SYNCOBJS
 #define SHIM_MAX_SIGPEND 32
+/* WP-NVIF: objects in one client's NVIF tree.  A stock winsys probes with one
+ * context (1 device + up to 5 engine objects), destroys it, then makes one per
+ * real context, so 24 leaves room for a handful of live contexts and still
+ * bounds the table. */
+#define SHIM_MAX_NVIF 24
 /* Policy ceilings, mirrored in nv_shim.h's comment: a single allocation below
  * the mock arena's size, a per-client total well below it so one client cannot
  * exhaust the mock. */
@@ -80,6 +85,17 @@ struct shim_map {
   uint64_t handle;
   uint64_t va;
   uint64_t len;
+};
+
+/* WP-NVIF: one object in a client's NVIF tree (nv_nvif_uapi.h).  `cookie` is
+ * the CLIENT's value, taken from nvshim_nvif_new.object: nouveau keys objects
+ * by exactly that field (nouveau_abi16_obj_find(ioctl->object)), which is why
+ * a winsys may pass (uintptr_t)its own struct and name it again later.  No
+ * kernel address is stored or handed out. */
+struct shim_nvif_obj {
+  uint64_t cookie;
+  int32_t oclass; /* the class it was created as (NVSHIM_NVIF_CLASS_*) */
+  uint32_t ch;    /* channel it lives under; 0 = the client's root (device) */
 };
 
 struct shim_client {
@@ -121,6 +137,10 @@ struct shim_client {
   int exec_have;
   uint32_t exec_sum;
   uint32_t exec_len;
+
+  /* WP-NVIF: the object tree this client built through nr 0x47. */
+  int nnvif;
+  struct shim_nvif_obj nvif[SHIM_MAX_NVIF];
 };
 
 static struct shim_client g_clients[SHIM_MAX_CLIENTS];
@@ -204,6 +224,12 @@ static int r_dev = SHIM_ROW_BUDGET, r_alloc = SHIM_ROW_BUDGET,
            r_vm = SHIM_ROW_BUDGET, r_bind = SHIM_ROW_BUDGET,
            r_ch = SHIM_ROW_BUDGET, r_submit = SHIM_ROW_BUDGET,
            r_fence = SHIM_ROW_BUDGET, r_refuse = SHIM_ROW_BUDGET,
+           r_nvif = 96, /* WP-NVIF: one row per object operation, success AND
+                         * refusal.  The budget is per BOOT, not per client, so
+                         * the four unit suites plus the EL0 probe need room for
+                         * every row that proves the tree; 24 ran out inside the
+                         * sclass suite and hid the engine refusals -- the very
+                         * rows this lane exists to produce. */
            r_mmap = 12, /* WP-F3: the CPU-mapping stage, success AND refusal -- a
                     * refused mapping names itself, and the tier exercises every
                     * refusal shape, so 8 was one short */
@@ -362,6 +388,12 @@ static void client_clear(struct shim_client *c) {
   c->exec_have = 0;
   c->exec_sum = 0;
   c->exec_len = 0;
+  c->nnvif = 0;
+  for (int i = 0; i < SHIM_MAX_NVIF; i++) {
+    c->nvif[i].cookie = 0;
+    c->nvif[i].oclass = 0;
+    c->nvif[i].ch = 0;
+  }
   for (unsigned i = 0; i < sizeof(c->info); i++) ((unsigned char *)&c->info)[i] = 0;
 }
 
@@ -1143,7 +1175,6 @@ static const struct {
     {NVSHIM_DRM_NR_GROBJ_ALLOC, "grobj_alloc"},
     {NVSHIM_DRM_NR_NOTIFIEROBJ_ALLOC, "notifier_obj"},
     {NVSHIM_DRM_NR_GPUOBJ_FREE, "gpuobj_free"},
-    {NVSHIM_DRM_NR_NVIF, "nvif"},
     {NVSHIM_DRM_NR_SVM_INIT, "svm_init"},
     {NVSHIM_DRM_NR_SVM_BIND, "svm_bind"},
     {NVSHIM_DRM_NR_GET_ZCULL_INFO, "get_zcull_info"},
@@ -1164,6 +1195,12 @@ static const struct {
  * different size, and a size mismatch on an implemented row is not mistaken
  * for an unknown number. */
 static int drm_row_size(uint32_t nr) {
+  /* NVIF is the one row whose encoded size is a BUFFER LENGTH (header + a
+   * per-type payload), so the table can only state its minimum; the handler
+   * applies each type's own shape rule.  Returning it here rather than 0 keeps
+   * "known and served" distinguishable from "refused" for callers of this
+   * function (the test tier asserts both). */
+  if (nr == (uint8_t)NVSHIM_DRM_NR_NVIF) return (int)NVSHIM_NVIF_MIN_SIZE;
   for (unsigned i = 0; i < sizeof g_drm_rows / sizeof g_drm_rows[0]; i++)
     if (g_drm_rows[i].nr == (uint8_t)nr) return (int)g_drm_rows[i].size;
   for (unsigned i = 0; i < sizeof g_drm_refusals / sizeof g_drm_refusals[0]; i++)
@@ -2004,11 +2041,32 @@ static int op_drm_channel_alloc(struct process *p, int fd, uint64_t arg) {
   struct nvshim_drm_channel_alloc ca;
   if (vm_user_read(p, arg, &ca, (int)sizeof ca) != 0) return -EFAULT;
 
-  if (ca.fb_ctxdma_handle != 0 || ca.tt_ctxdma_handle != 0 || ca.notifier_handle != 0) {
+  if (ca.notifier_handle != 0) {
+    row_begin("drm channel refused", &r_refuse);
+    row_s("reason=notifier_object");
+    row_end();
+    return -ENOSYS; /* notifier objects are RM objects: none in the mock */
+  }
+  /* The legacy context-DMA fields, as nouveau itself reads them since Kepler:
+   * fb_ctxdma_handle == ~0 means "no legacy context DMA, use tt_ctxdma_handle
+   * as the ENGINE SELECTOR" (nouveau_abi16_ioctl_channel_alloc), and the reply
+   * normalises both to 0.  A stock winsys sends exactly {~0, NOUVEAU_FIFO_
+   * ENGINE_GR}, so refusing that shape refused the parent of every NVIF child.
+   * Only GR has a mock channel; every other selector is named, not treated as
+   * GR. */
+  if (ca.fb_ctxdma_handle == 0xFFFFFFFFu) {
+    if (ca.tt_ctxdma_handle != 0 && ca.tt_ctxdma_handle != NVSHIM_ENGINE_GR) {
+      row_begin("drm channel refused", &r_refuse);
+      row_s("reason=engine_selector tt=");
+      row_hex(ca.tt_ctxdma_handle);
+      row_end();
+      return -ENOSYS; /* VP/PPP/BSP/CE/NVDEC channels need the real RM */
+    }
+  } else if (ca.fb_ctxdma_handle != 0 || ca.tt_ctxdma_handle != 0) {
     row_begin("drm channel refused", &r_refuse);
     row_s("reason=legacy_ctxdma");
     row_end();
-    return -ENOSYS; /* pre-nvif context DMAs / notifiers: the RM has none */
+    return -ENOSYS; /* pre-nvif context DMAs: the RM has none */
   }
   if (ca.nr_subchan != 0) {
     row_begin("drm channel refused", &r_refuse);
@@ -2077,6 +2135,10 @@ static int op_drm_channel_alloc(struct process *p, int fd, uint64_t arg) {
   ca.channel = (int32_t)ch_id;
   ca.pushbuf_domains = domain;
   ca.nr_subchan = 0;
+  /* nouveau normalises the engine-selector spelling in its reply; a client that
+   * reads the fields back must see the same "no legacy ctxdma" values. */
+  ca.fb_ctxdma_handle = 0;
+  ca.tt_ctxdma_handle = 0;
   for (unsigned i = 0; i < 8; i++) {
     ca.subchan[i].handle = 0;
     ca.subchan[i].grclass = 0;
@@ -2587,6 +2649,399 @@ int nv_shim_test_last_exec(struct process *p, int fd, uint32_t *sum, uint32_t *l
   return rc;
 }
 
+/* ============================================================================
+ *  NVIF -- DRM_IOCTL_NOUVEAU_NVIF (nr 0x47).  Contract: nv_nvif_uapi.h.
+ *
+ *  This is the object model a stock winsys uses.  Mesa's nouveau winsys
+ *  (src/nouveau/winsys/nouveau_device.c) does, in this order:
+ *
+ *      NVIF NEW   route 0x00, oclass NV_DEVICE, cookie = its device struct
+ *      MTHD       route 0x00, method NV_DEVICE_V0_INFO
+ *      ... CHANNEL_ALLOC ...
+ *      SCLASS     route 0xff, token = channel
+ *      NVIF NEW   route 0xff, token = channel, oclass = <engine class>
+ *
+ *  What this node can answer WITHOUT a GPU is the first three rows plus the
+ *  SCLASS list, because they are bookkeeping over identity the mock RM already
+ *  carries.  The fourth -- instantiating an HW class on a channel -- is a real
+ *  GSP object; it is refused with -ENOSYS and a row naming the class id, which
+ *  is the point of the lane: the caller learns exactly where the wall is.
+ *
+ *  Locking: user copies happen outside g_shim_lock (they can fault); the object
+ *  table is only touched under it; rows are emitted after it is released.
+ * ========================================================================== */
+
+/* The engine classes an AD102 channel offers, in the order nouveau's engine
+ * tables list them (gr/ga102.c then ce/ga102.c).  Names are ours -- a row has
+ * to say WHICH class it refused in words -- and the ids are class.h's. */
+struct nvif_class_row {
+  int32_t oclass;
+  char name[24];
+};
+
+static const struct nvif_class_row g_nvif_engines[] = {
+    {NVSHIM_NVIF_CLASS_FERMI_TWOD_A, "fermi_twod_a"},
+    {NVSHIM_NVIF_CLASS_KEPLER_INLINE_TO_MEM_B, "kepler_inline_m2mf"},
+    {NVSHIM_NVIF_CLASS_AMPERE_B, "ampere_b_gr"},
+    {NVSHIM_NVIF_CLASS_AMPERE_COMPUTE_B, "ampere_compute_b"},
+    {NVSHIM_NVIF_CLASS_AMPERE_DMA_COPY_A, "ampere_dma_copy_a"},
+    {NVSHIM_NVIF_CLASS_AMPERE_DMA_COPY_B, "ampere_dma_copy_b"},
+};
+#define NVIF_ENGINE_CLASSES (int)(sizeof g_nvif_engines / sizeof g_nvif_engines[0])
+
+/* The product name a PCI id table would supply.  0x2684 is the RTX 4090
+ * (PLAN.md §0); a winsys overwrites this from its own table, so it is
+ * identification, not a capability. */
+static const char g_nvif_product[] = "NVIDIA GeForce RTX 4090";
+
+static void nvif_strlcpy(char *dst, const char *src, int cap) {
+  int i = 0;
+  if (cap <= 0) return;
+  while (i + 1 < cap && src[i]) {
+    dst[i] = src[i];
+    i++;
+  }
+  dst[i] = 0;
+}
+
+/* One row for a refusal, and the errno it carries.  A refusal that is not
+ * named on the console is the failure mode this project keeps paying for. */
+static int nvif_refuse(const char *stage, const char *reason, int rc) {
+  row_begin(stage, &r_nvif);
+  row_s("refused reason=");
+  row_s(reason);
+  row_end();
+  return rc;
+}
+
+/* Is this client's NVIF tree holding `cookie`?  -1 = no.  Under the lock. */
+static int nvif_find_locked(const struct shim_client *c, uint64_t cookie) {
+  for (int i = 0; i < c->nnvif; i++)
+    if (c->nvif[i].cookie == cookie) return i;
+  return -1;
+}
+
+/* ---- NEW --------------------------------------------------------------- */
+
+static int nvif_new(struct process *p, int fd, uint32_t argc, uint64_t arg,
+                    const struct nvshim_nvif_hdr *h) {
+  if (argc < (uint32_t)(sizeof *h + sizeof(struct nvshim_nvif_new)))
+    return nvif_refuse("nvif new", "size", -EINVAL);
+
+  struct nvshim_nvif_new nw;
+  if (vm_user_read(p, arg + sizeof *h, &nw, (int)sizeof nw) != 0) return -EFAULT;
+  if (nw.version != 0) return nvif_refuse("nvif new", "version", -EINVAL);
+
+  uint32_t dev = 0;
+  int rc = drm_client_ensure(p, fd, &dev);
+  if (rc != 0) return rc;
+
+  if (h->route == NVSHIM_NVIF_ROUTE_NVIF) {
+    /* nouveau: route 0x00 is the client's own root, so nothing may be named
+     * as a parent and the only class it accepts is NV_DEVICE. */
+    if (h->object != 0 || nw.oclass != NVSHIM_NVIF_CLASS_DEVICE)
+      return nvif_refuse("nvif new", "device_shape", -EINVAL);
+    if (nw.object == 0) return nvif_refuse("nvif new", "cookie", -EINVAL);
+
+    int pid = shim_pid(p);
+    spinlock_acquire(&g_shim_lock);
+    struct shim_client *c = client_find(pid, fd);
+    int have = c ? nvif_find_locked(c, nw.object) : -1;
+    int rcl = 0;
+    if (!c)
+      rcl = -EBADF;
+    else if (have >= 0)
+      rcl = -EEXIST; /* the same cookie twice: nouveau's answer */
+    else if (c->nnvif >= SHIM_MAX_NVIF)
+      rcl = -ENOSPC;
+    else {
+      int at = c->nnvif++;
+      c->nvif[at].cookie = nw.object;
+      c->nvif[at].oclass = nw.oclass;
+      c->nvif[at].ch = 0;
+    }
+    spinlock_release(&g_shim_lock);
+    if (rcl == -EEXIST) return nvif_refuse("nvif new class=0x80", "cookie_exists", rcl);
+    if (rcl == -ENOSPC) return nvif_refuse("nvif new class=0x80", "table_full", rcl);
+    if (rcl != 0) return rcl;
+
+    row_begin("nvif new", &r_nvif);
+    row_s("class=0x80 cookie=");
+    row_hex(nw.object);
+    row_s(" dev=");
+    row_say((int)dev);
+    row_s(" served=device");
+    row_end();
+    return 0;
+  }
+
+  /* route 0xff: a child of the object named by `token` -- for every class a
+   * winsys asks for, that is a channel. */
+  if (h->token == 0 || h->token > 0xFFFFFFFFull)
+    return nvif_refuse("nvif new", "channel", -EINVAL);
+
+  int pid = shim_pid(p);
+  spinlock_acquire(&g_shim_lock);
+  struct shim_client *c = client_find(pid, fd);
+  int owns = (c && client_find_ch(c, (uint32_t)h->token) >= 0);
+  spinlock_release(&g_shim_lock);
+  if (!owns) return nvif_refuse("nvif new", "channel", -EINVAL);
+
+  /* SCLASS reported these; instantiating one is an RM object (a GR/CE/etc
+   * context) on a real channel, so it is refused BY NAME, with the id. */
+  for (int i = 0; i < NVIF_ENGINE_CLASSES; i++) {
+    if (g_nvif_engines[i].oclass != nw.oclass) continue;
+    row_begin("nvif new", &r_nvif);
+    row_s("refused class=");
+    row_hex((uint64_t)(uint32_t)nw.oclass);
+    row_s(" name=");
+    row_s(g_nvif_engines[i].name);
+    row_s(" need=gsp_rm");
+    row_end();
+    return -ENOSYS;
+  }
+
+  row_begin("nvif new", &r_nvif);
+  row_s("refused class=");
+  row_hex((uint64_t)(uint32_t)nw.oclass);
+  row_s(" reason=no_such_class");
+  row_end();
+  return -EINVAL;
+}
+
+/* ---- DEL --------------------------------------------------------------- */
+
+static int nvif_del(struct process *p, int fd, uint32_t argc, uint64_t arg,
+                    const struct nvshim_nvif_hdr *h) {
+  (void)arg;
+  /* nouveau requires route 0 and no payload at all. */
+  if (h->route != NVSHIM_NVIF_ROUTE_NVIF)
+    return nvif_refuse("nvif del", "route", -EINVAL);
+  if (argc != (uint32_t)sizeof *h) return nvif_refuse("nvif del", "size", -EINVAL);
+
+  int pid = shim_pid(p);
+  int found = 0;
+  spinlock_acquire(&g_shim_lock);
+  struct shim_client *c = client_find(pid, fd);
+  int at = c ? nvif_find_locked(c, h->object) : -1;
+  if (at >= 0) {
+    for (int i = at; i + 1 < c->nnvif; i++) c->nvif[i] = c->nvif[i + 1];
+    c->nnvif--;
+    c->nvif[c->nnvif].cookie = 0;
+    c->nvif[c->nnvif].oclass = 0;
+    c->nvif[c->nnvif].ch = 0;
+    found = 1;
+  }
+  spinlock_release(&g_shim_lock);
+
+  /* An unknown cookie is not an error -- nouveau's del handler returns 0 and
+   * a winsys relies on it (it destroys objects it may never have made). */
+  row_begin("nvif del", &r_nvif);
+  row_s("object=");
+  row_hex(h->object);
+  row_s(" found=");
+  row_say(found);
+  row_end();
+  return 0;
+}
+
+/* ---- SCLASS ------------------------------------------------------------ */
+
+static int nvif_sclass(struct process *p, int fd, uint32_t argc, uint64_t arg,
+                       const struct nvshim_nvif_hdr *h) {
+  if (h->route == NVSHIM_NVIF_ROUTE_NVIF)
+    return nvif_refuse("nvif sclass", "route", -EINVAL);
+  if (argc < (uint32_t)(sizeof *h + sizeof(struct nvshim_nvif_sclass)))
+    return nvif_refuse("nvif sclass", "size", -EINVAL);
+
+  struct nvshim_nvif_sclass sc;
+  if (vm_user_read(p, arg + sizeof *h, &sc, (int)sizeof sc) != 0) return -EFAULT;
+  if (sc.version != 0) return nvif_refuse("nvif sclass", "version", -EINVAL);
+  if (sc.count > NVSHIM_NVIF_MAX_SCLASS)
+    return nvif_refuse("nvif sclass", "count", -EINVAL);
+  /* nouveau's shape rule: the buffer must hold exactly `count` entries. */
+  if (argc != (uint32_t)(sizeof *h + sizeof sc) +
+                  (uint32_t)sc.count * (uint32_t)sizeof(struct nvshim_nvif_sclass_oclass))
+    return nvif_refuse("nvif sclass", "size", -EINVAL);
+
+  if (h->token == 0 || h->token > 0xFFFFFFFFull)
+    return nvif_refuse("nvif sclass", "channel", -EINVAL);
+
+  int pid = shim_pid(p);
+  spinlock_acquire(&g_shim_lock);
+  struct shim_client *c = client_find(pid, fd);
+  int owns = (c && client_find_ch(c, (uint32_t)h->token) >= 0);
+  spinlock_release(&g_shim_lock);
+  if (!owns) return nvif_refuse("nvif sclass", "channel", -EINVAL);
+
+  /* New entries go in the caller's array (truncated to what it can hold); the
+   * reply's count is the number the channel HAS, exactly as abi16 reports it. */
+  int n = sc.count < NVIF_ENGINE_CLASSES ? (int)sc.count : NVIF_ENGINE_CLASSES;
+  struct nvshim_nvif_sclass_oclass list[NVSHIM_NVIF_MAX_SCLASS];
+  for (int i = 0; i < n; i++) {
+    list[i].oclass = g_nvif_engines[i].oclass;
+    list[i].minver = -1; /* "any version": the spelling of nouveau's tables */
+    list[i].maxver = -1;
+  }
+  if (n > 0 &&
+      vm_kwrite(p, arg + sizeof *h + sizeof sc, list,
+                n * (int)sizeof(list[0])) != 0)
+    return -EFAULT;
+  sc.count = (uint8_t)NVIF_ENGINE_CLASSES;
+  if (vm_kwrite(p, arg + sizeof *h, &sc, (int)sizeof sc) != 0) return -EFAULT;
+
+  row_begin("nvif sclass", &r_nvif);
+  row_s("ch=");
+  row_say((int)h->token);
+  row_s(" count=");
+  row_say(NVIF_ENGINE_CLASSES);
+  row_s(" first=");
+  row_hex((uint64_t)(uint32_t)g_nvif_engines[0].oclass);
+  row_s(" 3d=");
+  /* What was actually WRITTEN to the caller for the 3D entry (not the table
+   * constant), so a regression in the fill shows up in this row. */
+  row_hex((uint64_t)(uint32_t)(n > 2 ? list[2].oclass : g_nvif_engines[2].oclass));
+  row_end();
+  return 0;
+}
+
+/* ---- MTHD -------------------------------------------------------------- */
+
+static int nvif_mthd(struct process *p, int fd, uint32_t argc, uint64_t arg,
+                     const struct nvshim_nvif_hdr *h) {
+  if (h->route != NVSHIM_NVIF_ROUTE_NVIF)
+    return nvif_refuse("nvif mthd", "route", -EINVAL);
+  if (argc < (uint32_t)(sizeof *h + sizeof(struct nvshim_nvif_mthd)))
+    return nvif_refuse("nvif mthd", "size", -EINVAL);
+
+  struct nvshim_nvif_mthd m;
+  if (vm_user_read(p, arg + sizeof *h, &m, (int)sizeof m) != 0) return -EFAULT;
+  if (m.version != 0) return nvif_refuse("nvif mthd", "version", -EINVAL);
+
+  /* The object must be a DEVICE object this client made.  A method on any
+   * other object is -EINVAL, which is what abi16 answers. */
+  int pid = shim_pid(p);
+  int32_t oclass = 0;
+  spinlock_acquire(&g_shim_lock);
+  struct shim_client *c = client_find(pid, fd);
+  int at = c ? nvif_find_locked(c, h->object) : -1;
+  if (at >= 0) oclass = c->nvif[at].oclass;
+  spinlock_release(&g_shim_lock);
+  if (oclass != NVSHIM_NVIF_CLASS_DEVICE)
+    return nvif_refuse("nvif mthd", "object", -EINVAL);
+
+  if (m.method == NVSHIM_DEVICE_V0_TIME) {
+    row_begin("nvif mthd", &r_nvif);
+    row_s("refused method=1 name=device_time need=ptimer");
+    row_end();
+    return -ENOSYS;
+  }
+  if (m.method == NVSHIM_DEVICE_V0_GCX_READY) {
+    row_begin("nvif mthd", &r_nvif);
+    row_s("refused method=2 name=gcx_ready need=gsp_rm");
+    row_end();
+    return -ENOSYS;
+  }
+  if (m.method != NVSHIM_DEVICE_V0_INFO) {
+    row_begin("nvif mthd", &r_nvif);
+    row_s("refused method=");
+    row_say((int)m.method);
+    row_s(" reason=no_such_method");
+    row_end();
+    return -EINVAL;
+  }
+
+  /* The payload must be exactly one nv_device_info_v0 with version 0. */
+  if (argc != (uint32_t)(sizeof *h + sizeof m + sizeof(struct nvshim_device_info_v0)))
+    return nvif_refuse("nvif mthd", "size", -EINVAL);
+
+  struct nvshim_device_info_v0 info;
+  if (vm_user_read(p, arg + sizeof *h + sizeof m, &info, (int)sizeof info) != 0)
+    return -EFAULT;
+  if (info.version != 0) return nvif_refuse("nvif mthd", "version", -EINVAL);
+
+  /* Fill from the RM's identity, which is what a real nvkm_udevice does: the
+   * device object answers about the card, not about the node. */
+  uint32_t dev = 0;
+  int rc = drm_client_ensure(p, fd, &dev);
+  if (rc != 0) return rc;
+  struct nv_rm_device_info di;
+  int have_info = 0;
+  spinlock_acquire(&g_shim_lock);
+  c = client_find(pid, fd);
+  if (c) {
+    di = c->info;
+    have_info = 1;
+  }
+  spinlock_release(&g_shim_lock);
+  if (!have_info) return -EBADF;
+
+  info.platform = NVSHIM_DEVICE_INFO_V0_PCIE;
+  info.chipset = (uint16_t)di.chipset;
+  info.revision = (uint8_t)di.revision;
+  info.family = NVSHIM_DEVICE_INFO_V0_ADA;
+  info.pad06[0] = 0;
+  info.pad06[1] = 0;
+  info.ram_size = di.fb_size;
+  info.ram_user = di.fb_size; /* the mock has no IMEM carve-out to subtract */
+  for (int i = 0; i < (int)sizeof info.chip; i++) info.chip[i] = 0;
+  for (int i = 0; i < (int)sizeof info.name; i++) info.name[i] = 0;
+  nvif_strlcpy(info.chip, di.name, (int)sizeof info.chip);
+  nvif_strlcpy(info.name, g_nvif_product, (int)sizeof info.name);
+
+  if (vm_kwrite(p, arg + sizeof *h + sizeof m, &info, (int)sizeof info) != 0)
+    return -EFAULT;
+
+  row_begin("nvif info", &r_nvif);
+  row_s("chip=");
+  row_s(info.chip);
+  row_s(" chipset=");
+  row_hex(info.chipset);
+  row_s(" fam=");
+  row_hex(info.family);
+  row_s(" ram=");
+  row_hex(info.ram_user);
+  row_end();
+  return 0;
+}
+
+/* ---- entry for the NVIF row ------------------------------------------- */
+
+static int op_drm_nvif(struct process *p, int fd, uint32_t r, uint64_t arg) {
+  uint32_t argc = NVSHIM_DRM_SIZE(r);
+  struct nvshim_nvif_hdr h;
+
+  /* Unusually, the encoded size IS the buffer length (see nv_nvif_uapi.h):
+   * every type below validates its own shape from here on. */
+  if (argc < (uint32_t)sizeof h) return nvif_refuse("nvif", "size", -EINVAL);
+  if (vm_user_read(p, arg, &h, (int)sizeof h) != 0) return -EFAULT;
+  if (h.version != 0) return nvif_refuse("nvif", "version", -EINVAL);
+  if (h.route != NVSHIM_NVIF_ROUTE_NVIF && h.route != NVSHIM_NVIF_ROUTE_HIDDEN)
+    return nvif_refuse("nvif", "route", -EINVAL);
+
+  switch (h.type) {
+  case NVSHIM_NVIF_NEW: return nvif_new(p, fd, argc, arg, &h);
+  case NVSHIM_NVIF_DEL: return nvif_del(p, fd, argc, arg, &h);
+  case NVSHIM_NVIF_MTHD: return nvif_mthd(p, fd, argc, arg, &h);
+  case NVSHIM_NVIF_SCLASS: return nvif_sclass(p, fd, argc, arg, &h);
+  case NVSHIM_NVIF_MAP:
+  case NVSHIM_NVIF_UNMAP:
+    /* Mapping an object's memory needs the object to HAVE RM memory at a GPU
+     * address; the mock allocates none for NVIF objects. */
+    row_begin("nvif map", &r_nvif);
+    row_s("refused need=gsp_rm");
+    row_end();
+    return -ENOSYS;
+  default:
+    row_begin("nvif", &r_nvif);
+    row_s("refused type=");
+    row_say((int)h.type);
+    row_s(" reason=no_such_type");
+    row_end();
+    return -EINVAL;
+  }
+}
+
 /* ---- entry ------------------------------------------------------------- */
 
 int nv_shim_drm_ioctl(struct process *p, int fd, unsigned long req, uint64_t arg) {
@@ -2606,6 +3061,13 @@ int nv_shim_drm_ioctl(struct process *p, int fd, unsigned long req, uint64_t arg
   }
   int want = drm_row_size(nr);
   if (want < 0) return -ENOTTY;
+  if (!p || arg == 0) return -EINVAL;
+  /* NVIF's encoded size is its buffer length (see nv_nvif_uapi.h), so it is
+   * routed before the equality check every other row gets. */
+  if (nr == (uint8_t)NVSHIM_DRM_NR_NVIF) {
+    if (!nv_shim_present()) return -ENODEV;
+    return op_drm_nvif(p, fd, r, arg);
+  }
   /* The size the number encodes must be the struct it pairs with.  This is the
    * check a winsys built against a different header trips, and it is the one a
    * mutation test is pointed at. */
@@ -2620,7 +3082,6 @@ int nv_shim_drm_ioctl(struct process *p, int fd, unsigned long req, uint64_t arg
     row_end();
     return -EINVAL;
   }
-  if (!p || arg == 0) return -EINVAL;
   if (!nv_shim_present()) return -ENODEV;
 
   switch (nr) {

@@ -75,6 +75,11 @@ struct nv_rm_device_info {
   uint32_t mock;         /* 1 = this RM has no card behind it */
   uint64_t fb_size;      /* bytes of memory the RM will allocate from */
   char name[8];          /* "AD102", NUL padded */
+  /* PMC_BOOT_0's revision byte (bits 0-7): 0xa1 on the AD102 this project
+   * targets (PLAN.md §1, `boot0=0x192000A1`).  Added for WP-NVIF: NVIF's
+   * NV_DEVICE_V0_INFO reports it, and it belongs to the RM (the thing that
+   * read the card) rather than to the ioctl layer that copies it out. */
+  uint32_t revision;
 };
 
 struct nv_rm_if {
