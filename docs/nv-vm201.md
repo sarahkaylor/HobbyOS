@@ -110,6 +110,9 @@ All six functions are on `vfio-pci`. IOMMU groups: 41/42 (4090), 58/59 and 22/23
 — no group is shared between lanes, so passthrough is per-GPU. r1's host has **no**
 NVIDIA driver installed; host-rendered (Venus/virgl) measurement on r1 is a blocked
 card awaiting approval, and today those measurements run on `strix` or llvmpipe.
+**Resolved 2026-11-24: not approved.** The plan, its vfio/VM-300/312 blast radius and
+its revert are in `docs/nv-r1-host-renderer.md`; the proprietary-driver baselines come
+from `strix` instead. Do not install a driver on this host without reading that doc.
 
 ## The 5090 lane's boundary (2026-11-24)
 
