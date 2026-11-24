@@ -7,13 +7,13 @@ its `disk.img` were not touched).
 **Question.** Round 6 measured SEC2 START → STOPPED at 2.3 µs and found
 `transitions=0`. Is the START bit refused, dropped, or consumed?
 
-**Answer, in one paragraph.** It is none of the three in isolation — and all
-three answers are now wrong in an instructive way. The write itself always
-lands: two non-trigger registers in the same window take a value that cannot
-appear there by themselves and read it back, and after a falcon reset the START
-bit itself *latches* and stays latched for 100 ms. What decides the bit's fate
-is the engine state the sequence leaves it in, and the driver's sequence was
-missing one half of it. Three states, measured 8 boots:
+**Answer, in one paragraph.** The write always lands. Whether the bit is taken,
+refused or dropped is decided by the engine state the sequence leaves behind —
+and the sequence the driver used was missing the state change that makes the
+core take it. The two sticky registers in the same window take a value that
+cannot appear there by themselves and read it back, and after a falcon reset the
+START bit itself *latches* and stays latched for 100 ms: the bus and the
+register file are not the problem. Three states, measured across 8 boots:
 
 | state the sequence builds | ctl at the first read after the write (2.27–2.43 µs) | at 10 ms | at 100 ms | core ran? |
 |---|---|---|---|---|
