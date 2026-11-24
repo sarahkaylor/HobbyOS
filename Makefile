@@ -4666,6 +4666,32 @@ $(GB019_IOCTL_ELF): src/user/gb019_ioctl_probe.c
 	@musl-gcc -static-pie -fPIE -O2 -Wall src/user/gb019_ioctl_probe.c -o $(GB019_IOCTL_ELF)
 	@readelf -h $(GB019_IOCTL_ELF) | grep -q 'Type: *DYN' || ( echo "gb019_ioctl: build is not ET_DYN/static-PIE"; readelf -h $(GB019_IOCTL_ELF) | head -4; exit 1 )
 
+# WP-EL0 (nv/wp-el0-shim): the DRM ABI proven from the CALLER's side.  A
+# freestanding static-PIE x86_64 ELF -- the class of binary a stock nvk is, and
+# the only class that can reach /dev/nvshim at all (a native .BIN has no ioctl
+# row: SYS_MAX is frozen and src/libc/src/ioctl.c answers ENOTTY by design).
+# No musl: this probe must not test two things at once, so it carries its own
+# syscall stubs and formatting.  ET_DYN is asserted for the same reason the
+# GB-066 probes assert it -- the v2 loader refuses a low-linked ET_EXEC.
+# NOT a disk.img prerequisite: like the other gated ELF members it is staged on
+# demand (tools/nv/el0_wave.sh), so the unit tier's build is untouched.
+NVABI_CC ?= $(shell command -v clang 2>/dev/null)
+NVABI_ELF = $(OBJ_DIR)/nvabi_probe.elf
+ifeq ($(ARCH),intel)
+$(NVABI_ELF): src/user/nvabi_probe.c src/include/nv_drm_uapi.h src/include/nv_shim.h
+	@[ -n "$(NVABI_CC)" ] || ( echo "nvabi_probe: no clang on PATH (NVABI_CC)"; exit 1 )
+	@$(NVABI_CC) -static-pie -fPIE -O2 -Wall -Wextra -fno-builtin -nostdlib \
+	  -Wl,-e,_start -Wl,--build-id=none $< -o $@
+	@readelf -h $(NVABI_ELF) | grep -q 'Type: *DYN' || ( echo "nvabi_probe: build is not ET_DYN/static-PIE — the v2 ELF loader rejects it"; readelf -h $(NVABI_ELF) | head -4; exit 1 )
+else
+# The Linux-ABI track this probe exercises is x86_64-only (linux_compat_fd.c),
+# so an ARM build of it would be an x86_64 binary in obj/arm/.  Name that
+# instead of quietly producing one.
+$(NVABI_ELF):
+	@echo "nvabi_probe: x86_64-only (Linux-ABI track); build it with ARCH=intel"; exit 1
+endif
+nvabi_elf: $(NVABI_ELF)
+
 # GB-016: uname(2) compat probe.  Same static-PIE vehicle as GB-019 so the
 # process carries PROC_FLAG_LINUX_ABI and its uname arrives as Linux number 63.
 GB016_UNAME_ELF = $(OBJ_DIR)/gb016_uname.elf
