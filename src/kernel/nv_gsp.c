@@ -3965,11 +3965,21 @@ static int sec2_attempt(struct nv_dev *d, const struct sec2_img *im,
   nv_wr32(d, NV_FALCON_SEC2_BASE + 0x044, (uint32_t)(im->meta_phys >> 32));
 
   nv_wr32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL, NV_FALCON_UC_CTRL_START);
+  /* Where does the core go?  PC (0xFF0) answers "did anything execute at all",
+   * which is the one question the verdicts cannot: a boot ROM rejection and a
+   * start that never reached the core both leave no write behind.  Sampled at
+   * fixed iteration counts so the series is comparable between runs. */
+  uint32_t pc_pre = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_PC);
+  uint32_t pc_s[5];
+  int pc_n = 0;
   uint32_t ctl = 0, mb0 = 0;
   int halted = 0;
   for (int i = 0; i < 400000; i++) {
     ctl = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL);
     mb0 = nv_rd32(d, NV_FALCON_SEC2_BASE + 0x040);
+    if (i == 0 || i == 8 || i == 64 || i == 1024 || i == 16384) {
+      if (pc_n < 5) pc_s[pc_n++] = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_PC);
+    }
     if (ctl & NV_FALCON_UC_CTRL_STOPPED) {
       halted = 1;
       break;
@@ -4005,6 +4015,15 @@ static int sec2_attempt(struct nv_dev *d, const struct sec2_img *im,
   uart_print_hex(nv_rd32(d, NV_FALCON_SEC2_BASE + 0x044));
   uart_puts(" verified=");
   uart_print_hex(v);
+  uart_puts(" pc_pre=");
+  uart_print_hex(pc_pre);
+  uart_puts(" pc_samples=");
+  for (int k = 0; k < pc_n; k++) {
+    uart_puts(k ? "," : "");
+    uart_print_hex(pc_s[k]);
+  }
+  uart_puts(" pc_after=");
+  uart_print_hex(nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_PC));
   if (verified) {
     uart_puts(" verdict=RAN (0xA0A0... in the metadata: the block was accepted "
               "and WPR2 is built)\n");
