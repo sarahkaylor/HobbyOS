@@ -78,3 +78,21 @@ nor the WebKit staging.
   one deploy at a time, and the VM must be left stopped.
 - The Mac control node (`sarah@192.168.0.123`'s build box) and VM 200 `nv-swarm`
   (`192.168.0.250`), which stay as the off-host build/test fallback.
+
+## Handover (2026-11-24, after round 5 merged as `eaf006a9`)
+
+The Mac stopped dispatching after this point; this VM runs the rounds.
+
+| Item | State |
+|---|---|
+| Baselines on this host | **intel 589/0, ARM 472/0** at `eaf006a9` |
+| Dispatch | `kanban.dispatch_in_gateway: true`, gateway active — the in-gateway dispatcher claims and spawns on its own |
+| Cards | six, written from round 5's own next steps (not machine-decomposed): SEC2 START→STOPPED timing, booter-image ciphertext question, GETPARAM GRAPH_UNITS + the engine-class wall, nvk build → vulkaninfo, merge gate, RimWorld audio |
+| `ssh r1` | now works from this VM (`~/.ssh/config` host `r1`, key `mac_to_r1`, chmod 600) — needed by the card lane only |
+| Lane discipline | **by instruction, not enforcement**: every worker runs as the same unix user, so any profile *could* ssh to r1. A worker must not deploy unless its card owns the card lane |
+| Retired | 55 machine-decomposed cards archived with a comment naming the two round-5 premises they contradicted |
+
+Watching it work: dashboard `http://192.168.0.251:9119` → Sessions; board state via
+`hermes kanban --board hobbyos-nv list`. A worker's session is its own profile's
+`~/.hermes/profiles/<p>/state.db`; `last_activity_at` age is the liveness signal, not
+`ended_at`.
