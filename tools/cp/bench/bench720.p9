@@ -1,0 +1,72 @@
+# tools/cp/bench/bench720.p9 -- Cyberpunk 2077's OWN built-in benchmark on
+# HobbyOS, 1280x720, on the settings the seeded prefix already carries
+# (Custom = the Low row set, Resolution Scaling Off, 1280x720 borderless,
+# VSync Off, no cap, RT off).  Run it with
+#   P9_SCRIPT=tools/cp/bench/bench720.p9 bash tools/cp/p9/run-p9.sh
+# and extract the game's own files from the run's cpdata.img afterwards with
+# tools/cp/bench/extract-bench.sh.  docs/cp-bench.md is the report.
+#
+# The sequence is tools/cp/p0host/nav.py's, measured on the host-native column
+# (game 2.5, 2026-11-14): main menu -> SETTINGS -> '3' (GRAPHICS tab) -> 'b'
+# (RUN BENCHMARK) -> Return on "Are you sure you would like to run a
+# benchmark?" -> the game's own results page.  On HobbyOS the settings page
+# opens on its last-used tab (SOUND CONTROLS on the user's prefix) and the
+# OCR header lists every tab, so judge the tab by its page rows; '3' did reach
+# GRAPHICS and 'b' triggers RUN BENCHMARK from any tab either way
+# (docs/cp-bench.md §5.3).
+#
+# Nothing here changes a setting: the run measures what the user's profile
+# already has, and the screens are captured as the record of it.
+#
+# v2 (what this file is): the results wait matches "Average FPS" only.
+# The 2026-11-24 run used v1, whose pattern also matched the bare word
+# "Results"; it fired a frame early, the script went on to quit while the
+# benchmark was still flying, the game ignored the input anyway, and the run
+# ended with verdict `seek-failed:menu-quit` with the results screen and
+# summary.json captured (docs/cp-bench.md §5.2).  The live HUD says "FPS: nn",
+# never "Average FPS", so this pattern cannot fire during the flight.
+
+phase menu
+shot menu
+# ---- main menu -> SETTINGS (main menu rows: CONTINUE .. SETTINGS at y=581) ---
+seek menu-settings main down 6 SETTINGS
+key ret
+wait 4
+shot settings-open
+# ---- the settings page: 'b' is RUN BENCHMARK from any tab ------------------
+key 3
+key 3
+key 3
+wait 3
+shot settings-graphics
+expect graphics-tab 20 GRAPHICS|Quick\s*Preset|Ray\s*Tracing|BENCHMARK
+# ---- run the game's own benchmark ------------------------------------------
+phase bench
+mark benchmark requested (b on the settings page)
+key b
+expect bench-confirm 25 LIKE\s*TO\s*RUN|RUN\s*A\s*BENCHMARK|Are\s*you\s*sure
+shot bench-confirm
+key ret
+wait 5
+shot bench-running
+expect bench-results 900 Average\s*FPS
+shot bench-results
+wait 10
+shot bench-results2
+mark BENCHMARK RESULTS ON SCREEN
+# ---- back out and quit (the result files are already on the ext2 prefix) ----
+# the results page's own EXIT BENCHMARK dialog asks "Do you want to go back to
+# the Main Menu?"; Esc opens it, Return answers it.
+phase quit
+key esc
+wait 4
+shot after-results
+seek menu-quit main down 8 QUIT GAME
+exit_ok
+phase quit
+key ret
+wait 3
+shot quit-confirm
+expect quit-confirm 10 sure.{0,20}quit
+key ret
+wait_exit 180

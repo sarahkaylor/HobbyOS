@@ -1,0 +1,33 @@
++     0.0 s  23:53:30  slot 1 acquired; boot -smp 8 -m 12288M -cpu host (KVM, venus); QEMU guests on the host before ours: 0
++     2.3 s  23:53:32  kernel frame pool: [FRAME] frames=2949120 total_mib=11520 ext0=0x0x0000000020000000-0x0x0000000070000000 ext1=0x0x0000000100000000-0x0x0000000200000000 extents=3 hi_mib=6144 reserved=0
++     5.3 s  23:53:35  NFS mount: [P8] mount 10.0.2.2:/srv/nfs/cp-play-p9 -> /CP ok
++    20.8 s  23:53:51  warm-up result: [P8] warm-up: display driver loaded
++    23.3 s  23:53:53  game launched: [P8] begin game : wine Z:\GAME\bin\x64\Cyberpunk2077.exe --launcher-skip
++    23.3 s  23:53:53  phase launch
++    23.3 s  23:53:53  dri nodes at game launch: qemu-system-x86/296163: /dev/dri/renderD129
++    23.3 s  23:53:53  dri nodes at game launch: virgl_render_se/296204: -
++    23.3 s  23:53:53  dri nodes at game launch: virgl-2-gpu_ren/296214: /dev/dri/renderD129
++    23.4 s  23:53:53  baseline screendump 1920x1080
++    26.2 s  23:53:56  serial row: [X]  25.811:0184:trace:process:CreateProcessInternalW app L"Z:\\GAME\\bin\\x64\\REDEngineErrorReporter.exe" cmdline L"REDEngineErrorReporter.exe 384"
++    36.2 s  23:54:06  kernel: [P7] scanout taken res/window 4161 20971570 seq=1
++    36.2 s  23:54:06  kernel: [P7] scanout back (blob freed) 4161 0 seq=1
++    36.2 s  23:54:06  kernel: [P7] scanout taken res/window 4164 20971570 seq=2
++    38.7 s  23:54:08  first screen change after launch (100.0% differs from the baseline)
++   116.8 s  23:55:27  title prompt 'PRESS ... TO CONTINUE' at s007-t000092-pre: sent one Space (#1)
++   132.4 s  23:55:42  title prompt 'PRESS ... TO CONTINUE' at s008-t000108-pre: sent one Space (#2)
++   146.8 s  23:55:57  main menu OCR at s009-t000123-pre: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'QUIT GAME']
++   151.7 s  23:56:01  main menu OCR at s010-t000128-pre: ['NEW GAME', 'LOAD GAME', 'SETTINGS', 'QUIT GAME']
++   151.7 s  23:56:01  phase menu
++   151.7 s  23:56:01  main menu reached: running the play script bench720.p9
++   151.7 s  23:56:01  phase menu
++   154.1 s  23:56:04  seek menu-settings: main menu focus on SETTINGS after 1 taps
++   172.8 s  23:56:23  expect graphics-tab: matched /GRAPHICS|Quick\s*Preset|Ray\s*Tracing|BENCHMARK/ at s017-t000149-graphics-tab
++   172.8 s  23:56:23  phase bench
++   172.8 s  23:56:23  script: benchmark requested (b on the GRAPHICS tab)
++   175.5 s  23:56:25  expect bench-confirm: matched /LIKE\s*TO\s*RUN|RUN\s*A\s*BENCHMARK|Are\s*you\s*sure/ at s019-t000151-bench-confirm
++   305.6 s  23:58:35  expect bench-results: matched /Average\s*FPS|AVERAGE\s*FPS|Results/ at s050-t000281-bench-results
++   317.5 s  23:58:47  script: BENCHMARK RESULTS ON SCREEN
++   317.5 s  23:58:47  phase quit
++   340.1 s  23:59:10  SEEK FAILED menu-quit: main menu row 'QUIT GAME' not focused after 8 x down
++   340.1 s  23:59:10  play script ended: seek-failed:menu-quit
++   341.4 s  23:59:11  verdict: seek-failed:menu-quit; QEMU stopped, slot released; guests on the host now: 0
