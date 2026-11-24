@@ -1,9 +1,11 @@
 # WP-A5B — SEC2's START→STOPPED is microseconds, and it is not a halt at all
 
-Branch `nv/wp-a5b-halttime`, cut from `eaf006a9` (`nv/integ-swarm`). Four boots,
-one named log each (`evidence/nv/r6a..r6d.log`), one attempt per signature slot
-per boot = **8 measurements**. Card lane owned r1 for the round; VM 300 and VM
-312 are stopped and no qemu is left behind (section 7).
+Branch `nv/wp-a5b-halttime`, cut from `eaf006a9` (`nv/integ-swarm`) — it also
+carries `2120a60e` (another lane's `docs/nv-booter-appcode.md`, committed into
+this checkout while the tree was on this branch; see §8). Four boots, one named
+log each (`evidence/nv/r6a..r6d.log`), one attempt per signature slot per boot =
+**8 measurements**. Card lane owned r1 for the round; VM 300 and VM 312 are
+stopped and no qemu is left behind (section 7).
 
 **The answer in one line:** `ctl` (`0x840100`) carries STOPPED **before** the
 START write and carried it in **every one of ~335,000 samples** taken at ~590 ns
@@ -139,11 +141,16 @@ booter and the START trigger never took its core out of STOPPED.**
 The plan's own branch for the µs answer: *"the ROM is not running at all; the
 lever is the boot state (secure-boot enable / BROM mode words around `0x840000`),
 not the image."* The timing rules out the whole image-and-signature space at
-once — ciphertext-vs-plaintext of the `0x7600` app bytes, signature slot, ucode
-id, engine mask, entry point, `modsel`: none of them can matter to a core that
-never leaves STOPPED. The cheapest lever is not the boot state either, because
-this tree already contains a measured statement about what makes a falcon accept
-STARTCPU — on the GSP:
+once — signature slot, ucode id, engine mask, entry point, `modsel`: none of them
+can matter to a core that never leaves STOPPED. The file-encoding question WP-A5
+§6 left open is also already closed on this branch: `docs/nv-booter-appcode.md`
+(dropped here by another lane, §8) measures the `0x7600` bytes as AES-128-ECB
+ciphertext of the fused ucode key, so loading them verbatim is *correct* and the
+ROM is supposed to decrypt them.
+
+The cheapest lever is not the boot state either, because this tree already
+contains a measured statement about what makes a falcon accept STARTCPU — on
+the GSP:
 
 > `nv_gsp_fwsec_reset`: *"The reset is REQUIRED for STARTCPU to be accepted --
 > measured: without it the core answers START with 'still halted'."*
@@ -177,8 +184,9 @@ Two orderings are worth one boot each after that:
 | gate | result |
 |---|---|
 | build, intel `MODE=test` | `exit=0`, 727 compiles, no new warning from `nv_gsp.c` (`clang -O2 -Wall -Wextra`, `KERNEL_MODE_TEST`) |
-| unit tier | see the row below (this section is filled by the run that follows the merge) |
-| image | `sha256=d55acc67cbf14f3ab11645ef933d834f39d072d3aabeb02e7b6e1f12ba9aa7ce`, 1 GiB, firmware staged (`BOOTER/LOADER/GSPRM/UNLOAD.BIN`) once; the same local file re-uploaded before each boot and never touched in between, so all four boots start from identical bytes |
+| ARM per-TU | `obj/arm/nv_gsp.o` compiles (`aarch64-none-elf`, exit 0, no warning): the new block is inside the file's x86-only region |
+| unit tier | **589 tests, 0 failed** (`UNIT TESTS PASSED`, `run_unit_tests_intel.sh`, TCG — `/dev/kvm` is present but not readable by this user, so `SKIP_KVM=1`; KVM mode aborts at `failed to initialize kvm: Permission denied` and says nothing about the tree) |
+| image | `sha256=d55acc67cbf14f3ab11645ef933d834f39d072d3aabeb02e7b6e1f12ba9aa7ce`, 1 GiB, firmware staged (`BOOTER/LOADER/GSPRM/UNLOAD.BIN`) once; the same local file re-uploaded before each boot and never touched in between, so all four boots start from identical bytes. The file in the worktree has since been replaced by the unit tier's own `MODE=unit_tests` image (that is what `run_unit_tests_intel.sh` builds); the four logs are the evidence, and `boot-n.sh` reproduces the image from this commit |
 | distinct boots | four different ptimer origins: `0x19BFDF960`, `0x199976C20`, `0x19811D4A0`, `0x19C96B400` |
 | card left clean | VM 300 **stopped** and VM 312 **stopped** (`qm status`), `/var/run/qemu-server/300.pid` **absent**, `ps -eo comm \| grep -c '^qemu-system'` = **0** on r1 |
 
@@ -192,6 +200,16 @@ Two orderings are worth one boot each after that:
   now "stage the firmware, then *prove* `BOOTER.BIN` is in the image before
   spending a boot" (`tools/nv/boot-n.sh`). This round's four logs are from a
   private worktree (`HobbyOS-a5b`) built and booted out of that contention.
+- **A commit that is not this lane's.** `2120a60e` (`docs/nv-booter-appcode.md`,
+  the AES-ECB analysis) is the parent of this lane's first commit: it was made in
+  the shared checkout at 07:29 while that checkout was on this branch, so it
+  landed here rather than on its author's branch. It is kept, not dropped — it is
+  real work and this branch is the only place it exists. A merge of
+  `nv/wp-a5b-halttime` therefore carries three commits, two of them this lane's.
+  **hotspot: `/home/sarah/Documents/GitHub/HobbyOS` (the shared checkout and its
+  `disk.img`)** — two lanes building in the same tree at the same time is what
+  produced the torn upload and the stray commit; this round moved to a private
+  worktree (`HobbyOS-a5b`) after the first two boots were lost to it.
 - **`tools/nv/deploy.sh` cannot be used per boot here.** It waits up to 450 s
   for the guest to self-terminate; this kernel does not halt QEMU in `MODE=test`,
   so four boots spend thirty minutes in `qm status` polling. `boot-n.sh` does the
