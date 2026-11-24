@@ -136,3 +136,19 @@ the wrapper to start the VM — it never runs `qm` itself).
 `docs/<topic>.md`; the pre-commit hook `tools/nv/hooks/pre-commit-plan` (installed by
 `tools/nv/install-hooks.sh`, and by running that after any fresh clone) refuses a commit
 that touches the plan unless `ALLOW_PLAN_EDIT=1` is set.
+
+### Known state of the 5090 lane's dispatch (2026-11-24, unresolved)
+
+The boundary works; the *dispatch loop* does not yet sustain a worker. Verified failures,
+in the order they were hit:
+
+| # | Symptom | Status |
+|---|---|---|
+| 1 | The lane's unit ran `/opt/nvcard-hermes`, which lacks Hermes' Python deps (`ruamel.yaml`, `dotenv`) | fixed: nvcard2 now has its own install at `/home/nvcard2/.local/bin/hermes` |
+| 2 | Cards defaulted to a workspace under `/home/sarah/.hermes/...`, which `nvcard2` cannot traverse | fixed per card: workspace `dir:/srv/nv5090/work` (owned by nvcard2) |
+| 3 | The spawned worker dies with **SIGINT (exit 130)** when the oneshot unit's cgroup is torn down | `KillMode=process` now set on both lane units — **not yet verified** |
+| 4 | After two failures the respawn guard reports `blocker_auth` from the stored `last_failure_error` | cleared by hand; the root cause is (3) |
+
+The hardware path itself is verified and usable manually (as `nvcard2`: `ssh r1 status`
+→ `status: stopped` for VM 313; `qm stop 300` and `cat /etc/shadow` refused). Card
+`t_deb5ab29` is parked on `t_abea1310`, which owns fixing the loop.
