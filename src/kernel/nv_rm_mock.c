@@ -183,6 +183,7 @@ static int mock_device_open(uint32_t *dev_id, struct nv_rm_device_info *info) {
   info->name[0] = 'A'; info->name[1] = 'D'; info->name[2] = '1';
   info->name[3] = '0'; info->name[4] = '2'; info->name[5] = 0;
   info->name[6] = 0;   info->name[7] = 0;
+  info->revision = 0xa1; /* PMC_BOOT_0 bits 0-7 on the AD102 this mock stands for */
   spinlock_release(&g_mock.lock);
   return 0;
 }

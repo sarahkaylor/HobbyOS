@@ -60,6 +60,19 @@ _Static_assert(sizeof(struct nvshim_drm_exec) == 40, "exec");
 _Static_assert(sizeof(struct nvshim_drm_exec_push) == 16, "exec_push");
 _Static_assert(sizeof(struct nvshim_drm_sync) == 16, "sync");
 _Static_assert(sizeof(struct nvshim_drm_syncobj_wait) == 40, "syncobj_wait");
+
+/* WP-NVIF: the object model's contract, asserted from the caller's side too.
+ * These are the numbers in nvif/ioctl.h, nvif/cl0080.h and nvif/class.h; a
+ * client that linked against a different shape would be asking a different
+ * question, so the build breaks rather than the row lying. */
+_Static_assert(sizeof(struct nvshim_nvif_hdr) == 24, "nvif hdr");
+_Static_assert(sizeof(struct nvshim_nvif_new) == 32, "nvif new");
+_Static_assert(sizeof(struct nvshim_nvif_sclass) == 8, "nvif sclass");
+_Static_assert(sizeof(struct nvshim_nvif_sclass_oclass) == 8, "nvif sclass entry");
+_Static_assert(sizeof(struct nvshim_nvif_mthd) == 8, "nvif mthd");
+_Static_assert(sizeof(struct nvshim_device_info_v0) == 104, "device_info_v0");
+_Static_assert(sizeof(struct nvshim_device_time_v0) == 16, "device_time_v0");
+_Static_assert(sizeof(struct nvshim_device_v0) == 16, "device_v0");
 _Static_assert(NVSHIM_DRM_IOC_VERSION == 0xC0406400u, "VERSION number");
 _Static_assert(NVSHIM_DRM_IOC_GETPARAM == 0xC0106440u, "GETPARAM number");
 _Static_assert(NVSHIM_DRM_IOC_VM_INIT == 0xC0106450u, "VM_INIT number");
@@ -203,6 +216,102 @@ static unsigned long fnv1a(const unsigned char *p, unsigned long n) {
     h = (h * 16777619u) & 0xFFFFFFFFu;
   }
   return h;
+}
+
+static void copy_n(void *dst, const void *src, unsigned long n) {
+  unsigned char *d = (unsigned char *)dst;
+  const unsigned char *s = (const unsigned char *)src;
+  for (unsigned long i = 0; i < n; i++) d[i] = s[i];
+}
+
+/* ---- NVIF (WP-NVIF): one request buffer, filled at the contract's offsets --
+ *
+ * NVIF's encoded _IOC size is the BUFFER LENGTH (header + the type's payload),
+ * so every request here is built in one 192-byte buffer and sent with the
+ * length it actually has -- the same arithmetic libdrm's drmCommandWrite does
+ * from the caller side.
+ */
+#define NVIF_BUF_MAX 192
+static unsigned char nbuf[NVIF_BUF_MAX] __attribute__((aligned(16)));
+
+static void nvif_hdr(int type, int route, unsigned long token, unsigned long object) {
+  struct nvshim_nvif_hdr h;
+  bzero_n(&h, sizeof h);
+  h.version = 0;
+  h.type = (uint8_t)type;
+  h.owner = NVSHIM_NVIF_OWNER_ANY;
+  h.route = (uint8_t)route;
+  h.token = token;
+  h.object = object;
+  copy_n(nbuf, &h, sizeof h);
+}
+
+static long nvif_call(long fd, unsigned long len) {
+  return ioctl_((int)fd, NVSHIM_DRM_IOC_NVIF_LEN(len), nbuf);
+}
+
+/* NVIF NEW of the device object, exactly as nouveau_ws_device_alloc sends it:
+ * route 0x00, parent object 0, oclass NV_DEVICE, one nv_device_v0 of class
+ * data, and the CLIENT's cookie in new.object. */
+static long nvif_new_device(long fd, unsigned long cookie, unsigned long len) {
+  struct nvshim_nvif_new nw;
+  struct nvshim_device_v0 dv;
+  bzero_n(nbuf, NVIF_BUF_MAX);
+  bzero_n(&nw, sizeof nw);
+  bzero_n(&dv, sizeof dv);
+  nw.route = NVSHIM_NVIF_ROUTE_NVIF;
+  nw.token = cookie;
+  nw.object = cookie;
+  nw.handle = 0;
+  nw.oclass = NVSHIM_NVIF_CLASS_DEVICE;
+  dv.device = ~0ul;
+  nvif_hdr(NVSHIM_NVIF_NEW, NVSHIM_NVIF_ROUTE_NVIF, 0, 0);
+  copy_n(nbuf + 24, &nw, sizeof nw);
+  copy_n(nbuf + 24 + sizeof nw, &dv, sizeof dv);
+  return nvif_call(fd, len);
+}
+
+/* A child object under a channel: route 0xff, token = the channel. */
+static long nvif_new_child(long fd, unsigned long ch, long oclass, unsigned long cookie) {
+  struct nvshim_nvif_new nw;
+  bzero_n(nbuf, NVIF_BUF_MAX);
+  bzero_n(&nw, sizeof nw);
+  nw.route = NVSHIM_NVIF_ROUTE_NVIF;
+  nw.token = cookie;
+  nw.object = cookie;
+  nw.oclass = (int32_t)oclass;
+  nvif_hdr(NVSHIM_NVIF_NEW, NVSHIM_NVIF_ROUTE_HIDDEN, ch, 0);
+  copy_n(nbuf + 24, &nw, sizeof nw);
+  return nvif_call(fd, 24 + sizeof nw);
+}
+
+/* MTHD on an object cookie.  `len` is passed in so a wrong-length call can be
+ * made deliberately; the payload is one nv_device_info_v0 at +32. */
+static long nvif_mthd(long fd, unsigned long cookie, int method, unsigned long len,
+                      int info_version) {
+  struct nvshim_nvif_mthd m;
+  struct nvshim_device_info_v0 info;
+  bzero_n(nbuf, NVIF_BUF_MAX);
+  bzero_n(&m, sizeof m);
+  bzero_n(&info, sizeof info);
+  m.method = (uint8_t)method;
+  info.version = (uint8_t)info_version;
+  nvif_hdr(NVSHIM_NVIF_MTHD, NVSHIM_NVIF_ROUTE_NVIF, 0, cookie);
+  copy_n(nbuf + 24, &m, sizeof m);
+  copy_n(nbuf + 24 + sizeof m, &info, sizeof info);
+  return nvif_call(fd, len);
+}
+
+/* SCLASS on a channel: `count` entries of room, `len` bytes sent. */
+static long nvif_sclass(long fd, unsigned long ch, int count, unsigned long len,
+                        int route) {
+  struct nvshim_nvif_sclass sc;
+  bzero_n(nbuf, NVIF_BUF_MAX);
+  bzero_n(&sc, sizeof sc);
+  sc.count = (uint8_t)count;
+  nvif_hdr(NVSHIM_NVIF_SCLASS, route, ch, 0);
+  copy_n(nbuf + 24, &sc, sizeof sc);
+  return nvif_call(fd, len);
 }
 
 /* The push stream this program writes through its CPU mapping: 64 bytes of a
@@ -575,16 +684,269 @@ int main(void) {
   r_dec(err_of(r_again));
   done(r_sig == 0 && r_again == 0);
 
-  /* --- 20 a named refusal, from EL0 ------------------------------------ */
-  long r_nvif = ioctl_((int)fd, NVSHIM_DRM_IOC_NVIF, &sa);
-  begin(20, "refuse_nvif");
-  r_s("reason=nvif errno=");
-  r_dec(err_of(r_nvif));
-  done(r_nvif == -38 /* -ENOSYS: refused by name, not skipped */);
+  /* ======================================================================
+   * 20-31. NVIF -- the object model a stock winsys actually uses.
+   *
+   * Rows 1-19 prove the *transport* surface (DRM rows, memory, a channel, a
+   * fence).  None of that is what a stock nvk calls first: nvk creates a
+   * DEVICE object through DRM_IOCTL_NOUVEAU_NVIF, asks that object who the
+   * card is, then asks a channel which engine classes it offers.  The rows
+   * below run that sequence from ring 3 and print one line per step, so the
+   * kernel's answer and the client's arithmetic are separately attributable.
+   * Where a real GPU object would be needed the answer is a NAMED refusal and
+   * the row says which class id and why -- that is where a stock winsys stops.
+   * ====================================================================== */
 
-  /* --- 21 a number nobody implements ----------------------------------- */
+  /* --- 20 the device object -------------------------------------------- */
+  /* nouveau keys objects by the CLIENT's cookie (new.object), which is why
+   * Mesa passes (uintptr_t)its own struct and names it again later.  Using the
+   * address of a real local is the faithful shape, not a made-up constant. */
+  struct { unsigned long pad[4]; } dev_obj;
+  bzero_n(&dev_obj, sizeof dev_obj);
+  unsigned long dev_cookie = (unsigned long)(uintptr_t)&dev_obj;
+  long r_nd = nvif_new_device(fd, dev_cookie, 24 + 32 + 16);
+  begin(20, "nvif_new_device");
+  r_s("class=0x80 cookie=");
+  r_hex(dev_cookie);
+  r_s(" len=72 errno=");
+  r_dec(err_of(r_nd));
+  done(r_nd == 0);
+
+  /* --- 21 NV_DEVICE_V0_INFO: who the card is --------------------------- */
+  long r_inf = nvif_mthd(fd, dev_cookie, NVSHIM_DEVICE_V0_INFO, 24 + 8 + 104, 0);
+  struct nvshim_device_info_v0 dinfo;
+  bzero_n(&dinfo, sizeof dinfo);
+  if (r_inf == 0) copy_n(&dinfo, nbuf + 32, sizeof dinfo);
+  int chip_ok = bytes_eq((const unsigned char *)dinfo.chip,
+                         (const unsigned char *)"AD102", 6);
+  begin(21, "nvif_info");
+  r_s("chip=");
+  r_s(chip_ok ? dinfo.chip : "(none)");
+  r_s(" chipset=");
+  r_hex(dinfo.chipset);
+  r_s(" fam=");
+  r_hex(dinfo.family);
+  r_s(" ram=");
+  r_hex((unsigned long)dinfo.ram_user);
+  done(r_inf == 0 && chip_ok && dinfo.platform == NVSHIM_DEVICE_INFO_V0_PCIE &&
+       dinfo.chipset == 0x192 && dinfo.family == NVSHIM_DEVICE_INFO_V0_ADA &&
+       dinfo.revision == 0xa1 && dinfo.ram_user == fbsize &&
+       dinfo.ram_size == dinfo.ram_user && dinfo.name[0] == 'N');
+
+  /* --- 22 methods this node will not answer ----------------------------
+   * TIME needs the card's PTIMER (a CPU clock would be a different quantity
+   * reported under the same name); a method on an object that was never made
+   * is -EINVAL; and INFO with a payload one byte short is -EINVAL -- the shape
+   * rule is a real check, not a coincidence of the happy path. */
+  long r_time = nvif_mthd(fd, dev_cookie, NVSHIM_DEVICE_V0_TIME, 24 + 8 + 16, 0);
+  long r_noobj = nvif_mthd(fd, dev_cookie + 0x40, NVSHIM_DEVICE_V0_INFO, 24 + 8 + 104, 0);
+  long r_short = nvif_mthd(fd, dev_cookie, NVSHIM_DEVICE_V0_INFO, 24 + 8 + 103, 0);
+  begin(22, "nvif_mthd_refusals");
+  r_s("time_errno=");
+  r_dec(err_of(r_time));
+  r_s(" unknown_object=");
+  r_dec(err_of(r_noobj));
+  r_s(" short_payload=");
+  r_dec(err_of(r_short));
+  done(r_time == -38 /* named -ENOSYS: needs the PTIMER */ && r_noobj == -22 &&
+       r_short == -22);
+
+  /* --- 23 the cookie rules --------------------------------------------- */
+  long r_dup = nvif_new_device(fd, dev_cookie, 24 + 32 + 16);
+  long r_zero = nvif_new_device(fd, 0, 24 + 32);
+  begin(23, "nvif_new_cookie");
+  r_s("duplicate_errno=");
+  r_dec(err_of(r_dup));
+  r_s(" zero_cookie=");
+  r_dec(err_of(r_zero));
+  done(r_dup == -17 /* -EEXIST, as nouveau */ && r_zero == -22);
+
+  /* --- 24 SCLASS without a valid parent -------------------------------- */
+  long r_sc0 = nvif_sclass(fd, 0, 16, 24 + 8 + 16 * 8, NVSHIM_NVIF_ROUTE_HIDDEN);
+  long r_sc_rt = nvif_sclass(fd, ch, 16, 24 + 8 + 16 * 8, NVSHIM_NVIF_ROUTE_NVIF);
+  begin(24, "nvif_sclass_controls");
+  r_s("no_parent=");
+  r_dec(err_of(r_sc0));
+  r_s(" route0=");
+  r_dec(err_of(r_sc_rt));
+  done(r_sc0 == -22 && r_sc_rt == -22);
+
+  /* --- 25 SCLASS: the classes this channel's runlist carries -----------
+   * nvk's own match: for each engine it takes the highest class whose LOW BYTE
+   * is 0x2d (2D), 0x40/0x39 (M2MF), 0x97 (3D), 0xb5 (copy), 0xc0 (compute). */
+  long r_sc = nvif_sclass(fd, ch, 16, 24 + 8 + 16 * 8, NVSHIM_NVIF_ROUTE_HIDDEN);
+  struct nvshim_nvif_sclass scv;
+  struct nvshim_nvif_sclass_oclass scl[NVSHIM_NVIF_MAX_SCLASS];
+  bzero_n(&scv, sizeof scv);
+  bzero_n(scl, sizeof scl);
+  if (r_sc == 0) {
+    copy_n(&scv, nbuf + 24, sizeof scv);
+    copy_n(scl, nbuf + 32, sizeof scl);
+  }
+  begin(25, "nvif_sclass");
+  r_s("ch=");
+  r_dec((long)ch);
+  r_s(" count=");
+  r_dec((long)scv.count);
+  r_s(" 2d=");
+  r_hex((unsigned long)scl[0].oclass);
+  r_s(" 3d=");
+  r_hex((unsigned long)scl[2].oclass);
+  r_s(" copy=");
+  r_hex((unsigned long)scl[4].oclass);
+  done(r_sc == 0 && scv.count == 6 &&
+       scl[0].oclass == NVSHIM_NVIF_CLASS_FERMI_TWOD_A &&
+       scl[1].oclass == NVSHIM_NVIF_CLASS_KEPLER_INLINE_TO_MEM_B &&
+       scl[2].oclass == NVSHIM_NVIF_CLASS_AMPERE_B &&
+       scl[3].oclass == NVSHIM_NVIF_CLASS_AMPERE_COMPUTE_B &&
+       scl[4].oclass == NVSHIM_NVIF_CLASS_AMPERE_DMA_COPY_A &&
+       scl[5].oclass == NVSHIM_NVIF_CLASS_AMPERE_DMA_COPY_B &&
+       (scl[2].oclass & 0xff) == 0x97 && scl[2].minver == -1);
+
+  /* --- 26 a caller with room for two entries ---------------------------
+   * nouveau reports the number the channel HAS and fills what the caller's
+   * array holds; a client that allocated two slots must not be overrun. */
+  long r_sc2 = nvif_sclass(fd, ch, 2, 24 + 8 + 2 * 8, NVSHIM_NVIF_ROUTE_HIDDEN);
+  struct nvshim_nvif_sclass scv2;
+  struct nvshim_nvif_sclass_oclass scl2[2];
+  bzero_n(&scv2, sizeof scv2);
+  bzero_n(scl2, sizeof scl2);
+  if (r_sc2 == 0) {
+    copy_n(&scv2, nbuf + 24, sizeof scv2);
+    copy_n(scl2, nbuf + 32, sizeof scl2);
+  }
+  begin(26, "nvif_sclass_truncated");
+  r_s("slots=2 reported=");
+  r_dec((long)scv2.count);
+  r_s(" e0=");
+  r_hex((unsigned long)scl2[0].oclass);
+  r_s(" e1=");
+  r_hex((unsigned long)scl2[1].oclass);
+  done(r_sc2 == 0 && scv2.count == 6 &&
+       scl2[0].oclass == NVSHIM_NVIF_CLASS_FERMI_TWOD_A &&
+       scl2[1].oclass == NVSHIM_NVIF_CLASS_KEPLER_INLINE_TO_MEM_B);
+
+  /* --- 27 THE WALL: an engine class object ----------------------------
+   * The 3D class nvk would pick on AD102.  Instantiating it is a real HW
+   * class on a real channel -- a GSP-RM object -- so the answer is -ENOSYS
+   * with the class id in the kernel's row, not a fake object that would let
+   * nvk build a command stream nothing will read. */
+  long r_eng = nvif_new_child(fd, ch, NVSHIM_NVIF_CLASS_AMPERE_B, 0xb000);
+  begin(27, "nvif_new_engine");
+  r_s("class=");
+  r_hex((unsigned long)NVSHIM_NVIF_CLASS_AMPERE_B);
+  r_s(" errno=");
+  r_dec(err_of(r_eng));
+  r_s(" need=gsp_rm");
+  done(r_eng == -38 /* named refusal, not a fake object */);
+
+  /* --- 28 every class SCLASS reported, and one it did not ------------- */
+  const long all_classes[6] = {
+      NVSHIM_NVIF_CLASS_FERMI_TWOD_A,      NVSHIM_NVIF_CLASS_KEPLER_INLINE_TO_MEM_B,
+      NVSHIM_NVIF_CLASS_AMPERE_B,          NVSHIM_NVIF_CLASS_AMPERE_COMPUTE_B,
+      NVSHIM_NVIF_CLASS_AMPERE_DMA_COPY_A, NVSHIM_NVIF_CLASS_AMPERE_DMA_COPY_B};
+  int refused = 0;
+  for (int i = 0; i < 6; i++)
+    if (nvif_new_child(fd, ch, all_classes[i], 0xb100 + (unsigned long)i) == -38)
+      refused++;
+  long r_noclass = nvif_new_child(fd, ch, 0x1234, 0xb200);
+  begin(28, "nvif_new_classes");
+  r_s("refused=");
+  r_dec(refused);
+  r_s("/6 no_such_class=");
+  r_dec(err_of(r_noclass));
+  done(refused == 6 && r_noclass == -22);
+
+  /* --- 29 the shapes nouveau rejects ---------------------------------- */
+  long r_fch = nvif_new_child(fd, ch + 99, NVSHIM_NVIF_CLASS_AMPERE_B, 0xb300);
+  long r_root = nvif_new_child(fd, 0, NVSHIM_NVIF_CLASS_AMPERE_B, 0xb301);
+  nvif_hdr(NVSHIM_NVIF_NEW, NVSHIM_NVIF_ROUTE_NVIF, 0, 0);
+  nbuf[0] = 1; /* header version != 0 */
+  long r_ver = nvif_call(fd, 24 + 32);
+  nvif_hdr(NVSHIM_NVIF_NEW, 0x55, 0, 0);
+  long r_route = nvif_call(fd, 24 + 32);
+  long r_thin = nvif_call(fd, 8); /* shorter than the header itself */
+  begin(29, "nvif_new_shapes");
+  r_s("foreign_ch=");
+  r_dec(err_of(r_fch));
+  r_s(" no_channel=");
+  r_dec(err_of(r_root));
+  r_s(" bad_version=");
+  r_dec(err_of(r_ver));
+  r_s(" bad_route=");
+  r_dec(err_of(r_route));
+  r_s(" short=");
+  r_dec(err_of(r_thin));
+  done(r_fch == -22 && r_root == -22 && r_ver == -22 && r_route == -22 &&
+       r_thin == -22);
+
+  /* --- 30 the winsys walk: where a stock nvk actually stops ------------
+   * nouveau_ws_device_new() runs VERSION, GET_CAP, VM_INIT (rows 2/3/6),
+   * then: GETPARAM(PCI_DEVICE), NVIF NEW(device), NVIF MTHD(INFO),
+   * GETPARAM(EXEC_PUSH_MAX), GETPARAM(VRAM_BAR_SIZE), GETPARAM(GRAPH_UNITS)
+   * -- and GETPARAM GRAPH_UNITS is FATAL (`goto out_err`) -- then
+   * CHANNEL_ALLOC, SCLASS, and one NVIF NEW per engine class.  This row walks
+   * that tail and reports the first two refusals it meets, in order, so the
+   * report can say where the wall is instead of guessing. */
+  struct nvshim_drm_getparam qw;
+  bzero_n(&qw, sizeof qw);
+  long w_pcidev, w_pushmax, w_bar, w_units;
+  qw.param = NVSHIM_PARAM_PCI_DEVICE;
+  w_pcidev = err_of(ioctl_((int)fd, NVSHIM_DRM_IOC_GETPARAM, &qw));
+  struct { unsigned long pad[2]; } dev2;
+  bzero_n(&dev2, sizeof dev2);
+  long w_new = nvif_new_device(fd, (unsigned long)(uintptr_t)&dev2, 24 + 32 + 16);
+  long w_info = nvif_mthd(fd, (unsigned long)(uintptr_t)&dev2,
+                          NVSHIM_DEVICE_V0_INFO, 24 + 8 + 104, 0);
+  qw.param = NVSHIM_DRM_PARAM_EXEC_PUSH_MAX;
+  w_pushmax = err_of(ioctl_((int)fd, NVSHIM_DRM_IOC_GETPARAM, &qw));
+  qw.param = NVSHIM_PARAM_VRAM_BAR_SIZE;
+  w_bar = err_of(ioctl_((int)fd, NVSHIM_DRM_IOC_GETPARAM, &qw));
+  qw.param = NVSHIM_PARAM_GRAPH_UNITS;
+  w_units = ioctl_((int)fd, NVSHIM_DRM_IOC_GETPARAM, &qw);
+  /* As if it had answered: the next two steps a winsys takes -- SCLASS, then
+   * the highest class whose low byte is 0x97 (nvk's own find_class). */
+  long w_sc = nvif_sclass(fd, ch, 16, 24 + 8 + 16 * 8, NVSHIM_NVIF_ROUTE_HIDDEN);
+  struct nvshim_nvif_sclass_oclass wl[NVSHIM_NVIF_MAX_SCLASS];
+  bzero_n(wl, sizeof wl);
+  if (w_sc == 0) copy_n(wl, nbuf + 32, sizeof wl);
+  unsigned long pick = 0;
+  for (int i = 0; i < NVSHIM_NVIF_MAX_SCLASS; i++)
+    if ((wl[i].oclass & 0xff) == 0x97 && (unsigned long)wl[i].oclass > pick)
+      pick = (unsigned long)wl[i].oclass;
+  long w_eng = nvif_new_child(fd, ch, pick ? (long)pick : NVSHIM_NVIF_CLASS_AMPERE_B,
+                              0xb400);
+  begin(30, "nvif_winsys_walk");
+  r_s("stop1=getparam(13)=");
+  r_dec(err_of(w_units));
+  r_s(" then_sclass=");
+  r_dec(err_of(w_sc));
+  r_s(" stop2=nvif_new(3d)=");
+  r_dec(err_of(w_eng));
+  done(w_pcidev == 0 && w_new == 0 && w_info == 0 && w_pushmax == 0 &&
+       w_bar == 0 && w_units == -38 && w_sc == 0 && w_eng == -38);
+
+  /* --- 31 DEL, and the object really goes ----------------------------- */
+  nvif_hdr(NVSHIM_NVIF_DEL, NVSHIM_NVIF_ROUTE_NVIF, 0, (unsigned long)(uintptr_t)&dev2);
+  long r_del = nvif_call(fd, 24);
+  long r_after_del = nvif_mthd(fd, (unsigned long)(uintptr_t)&dev2,
+                               NVSHIM_DEVICE_V0_INFO, 24 + 8 + 104, 0);
+  /* The MTHD above rebuilt the shared request buffer, so the second DEL has to
+   * be built again -- a client that reuses one buffer must refill it. */
+  nvif_hdr(NVSHIM_NVIF_DEL, NVSHIM_NVIF_ROUTE_NVIF, 0, (unsigned long)(uintptr_t)&dev2);
+  long r_del2 = nvif_call(fd, 24); /* second DEL: not an error, as in nouveau */
+  begin(31, "nvif_del");
+  r_s("del=");
+  r_dec(err_of(r_del));
+  r_s(" info_after=");
+  r_dec(err_of(r_after_del));
+  r_s(" del_again=");
+  r_dec(err_of(r_del2));
+  done(r_del == 0 && r_after_del == -22 && r_del2 == 0);
+
+  /* --- 32 a number nobody implements ----------------------------------- */
   long r_unk = ioctl_((int)fd, NVSHIM_DRM_IOC_ANY(0x7e, 8), &sa);
-  begin(21, "unknown_nr");
+  begin(32, "unknown_nr");
   r_s("nr=0x7e errno=");
   r_dec(err_of(r_unk));
   done(r_unk == -25 /* -ENOTTY */);
@@ -593,7 +955,7 @@ int main(void) {
   vmi.kernel_managed_addr = 1ull << 39;
   vmi.kernel_managed_size = 1ull << 39;
   long r_vm2 = ioctl_((int)fd, NVSHIM_DRM_IOC_VM_INIT, &vmi);
-  begin(22, "vm_reinit");
+  begin(33, "vm_reinit");
   r_s("reason=objects_exist errno=");
   r_dec(err_of(r_vm2));
   done(r_vm2 == -38);
@@ -604,7 +966,7 @@ int main(void) {
    * be -EFAULT and the kernel must survive it (a copy-in to an unproven user
    * address is how a driver takes the CPU down). */
   long r_badarg = ioctl_((int)fd, NVSHIM_DRM_IOC_GETPARAM, (void *)0xdead0000);
-  begin(23, "ptr_arg");
+  begin(34, "ptr_arg");
   r_s("arg=0xdead0000 errno=");
   r_dec(err_of(r_badarg));
   done(r_badarg == -14 /* -EFAULT */);
@@ -615,7 +977,7 @@ int main(void) {
   vb_bad.op_count = 1;
   vb_bad.op_ptr = 0xdead1000;
   long r_badop = ioctl_((int)fd, NVSHIM_DRM_IOC_VM_BIND, &vb_bad);
-  begin(24, "ptr_inner");
+  begin(35, "ptr_inner");
   r_s("op_ptr=0xdead1000 errno=");
   r_dec(err_of(r_badop));
   done(r_badop == -14);
@@ -627,7 +989,7 @@ int main(void) {
   ex_bad.push_count = 1;
   ex_bad.push_ptr = 0xdead2000;
   long r_badpush = ioctl_((int)fd, NVSHIM_DRM_IOC_EXEC, &ex_bad);
-  begin(25, "ptr_exec_push");
+  begin(36, "ptr_exec_push");
   r_s("push_ptr=0xdead2000 errno=");
   r_dec(err_of(r_badpush));
   done(r_badpush == -14);
@@ -647,7 +1009,7 @@ int main(void) {
   ex_ub.push_count = 1;
   ex_ub.push_ptr = (uint64_t)(uintptr_t)&push_bad;
   long r_unbound = ioctl_((int)fd, NVSHIM_DRM_IOC_EXEC, &ex_ub);
-  begin(26, "exec_unbound_va");
+  begin(37, "exec_unbound_va");
   r_s("push_va=0x80000 errno=");
   r_dec(err_of(r_unbound));
   done(r_unbound == -22);
@@ -662,7 +1024,7 @@ int main(void) {
                     (long)map_handle);
   long g_exec = sc6(SYS_MMAP, 0, 4096, PROT_READ | 4 /*EXEC*/, MAP_SHARED, fd,
                     (long)map_handle);
-  begin(27, "mmap_geometry");
+  begin(38, "mmap_geometry");
   r_s("len_past_object=");
   r_dec(err_of(g_len));
   r_s(" private=");
@@ -682,7 +1044,7 @@ int main(void) {
     for (int i = 0; i < 8 && alias_ok; i++)
       if (bo[i] != (unsigned char)(0x11 * (i + 1))) alias_ok = 0;
   }
-  begin(28, "mmap_alias");
+  begin(39, "mmap_alias");
   r_s("va2=");
   if (mva2 > 0) {
     r_hex((unsigned long)mva2);
@@ -707,7 +1069,7 @@ int main(void) {
   gn2.info.size = 4096;
   long r_new2 = fd2 >= 0 ? ioctl_((int)fd2, NVSHIM_DRM_IOC_GEM_NEW, &gn2) : -999;
   unsigned long h2 = gn2.info.handle;
-  begin(29, "two_clients");
+  begin(40, "two_clients");
   r_s("fd2=");
   r_dec(fd2);
   r_s(" old_handle_errno=");
@@ -742,7 +1104,7 @@ int main(void) {
     (void)sc6(SYS_WAIT4, cpid, (long)&st, 0, 0, 0, 0);
     cst = st;
   }
-  begin(30, "gem_close_unmaps");
+  begin(41, "gem_close_unmaps");
   r_s("close_ret=");
   r_dec(r_closebo);
   r_s(" child_status=");
@@ -776,7 +1138,7 @@ int main(void) {
     (void)sc6(SYS_WAIT4, fpid, (long)&st, 0, 0, 0, 0);
     fst = st;
   }
-  begin(31, "fork_inherit_fd");
+  begin(42, "fork_inherit_fd");
   r_s("inherited_fd=");
   r_dec(fd);
   r_s(" child_exit=");
@@ -789,7 +1151,7 @@ int main(void) {
    * fd is gone) hides a use-after-close from the caller. */
   (void)sc1(SYS_CLOSE, fd);
   long r_after = ioctl_((int)fd, NVSHIM_DRM_IOC_GETPARAM, &q);
-  begin(32, "close_ioctl");
+  begin(43, "close_ioctl");
   r_s("closed_fd=");
   r_dec(fd);
   r_s(" errno=");
@@ -802,7 +1164,7 @@ int main(void) {
   bzero_n(&g3, sizeof g3);
   g3.handle = (uint32_t)bo_handle;
   long r_reuse2 = fd3 >= 0 ? ioctl_((int)fd3, NVSHIM_DRM_IOC_GEM_INFO, &g3) : -999;
-  begin(33, "fd_lifetime");
+  begin(44, "fd_lifetime");
   r_s("new_fd=");
   r_dec(fd3);
   r_s(" old_handle=");

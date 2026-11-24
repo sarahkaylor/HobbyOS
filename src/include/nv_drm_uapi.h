@@ -35,9 +35,16 @@
  *  not by a HobbyOS-shaped imitation of it.
  *
  *  WHAT IS NOT HERE: dma-buf/PRIME, sync files, the timeline half of syncobj,
- *  NVIF (every RM class object), SVM, relocations and the legacy pushbuf path.
- *  Each is a named refusal (-ENOSYS with a console row), never a silent no-op:
- *  see nv_shim_drm_refusal_name().
+ *  SVM, relocations and the legacy pushbuf path.  Each is a named refusal
+ *  (-ENOSYS with a console row), never a silent no-op: see
+ *  nv_shim_drm_refusal_name().
+ *
+ *  WHAT IS HERE SINCE WP-NVIF: DRM_IOCTL_NOUVEAU_NVIF (nr 0x47) -- the
+ *  object model a stock winsys uses before it can make a channel object:
+ *  the DEVICE object, NV_DEVICE_V0_INFO, DEL and a channel's SCLASS list.
+ *  Engine class objects are refused by name because instantiating one is a
+ *  real HW class on a real channel.  Contract, sizes and the source of every
+ *  number: nv_nvif_uapi.h.
  *
  *  WHAT IS HERE SINCE WP-F3: a CPU mapping of a GEM object, through mmap(2) on
  *  the node rather than through a request row (DRM has never had a mmap ioctl;
@@ -52,6 +59,7 @@
 #include <stdint.h>
 
 #include "nv_shim.h" /* NVSHIM_IOC encoding + the 'N' surface this deprecates */
+#include "nv_nvif_uapi.h" /* WP-NVIF: DRM_IOCTL_NOUVEAU_NVIF (nr 0x47) */
 
 /* DRM ioctl encoding (include/uapi/drm/drm.h): magic 'd', and the command
  * base is 0x40 for driver-private rows.  The _IOC field layout is the one
@@ -351,11 +359,22 @@ struct nvshim_drm_exec {
 #define NVSHIM_DRM_IOC_SYNCOBJ_SIGNAL                                                          \
   NVSHIM_DRM_IOWR(0xc5, struct nvshim_drm_syncobj_array)               /* 0xC01064C5 */
 
+/* ---- NVIF (nr 0x47): served since WP-NVIF, and the one row whose encoded
+ * size is a BUFFER LENGTH rather than a struct width.  The kernel validates
+ * each `type` against its own shape rule (see nv_nvif_uapi.h); the dispatch
+ * table's entry for this number is therefore the MINIMUM length, not an
+ * equality check.  `libdrm`'s drmCommandWrite* builds exactly this: */
+#define NVSHIM_DRM_IOC_NVIF_LEN(len)                                                    \
+  NVSHIM_IOC(NVSHIM_IOC_WRITE | NVSHIM_IOC_READ, NVSHIM_DRM_MAGIC, NVSHIM_DRM_NR_NVIF,   \
+             (len))
+/* The 24-byte bare header: enough to be answered (and refused) on its own,
+ * too short for any type to carry its payload. */
+#define NVSHIM_DRM_IOC_NVIF NVSHIM_DRM_IOC_NVIF_LEN(NVSHIM_NVIF_MIN_SIZE)
+
 /* Refused rows.  Keyed on the request NUMBER only: several of these have no
  * struct in the public uAPI (SETPARAM and the three object rows are deprecated
- * and their structs are gone; NVIF's lives in nouveau's private
- * include/nvif/ioctl.h; GET_ZCULL_INFO's struct is 48 bytes but unused), so
- * there is no size to check against.  Answered -ENOSYS with a named
+ * and their structs are gone; GET_ZCULL_INFO's struct is 48 bytes but unused),
+ * so there is no size to check against.  Answered -ENOSYS with a named
  * [NVSHIM] drm refuse row, whatever size the request encodes. */
 #define NVSHIM_DRM_NR_GEM_FLINK           0x0a
 #define NVSHIM_DRM_NR_PRIME_HANDLE_TO_FD  0x2d
@@ -390,7 +409,6 @@ struct nvshim_drm_exec {
 #define NVSHIM_DRM_IOC_GROBJ_ALLOC      NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_GROBJ_ALLOC, 16)
 #define NVSHIM_DRM_IOC_NOTIFIEROBJ_ALLOC NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_NOTIFIEROBJ_ALLOC, 16)
 #define NVSHIM_DRM_IOC_GPUOBJ_FREE      NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_GPUOBJ_FREE, 16)
-#define NVSHIM_DRM_IOC_NVIF             NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_NVIF, 16)
 #define NVSHIM_DRM_IOC_SVM_INIT         NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_SVM_INIT, 16)
 #define NVSHIM_DRM_IOC_SVM_BIND         NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_SVM_BIND, 64)
 #define NVSHIM_DRM_IOC_GET_ZCULL_INFO   NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_GET_ZCULL_INFO, 48)

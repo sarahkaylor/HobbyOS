@@ -133,14 +133,20 @@ static void test_nvshim_drm_layout(void) {
   EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_GETPARAM), 16);
   EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_CHANNEL_ALLOC), 88);
   EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_SYNCOBJ_WAIT), 40);
-  EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_NVIF), 0);
+  /* NVIF is served since WP-NVIF, and it is the ONE row whose encoded size is
+   * a buffer length: the table states the bare header as its minimum, and the
+   * handler applies each type's own shape rule.  So any encoded size >= 24
+   * resolves to the same "known, served" answer here -- 8 bytes does too,
+   * because the number is known; the handler then refuses the short call. */
+  EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_NVIF), (int)NVSHIM_NVIF_MIN_SIZE);
+  EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_NVIF_LEN(160)), (int)NVSHIM_NVIF_MIN_SIZE);
+  EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_NVIF, 8)), (int)NVSHIM_NVIF_MIN_SIZE);
   EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_GEM_PUSHBUF), 0);
-  EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_NVIF, 8)), 0);
   EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_ANY(0x7e, 8)), -1);
   EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_ANY(0x50, 8)), 16); /* same nr, size checked later */
 
   /* Refusal names exist for every refused row, and for nothing served. */
-  EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_NVIF) != 0), 1);
+  EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_NVIF) != 0), 0);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_GEM_PUSHBUF) != 0), 1);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT) != 0), 1);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_EXEC) != 0), 0);
@@ -167,7 +173,10 @@ static void test_nvshim_drm_refusals(void) {
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_GROBJ_ALLOC, 0), -ENOSYS);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_NOTIFIEROBJ_ALLOC, 0), -ENOSYS);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_GPUOBJ_FREE, 0), -ENOSYS);
-  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_NVIF, 0), -ENOSYS);
+  /* NVIF is SERVED since WP-NVIF, so it is no longer in this list; with no
+   * process there is nothing to attribute an object to, and the answer is the
+   * same -EINVAL every other served row gives.  Its own suites follow. */
+  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_NVIF, 0), -EINVAL);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SVM_INIT, 0), -ENOSYS);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SVM_BIND, 0), -ENOSYS);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_GET_ZCULL_INFO, 0), -ENOSYS);
@@ -1253,6 +1262,442 @@ static void test_nvshim_drm_cpu_map_refusals(void) {
   EXPECT_EQ(nv_rm_mock_live(), 0);
 }
 
+/* ============================================================================
+ *  8-11. NVIF (WP-NVIF): the object model, driven through the real route.
+ *
+ *  These suites call nv_shim_ioctl() exactly as the compat ioctl route does,
+ *  with every struct in the probe process's own user pages and every encoded
+ *  size built by NVSHIM_DRM_IOC_NVIF_LEN() -- so the variable-length rule, the
+ *  per-type shape rules and the object table are all exercised, not just the
+ *  handlers' bookkeeping.
+ *
+ *  What passing does NOT mean: no engine object was created (every one is
+ *  refused), so nothing here says a GR context exists.  The refusal IS the
+ *  result: -ENOSYS with a row naming the class id is the wall a stock winsys
+ *  reports, and these suites pin the wall's position.
+ * ========================================================================== */
+
+#define NVIF_BUF (DREQ_BASE + 0x2000) /* 4 KiB of the probe region */
+#define NVIF_HDR 24                   /* sizeof(struct nvshim_nvif_hdr) */
+
+static int nvif_hdr_put(struct drm_probe *pr, uint32_t type, uint8_t route,
+                        uint64_t token, uint64_t object, uint8_t version) {
+  struct nvshim_nvif_hdr h;
+  for (unsigned i = 0; i < sizeof h; i++) ((unsigned char *)&h)[i] = 0;
+  h.version = version;
+  h.type = (uint8_t)type;
+  h.owner = NVSHIM_NVIF_OWNER_ANY;
+  h.route = route;
+  h.token = token;
+  h.object = object;
+  return vm_kwrite(pr->p, NVIF_BUF, &h, (int)sizeof h);
+}
+
+static int nvif_call(struct drm_probe *pr, uint32_t len) {
+  return nv_shim_ioctl(pr->p, pr->fd, NVSHIM_DRM_IOC_NVIF_LEN(len), NVIF_BUF);
+}
+
+/* The exact sequence a winsys runs for its device object: NEW(route 0, class
+ * NV_DEVICE, cookie, one nv_device_v0 of class data).  72 bytes. */
+static int nvif_new_device(struct drm_probe *pr, uint64_t cookie) {
+  struct nvshim_nvif_new nw;
+  struct nvshim_device_v0 dv;
+  for (unsigned i = 0; i < sizeof nw; i++) ((unsigned char *)&nw)[i] = 0;
+  for (unsigned i = 0; i < sizeof dv; i++) ((unsigned char *)&dv)[i] = 0;
+  nw.object = cookie;
+  nw.oclass = NVSHIM_NVIF_CLASS_DEVICE;
+  nw.route = NVSHIM_NVIF_ROUTE_NVIF;
+  nw.token = cookie;
+  nw.handle = 0;
+  dv.device = ~0ull;
+  if (nvif_hdr_put(pr, NVSHIM_NVIF_NEW, NVSHIM_NVIF_ROUTE_NVIF, 0, 0, 0) != 0)
+    return -1000;
+  if (vm_kwrite(pr->p, NVIF_BUF + NVIF_HDR, &nw, (int)sizeof nw) != 0) return -1001;
+  if (vm_kwrite(pr->p, NVIF_BUF + NVIF_HDR + (int)sizeof nw, &dv, (int)sizeof dv) != 0)
+    return -1002;
+  return nvif_call(pr, NVIF_HDR + (uint32_t)sizeof nw + (uint32_t)sizeof dv);
+}
+
+/* A child object under a channel: route 0xff, token = channel. */
+static int nvif_new_child(struct drm_probe *pr, uint32_t ch, int32_t oclass,
+                          uint64_t cookie, uint32_t len) {
+  struct nvshim_nvif_new nw;
+  for (unsigned i = 0; i < sizeof nw; i++) ((unsigned char *)&nw)[i] = 0;
+  nw.object = cookie;
+  nw.oclass = oclass;
+  nw.route = NVSHIM_NVIF_ROUTE_NVIF;
+  nw.token = cookie;
+  if (nvif_hdr_put(pr, NVSHIM_NVIF_NEW, NVSHIM_NVIF_ROUTE_HIDDEN, ch, 0, 0) != 0)
+    return -1000;
+  if (vm_kwrite(pr->p, NVIF_BUF + NVIF_HDR, &nw, (int)sizeof nw) != 0) return -1001;
+  return nvif_call(pr, len);
+}
+
+/* MTHD on an object cookie.  The payload is `len - 32` bytes at +32. */
+static int nvif_mthd(struct drm_probe *pr, uint64_t cookie, uint8_t method,
+                     uint32_t len, uint8_t info_version) {
+  struct nvshim_nvif_mthd m;
+  struct nvshim_device_info_v0 info;
+  for (unsigned i = 0; i < sizeof m; i++) ((unsigned char *)&m)[i] = 0;
+  for (unsigned i = 0; i < sizeof info; i++) ((unsigned char *)&info)[i] = 0xa5;
+  m.method = method;
+  info.version = info_version;
+  if (nvif_hdr_put(pr, NVSHIM_NVIF_MTHD, NVSHIM_NVIF_ROUTE_NVIF, 0, cookie, 0) != 0)
+    return -1000;
+  if (vm_kwrite(pr->p, NVIF_BUF + NVIF_HDR, &m, (int)sizeof m) != 0) return -1001;
+  if (len > NVIF_HDR + (uint32_t)sizeof m &&
+      vm_kwrite(pr->p, NVIF_BUF + NVIF_HDR + (int)sizeof m, &info,
+                (int)sizeof info) != 0)
+    return -1002;
+  return nvif_call(pr, len);
+}
+
+static void test_nvshim_nvif_layout(void) {
+  uart_puts("  Running test_nvshim_nvif_layout...\n");
+  tests_run++;
+
+  /* nvif/ioctl.h: the header is 24 bytes and these are its field offsets. */
+  EXPECT_EQ((int)sizeof(struct nvshim_nvif_hdr), 24);
+  EXPECT_EQ(OFF(struct nvshim_nvif_hdr, type), 1);
+  EXPECT_EQ(OFF(struct nvshim_nvif_hdr, owner), 6);
+  EXPECT_EQ(OFF(struct nvshim_nvif_hdr, route), 7);
+  EXPECT_EQ(OFF(struct nvshim_nvif_hdr, token), 8);
+  EXPECT_EQ(OFF(struct nvshim_nvif_hdr, object), 16);
+  EXPECT_EQ((int)sizeof(struct nvshim_nvif_sclass), 8);
+  EXPECT_EQ((int)sizeof(struct nvshim_nvif_sclass_oclass), 8);
+  EXPECT_EQ((int)sizeof(struct nvshim_nvif_new), 32);
+  EXPECT_EQ(OFF(struct nvshim_nvif_new, route), 7);
+  EXPECT_EQ(OFF(struct nvshim_nvif_new, token), 8);
+  EXPECT_EQ(OFF(struct nvshim_nvif_new, object), 16);
+  EXPECT_EQ(OFF(struct nvshim_nvif_new, handle), 24);
+  EXPECT_EQ(OFF(struct nvshim_nvif_new, oclass), 28);
+  EXPECT_EQ((int)sizeof(struct nvshim_nvif_mthd), 8);
+  EXPECT_EQ(OFF(struct nvshim_nvif_mthd, method), 1);
+
+  /* cl0080.h */
+  EXPECT_EQ((int)sizeof(struct nvshim_device_v0), 16);
+  EXPECT_EQ((int)sizeof(struct nvshim_device_info_v0), 104);
+  EXPECT_EQ(OFF(struct nvshim_device_info_v0, platform), 1);
+  EXPECT_EQ(OFF(struct nvshim_device_info_v0, chipset), 2);
+  EXPECT_EQ(OFF(struct nvshim_device_info_v0, revision), 4);
+  EXPECT_EQ(OFF(struct nvshim_device_info_v0, family), 5);
+  EXPECT_EQ(OFF(struct nvshim_device_info_v0, ram_size), 8);
+  EXPECT_EQ(OFF(struct nvshim_device_info_v0, ram_user), 16);
+  EXPECT_EQ(OFF(struct nvshim_device_info_v0, chip), 24);
+  EXPECT_EQ(OFF(struct nvshim_device_info_v0, name), 40);
+  EXPECT_EQ((int)sizeof(struct nvshim_device_time_v0), 16);
+
+  /* Type numbers and the route/owner constants, as literals. */
+  EXPECT_EQ((int)NVSHIM_NVIF_SCLASS, 0x01);
+  EXPECT_EQ((int)NVSHIM_NVIF_NEW, 0x02);
+  EXPECT_EQ((int)NVSHIM_NVIF_DEL, 0x03);
+  EXPECT_EQ((int)NVSHIM_NVIF_MTHD, 0x04);
+  EXPECT_EQ((int)NVSHIM_NVIF_MAP, 0x07);
+  EXPECT_EQ((int)NVSHIM_NVIF_UNMAP, 0x08);
+  EXPECT_EQ((int)NVSHIM_NVIF_ROUTE_NVIF, 0x00);
+  EXPECT_EQ((int)NVSHIM_NVIF_ROUTE_HIDDEN, 0xff);
+  EXPECT_EQ((int)NVSHIM_NVIF_OWNER_ANY, 0xff);
+  EXPECT_EQ((int)NVSHIM_DEVICE_V0_INFO, 0x00);
+  EXPECT_EQ((int)NVSHIM_DEVICE_V0_TIME, 0x01);
+  EXPECT_EQ((int)NVSHIM_DEVICE_V0_GCX_READY, 0x02);
+  EXPECT_EQ((int)NVSHIM_DEVICE_INFO_V0_PCIE, 0x03);
+  EXPECT_EQ((int)NVSHIM_DEVICE_INFO_V0_ADA, 0x0e);
+
+  /* class.h -- the class ids this node reports and refuses. */
+  EXPECT_EQ((int)NVSHIM_NVIF_CLASS_DEVICE, 0x00000080);
+  EXPECT_EQ((int)NVSHIM_NVIF_CLASS_FERMI_TWOD_A, 0x0000902d);
+  EXPECT_EQ((int)NVSHIM_NVIF_CLASS_KEPLER_INLINE_TO_MEM_B, 0x0000a140);
+  EXPECT_EQ((int)NVSHIM_NVIF_CLASS_AMPERE_B, 0x0000c797);
+  EXPECT_EQ((int)NVSHIM_NVIF_CLASS_AMPERE_COMPUTE_B, 0x0000c7c0);
+  EXPECT_EQ((int)NVSHIM_NVIF_CLASS_AMPERE_DMA_COPY_A, 0x0000c6b5);
+  EXPECT_EQ((int)NVSHIM_NVIF_CLASS_AMPERE_DMA_COPY_B, 0x0000c7b5);
+
+  /* The request encodes the BUFFER LENGTH, magic 'd', nr 0x47. */
+  EXPECT_EQ((int)NVSHIM_NVIF_MIN_SIZE, 24);
+  EXPECT_EQ((int)NVSHIM_DRM_SIZE(NVSHIM_DRM_IOC_NVIF_LEN(136)), 136);
+  EXPECT_EQ((int)NVSHIM_DRM_NR(NVSHIM_DRM_IOC_NVIF_LEN(136)), 0x47);
+  EXPECT_EQ((int)NVSHIM_DRM_TYPE(NVSHIM_DRM_IOC_NVIF_LEN(136)), 0x64);
+  EXPECT_EQ((int)NVSHIM_DRM_DIR(NVSHIM_DRM_IOC_NVIF_LEN(136)), 3);
+  /* ... and it is not in the refusal table any more. */
+  EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_NVIF_LEN(136)) != 0), 0);
+}
+
+static void test_nvshim_nvif_device(void) {
+  uart_puts("  Running test_nvshim_nvif_device...\n");
+  tests_run++;
+
+  struct drm_probe pr;
+  EXPECT_EQ(drm_probe_up(&pr, 121), 0);
+  if (!pr.up) return;
+
+  const uint64_t cookie = 0x1000;
+  /* A device object, exactly as nouveau_ws_device_alloc sends it. */
+  EXPECT_EQ(nvif_new_device(&pr, cookie), 0);
+  /* The same cookie twice is nouveau's -EEXIST, not a second object. */
+  EXPECT_EQ(nvif_new_device(&pr, cookie), -EEXIST);
+  /* A different cookie is a different object. */
+  EXPECT_EQ(nvif_new_device(&pr, cookie + 8), 0);
+
+  /* MTHD NV_DEVICE_V0_INFO: 136 bytes, and the payload says who the card is. */
+  EXPECT_EQ(nvif_mthd(&pr, cookie, NVSHIM_DEVICE_V0_INFO,
+                      NVIF_HDR + 8 + (uint32_t)sizeof(struct nvshim_device_info_v0), 0),
+            0);
+  struct nvshim_device_info_v0 info;
+  EXPECT_EQ(vm_user_read(pr.p, NVIF_BUF + NVIF_HDR + 8, &info, (int)sizeof info), 0);
+  EXPECT_EQ((int)info.version, 0);
+  EXPECT_EQ((int)info.platform, NVSHIM_DEVICE_INFO_V0_PCIE);
+  EXPECT_EQ((int)info.chipset, 0x192);
+  EXPECT_EQ((int)info.revision, 0xa1);
+  EXPECT_EQ((int)info.family, NVSHIM_DEVICE_INFO_V0_ADA);
+  EXPECT_EQ((info.ram_size == info.ram_user), 1);
+  EXPECT_EQ((int)(info.ram_user >> 32), 1); /* 4 GiB: the mock's arena */
+  EXPECT_EQ((int)info.chip[0], 'A');
+  EXPECT_EQ((int)info.chip[1], 'D');
+  EXPECT_EQ((int)info.chip[3], '0');
+  EXPECT_EQ((int)info.chip[4], '2'); /* "AD102" */
+  EXPECT_EQ((int)info.chip[5], 0);
+  EXPECT_EQ((int)info.chip[6], 0);
+  EXPECT_EQ((int)info.name[0], 'N');
+
+  /* The payload's own version must be 0, and its length must be exactly one
+   * nv_device_info_v0 -- 135 and 137 are both -EINVAL (nouveau's rule). */
+  EXPECT_EQ(nvif_mthd(&pr, cookie, NVSHIM_DEVICE_V0_INFO, 136, 1), -EINVAL);
+  EXPECT_EQ(nvif_mthd(&pr, cookie, NVSHIM_DEVICE_V0_INFO, 135, 0), -EINVAL);
+  EXPECT_EQ(nvif_mthd(&pr, cookie, NVSHIM_DEVICE_V0_INFO, 137, 0), -EINVAL);
+
+  /* TIME needs the card's PTIMER; GCX_READY needs the GSP.  Both named. */
+  EXPECT_EQ(nvif_mthd(&pr, cookie, NVSHIM_DEVICE_V0_TIME, NVIF_HDR + 8 + 16, 0),
+            -ENOSYS);
+  EXPECT_EQ(nvif_mthd(&pr, cookie, NVSHIM_DEVICE_V0_GCX_READY, NVIF_HDR + 8 + 16, 0),
+            -ENOSYS);
+  /* An unknown method is -EINVAL, and so is a method on an object that was
+   * never created (the lookup is the gate, not the method number). */
+  EXPECT_EQ(nvif_mthd(&pr, cookie, 9, NVIF_HDR + 8 + 16, 0), -EINVAL);
+  EXPECT_EQ(nvif_mthd(&pr, cookie + 0x40, NVSHIM_DEVICE_V0_INFO, 136, 0), -EINVAL);
+
+  /* NEW shapes nouveau rejects: a parent named on route 0, an engine class on
+   * route 0, a zero cookie, a channel that does not exist. */
+  struct nvshim_nvif_new nw;
+  struct nvshim_device_v0 dv;
+  for (unsigned i = 0; i < sizeof nw; i++) ((unsigned char *)&nw)[i] = 0;
+  for (unsigned i = 0; i < sizeof dv; i++) ((unsigned char *)&dv)[i] = 0;
+  nw.object = 0x2000;
+  nw.oclass = NVSHIM_NVIF_CLASS_DEVICE;
+  EXPECT_EQ(nvif_hdr_put(&pr, NVSHIM_NVIF_NEW, NVSHIM_NVIF_ROUTE_NVIF, 0, 7, 0), 0);
+  EXPECT_EQ(vm_kwrite(pr.p, NVIF_BUF + NVIF_HDR, &nw, (int)sizeof nw), 0);
+  EXPECT_EQ(vm_kwrite(pr.p, NVIF_BUF + NVIF_HDR + (int)sizeof nw, &dv, (int)sizeof dv), 0);
+  EXPECT_EQ(nvif_call(&pr, 72), -EINVAL); /* ioctl->object != 0 */
+
+  nw.oclass = NVSHIM_NVIF_CLASS_AMPERE_B;
+  EXPECT_EQ(nvif_hdr_put(&pr, NVSHIM_NVIF_NEW, NVSHIM_NVIF_ROUTE_NVIF, 0, 0, 0), 0);
+  EXPECT_EQ(vm_kwrite(pr.p, NVIF_BUF + NVIF_HDR, &nw, (int)sizeof nw), 0);
+  EXPECT_EQ(nvif_call(&pr, 56), -EINVAL); /* a GR class is not a root object */
+
+  nw.oclass = NVSHIM_NVIF_CLASS_DEVICE;
+  nw.object = 0;
+  EXPECT_EQ(vm_kwrite(pr.p, NVIF_BUF + NVIF_HDR, &nw, (int)sizeof nw), 0);
+  EXPECT_EQ(nvif_call(&pr, 56), -EINVAL); /* zero cookie */
+
+  EXPECT_EQ(nvif_new_child(&pr, 1, NVSHIM_NVIF_CLASS_AMPERE_B, 0x3000, 56), -EINVAL);
+
+  /* Header-level rules: version, route, type, and a buffer shorter than the
+   * header itself.  Four shapes, four refusals, all -EINVAL. */
+  EXPECT_EQ(nvif_hdr_put(&pr, NVSHIM_NVIF_DEL, NVSHIM_NVIF_ROUTE_NVIF, 0, cookie, 1), 0);
+  EXPECT_EQ(nvif_call(&pr, 24), -EINVAL); /* header version != 0 */
+  EXPECT_EQ(nvif_hdr_put(&pr, NVSHIM_NVIF_DEL, 0x55, 0, cookie, 0), 0);
+  EXPECT_EQ(nvif_call(&pr, 24), -EINVAL); /* route not 0x00/0xff */
+  EXPECT_EQ(nvif_hdr_put(&pr, 0x09, NVSHIM_NVIF_ROUTE_NVIF, 0, cookie, 0), 0);
+  EXPECT_EQ(nvif_call(&pr, 24), -EINVAL); /* no such type */
+  EXPECT_EQ(nvif_hdr_put(&pr, NVSHIM_NVIF_NEW, NVSHIM_NVIF_ROUTE_NVIF, 0, 0, 0), 0);
+  EXPECT_EQ(nvif_call(&pr, 8), -EINVAL); /* shorter than the header */
+
+  /* DEL: 24 bytes exactly, route 0; an unknown cookie is NOT an error. */
+  EXPECT_EQ(nvif_hdr_put(&pr, NVSHIM_NVIF_DEL, NVSHIM_NVIF_ROUTE_NVIF, 0, cookie, 0), 0);
+  EXPECT_EQ(nvif_call(&pr, 32), -EINVAL); /* payload where none is allowed */
+  EXPECT_EQ(nvif_call(&pr, 24), 0);
+  /* ... and the object is gone: the same MTHD is now -EINVAL. */
+  EXPECT_EQ(nvif_mthd(&pr, cookie, NVSHIM_DEVICE_V0_INFO, 136, 0), -EINVAL);
+  EXPECT_EQ(nvif_hdr_put(&pr, NVSHIM_NVIF_DEL, NVSHIM_NVIF_ROUTE_NVIF, 0, cookie, 0), 0);
+  EXPECT_EQ(nvif_call(&pr, 24), 0); /* second DEL of the same cookie */
+
+  drm_probe_down(&pr);
+  EXPECT_EQ(nv_rm_mock_live(), 0);
+}
+
+static void test_nvshim_nvif_sclass(void) {
+  uart_puts("  Running test_nvshim_nvif_sclass...\n");
+  tests_run++;
+
+  struct drm_probe pr;
+  EXPECT_EQ(drm_probe_up(&pr, 122), 0);
+  if (!pr.up) return;
+
+  /* No channel yet: SCLASS names a parent that does not exist. */
+  EXPECT_EQ(nvif_hdr_put(&pr, NVSHIM_NVIF_SCLASS, NVSHIM_NVIF_ROUTE_HIDDEN, 1, 0, 0),
+            0);
+  struct nvshim_nvif_sclass sc;
+  for (unsigned i = 0; i < sizeof sc; i++) ((unsigned char *)&sc)[i] = 0;
+  sc.count = 16;
+  EXPECT_EQ(vm_kwrite(pr.p, NVIF_BUF + NVIF_HDR, &sc, (int)sizeof sc), 0);
+  EXPECT_EQ(nvif_call(&pr, 160), -EINVAL);
+
+  /* route 0x00 is not a valid route for SCLASS (nouveau: `if (!route)`). */
+  EXPECT_EQ(nvif_hdr_put(&pr, NVSHIM_NVIF_SCLASS, NVSHIM_NVIF_ROUTE_NVIF, 1, 0, 0), 0);
+  EXPECT_EQ(nvif_call(&pr, 160), -EINVAL);
+
+  /* A channel, in the exact shape a stock winsys asks for: {~0, GR} -- the
+   * legacy context-DMA fields used as the engine selector, normalised to 0. */
+  struct nvshim_drm_vm_init vmi;
+  vmi.kernel_managed_addr = 1ull << 39;
+  vmi.kernel_managed_size = 1ull << 39;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_VM_INIT, &vmi, (int)sizeof vmi), 0);
+
+  struct nvshim_drm_channel_alloc ca;
+  for (unsigned i = 0; i < sizeof ca; i++) ((unsigned char *)&ca)[i] = 0;
+  ca.fb_ctxdma_handle = 0xFFFFFFFFu;      /* "no legacy ctxdma" */
+  ca.tt_ctxdma_handle = NVSHIM_ENGINE_GR; /* ... use this as the selector  */
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_CHANNEL_ALLOC, &ca, (int)sizeof ca), 0);
+  EXPECT_EQ((int)ca.fb_ctxdma_handle, 0);
+  EXPECT_EQ((int)ca.tt_ctxdma_handle, 0);
+  EXPECT_EQ((ca.channel > 0), 1);
+  uint32_t ch = (uint32_t)ca.channel;
+
+  /* The class list: count is what the channel HAS, entries are class.h's. */
+  EXPECT_EQ(nvif_hdr_put(&pr, NVSHIM_NVIF_SCLASS, NVSHIM_NVIF_ROUTE_HIDDEN, ch, 0, 0),
+            0);
+  sc.count = 16;
+  EXPECT_EQ(vm_kwrite(pr.p, NVIF_BUF + NVIF_HDR, &sc, (int)sizeof sc), 0);
+  EXPECT_EQ(nvif_call(&pr, 160), 0);
+  EXPECT_EQ(vm_user_read(pr.p, NVIF_BUF + NVIF_HDR, &sc, (int)sizeof sc), 0);
+  EXPECT_EQ((int)sc.count, 6);
+  struct nvshim_nvif_sclass_oclass list[NVSHIM_NVIF_MAX_SCLASS];
+  EXPECT_EQ(vm_user_read(pr.p, NVIF_BUF + NVIF_HDR + 8, list, (int)sizeof list), 0);
+  EXPECT_EQ((int)list[0].oclass, NVSHIM_NVIF_CLASS_FERMI_TWOD_A);
+  EXPECT_EQ((int)list[1].oclass, NVSHIM_NVIF_CLASS_KEPLER_INLINE_TO_MEM_B);
+  EXPECT_EQ((int)list[2].oclass, NVSHIM_NVIF_CLASS_AMPERE_B);
+  EXPECT_EQ((int)list[3].oclass, NVSHIM_NVIF_CLASS_AMPERE_COMPUTE_B);
+  EXPECT_EQ((int)list[4].oclass, NVSHIM_NVIF_CLASS_AMPERE_DMA_COPY_A);
+  EXPECT_EQ((int)list[5].oclass, NVSHIM_NVIF_CLASS_AMPERE_DMA_COPY_B);
+  EXPECT_EQ((int)list[2].minver, -1);
+  EXPECT_EQ((int)list[2].maxver, -1);
+  /* The winsys's own match: the highest class whose low byte is 0x97. */
+  EXPECT_EQ((int)(list[2].oclass & 0xff), 0x97);
+
+  /* A caller with room for two entries gets two entries and the true count
+   * (nouveau reports the real number and truncates the array). */
+  EXPECT_EQ(nvif_hdr_put(&pr, NVSHIM_NVIF_SCLASS, NVSHIM_NVIF_ROUTE_HIDDEN, ch, 0, 0),
+            0);
+  sc.count = 2;
+  EXPECT_EQ(vm_kwrite(pr.p, NVIF_BUF + NVIF_HDR, &sc, (int)sizeof sc), 0);
+  struct nvshim_nvif_sclass_oclass two[2];
+  two[0].oclass = 0x7e7e;
+  two[1].oclass = 0x7e7e;
+  EXPECT_EQ(vm_kwrite(pr.p, NVIF_BUF + NVIF_HDR + 8, two, (int)sizeof two), 0);
+  EXPECT_EQ(nvif_call(&pr, NVIF_HDR + 8 + (uint32_t)sizeof two), 0);
+  EXPECT_EQ(vm_user_read(pr.p, NVIF_BUF + NVIF_HDR + 8, two, (int)sizeof two), 0);
+  EXPECT_EQ((int)two[0].oclass, NVSHIM_NVIF_CLASS_FERMI_TWOD_A);
+  EXPECT_EQ((int)two[1].oclass, NVSHIM_NVIF_CLASS_KEPLER_INLINE_TO_MEM_B);
+  EXPECT_EQ(vm_user_read(pr.p, NVIF_BUF + NVIF_HDR, &sc, (int)sizeof sc), 0);
+  EXPECT_EQ((int)sc.count, 6);
+
+  /* Shape rules: count must match the buffer, and must fit in 16 entries. */
+  EXPECT_EQ(nvif_hdr_put(&pr, NVSHIM_NVIF_SCLASS, NVSHIM_NVIF_ROUTE_HIDDEN, ch, 0, 0),
+            0);
+  sc.count = 16;
+  EXPECT_EQ(vm_kwrite(pr.p, NVIF_BUF + NVIF_HDR, &sc, (int)sizeof sc), 0);
+  EXPECT_EQ(nvif_call(&pr, NVIF_HDR + 8 + 8), -EINVAL); /* 16 claimed, 1 present */
+  sc.count = 17;
+  EXPECT_EQ(vm_kwrite(pr.p, NVIF_BUF + NVIF_HDR, &sc, (int)sizeof sc), 0);
+  EXPECT_EQ(nvif_call(&pr, NVIF_HDR + 8 + 17 * 8), -EINVAL);
+  sc.count = 0;
+  EXPECT_EQ(vm_kwrite(pr.p, NVIF_BUF + NVIF_HDR, &sc, (int)sizeof sc), 0);
+  EXPECT_EQ(nvif_call(&pr, NVIF_HDR + 8), 0); /* asks nothing, learns the count */
+
+  /* A channel this client does not own. */
+  EXPECT_EQ(nvif_hdr_put(&pr, NVSHIM_NVIF_SCLASS, NVSHIM_NVIF_ROUTE_HIDDEN, ch + 99, 0, 0),
+            0);
+  sc.count = 0;
+  EXPECT_EQ(vm_kwrite(pr.p, NVIF_BUF + NVIF_HDR, &sc, (int)sizeof sc), 0);
+  EXPECT_EQ(nvif_call(&pr, NVIF_HDR + 8), -EINVAL);
+
+  /* After CHANNEL_FREE the parent is gone and so is its class list. */
+  struct nvshim_drm_channel_free cf;
+  cf.channel = (int32_t)ch;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_CHANNEL_FREE, &cf, (int)sizeof cf), 0);
+  EXPECT_EQ(nvif_hdr_put(&pr, NVSHIM_NVIF_SCLASS, NVSHIM_NVIF_ROUTE_HIDDEN, ch, 0, 0),
+            0);
+  sc.count = 0;
+  EXPECT_EQ(vm_kwrite(pr.p, NVIF_BUF + NVIF_HDR, &sc, (int)sizeof sc), 0);
+  EXPECT_EQ(nvif_call(&pr, NVIF_HDR + 8), -EINVAL);
+
+  drm_probe_down(&pr);
+  EXPECT_EQ(nv_rm_mock_live(), 0);
+}
+
+static void test_nvshim_nvif_engine(void) {
+  uart_puts("  Running test_nvshim_nvif_engine...\n");
+  tests_run++;
+
+  struct drm_probe pr;
+  EXPECT_EQ(drm_probe_up(&pr, 123), 0);
+  if (!pr.up) return;
+
+  struct nvshim_drm_vm_init vmi;
+  vmi.kernel_managed_addr = 1ull << 39;
+  vmi.kernel_managed_size = 1ull << 39;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_VM_INIT, &vmi, (int)sizeof vmi), 0);
+
+  /* Engine selectors the mock has no channel for are refused by name; only
+   * {~0, GR} is a channel this node can make. */
+  struct nvshim_drm_channel_alloc ca;
+  for (unsigned i = 0; i < sizeof ca; i++) ((unsigned char *)&ca)[i] = 0;
+  ca.fb_ctxdma_handle = 0xFFFFFFFFu;
+  ca.tt_ctxdma_handle = 0x30; /* NOUVEAU_FIFO_ENGINE_CE */
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_CHANNEL_ALLOC, &ca, (int)sizeof ca), -ENOSYS);
+  ca.tt_ctxdma_handle = 0;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_CHANNEL_ALLOC, &ca, (int)sizeof ca), 0);
+  uint32_t ch = (uint32_t)ca.channel;
+  /* The notifier object is an RM object too. */
+  ca.notifier_handle = 1;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_CHANNEL_ALLOC, &ca, (int)sizeof ca), -ENOSYS);
+  ca.notifier_handle = 0;
+
+  EXPECT_EQ(nvif_new_device(&pr, 0x5000), 0);
+
+  /* Every class SCLASS reports is refused with -ENOSYS -- the wall.  A real
+   * GR/CE context object is what a real RM would allocate here. */
+  const int32_t classes[] = {
+      NVSHIM_NVIF_CLASS_FERMI_TWOD_A,      NVSHIM_NVIF_CLASS_KEPLER_INLINE_TO_MEM_B,
+      NVSHIM_NVIF_CLASS_AMPERE_B,          NVSHIM_NVIF_CLASS_AMPERE_COMPUTE_B,
+      NVSHIM_NVIF_CLASS_AMPERE_DMA_COPY_A, NVSHIM_NVIF_CLASS_AMPERE_DMA_COPY_B,
+  };
+  for (unsigned i = 0; i < sizeof classes / sizeof classes[0]; i++)
+    EXPECT_EQ(nvif_new_child(&pr, ch, classes[i], 0x6000 + i, 56), -ENOSYS);
+
+  /* A class the chip does not have is -EINVAL, not a refusal: the class check
+   * is a lookup, so it can come out negative. */
+  EXPECT_EQ(nvif_new_child(&pr, ch, 0x00001234, 0x7000, 56), -EINVAL);
+  /* And a DEVICE object cannot be made under a channel either. */
+  EXPECT_EQ(nvif_new_child(&pr, ch, NVSHIM_NVIF_CLASS_DEVICE, 0x7008, 56), -EINVAL);
+
+  /* The engine class object is NOT created: DEL of its cookie finds nothing,
+   * and the shim's own table never grew. */
+  EXPECT_EQ(nvif_hdr_put(&pr, NVSHIM_NVIF_DEL, NVSHIM_NVIF_ROUTE_NVIF, 0, 0x6002, 0), 0);
+  EXPECT_EQ(nvif_call(&pr, 24), 0);
+
+  /* MAP/UNMAP are for objects that have RM memory behind them. */
+  struct nvshim_nvif_hdr h;
+  for (unsigned i = 0; i < sizeof h; i++) ((unsigned char *)&h)[i] = 0;
+  h.owner = NVSHIM_NVIF_OWNER_ANY;
+  h.type = NVSHIM_NVIF_MAP;
+  h.object = 0x5000;
+  EXPECT_EQ(vm_kwrite(pr.p, NVIF_BUF, &h, (int)sizeof h), 0);
+  EXPECT_EQ(nvif_call(&pr, 24), -ENOSYS);
+
+  drm_probe_down(&pr);
+  EXPECT_EQ(nv_rm_mock_live(), 0);
+}
+
 void nv_shim_drm_test_suite(void) {
   test_nvshim_drm_layout();
   test_nvshim_drm_refusals();
@@ -1261,6 +1706,10 @@ void nv_shim_drm_test_suite(void) {
   test_nvshim_drm_limits();
   test_nvshim_drm_cpu_map();
   test_nvshim_drm_cpu_map_refusals();
+  test_nvshim_nvif_layout();
+  test_nvshim_nvif_device();
+  test_nvshim_nvif_sclass();
+  test_nvshim_nvif_engine();
 }
 
 #endif /* KERNEL_MODE_UNIT_TEST */
