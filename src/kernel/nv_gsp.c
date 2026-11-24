@@ -3700,6 +3700,70 @@ static void nv_booter_vram_post(struct nv_dev *d, struct nv_booter_vram *s,
   }
 }
 
+/* ---- SEC2's RISC-V core select ----------------------------------------
+ *
+ * Round 1's F3 fixed the GSP path with exactly this write: 0x111668 (the RISC-V
+ * BCR control, GSP-base + 0x1668) reads 0x110 -- RISCV|BRFETCH, VALID clear --
+ * and "a START issued while the core is selected as RISC-V need not reach the
+ * falcon core at all".  Clearing it is what made FWSEC runnable.
+ *
+ * SEC2 carries the same block at the same offset inside its own window
+ * (0x840000 + 0x1668).  The SEC2 RISC-V base is INFERRED by symmetry in
+ * docs/nv-gsp-wpr-contract.md 4.2; this row is the measurement of that
+ * inference, and both outcomes are worth a line:
+ *   readable + RISCV set -> clear it, and the SEC2 window may answer (which
+ *     turns the booter from inferred into observed)
+ *   fenced either side    -> the same write round 1 proved is still issued, and
+ *     the attempt proceeds; the row says the window stayed blind.
+ */
+static void sec2_core_select(struct nv_dev *d) {
+  const uint32_t kBcr = NV_FALCON_SEC2_BASE + 0x1668;
+  uint32_t bcr = nv_rd32(d, kBcr);
+  uart_puts("[NV-SEC2] core-select @");
+  uart_print_hex(kBcr);
+  uart_puts("=");
+  uart_print_hex(bcr);
+  if (bcr == NV_REG_FENCED || bcr == 0xffffffffu) {
+    nv_wr32(d, kBcr, 0);
+    for (int i = 0; i < 100000; i++) {
+      bcr = nv_rd32(d, kBcr);
+      if (bcr & NV_GSP_BCR_VALID) break;
+    }
+    uint32_t ctl = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL);
+    uart_puts(" fenced before and after the clear (now=");
+    uart_print_hex(bcr);
+    uart_puts(") verdict=CLEAR-UNOBSERVABLE (the write is the one round 1 "
+              "proved on the GSP); ctl after=");
+    uart_print_hex(ctl);
+    uart_puts(ctl == NV_REG_FENCED ? " still-fenced\n" : " READABLE\n");
+    return;
+  }
+  if (bcr & NV_GSP_BCR_RISCV) {
+    nv_wr32(d, kBcr, 0);
+    uint32_t b2 = bcr;
+    for (int i = 0; i < 100000; i++) {
+      b2 = nv_rd32(d, kBcr);
+      if (b2 & NV_GSP_BCR_VALID) break;
+    }
+    uart_puts(" RISCV-SELECTED -> cleared: ");
+    uart_print_hex(b2);
+    uart_puts((b2 & NV_GSP_BCR_VALID)
+                  ? " verdict=VALID (the falcon core is now the selected "
+                    "core)\n"
+                  : " verdict=VALID-NEVER-SET (the clear did not take)\n");
+  } else {
+    uart_puts(" already falcon-selected: no clear needed\n");
+  }
+  {
+    uint32_t ctl = nv_rd32(d, NV_FALCON_SEC2_BASE + NV_FALCON_UC_CTRL);
+    uart_puts("[NV-SEC2] ctl after core-select=");
+    uart_print_hex(ctl);
+    uart_puts(ctl == NV_REG_FENCED
+                  ? " (the fence stands, though the select word answered)\n"
+                  : " verdict=READABLE (the SEC2 window answers)\n");
+  }
+}
+
 /* `force` runs the attempt even when the SEC2 window refuses to be read.
  *
  * Why that is worth a deploy: the fence is READ-side only (measured on the GSP
@@ -3767,11 +3831,26 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
     uart_puts("[NV-SEC2] halt ctl=");
     uart_print_hex(ctl);
     if (!(ctl & NV_FALCON_UC_CTRL_STOPPED)) {
-      uart_puts(" FAILED (never reached STOPPED)\n");
-      return -ETIMEDOUT;
+      /* A readable window that will not report STOPPED is a new observation,
+       * not a reason to throw the attempt away: the reset above was issued, and
+       * skipping the load because a handshake nobody has measured on this part
+       * did not answer would spend the deploy on the handshake.  The row says
+       * which happened, and the verdict channels below need no ctl at all. */
+      uart_puts(" NOT-STOPPED after the reset: the reset was issued and the "
+                "load proceeds (the row above records it; the verdict channels "
+                "do not depend on ctl)\n");
+    } else {
+      uart_puts("\n");
     }
-    uart_puts("\n");
   }
+
+  /* ---- SEC2's RISC-V core select, cleared exactly where the GSP's was ----
+   *
+   * The GSP measurement (round 1, F3) is that 0x111668 is unreadable *before*
+   * the reset and reads 0x110 -- RISCV|BRFETCH -- once the reset has run.  So
+   * this step belongs after the reset, not before it: the same order the GSP
+   * path uses, and the reason the read may answer here at all. */
+  sec2_core_select(d);
 
   /* The DMA reads system memory coherently and physically. */
   nv_wr32(d, NV_SEC2_FBIF_TRANSCFG, NV_LOCAL_TRANSCFG_COHERENT);
@@ -4402,11 +4481,31 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
        * size 0x8000), so it is also the fingerprint to compare against. */
       const uint8_t *expect = 0;
       uint32_t expect_len = 0;
-      if (ldr_rc == 0 && loader.buf && loader.size > 0x6C + NV_BOOTBIN_LEN) {
+      if (ldr_rc == 0 && loader.buf && loader.size >= 0x6C + NV_BOOTBIN_LEN) {
         expect = loader.buf + 0x6C;
         expect_len = NV_BOOTBIN_LEN;
       }
       nv_booter_vram_post(d, &bv, expect, expect_len);
+      /* The SEC2 window, word by word, after the attempt.  If the core-select
+       * clear made it answer, these are the numbers that say how far the booter
+       * got: 0x118's done bit, 0x114's last destination, MAILBOX0's return code
+       * (0 = success) and 0x840100's privilege bit.  If they are the fence word,
+       * the row says the window stayed blind and nothing else is claimed. */
+      {
+        static const uint32_t kWin[] = {0x840100, 0x840104, 0x840110, 0x840114,
+                                        0x840118, 0x84011C, 0x840120, 0x840128,
+                                        0x840040, 0x840044, 0x841668};
+        uart_puts("[NV-SEC2] window after:");
+        for (uint32_t i = 0; i < (uint32_t)(sizeof kWin / sizeof kWin[0]); i++) {
+          uart_puts(" ");
+          uart_print_hex(kWin[i]);
+          uart_puts("=");
+          uart_print_hex(nv_rd32(d, kWin[i]));
+        }
+        uart_puts(nv_rd32(d, 0x840100) == NV_REG_FENCED
+                      ? " verdict=STILL-BLIND\n"
+                      : " verdict=OBSERVABLE\n");
+      }
       uint32_t sec2_priv = nv_rd32(d, 0x840100);
       uart_puts("[NV-SEC2] summary meta_verified=0x");
       uart_print_hex(nv_meta_get64(
