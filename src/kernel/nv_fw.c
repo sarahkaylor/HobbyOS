@@ -236,8 +236,18 @@ int nv_fw_hs_parse(const struct nv_fw_container *c, struct nv_fw_hs *out) {
   /* The convergence check: the images the load header places must exactly
    * cover the data region the container declares.  This is what rejects a
    * booter for the wrong chip, or a container whose header and payload were
-   * mixed from two different blobs. */
-  if (total != c->data_size) return -EINVAL;
+   * mixed from two different blobs.  Zero padding at the end of the region is
+   * legal (measured on booter_unload: its images cover 0x9700 of a 0x9800 data
+   * region and the last 0x100 bytes are zeros), so padding is accepted up to
+   * one 256-byte block and only if every padding byte is zero. */
+  if (total != c->data_size) {
+    uint32_t pad = c->data_size - total;
+    /* Padding is dword-granular (the images are), so an undershoot of 1..3
+     * bytes is still a mismatch, not padding. */
+    if (total > c->data_size || pad > 0x100u || (pad & 3u)) return -EINVAL;
+    for (uint32_t i = 0; i < pad; i++)
+      if (c->data[total + i]) return -EINVAL;
+  }
 
   *out = hs;
   return 0;

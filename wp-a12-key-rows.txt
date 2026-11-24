@@ -1,0 +1,81 @@
+==============================================================================
+LOG evidence/nv/bv1a.log
+  [NV-SEC2] image data_off=0x0000000000000378 imem@file=0x0000000000000478 len=0x0000000000007600 dmem@file=0x0000000000007A78 len=0x0000000000006000 bootvec=0x0000000000000000 ends@=0x000000000000DA78 file_size=0x000000000000DA78 verdict=TILES-THE-FILE (IMEM runs into the DMEM image and the image ends exactly at the end of the file)
+  [NV-SEC2T] S verdict-wait ms=0x0000000000000259 verified=0x000000005EC2A0A0 ctl=0x0000000000000010 halted=1 pc=0x00000000BADF5620 alias130=0x00000000BADF5620 mb0=0x00000000094E8000 mb1=0x0000000000000002 polls=0x00000000042E5801 verdict=NOWRITE-HALTED (the core is STOPPED and the metadata still holds the sentinel: a rejection, not a slow boot)
+  [NV-SEC2T] W verdict-wait ms=0x0000000000000259 verified=0x000000005EC2A0A0 ctl=0x0000000000000010 halted=1 pc=0x00000000BADF5620 alias130=0x00000000BADF5620 mb0=0x00000000094E8000 mb1=0x0000000000000002 polls=0x000000000424FC01 verdict=NOWRITE-HALTED (the core is STOPPED and the metadata still holds the sentinel: a rejection, not a slow boot)
+  [NV-SEC2T] X auth-bisect BOOTVEC100 (BOOTVEC: 0 -> 0x100 (the reference's app[0].offset, with the same app image at IMEM 0)) control(S) slot=1 engid=0x0000000000000001 ucode=0x0000000000000003 modsel=0x0000000000000001 bootvec=0x0000000000000000 ran=1 u94=0x0x00000000002B0009 intr=0x0x0000000000000010 sec240=0x0x0000000000003002 ctl=0x0x0000000000000010 mb0=0x0x00000000094E8000 verified=0x0x000000005EC2A0A0 | varied(BOOTVEC100) slot=1 engid=0x0000000000000001 ucode=0x0000000000000003 modsel=0x0000000000000001 bootvec=0x0000000000000100 ran=1 u94=0x0x00000000002B0009 intr=0x0x0000000000000010 sec240=0x0x0000000000003002 ctl=0x0x0000000000000010 mb0=0x0x00000000094E8000 verified=0x0x000000005EC2A0A0 verdict=U94-UNCHANGED-BY-BOOTVEC100 (varying BOOTVEC: 0 -> 0x100 (the reference's app[0].offset, with the same app image at IMEM 0) left 0x094, INTR, SEC_MODE, CPUCTL, MAILBOX0 and the metadata word exactly as the control left them in this same boot: the 0x002B0009 outcome does not depend on that input, so it is not the defect)
+  [NV-GSP] stage5 result=-1 (no success reported; the [NV-SEC2] rows are the evidence)
+  TL S u94=0x3900FF @ +53.5 us after START
+  TL S u94=0x3900FF @ +66.3 us after START
+  TL S u94=0x2B0009 @ +281.7 us after START
+  TL S u94=0x2B0009 @ +386.8 us after START
+  TL W u94=0x3900FF @ +53.6 us after START
+  TL W u94=0x3900FF @ +59.1 us after START
+  TL W u94=0x3900FF @ +263.8 us after START
+  TL W u94=0x3900FF @ +269.3 us after START
+  TL W u94=0x2B0009 @ +280.3 us after START
+  TL W u94=0x2B0009 @ +385.3 us after START
+==============================================================================
+LOG evidence/nv/oc2a.log
+  [NV-SEC2] image data_off=0x0000000000000378 imem@file=0x0000000000000378 len=0x0000000000007700 dmem@file=0x0000000000007A78 len=0x0000000000006000 bootvec=0x0000000000000000 ends@=0x000000000000DA78 file_size=0x000000000000DA78 verdict=TILES-THE-FILE (IMEM runs into the DMEM image and the image ends exactly at the end of the file)
+  [NV-SEC2T] S verdict-wait ms=0x0000000000000259 verified=0x000000005EC2A0A0 ctl=0x0000000000000010 halted=1 pc=0x00000000BADF5620 alias130=0x00000000BADF5620 mb0=0x00000000094E8000 mb1=0x0000000000000002 polls=0x00000000042B3101 verdict=NOWRITE-HALTED (the core is STOPPED and the metadata still holds the sentinel: a rejection, not a slow boot)
+  [NV-SEC2T] W verdict-wait ms=0x0000000000000259 verified=0x000000005EC2A0A0 ctl=0x0000000000000010 halted=1 pc=0x00000000BADF5620 alias130=0x00000000BADF5620 mb0=0x00000000094E8000 mb1=0x0000000000000002 polls=0x000000000423F501 verdict=NOWRITE-HALTED (the core is STOPPED and the metadata still holds the sentinel: a rejection, not a slow boot)
+  [NV-SEC2T] X auth-bisect BOOTVEC100 (BOOTVEC: 0 -> 0x100 (the reference's app[0].offset, with the same app image at IMEM 0)) control(S) slot=1 engid=0x0000000000000001 ucode=0x0000000000000003 modsel=0x0000000000000001 bootvec=0x0000000000000000 ran=1 u94=0x0x00000000002B0009 intr=0x0x0000000000000010 sec240=0x0x0000000000003002 ctl=0x0x0000000000000010 mb0=0x0x00000000094E8000 verified=0x0x000000005EC2A0A0 | varied(BOOTVEC100) slot=1 engid=0x0000000000000001 ucode=0x0000000000000003 modsel=0x0000000000000001 bootvec=0x0000000000000100 ran=1 u94=0x0x00000000002B0009 intr=0x0x0000000000000010 sec240=0x0x0000000000003002 ctl=0x0x0000000000000010 mb0=0x0x00000000094E8000 verified=0x0x000000005EC2A0A0 verdict=U94-UNCHANGED-BY-BOOTVEC100 (varying BOOTVEC: 0 -> 0x100 (the reference's app[0].offset, with the same app image at IMEM 0) left 0x094, INTR, SEC_MODE, CPUCTL, MAILBOX0 and the metadata word exactly as the control left them in this same boot: the 0x002B0009 outcome does not depend on that input, so it is not the defect)
+  [NV-GSP] stage5 result=-1 (no success reported; the [NV-SEC2] rows are the evidence)
+  TL S u94=0x3900FF @ +53.5 us after START
+  TL S u94=0x3900FF @ +59.0 us after START
+  TL S u94=0x2B0009 @ +279.4 us after START
+  TL S u94=0x2B0009 @ +384.2 us after START
+  TL S u94=0x2B0009 @ +389.9 us after START
+  TL W u94=0x3900FF @ +53.5 us after START
+  TL W u94=0x3900FF @ +59.0 us after START
+  TL W u94=0x3900FF @ +260.1 us after START
+  TL W u94=0x3900FF @ +265.6 us after START
+  TL W u94=0x2B0009 @ +282.1 us after START
+  TL W u94=0x2B0009 @ +386.9 us after START
+==============================================================================
+LOG evidence/nv/ul3a.log
+  [NV-SEC2] image data_off=0x0000000000000378 imem@file=0x0000000000000478 len=0x0000000000004800 dmem@file=0x0000000000004C78 len=0x0000000000004E00 bootvec=0x0000000000000000 ends@=0x0000000000009A78 file_size=0x0000000000009B78 verdict=DOES-NOT-TILE (the offsets below do not line up with the file: read them as raw)
+  [NV-SEC2T] S verdict-wait ms=0x0000000000000259 verified=0x000000005EC2A0A0 ctl=0x0000000000000010 halted=1 pc=0x00000000BADF5620 alias130=0x00000000BADF5620 mb0=0x00000000094E0000 mb1=0x0000000000000002 polls=0x0000000004226501 verdict=NOWRITE-HALTED (the core is STOPPED and the metadata still holds the sentinel: a rejection, not a slow boot)
+  [NV-SEC2T] W verdict-wait ms=0x0000000000000259 verified=0x000000005EC2A0A0 ctl=0x0000000000000010 halted=1 pc=0x00000000BADF5620 alias130=0x00000000BADF5620 mb0=0x00000000094E0000 mb1=0x0000000000000002 polls=0x00000000042F7601 verdict=NOWRITE-HALTED (the core is STOPPED and the metadata still holds the sentinel: a rejection, not a slow boot)
+  [NV-SEC2T] X auth-bisect BOOTVEC100 (BOOTVEC: 0 -> 0x100 (the reference's app[0].offset, with the same app image at IMEM 0)) control(S) slot=1 engid=0x0000000000000001 ucode=0x0000000000000003 modsel=0x0000000000000001 bootvec=0x0000000000000000 ran=1 u94=0x0x00000000002B0009 intr=0x0x0000000000000010 sec240=0x0x0000000000003002 ctl=0x0x0000000000000010 mb0=0x0x00000000094E0000 verified=0x0x000000005EC2A0A0 | varied(BOOTVEC100) slot=1 engid=0x0000000000000001 ucode=0x0000000000000003 modsel=0x0000000000000001 bootvec=0x0000000000000100 ran=1 u94=0x0x00000000002B0009 intr=0x0x0000000000000010 sec240=0x0x0000000000003002 ctl=0x0x0000000000000010 mb0=0x0x00000000094E0000 verified=0x0x000000005EC2A0A0 verdict=U94-UNCHANGED-BY-BOOTVEC100 (varying BOOTVEC: 0 -> 0x100 (the reference's app[0].offset, with the same app image at IMEM 0) left 0x094, INTR, SEC_MODE, CPUCTL, MAILBOX0 and the metadata word exactly as the control left them in this same boot: the 0x002B0009 outcome does not depend on that input, so it is not the defect)
+  [NV-GSP] stage5 result=-1 (no success reported; the [NV-SEC2] rows are the evidence)
+  TL S u94=0x2B0009 @ +270.4 us after START
+  TL S u94=0x2B0009 @ +337.2 us after START
+  TL W u94=0x2B0009 @ +270.7 us after START
+  TL W u94=0x2B0009 @ +337.4 us after START
+==============================================================================
+LOG evidence/nv/fz1a.log
+  [NV-SEC2] image data_off=0x0000000000000378 imem@file=0x0000000000000478 len=0x0000000000007600 dmem@file=0x0000000000007A78 len=0x0000000000006000 bootvec=0x0000000000000000 ends@=0x000000000000DA78 file_size=0x000000000000DA78 verdict=TILES-THE-FILE (IMEM runs into the DMEM image and the image ends exactly at the end of the file)
+  [NV-SEC2] fuse SEC2 ucode=3 word=0x0000000000000001 -> reg_fuse_version=1 | NVIDIA slot rule idx=num_sigs-1-reg=0 (valid)
+  [NV-SEC2T] S verdict-wait ms=0x0000000000000259 verified=0x000000005EC2A0A0 ctl=0x0000000000000010 halted=1 pc=0x00000000BADF5620 alias130=0x00000000BADF5620 mb0=0x00000000094E8000 mb1=0x0000000000000002 polls=0x00000000043EEF01 verdict=NOWRITE-HALTED (the core is STOPPED and the metadata still holds the sentinel: a rejection, not a slow boot)
+  [NV-GSP] stage5 result=-1 (no success reported; the [NV-SEC2] rows are the evidence)
+  TL S u94=0x3900FF @ +53.5 us after START
+  TL S u94=0x3900FF @ +59.0 us after START
+  TL S u94=0x2B0009 @ +279.6 us after START
+  TL S u94=0x2B0009 @ +384.5 us after START
+==============================================================================
+LOG evidence/nv/eg1a.log
+  [NV-SEC2] image data_off=0x0000000000000378 imem@file=0x0000000000000478 len=0x0000000000007600 dmem@file=0x0000000000007A78 len=0x0000000000006000 bootvec=0x0000000000000000 ends@=0x000000000000DA78 file_size=0x000000000000DA78 verdict=TILES-THE-FILE (IMEM runs into the DMEM image and the image ends exactly at the end of the file)
+  [NV-SEC2] fuse SEC2 ucode=3 word=0x0000000000000001 -> reg_fuse_version=1 | NVIDIA slot rule idx=num_sigs-1-reg=0 (valid)
+  [NV-SEC2T] S verdict-wait ms=0x0000000000000259 verified=0x000000005EC2A0A0 ctl=0x0000000000000010 halted=1 pc=0x00000000BADF5620 alias130=0x00000000BADF5620 mb0=0x00000000094E8000 mb1=0x0000000000000002 polls=0x00000000042BFA01 verdict=NOWRITE-HALTED (the core is STOPPED and the metadata still holds the sentinel: a rejection, not a slow boot)
+  [NV-SEC2T] W verdict-wait ms=0x0000000000000259 verified=0x000000005EC2A0A0 ctl=0x0000000000000010 halted=1 pc=0x00000000BADF5620 alias130=0x00000000BADF5620 mb0=0x00000000094E8000 mb1=0x0000000000000002 polls=0x00000000043C1401 verdict=NOWRITE-HALTED (the core is STOPPED and the metadata still holds the sentinel: a rejection, not a slow boot)
+  [NV-SEC2T] X auth-bisect ENGID-GSP (BROM_ENGIDMASK: 1 (SEC2 key) -> 0x400 (GSP key)) control(S) slot=1 engid=0x0000000000000001 ucode=0x0000000000000003 modsel=0x0000000000000001 bootvec=0x0000000000000000 ran=1 u94=0x0x00000000002B0009 intr=0x0x0000000000000010 sec240=0x0x0000000000003002 ctl=0x0x0000000000000010 mb0=0x0x00000000094E8000 verified=0x0x000000005EC2A0A0 | varied(ENGID-GSP) slot=1 engid=0x0000000000000400 ucode=0x0000000000000003 modsel=0x0000000000000001 bootvec=0x0000000000000000 ran=1 u94=0x0x000000000004000B intr=0x0x0000000000000010 sec240=0x0x0000000000003002 ctl=0x0x0000000000000010 mb0=0x0x00000000094E8000 verified=0x0x000000005EC2A0A0 verdict=U94-MOVED-BY-ENGID-GSP (the 0x094 code word changed when BROM_ENGIDMASK: 1 (SEC2 key) -> 0x400 (GSP key) was varied and nothing else was: the boot ROM reads that input on the path that writes 0x094, so the rejection status is a function of it -- this is one of the authentication inputs the blocker can be in)
+  [NV-GSP] stage5 result=-1 (no success reported; the [NV-SEC2] rows are the evidence)
+  TL S u94=0x3900FF @ +54.0 us after START
+  TL S u94=0x3900FF @ +59.5 us after START
+  TL S u94=0x2B0009 @ +281.7 us after START
+  TL S u94=0x2B0009 @ +387.4 us after START
+  TL W u94=0x4000B @ +31.7 us after START
+  TL W u94=0x4000B @ +137.3 us after START
+  TL W u94=0x4000B @ +142.8 us after START
+==============================================================================
+LOG evidence/nv/fx1a.log
+  [NV-SEC2] image data_off=0x0000000000000378 imem@file=0x0000000000000478 len=0x0000000000007600 dmem@file=0x0000000000007A78 len=0x0000000000006000 bootvec=0x0000000000000000 ends@=0x000000000000DA78 file_size=0x000000000000DA78 verdict=TILES-THE-FILE (IMEM runs into the DMEM image and the image ends exactly at the end of the file)
+  [NV-SEC2] fuse SEC2 ucode=3 word=0x0000000000000001 -> reg_fuse_version=1 | NVIDIA slot rule idx=num_sigs-1-reg=0 (valid)
+  [NV-SEC2T] S verdict-wait ms=0x0000000000000259 verified=0x000000005EC2A0A0 ctl=0x0000000000000010 halted=1 pc=0x00000000BADF5620 alias130=0x00000000BADF5620 mb0=0x00000000094E8000 mb1=0x0000000000000002 polls=0x000000000435FB01 verdict=NOWRITE-HALTED (the core is STOPPED and the metadata still holds the sentinel: a rejection, not a slow boot)
+  [NV-GSP] stage5 result=-1 (no success reported; the [NV-SEC2] rows are the evidence)
+  TL S u94=0x3900FF @ +53.6 us after START
+  TL S u94=0x3900FF @ +59.1 us after START
+  TL S u94=0x2B0009 @ +279.8 us after START
+  TL S u94=0x2B0009 @ +384.9 us after START

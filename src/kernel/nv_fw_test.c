@@ -265,10 +265,18 @@ static void test_nv_fw_hs_reject_size_mismatch(void) {
   EXPECT_EQ(nv_fw_hs_parse(&c, &hs), -EINVAL);
   put32(buf + 0x354 + 0x18, 0x300);
 
-  /* A data region enlarged without the load header following it. */
+  /* A data region enlarged without the load header following it.  Zero bytes
+   * are indistinguishable from real padding (booter_unload carries 0x100 of
+   * them), so the parser accepts a zero tail up to one 256-byte block; what it
+   * must still reject is a tail that carries data, which is what a header and a
+   * payload mixed from two blobs look like. */
   put32(buf + 0x14, 0x700 + 0x100);
   ASSERT(nv_fw_container_parse(buf, len + 0x100, &c) == 0);
-  EXPECT_EQ(nv_fw_hs_parse(&c, &hs), -EINVAL);
+  ASSERT(nv_fw_hs_parse(&c, &hs) == 0);
+  buf[len + 0x100 - 4] = 0xA5; /* one nonzero byte in the tail */
+  ASSERT(nv_fw_hs_parse(&c, &hs) == -EINVAL);
+  buf[len + 0x100 - 4] = 0x00;
+  put32(buf + 0x14, 0x700);
 }
 
 static void test_nv_fw_hs_reject_bad_offsets(void) {
