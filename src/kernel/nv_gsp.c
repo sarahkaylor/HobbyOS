@@ -766,7 +766,7 @@ static int rpc_stage8_common(struct nv_gsp_rpc *r, struct nv_dev *d,
     uart_puts("linked=0 peer=none (status header still zero: RM has not "
               "started; this stage sends nothing, and none of the doorbells=");
     print_int((int)r->doorbells);
-    uart_puts(" so far came from it)");
+    uart_puts(" so far came from it;");
     uart_puts(" wait_us=");
     uart_print_hex(link_timeout_us);
     if (lrc == -ETIMEDOUT) {
