@@ -97,6 +97,17 @@ static uint32_t glue_ld32(const uint8_t *p) {
          ((uint32_t)b[3] << 24);
 }
 
+/* Byte-wise little-endian writers, same rule: the block is read by a device, so
+ * no wide store at a compiler-chosen offset.  Only our own words are ever
+ * written here (never the status header: that one belongs to RM). */
+static void glue_st32(uint8_t *p, uint32_t v) {
+  volatile uint8_t *b = p;
+  b[0] = (uint8_t)v;
+  b[1] = (uint8_t)(v >> 8);
+  b[2] = (uint8_t)(v >> 16);
+  b[3] = (uint8_t)(v >> 24);
+}
+
 static uint64_t glue_ld64(const uint8_t *p) {
   const volatile uint8_t *b = p;
   uint64_t v = 0;
@@ -614,8 +625,74 @@ const struct nv_gsp_rpc *nv_gsp_rpc_state(void) { return &g_gsp_rpc; }
 /* Stage 8 of the boot: publish the block the RM task will walk.  Three rows,
  * one per stage, and the notification is gated on the peer's own header --
  * which RM writes when its task starts, so on a card where RM is not running
- * this stage cannot ring the doorbell and says so instead. */
-int nv_gsp_rpc_stage8_into(struct nv_gsp_rpc *r, struct nv_dev *d) {
+ * this stage cannot ring the doorbell and says so instead.
+ *
+ * The contract's two bounded waits (4.1 rows 7 and 9) are 4 s each.  That is
+ * what both reference implementations use (NVIDIA/mq.c GspStatusQueueInit, and
+ * the independent one's r535_gsp_init), and RM's slowest measured init is
+ * 105.8 ms, so 4 s is "the documented patience", not a guess. */
+#define NV_RPC_LINK_TIMEOUT_US 4000000u
+#define NV_RPC_INIT_TIMEOUT_US 4000000u
+
+/* THE CANARY, and why it exists.  The card's acceptance turns on one
+ * difference: the peer's status-header write pointer moving, and not our own
+ * command-queue one.  With no peer there is no send that could advance either,
+ * so this probe manufactures the comparison without touching the peer's word:
+ * it writes a canary into OUR producer word (block + cmd_off + 0x10), reads the
+ * peer's word (block + stat_off + 0x10) while the canary is there, and restores
+ * our word to the value it had.  A peer word that did not follow the canary is
+ * a MEASURED fact that the two are different storage, which is the first half
+ * of the discriminator; the second half (the peer's word moving) still needs
+ * RM.  Nothing is written at block+stat_off, ever: a canary there would
+ * counterfeit the very evidence the link stage exists to read.
+ *
+ * The restore is read back.  If it does not take, the block is unusable and the
+ * stage fails rather than leaving a writePtr no send ever wrote. */
+static int rpc_writepointer_canary(struct nv_gsp_rpc *r) {
+  if (!r || !r->built || !r->q.block) return -EINVAL;
+  uint8_t *block = r->q.block;
+  uint8_t *own = block + r->q.cmd_off + NV_RPC_Q_WRITE_PTR;
+  const uint8_t *peer = block + r->q.stat_off + NV_RPC_Q_WRITE_PTR;
+
+  uint32_t before = glue_ld32(own);
+  uint32_t peer_before = glue_ld32(peer);
+  /* A valid ring index far from the current one: if this ever leaked, the value
+   * would still be a pointer rather than a wild word. */
+  uint32_t canary = (before + 47u) % NV_RPC_MSG_COUNT;
+  glue_st32(own, canary);
+  uint32_t peer_mid = glue_ld32(peer);
+  glue_st32(own, before);
+  uint32_t after = glue_ld32(own);
+
+  uart_puts("[NV-RPC] stage=canary own_off=");
+  uart_print_hex(r->q.cmd_off + NV_RPC_Q_WRITE_PTR);
+  uart_puts(" before=");
+  print_int((int)before);
+  uart_puts(" wrote=");
+  print_int((int)canary);
+  uart_puts(" restored=");
+  print_int((int)after);
+  uart_puts(" peer_off=");
+  uart_print_hex(r->q.stat_off + NV_RPC_Q_WRITE_PTR);
+  uart_puts(" peer_before=");
+  print_int((int)peer_before);
+  uart_puts(" peer_during=");
+  print_int((int)peer_mid);
+  if (after != before) {
+    uart_puts(" verdict=RESTORE-FAILED (our writePtr is not what we built; the "
+              "block is not usable)\n");
+    return -EIO;
+  }
+  uart_puts(peer_mid == peer_before && peer_before == 0
+                ? " verdict=SEPARATE-WORDS (the peer's word did not follow a "
+                  "store to ours, and is still the zero we built)\n"
+                : " verdict=PEER-WORD-NONZERO (it was already written: read it "
+                  "before calling it ours)\n");
+  return 0;
+}
+
+static int rpc_stage8_common(struct nv_gsp_rpc *r, struct nv_dev *d,
+                             uint32_t link_timeout_us) {
   if (!r || !d) return -EINVAL;
 
   /* Bring-up may call the firmware stage more than once (probe, then boot).
@@ -646,20 +723,42 @@ int nv_gsp_rpc_stage8_into(struct nv_gsp_rpc *r, struct nv_dev *d) {
   }
 
   enum nv_rpc_link_field bad = NV_RPC_LINK_OK;
+  enum nv_rpc_reason why = NV_RPC_OK;
+  /* One read first: on a boot where the booter failed there can be no peer,
+   * and burning the contract's 4 s before saying so would make every such boot
+   * slower for nothing.  Only an absent header (which a booter that returned
+   * success can still turn into a real one) is worth polling. */
   int lrc = nv_rpc_link_apply(&r->q, &bad);
+  if (lrc == -EAGAIN && link_timeout_us) {
+    lrc = nv_rpc_link(&r->q, &hw, link_timeout_us, &why);
+    if (lrc == -EINVAL) {
+      /* Name the field, so the terminal case is not reported as "field=ok". */
+      enum nv_rpc_link_field b2 = NV_RPC_LINK_OK;
+      (void)nv_rpc_link_apply(&r->q, &b2);
+      bad = b2;
+    }
+  }
+
   uart_puts("[NV-RPC] stage=link ");
   if (lrc == 0) {
-    uart_puts("linked=1 (RM published the status header; no message is staged "
-              "here yet, so doorbells=");
+    uart_puts("linked=1 (the peer published a usable status header) wait_us=");
+    uart_print_hex(link_timeout_us);
+    uart_puts(" doorbells=");
     print_int((int)r->doorbells);
-    uart_puts(")\n");
-  } else if (lrc == -EAGAIN) {
+    uart_puts("\n");
+  } else if (lrc == -EAGAIN || lrc == -ETIMEDOUT) {
     /* The honest reading of a zeroed status header: the RM task has not
-     * started, so nothing is listening and the doorbell is withheld rather
-     * than written into a window a reset just fenced. */
+     * started, so nothing is listening and the doorbell is withheld rather than
+     * written into a window a reset just fenced. */
     uart_puts("linked=0 peer=none (status header still zero: RM has not "
               "started; doorbell withheld, doorbells=");
     print_int((int)r->doorbells);
+    uart_puts(" wait_us=");
+    uart_print_hex(link_timeout_us);
+    if (lrc == -ETIMEDOUT) {
+      uart_puts(" reason=");
+      uart_puts(nv_rpc_reason_name(why));
+    }
     uart_puts(")\n");
   } else {
     uart_puts("linked=0 field=");
@@ -667,14 +766,137 @@ int nv_gsp_rpc_stage8_into(struct nv_gsp_rpc *r, struct nv_dev *d) {
     uart_puts(" (header written but unusable; waiting will not fix it)\n");
   }
   nv_rpc_dump("link", &r->q);
+
+  /* With no peer, the one comparison a card can still make: our producer word
+   * and the peer's are different storage.  On a linked queue it is not needed
+   * and is skipped (a canary in a live queue is a store RM could read), and it
+   * is skipped whenever the caller said a peer is possible (link_timeout_us
+   * != 0), so the probe can never race a peer that is starting. */
+  if (lrc != 0 && prc == 0 && link_timeout_us == 0) {
+    int crc = rpc_writepointer_canary(r);
+    if (crc != 0) return crc;
+  }
+
   /* A publish that failed is the more fundamental error: the firmware was
    * never told where the block is, so the link's -EAGAIN cannot become 0 on
    * this boot however long anyone waits. */
   return prc != 0 ? prc : lrc;
 }
 
-int nv_gsp_rpc_stage8(struct nv_dev *d) {
-  return nv_gsp_rpc_stage8_into(&g_gsp_rpc, d);
+int nv_gsp_rpc_stage8_into(struct nv_gsp_rpc *r, struct nv_dev *d) {
+  return rpc_stage8_common(r, d, 0);
+}
+
+int nv_gsp_rpc_stage8_wait(struct nv_dev *d, uint32_t link_timeout_us) {
+  return rpc_stage8_common(&g_gsp_rpc, d, link_timeout_us);
+}
+
+int nv_gsp_rpc_stage8(struct nv_dev *d) { return rpc_stage8_common(&g_gsp_rpc, d, 0); }
+
+/* Stage 9: the first round trip.  Nothing here runs unless stage 8 linked the
+ * status queue, because every send goes through nv_rpc_roundtrip(), whose first
+ * act is the same gate.  The two waits are the contract's own (4.1 rows 9 and
+ * 10) and each failure names itself in one row. */
+int nv_gsp_rpc_stage9_into(struct nv_gsp_rpc *r, struct nv_dev *d) {
+  if (!r || !d) return -EINVAL;
+  if (!r->q.linked) {
+    uart_puts("[NV-RPC] stage=init skipped: linked=0 (no peer header to answer, "
+              "so nothing was sent and no doorbell was rung; doorbells=");
+    print_int((int)r->doorbells);
+    uart_puts(")\n");
+    return -EAGAIN;
+  }
+
+  struct nv_rpc_hw hw;
+  nv_rpc_hw_dev(d, &hw);
+  /* 0x1000 is the queue's element size: enough for INIT_DONE's header and for
+   * the 0xD10-byte static-info reply, and small enough to be one frame's
+   * worth of scratch. */
+  static uint8_t msg[NV_RPC_SLOT];
+  static uint8_t req[NV_RPC_SLOT];
+
+  uint32_t result = NV_RPC_PENDING;
+  enum nv_rpc_reason why = NV_RPC_OK;
+
+  int n = nv_rpc_rx_wait(&r->q, &hw, NV_RPC_FN_INIT_DONE,
+                         NV_RPC_INIT_TIMEOUT_US, msg, sizeof msg, &result, &why);
+  uart_puts("[NV-RPC] stage=init_done fn=0x1001");
+  if (n <= 0) {
+    uart_puts(" FAIL rc=");
+    print_int(n);
+    uart_puts(" reason=");
+    uart_puts(nv_rpc_reason_name(why));
+    uart_puts(" wait_us=");
+    uart_print_hex(NV_RPC_INIT_TIMEOUT_US);
+    uart_puts(" (linked, but the init event never arrived: the link is up and "
+              "the event path is not)\n");
+    return n;
+  }
+  uart_puts(" len=");
+  uart_print_hex((uint64_t)n);
+  uart_puts(" result=");
+  uart_print_hex(result);
+  uart_puts(result == 0
+                ? " (RM reports initialised)\n"
+                : " (RM's own init verdict is nonzero: read it, do not retry)\n");
+  if (result != 0) return -EIO;
+
+  int ec = nv_rpc_static_info_request(req, r->q.tx_seq);
+  if (ec <= 0) {
+    uart_puts("[NV-RPC] stage=static_info FAIL build rc=");
+    print_int(ec);
+    uart_puts(" (the request did not frame; nothing was sent)\n");
+    return ec ? ec : -EIO;
+  }
+  uart_puts("[NV-RPC] stage=static_info req fn=65 len=");
+  uart_print_hex(NV_RPC_STATIC_INFO_LEN);
+  uart_puts(" ec=");
+  print_int(ec);
+  uart_puts(" wp=");
+  print_int((int)(glue_ld32(r->q.block + r->q.cmd_off + NV_RPC_Q_WRITE_PTR)));
+  uart_puts(" doorbells_before=");
+  print_int((int)r->doorbells);
+  uart_puts("\n");
+
+  n = nv_rpc_roundtrip(&r->q, &hw, req, NV_RPC_FN_GET_STATIC_INFO,
+                       NV_RPC_INIT_TIMEOUT_US, msg, sizeof msg, &result, &why);
+  nv_rpc_dump("send", &r->q);
+  if (n <= 0) {
+    uart_puts("[NV-RPC] stage=reply FAIL rc=");
+    print_int(n);
+    uart_puts(" reason=");
+    uart_puts(nv_rpc_reason_name(why));
+    uart_puts(" doorbells=");
+    print_int((int)r->doorbells);
+    uart_puts(" (the request was sent; no reply with fn=65 arrived inside the "
+              "contract's wait -- do NOT resend, the peer may have consumed "
+              "it)\n");
+    return n;
+  }
+
+  /* The four payload words, RAW: the contract names hInternalClient/Device/
+   * Subdevice as the proof, but it does not give their offsets inside
+   * GspStaticConfigInfo, and a row that guessed them would be a claim.  The
+   * shape is logged from the RPC header (function, length, result), which is
+   * what "answered" means here. */
+  uart_puts("[NV-RPC] stage=reply fn=65 len=");
+  uart_print_hex((uint64_t)n);
+  uart_puts(" result=");
+  uart_print_hex(result);
+  for (int i = 0; i < 4; i++) {
+    uart_puts(" w");
+    print_int(i);
+    uart_puts("=");
+    uart_print_hex(glue_ld32(msg + NV_RPC_H_PAYLOAD + (uint32_t)i * 4u));
+  }
+  uart_puts(result == 0
+                ? " (one message answered: the first round trip)\n"
+                : " (answered with a nonzero result: contract 3.3 names it)\n");
+  return result == 0 ? 0 : -EIO;
+}
+
+int nv_gsp_rpc_stage9(struct nv_dev *d) {
+  return nv_gsp_rpc_stage9_into(&g_gsp_rpc, d);
 }
 
 /* PFB: the write-protected-region block.  MEASURED (docs/nv-gsp-reference.md)
@@ -6313,6 +6535,10 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
    * Everything above this line is memory work.  This is the first stage that
    * writes to the card, and it is the one the metadata block was built for.
    * The trees, the image and the block all stay resident until it returns. */
+  /* Whether the booter itself reported success.  Stage 8 uses it for one
+   * decision only (how long to wait for RM's status header): a booter that
+   * failed cannot produce a peer, so it gets one read instead of the 4 s. */
+  int booter_ok = 0;
   nv_gsp_map_windows(d);
   (void)nv_gsp_write_lands(d);
   /* Work package B (the fuse check) runs here: read-only, and it decides
@@ -6366,6 +6592,7 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
       (void)nv_booter_vram_prefill(d, &bv, boot_off, wpmeta_off);
       int src2 = nv_gsp_sec2_start_booter_ex(d, booter.buf, booter.size,
                                              meta_bus, 1);
+      booter_ok = (src2 == 0);
       uart_puts("[NV-GSP] stage5 result=");
       print_int(src2);
       uart_puts(src2 == 0 ? " (booter returned success)\n"
@@ -6419,8 +6646,20 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
    * peer's header (nv_gsp_rpc_stage8 logs its own [NV-RPC] rows), so it runs
    * even when the booter did not: publishing a block nobody has walked is
    * cheap, and the row that says "peer=none" is the honest state of a boot
-   * that has not reached RM. */
-  if (lrc2 == 0) (void)nv_gsp_rpc_stage8(d);
+   * that has not reached RM.
+   *
+   * `booter_ok` decides how long the peer's header is waited for, and nothing
+   * else: a booter that returned success can still have RM appear, so that boot
+   * gets the contract's 4 s; a booter that did not cannot, so it gets one read
+   * and does not pay 4 s for an absent peer. */
+  if (lrc2 == 0) {
+    int s8 = nv_gsp_rpc_stage8_wait(d, booter_ok ? NV_RPC_LINK_TIMEOUT_US : 0u);
+    /* Stage 9 is called even when the link failed, because it gates itself: on
+     * an unlinked queue its one row is the statement that nothing was sent and
+     * no doorbell was rung.  When the link is up it is the first round trip. */
+    (void)s8;
+    (void)nv_gsp_rpc_stage9(d);
+  }
 
   if (d->radix3_root) {
     nv_radix3_release(d->radix3_root, d->radix3_pages);

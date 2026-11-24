@@ -153,6 +153,7 @@ enum nv_rpc_reason {
   NV_RPC_UNKNOWN_FN,   /* 0: dispatched and dropped */
   NV_RPC_CONTINUATION, /* 0: function 71, appended to the assembly */
   NV_RPC_BUSY,         /* -EBUSY: one request already outstanding (4.1 P4) */
+  NV_RPC_NO_REPLY,     /* -ETIMEDOUT: sent, but the expected message never came */
 };
 
 const char *nv_rpc_reason_name(enum nv_rpc_reason r);
@@ -521,6 +522,51 @@ int nv_rpc_rx_take(struct nv_rpc_queue *q, const struct nv_rpc_hw *hw,
 
 /* R8/R9 for the message rx_take() returned. */
 int nv_rpc_rx_release(struct nv_rpc_queue *q);
+
+/* ---- the peer's header as an observation (spec 4.2, 6.2 #2) ---------- */
+
+/* The eight words nv_rpc_link_validate() starts from, read out of
+ * block + stat_off at the moment of the call -- never the cached
+ * struct nv_rpc_peer.  The difference matters: on a boot whose peer never ran,
+ * "peer=none" printed from the cache is an inference ("we never linked"), while
+ * the same sentence printed from these words is a read of the peer's own
+ * address.  `nonzero` counts the eight; 0 is "nothing has written the header
+ * yet", which is what -EAGAIN from nv_rpc_link_validate() means. */
+struct nv_rpc_peer_statq {
+  uint32_t w[8]; /* version,size,msgSize,msgCount,writePtr,flags,rxHdrOff,entryOff */
+  uint32_t nonzero;
+};
+void nv_rpc_peer_snapshot(const struct nv_rpc_queue *q,
+                          struct nv_rpc_peer_statq *s);
+
+/* ---- the first round trip (contract 4.1 steps 9-10) ------------------ */
+
+#define NV_RPC_STATIC_INFO_PAYLOAD 0xCF0u /* reply size the request declares */
+#define NV_RPC_STATIC_INFO_LEN (NV_RPC_RPC_HDR + NV_RPC_STATIC_INFO_PAYLOAD)
+
+/* Build GET_GSP_STATIC_INFO (function 65, length 0x20 + 0xCF0, zeroed payload,
+ * rpc_result PENDING) in a staging buffer and frame it.  Returns elemCount
+ * (1 at this size) or -EINVAL/-EMSGSIZE/-EIO. */
+int nv_rpc_static_info_request(uint8_t *stage, uint32_t seq);
+
+/* Wait for one message whose function is `fn` -- an event such as 0x1001, or a
+ * reply -- bounded by hw->now_us, and release the element once copied.  On
+ * success returns its RPC length (> 0) and stores rpc_result (out + 0x10) in
+ * *result.  No ring stores other than the read pointer, and no doorbell.
+ * -ETIMEDOUT / NV_RPC_NO_REPLY when nothing with that function arrived. */
+int nv_rpc_rx_wait(struct nv_rpc_queue *q, const struct nv_rpc_hw *hw,
+                   uint32_t fn, uint32_t timeout_us, void *out, uint32_t cap,
+                   uint32_t *result, enum nv_rpc_reason *reason);
+
+/* Send `stage` and wait for the reply with function `reply_fn`: tx_prepare,
+ * tx_commit, exactly one doorbell, then rx_wait().  A queue that is not linked
+ * is refused BEFORE any store and before the doorbell (-EAGAIN/NOT_LINKED): a
+ * kick into a queue whose peer never published is a send nobody can see, and
+ * ringing it would look like delivery. */
+int nv_rpc_roundtrip(struct nv_rpc_queue *q, const struct nv_rpc_hw *hw,
+                     uint8_t *stage, uint32_t reply_fn, uint32_t timeout_us,
+                     void *out, uint32_t cap, uint32_t *result,
+                     enum nv_rpc_reason *reason);
 
 /* ---- real seam + log row (x86_64 only, like the rest of the driver) --- */
 
