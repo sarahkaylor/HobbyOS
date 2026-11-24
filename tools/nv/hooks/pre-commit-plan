@@ -1,0 +1,25 @@
+#!/bin/sh
+# pre-commit guard: docs/nv-plan.md is coordinator-owned.
+#
+# The plan is the shared record of what is measured and what is not; when several
+# workers append their own round sections concurrently the document conflicts (it has
+# already cost one rebase). Workers report in SWARM-REPORT-*.md and leave the plan to
+# the coordinator, who folds the findings in one commit.
+#
+# Install: tools/nv/install-hooks.sh   (copies this to .git/hooks/pre-commit)
+if [ "${ALLOW_PLAN_EDIT:-0}" = "1" ]; then
+  exit 0
+fi
+if git diff --cached --name-only | grep -qx "docs/nv-plan.md"; then
+  cat >&2 <<'MSG'
+refusing commit: docs/nv-plan.md is coordinator-owned.
+
+  Workers: put your findings in SWARM-REPORT-<lane>.md (and docs/<topic>.md) instead.
+  Coordinator: ALLOW_PLAN_EDIT=1 git commit ...
+
+Why: concurrent edits to the plan conflict on every round boundary, and the plan is the
+one document whose accuracy everything else is judged against.
+MSG
+  exit 1
+fi
+exit 0
