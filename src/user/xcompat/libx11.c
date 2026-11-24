@@ -1072,21 +1072,67 @@ static void queue_event(Display *d, const XEvent *ev) {
  * whichever window was created last: Unity creates an override-redirect
  * container after its GL window and selects no input mask on it, while the GL
  * window (the reparented child) keeps KeyPress/Button/Motion.  A real server
- * delivers to the window under the pointer; here the reparented child is it. */
-static Window input_target(Display *d, long *mask) {
-  Window w = d->surface ? d->surface : d->win.id;
-  struct xwin *e = xw_find(d, w);
-  if (e) {
-    if (mask) *mask = e->event_mask;
-    return w;
+ * delivers to the window under the pointer; here the reparented child is it.
+ *
+ * WP-PTR: the body used to return d->surface unconditionally, which is the
+ * CONTAINER -- so the comment above was right and the code did the opposite.
+ * Measured on r1 (QEMU 11, RimWorld 720p): the container's only selection is
+ * StructureNotifyMask (0x20000), the GL window's is 0x62c07f (it has
+ * ButtonPressMask), and `mouse_event()` therefore dropped every ButtonPress
+ * with `sel & ButtonPressMask == 0`.  Pointer MOTION still looked alive
+ * because Unity polls XQueryPointer, which the shim answers from the tracking
+ * report rather than from an event mask -- that is why "motion works, buttons
+ * do not" was the shape of the defect.
+ *
+ * So: prefer the surface when it selected what this event needs; otherwise
+ * take the most recently created MAPPED child of the surface that did.  With
+ * no such child the surface is returned unchanged, i.e. a client that
+ * selected nothing still receives nothing.
+ */
+static Window input_target(Display *d, long *mask, long need) {
+  Window base = d->surface ? d->surface : d->win.id;
+  struct xwin *be = xw_find(d, base);
+  long bsel = be ? be->event_mask : d->win.event_mask;
+#ifdef XCOMPAT_INPUT_SURFACE_ONLY
+  /* A/B knob (`make XCOMPAT_NO_PTR_FIX=1 xcompat_dsos`): the pre-fix body,
+   * which always answered the surface XID.  Kept so the gate can be shown
+   * failing on the old bytes and passing on the new ones. */
+  if (mask) *mask = bsel;
+  return base;
+#endif
+  if (!need || (bsel & need)) {
+    if (mask) *mask = bsel;
+    return base;
   }
-  if (mask) *mask = d->win.event_mask;
-  return d->win.id;
+  Window best = 0;
+  long best_sel = 0;
+  int best_rank = -1;
+  for (int i = 0; i < XW_MAX; i++) {
+    struct xwin *w = &d->wins[i];
+    if (!w->used || w->destroyed || !w->mapped) continue;
+    if (w->id == base) continue;
+    if (!(w->event_mask & need)) continue;
+    /* Rank: a descendant of the surface is the window under the pointer, so it
+     * wins over any other XID that merely selected the same class.  Rank 1
+     * (descendant) beats rank 0 (any other mapped window), and within a rank
+     * the later slot wins because later slots were created later. */
+    int rank = (w->parent == base || w->parent == d->win.id) ? 1 : 0;
+    if (rank < best_rank) continue;
+    best_rank = rank;
+    best = w->id;
+    best_sel = w->event_mask;
+  }
+  if (best) {
+    if (mask) *mask = best_sel;
+    return best;
+  }
+  if (mask) *mask = bsel;
+  return base;
 }
 
 static void key_event(Display *d, unsigned long keysym, unsigned extra_state) {
   long sel = 0;
-  Window wid = input_target(d, &sel);
+  Window wid = input_target(d, &sel, KeyPressMask);
   struct xwin *ie = xw_find(d, wid);
   if (ie ? !ie->mapped : (!d->win.mapped || d->win.destroyed)) return;
   if (!(sel & KeyPressMask)) return;
@@ -1113,15 +1159,20 @@ static void key_event(Display *d, unsigned long keysym, unsigned extra_state) {
   d->release_keycode = kc;
 }
 
+static int ptr_trace_rows;
 static void mouse_event(Display *d, int type, int x, int y, int btn,
                         unsigned state) {
   long sel = 0;
-  Window wid = input_target(d, &sel);
-  struct xwin *ie = xw_find(d, wid);
-  if (ie ? !ie->mapped : (!d->win.mapped || d->win.destroyed)) return;
   long need = (type == ButtonPress) ? ButtonPressMask
             : (type == ButtonRelease) ? ButtonReleaseMask
             : PointerMotionMask;
+  Window wid = input_target(d, &sel, need);
+  struct xwin *ie = xw_find(d, wid);
+  if (ie ? !ie->mapped : (!d->win.mapped || d->win.destroyed)) return;
+  if (type != MotionNotify && ptr_trace_rows < 20) {
+    ptr_trace_rows++;
+    l34_row("BTNsel", (int)sel, (int)need, (int)(sel & need), btn);
+  }
   if (sel & need) {
     XEvent ev;
     xz(&ev, sizeof ev);
@@ -1300,6 +1351,10 @@ static void handle_mouse(Display *d, unsigned char kind,
   int type = (kind == 'P') ? ButtonPress
            : (kind == 'R') ? ButtonRelease
            : MotionNotify;
+  if (kind != 'G' && ptr_trace_rows < 20) {
+    ptr_trace_rows++;
+    l34_row("BTNin", (int)kind, x, y, btn);
+  }
   mouse_event(d, type, x, y, btn, (type == MotionNotify) ? d->button_state : 0);
 }
 
