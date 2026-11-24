@@ -132,7 +132,7 @@ Two honest notes about the list:
 
 | Gate | Command | Line |
 |---|---|---|
-| intel build | `nvswarm build wp-nvif` / `make -j12 ARCH=intel MODE=unit_tests …` | `rc=0`, 0 errors, 0 warnings |
+| intel build | `nvswarm build wp-nvif` / `make -j12 ARCH=intel MODE=unit_tests …` | `rc=0`; **no warning or error from any file this branch touches** (the 102 warnings a rebuild emits are pre-existing ones in `vm.h`, `file_obj.h`, `dhcp.c`, `trap.c` …) |
 | intel unit tier | `TOOLS_SKIP=1 BROWSER_SKIP=1 UNIT_TESTS_TIMEOUT=1200 ./run_unit_tests_intel.sh` | `Tests run: 588` / `Tests failed: 0` / `UNIT TESTS PASSED` |
 | EL0 wave, end to end | `tools/nv/el0_wave.sh` | `[el0] PASS`, `[EL0] RESULT PASS 44/44` |
 | per-TU ARM (files touched) | `make ARCH=arm obj/arm/{nv_shim,nv_shim_drm_test,nv_rm_mock,unit_test}.o` | `rc=0`, 0 errors, 3 × pre-existing `-Wcomment` (`vm.h`) |
