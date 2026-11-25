@@ -353,6 +353,12 @@ TEST(test_nv_gsp_rpc_stage8_publishes_and_holds_the_doorbell) {
   d.ops_ctx = &mmio;
 
   struct nv_gsp_rpc r;
+  /* Zero it: nv_gsp_rpc_stage8_into() reads `r->built` as its "already set up"
+   * latch, so an uninitialised struct makes the first call skip setup and leave
+   * the field as the stack held it.  The test was reading a field the function
+   * only writes on the setup path, and it passed only while the stack happened
+   * to hold 0 there. */
+  t_zero(&r, (uint32_t)sizeof r);
   int before = frame_free_count();
 
   /* No RM has run, so the status header is zero: the stage reports -EAGAIN

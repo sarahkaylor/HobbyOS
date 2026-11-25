@@ -1,0 +1,431 @@
+{
+  "file": "evidence/vbios.bin",
+  "size": 1048576,
+  "rom_offset": 0,
+  "rom_offset_how": "no IFR: PCI ROM image at 0 (0xAA55)",
+  "bit_candidates": [
+    {
+      "off": 432,
+      "hdr_size": 12,
+      "tok_size": 6,
+      "tok_count": 19,
+      "bcd": 256
+    }
+  ],
+  "bcd_version": "0x0100",
+  "tokens": [
+    {
+      "index": 0,
+      "id": 50,
+      "version": 1,
+      "size": 4,
+      "ptr": 574
+    },
+    {
+      "index": 1,
+      "id": 66,
+      "version": 2,
+      "size": 37,
+      "ptr": 586
+    },
+    {
+      "index": 2,
+      "id": 67,
+      "version": 2,
+      "size": 44,
+      "ptr": 623
+    },
+    {
+      "index": 3,
+      "id": 68,
+      "version": 1,
+      "size": 4,
+      "ptr": 667
+    },
+    {
+      "index": 4,
+      "id": 73,
+      "version": 1,
+      "size": 36,
+      "ptr": 671
+    },
+    {
+      "index": 5,
+      "id": 77,
+      "version": 2,
+      "size": 41,
+      "ptr": 707
+    },
+    {
+      "index": 6,
+      "id": 78,
+      "version": 0,
+      "size": 0,
+      "ptr": 0
+    },
+    {
+      "index": 7,
+      "id": 80,
+      "version": 2,
+      "size": 252,
+      "ptr": 748
+    },
+    {
+      "index": 8,
+      "id": 83,
+      "version": 2,
+      "size": 24,
+      "ptr": 1000
+    },
+    {
+      "index": 9,
+      "id": 84,
+      "version": 1,
+      "size": 2,
+      "ptr": 1024
+    },
+    {
+      "index": 10,
+      "id": 85,
+      "version": 1,
+      "size": 5,
+      "ptr": 1034
+    },
+    {
+      "index": 11,
+      "id": 86,
+      "version": 1,
+      "size": 6,
+      "ptr": 1039
+    },
+    {
+      "index": 12,
+      "id": 120,
+      "version": 1,
+      "size": 8,
+      "ptr": 1045
+    },
+    {
+      "index": 13,
+      "id": 100,
+      "version": 1,
+      "size": 2,
+      "ptr": 1053
+    },
+    {
+      "index": 14,
+      "id": 112,
+      "version": 2,
+      "size": 4,
+      "ptr": 1055
+    },
+    {
+      "index": 15,
+      "id": 117,
+      "version": 1,
+      "size": 17,
+      "ptr": 1059
+    },
+    {
+      "index": 16,
+      "id": 105,
+      "version": 2,
+      "size": 110,
+      "ptr": 1076
+    },
+    {
+      "index": 17,
+      "id": 69,
+      "version": 1,
+      "size": 4,
+      "ptr": 1026
+    },
+    {
+      "index": 18,
+      "id": 115,
+      "version": 1,
+      "size": 4,
+      "ptr": 1030
+    }
+  ],
+  "tokens_str": "32 42 43 44 49 4d 4e 50 53 54 55 56 78 64 70 75 69 45 73",
+  "falcon_token": {
+    "index": 14,
+    "id": 112,
+    "version": 2,
+    "size": 4,
+    "ptr": 1055
+  },
+  "falcon_table": {
+    "ptr": 527848,
+    "off": 613352,
+    "rule": "logical+0x14E00 (EFI ROM stripped)",
+    "version": 1,
+    "hdr_size": 6,
+    "entry_size": 6,
+    "entry_count": 16,
+    "desc_version": 1,
+    "desc_size": 48
+  },
+  "entries": [
+    {
+      "n": 0,
+      "app_id": 1,
+      "app_name": "PMU?/DEVINIT? (unclaimed, see nv-devinit-contract.md S9)",
+      "target_id": 1,
+      "desc_ptr": 89172,
+      "desc_off": 89172,
+      "desc_rule": "raw",
+      "vdesc": 3046828291,
+      "version_available": true,
+      "encrypted": false,
+      "version": 233,
+      "size": 46490,
+      "stored_size": 3755135347
+    },
+    {
+      "n": 1,
+      "app_id": 0,
+      "app_name": "-",
+      "target_id": 0,
+      "desc_ptr": 0,
+      "desc_off": 0,
+      "desc_rule": "raw",
+      "vdesc": 3950946901,
+      "version_available": true,
+      "encrypted": true,
+      "version": 170,
+      "size": 60286,
+      "stored_size": 808728395
+    },
+    {
+      "n": 2,
+      "app_id": 0,
+      "app_name": "-",
+      "target_id": 0,
+      "desc_ptr": 0,
+      "desc_off": 0,
+      "desc_rule": "raw",
+      "vdesc": 3950946901,
+      "version_available": true,
+      "encrypted": true,
+      "version": 170,
+      "size": 60286,
+      "stored_size": 808728395
+    },
+    {
+      "n": 3,
+      "app_id": 0,
+      "app_name": "-",
+      "target_id": 0,
+      "desc_ptr": 0,
+      "desc_off": 0,
+      "desc_rule": "raw",
+      "vdesc": 3950946901,
+      "version_available": true,
+      "encrypted": true,
+      "version": 170,
+      "size": 60286,
+      "stored_size": 808728395
+    },
+    {
+      "n": 4,
+      "app_id": 0,
+      "app_name": "-",
+      "target_id": 0,
+      "desc_ptr": 0,
+      "desc_off": 0,
+      "desc_rule": "raw",
+      "vdesc": 3950946901,
+      "version_available": true,
+      "encrypted": true,
+      "version": 170,
+      "size": 60286,
+      "stored_size": 808728395
+    },
+    {
+      "n": 5,
+      "app_id": 7,
+      "app_name": "-",
+      "target_id": 6,
+      "desc_ptr": 258792,
+      "desc_off": 258792,
+      "desc_rule": "raw",
+      "vdesc": 1871997865,
+      "version_available": true,
+      "encrypted": false,
+      "version": 107,
+      "size": 28564,
+      "stored_size": 3528714305
+    },
+    {
+      "n": 6,
+      "app_id": 8,
+      "app_name": "-",
+      "target_id": 1,
+      "desc_ptr": 376620,
+      "desc_off": 376620,
+      "desc_rule": "raw",
+      "vdesc": 2560605952,
+      "version_available": false,
+      "encrypted": false,
+      "version": 191,
+      "size": 39071,
+      "stored_size": 2613514457
+    },
+    {
+      "n": 7,
+      "app_id": 0,
+      "app_name": "-",
+      "target_id": 0,
+      "desc_ptr": 0,
+      "desc_off": 0,
+      "desc_rule": "raw",
+      "vdesc": 3950946901,
+      "version_available": true,
+      "encrypted": true,
+      "version": 170,
+      "size": 60286,
+      "stored_size": 808728395
+    },
+    {
+      "n": 8,
+      "app_id": 69,
+      "app_name": "FWSEC_DBG",
+      "target_id": 7,
+      "desc_ptr": 126352,
+      "desc_off": 126352,
+      "desc_rule": "raw",
+      "vdesc": 2199457883,
+      "version_available": true,
+      "encrypted": false,
+      "version": 16,
+      "size": 33561,
+      "stored_size": 2514588763
+    },
+    {
+      "n": 9,
+      "app_id": 133,
+      "app_name": "FWSEC_PROD",
+      "target_id": 7,
+      "desc_ptr": 192572,
+      "desc_off": 192572,
+      "desc_rule": "raw",
+      "vdesc": 2964521482,
+      "version_available": false,
+      "encrypted": false,
+      "version": 2,
+      "size": 45235,
+      "stored_size": 2461150976,
+      "uncompressed_size": 546837693,
+      "virtual_entry": 17928195,
+      "interface_offset": 2986615440,
+      "imem_phys_base": 45883,
+      "imem_load_size": 2114630170,
+      "imem_virt_base": 855655751,
+      "imem_sec_base": 2685141152,
+      "imem_sec_size": 1050983744,
+      "dmem_offset": 3003139561,
+      "dmem_phys_base": 182391828,
+      "dmem_load_size": 4097964804
+    },
+    {
+      "n": 10,
+      "app_id": 73,
+      "app_name": "-",
+      "target_id": 5,
+      "desc_ptr": 323716,
+      "desc_off": 323716,
+      "desc_rule": "raw",
+      "vdesc": 3867243448,
+      "version_available": false,
+      "encrypted": false,
+      "version": 115,
+      "size": 59009,
+      "stored_size": 3892337366
+    },
+    {
+      "n": 11,
+      "app_id": 137,
+      "app_name": "-",
+      "target_id": 5,
+      "desc_ptr": 350168,
+      "desc_off": 350168,
+      "desc_rule": "raw",
+      "vdesc": 541695008,
+      "version_available": false,
+      "encrypted": false,
+      "version": 156,
+      "size": 8265,
+      "stored_size": 10352132
+    },
+    {
+      "n": 12,
+      "app_id": 0,
+      "app_name": "-",
+      "target_id": 0,
+      "desc_ptr": 0,
+      "desc_off": 0,
+      "desc_rule": "raw",
+      "vdesc": 3950946901,
+      "version_available": true,
+      "encrypted": true,
+      "version": 170,
+      "size": 60286,
+      "stored_size": 808728395
+    },
+    {
+      "n": 13,
+      "app_id": 0,
+      "app_name": "-",
+      "target_id": 0,
+      "desc_ptr": 0,
+      "desc_off": 0,
+      "desc_rule": "raw",
+      "vdesc": 3950946901,
+      "version_available": true,
+      "encrypted": true,
+      "version": 170,
+      "size": 60286,
+      "stored_size": 808728395
+    },
+    {
+      "n": 14,
+      "app_id": 0,
+      "app_name": "-",
+      "target_id": 0,
+      "desc_ptr": 0,
+      "desc_off": 0,
+      "desc_rule": "raw",
+      "vdesc": 3950946901,
+      "version_available": true,
+      "encrypted": true,
+      "version": 170,
+      "size": 60286,
+      "stored_size": 808728395
+    },
+    {
+      "n": 15,
+      "app_id": 0,
+      "app_name": "-",
+      "target_id": 0,
+      "desc_ptr": 0,
+      "desc_off": 0,
+      "desc_rule": "raw",
+      "vdesc": 3950946901,
+      "version_available": true,
+      "encrypted": true,
+      "version": 170,
+      "size": 60286,
+      "stored_size": 808728395
+    }
+  ],
+  "version_string_token": {
+    "index": 1,
+    "id": 66,
+    "version": 2,
+    "size": 37,
+    "ptr": 586
+  },
+  "vbios_version_dword": "0x95021840"
+}

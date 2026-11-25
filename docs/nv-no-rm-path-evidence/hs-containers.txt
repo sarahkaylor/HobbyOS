@@ -1,0 +1,38 @@
+== evidence/fw/ga102-sec2-hs_bl_sig.bin  (1280 B)
+   bin_hdr: magic=0x000010de ver=1 size=1280 header_offset=0x100 data=0+0
+   hs_v2: sig_prod=0x11c+768 patch_loc=0x41c patch_sig=0x420 meta=0x424+12 num_sig=1072 load_hdr=0x2506c80b+196346988
+   IDENTITY TRIPLE: fuse_ver=1 engine_id=0x1 (HS class bit 0x400: False) ucode_id=5
+   sig_prod[0:16]=0bc806256c04b40b8d998ea460598c9e patch_loc_value=0x00010000 patch_sig_value=0x00000000
+
+== evidence/fw/ga102-acr-ucode_ahesasc.bin  (57088 B)
+   bin_hdr: magic=0x000010de ver=1 size=57088 header_offset=0x100 data=1536+55552
+   hs_v2: sig_prod=0x124+1152 patch_loc=0x5a4 patch_sig=0x5a8 meta=0x5ac+12 num_sig=1464 load_hdr=0x5bc+36
+   IDENTITY TRIPLE: fuse_ver=2 engine_id=0x1 (HS class bit 0x400: False) ucode_id=1
+   load_v2: os_code=0x0+256 os_data=0x8100+19968 apps=1
+     app0: code 0x100+32768  data 0x100+0
+   sig_prod[0:16]=feecf9eedfa6772270f99013b2ac2b52 patch_loc_value=0x0000cc90 patch_sig_value=0x00000000
+
+== evidence/fw/ga102-acr-ucode_asb.bin  (28672 B)
+   bin_hdr: magic=0x000010de ver=1 size=28672 header_offset=0x100 data=1536+27136
+   hs_v2: sig_prod=0x124+1152 patch_loc=0x5a4 patch_sig=0x5a8 meta=0x5ac+12 num_sig=1464 load_hdr=0x5bc+36
+   IDENTITY TRIPLE: fuse_ver=2 engine_id=0x400 (HS class bit 0x400: True) ucode_id=1
+   load_v2: os_code=0x0+256 os_data=0x3c00+9216 apps=1
+     app0: code 0x100+15104  data 0x100+0
+   sig_prod[0:16]=6dfb7773ce90f38e29d2c12c9d3f13fe patch_loc_value=0x00005b10 patch_sig_value=0x00000000
+
+== evidence/fw/ga102-acr-ucode_unload.bin  (17920 B)
+   bin_hdr: magic=0x000010de ver=1 size=17920 header_offset=0x100 data=1536+16384
+   hs_v2: sig_prod=0x124+1152 patch_loc=0x5a4 patch_sig=0x5a8 meta=0x5ac+12 num_sig=1464 load_hdr=0x5bc+36
+   IDENTITY TRIPLE: fuse_ver=2 engine_id=0x1 (HS class bit 0x400: False) ucode_id=1
+   load_v2: os_code=0x0+256 os_data=0x3300+3328 apps=1
+     app0: code 0x100+12800  data 0x100+0
+   sig_prod[0:16]=d8c8e11db29c89a3726b9231f13d1c7a patch_loc_value=0x00003d10 patch_sig_value=0x00000000
+
+== /srv/hermes-kanban/boards/hobbyos-nv/workspaces/t_7c890c1e/cand/ad102-booter_load-570.144.bin  (57720 B)
+   bin_hdr: magic=0x000010de ver=1 size=57856 header_offset=0x18 data=888+56832
+   hs_v2: sig_prod=0x3c+768 patch_loc=0x33c patch_sig=0x340 meta=0x344+12 num_sig=848 load_hdr=0x354+36
+   IDENTITY TRIPLE: fuse_ver=1 engine_id=0x1 (HS class bit 0x400: False) ucode_id=3
+   load_v2: os_code=0x0+256 os_data=0x7e00+24576 apps=1
+     app0: code 0x100+32000  data 0x100+0
+   sig_prod[0:16]=0ed3a01c8d5f78fcd166edcad27717f0 patch_loc_value=0x00007e10 patch_sig_value=0x00000000
+

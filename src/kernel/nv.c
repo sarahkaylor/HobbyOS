@@ -326,6 +326,10 @@ int nv_bringup(struct nv_dev *d) {
     d->failed_stage = NV_STATE_FALCON;
     return rc;
   }
+  /* Is the GR window addressable at all, and does it carry a topology?  Both
+   * are reads; an engine that refuses the read is a fact to report, so this
+   * stage cannot fail the bring-up (docs/nv-no-rm-path.md row 2). */
+  (void)nv_engine_probe(d);
   /* The firmware stage only ever *observes* here: WPR2, mailbox pair, RISC-V
    * status.  It cannot fail the bring-up -- a card with firmware already
    * running is a fact to report, not an error. */

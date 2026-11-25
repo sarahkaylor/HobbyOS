@@ -58,6 +58,36 @@ struct nv_falcon {
   const char *name;
 };
 
+/* ---- GR-engine reachability + topology (nv_engine.c) --------------------
+ *
+ * Answers the two questions a no-RM path starts from (docs/nv-no-rm-path.md,
+ * row 2): is the PGRAPH window host-addressable on this part, and does it
+ * carry a measurable topology?  Read-only: no write is made, and a
+ * data-answering word is reachability, not permission. */
+#define NV_ENG_PROBE_REGS 7
+#define NV_ENG_MAX_GPC 12 /* full AD102 die; a larger word is refused, not walked */
+struct nv_eng_reg {
+  const char *name;
+  uint32_t addr;
+};
+enum { NV_ENG_ABSENT = 0, NV_ENG_FENCED, NV_ENG_UNREADABLE, NV_ENG_ADDRESSABLE };
+enum {
+  NV_TOPO_UNMEASURED = 0, /* the topology word is not data */
+  NV_TOPO_IMPLAUSIBLE,    /* data, but no control register agreed / out of range */
+  NV_TOPO_PARTIAL,        /* gpc answered, per-GPC tpc masks did not */
+  NV_TOPO_MEASURED,
+};
+struct nv_eng_report {
+  int n_regs, n_data, n_fenced, n_unreadable, n_absent;
+  int window;       /* NV_ENG_* verdict for the whole window */
+  uint32_t topo;    /* 0x409604 raw, when it answered */
+  int gpc_nr;       /* -1 = not measured (never 0: see nv_engine.c) */
+  int tpc_nr;
+  uint32_t tpc[NV_ENG_MAX_GPC];
+  uint32_t tpc_ok;  /* bit per GPC whose tpc mask answered data */
+  int topo_verdict; /* NV_TOPO_* */
+};
+
 /* MMIO backend.  The real one is BAR0; the unit test supplies a fake. */
 struct nv_mmio_ops {
   uint32_t (*rd32)(void *ctx, uint32_t off);
@@ -101,6 +131,7 @@ struct nv_dev {
   /* subengines */
   struct nv_falcon falcon[3]; /* PMU, GSP, SEC2 */
   uint32_t falcon_mask;       /* bit per present falcon */
+  struct nv_eng_report eng;   /* read-only GR-window probe (nv_engine.c) */
 
   struct nv_mmio_ops ops;
   void *ops_ctx;
@@ -154,6 +185,11 @@ int nv_pmc_enable_timer(struct nv_dev *d);
 int nv_timer_read(struct nv_dev *d, uint64_t *out);
 int nv_timer_probe(struct nv_dev *d, uint32_t *hz_out);
 int nv_falcon_probe_all(struct nv_dev *d);
+/* Read-only GR-window reachability + topology probe (nv_engine.c).  Cannot fail
+ * the bring-up: an unreachable engine is a fact to report, not an error. */
+int nv_engine_probe(struct nv_dev *d);
+uint32_t nv_eng_gpc_unit(int gpc, uint32_t reg);
+extern const struct nv_eng_reg nv_eng_probe_regs[NV_ENG_PROBE_REGS];
 int nv_bringup(struct nv_dev *d); /* identify -> pmc -> timer -> falcons */
 void nv_log_state(struct nv_dev *d);
 void nv_mark_probed(void); /* nv_pci.c: attach finished */
