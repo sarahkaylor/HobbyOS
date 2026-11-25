@@ -308,6 +308,11 @@ uint64_t lock_audit_irqoff_total_us(void);
  * is an oversubscribed runner, not a lock-scope defect. */
 uint64_t lock_audit_irqoff_steal_us(void);
 uint64_t lock_audit_irqoff_wall_max_us(void);
+/* Console bytes pushed inside those windows / inside the worst one.  A
+ * non-zero max is a console write, not a lock section: every byte is a port
+ * exit the host serves, so its cost is the runner's, not the kernel's. */
+uint64_t lock_audit_irqoff_cons_bytes(void);
+uint64_t lock_audit_irqoff_max_bytes(void);
 void lock_audit_reset_counters(void);
 
 /* One machine-readable console record; the test tiers grep and assert on it. */

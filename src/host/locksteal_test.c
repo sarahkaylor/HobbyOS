@@ -65,6 +65,11 @@ uint64_t timer_get_us(void) { return host_now_us; }
    want; the correction tests below drive it explicitly. */
 static uint64_t host_steal_us;
 uint64_t timer_steal_us(void) { return host_steal_us; }
+/* Console bytes this CPU has pushed into the hardware (console.h).  The audit
+   reads it to attribute a window to a console write; the correction test below
+   drives it.  It is not the fake timer: bytes are a separate counter. */
+static uint32_t host_cons_bytes;
+uint32_t cons_hw_bytes(uint32_t cpu) { (void)cpu; return host_cons_bytes; }
 
 
 /* Capture the console: the steal must be announced, never silent. */
@@ -346,8 +351,28 @@ static void test_irqoff_steal_correction(void) {
   check(lock_audit_irqoff_max_us() == 3000,
         "irqoff: nested windows are measured once, from the outermost begin to end");
 
+  /* G: console attribution.  An 8 KiB console write is 8 KiB of port exits,
+     which is what the nested-KVM window actually is (the same window costs
+     0.7 us/byte under TCG).  The audit must record the byte count of the
+     worst window so "masked while printing" is distinguishable from "masked
+     while computing". */
+  lock_audit_reset_counters();
+  host_now_us = 7000000;
+  host_cons_bytes = 100;
+  lock_audit_irqoff_begin(1);
+  host_now_us += 5600;    /* 0.7 us/byte under TCG */
+  host_cons_bytes += 8000;
+  lock_audit_irqoff_end(1);
+  check(lock_audit_irqoff_max_bytes() == 8000,
+        "irqoff: the worst window carries its console byte count (8000)");
+  check(lock_audit_irqoff_cons_bytes() == 8000,
+        "irqoff: total console bytes inside windows are counted");
+  check(lock_audit_irqoff_max_us() == 5600,
+        "irqoff: a console window is measured like any other window");
+
   lock_audit_reset_counters();
   host_steal_us = 0;
+  host_cons_bytes = 0;
 }
 
 int main(void) {

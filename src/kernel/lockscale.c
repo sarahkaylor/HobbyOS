@@ -48,6 +48,7 @@
 #include <stdint.h>
 #include "lock.h"
 #include "kline.h"
+#include "console.h"
 #include "process.h"
 #include "timer.h"
 
@@ -171,6 +172,15 @@ struct ls_cpu_state {
    * gate uses.  Kept per CPU as a separate total so "the runner descheduled
    * this vCPU" stays visible instead of silently vanishing from the report. */
   volatile uint64_t irqoff_start_steal, irqoff_steal_total, irqoff_wall_max;
+  /* Console bytes pushed inside the window, and the same for the worst one:
+   * a console byte is a port exit (see console.h cons_hw_bytes), so this is
+   * what tells "the code computed with interrupts masked" from "the code
+   * printed with interrupts masked". */
+  volatile uint64_t irqoff_start_bytes, irqoff_max_bytes, irqoff_cons_total;
+  /* Call site that opened and closed the worst window.  When no lock is held
+   * at either end (worst_lock=-) this is the only thing that can name the
+   * code, and it is what a symbol lookup needs. */
+  volatile uint64_t irqoff_start_pc, irqoff_max_begin_pc, irqoff_max_end_pc;
   volatile uint64_t preempt_site;
   volatile int32_t preempt;
   volatile uint8_t held_n, irqoff_nest, irqoff_active, in_irq;
@@ -294,6 +304,16 @@ void lock_audit_irq_enter(void) { ls_pc[ls_cpu()].in_irq = 1; }
 void lock_audit_irq_exit(void) { ls_pc[ls_cpu()].in_irq = 0; }
 int lock_audit_in_irq(void) { return ls_pc[ls_cpu()].in_irq != 0; }
 
+/* The IRQ-off call site, one level up from the audit call: the audit is
+ * called from spinlock_acquire_irqsave/release_irqrestore in the arch locks.c
+ * (a separate translation unit, so no inlining), and level 1 is the code that
+ * decided to mask.  Host builds have no frames to walk. */
+#ifdef HOST_TEST
+#define LS_SITE_PC() 0ULL
+#else
+#define LS_SITE_PC() ((uint64_t)(uintptr_t)__builtin_return_address(1))
+#endif
+
 void lock_audit_irqoff_begin(int we_masked) {
   uint32_t c = ls_cpu();
   uint8_t n = ls_pc[c].irqoff_nest;
@@ -302,6 +322,9 @@ void lock_audit_irqoff_begin(int we_masked) {
     ls_pc[c].irqoff_start = timer_get_us();
     /* Snapshot the steal clock in the same breath (see the window end). */
     ls_pc[c].irqoff_start_steal = timer_steal_us();
+    /* ... and the console byte count: port exits are not guest compute. */
+    ls_pc[c].irqoff_start_bytes = cons_hw_bytes(c);
+    ls_pc[c].irqoff_start_pc = LS_SITE_PC();
     ls_pc[c].irqoff_active = 1;
   }
 }
@@ -327,12 +350,20 @@ void lock_audit_irqoff_end(int we_unmask) {
     if (steal > wall) /* coarse record or a clock that went backwards */
       steal = wall;
     uint64_t d = wall - steal;
+    /* Console bytes this window pushed to the wire (wrap-safe: 32-bit
+     * counter, difference taken in 32 bits). */
+    uint32_t bytes = (uint32_t)((uint32_t)cons_hw_bytes(c) -
+                                (uint32_t)ls_pc[c].irqoff_start_bytes);
+    ls_pc[c].irqoff_cons_total += bytes;
     ls_pc[c].irqoff_steal_total += steal;
     if (wall > ls_pc[c].irqoff_wall_max)
       ls_pc[c].irqoff_wall_max = wall;
     ls_pc[c].irqoff_total += d;
     if (d > ls_pc[c].irqoff_max) {
       ls_pc[c].irqoff_max = d;
+      ls_pc[c].irqoff_max_bytes = bytes;
+      ls_pc[c].irqoff_max_begin_pc = ls_pc[c].irqoff_start_pc;
+      ls_pc[c].irqoff_max_end_pc = LS_SITE_PC();
       /* Blame the outermost lock still held when the window closes: it is the
        * one that decided to mask.  Read the stack before it is popped. */
       uint8_t hn = ls_pc[c].held_n;
@@ -527,6 +558,28 @@ uint64_t lock_audit_irqoff_wall_max_us(void) {
   return m;
 }
 
+/* Console bytes pushed inside IRQ-off windows (all CPUs), and the same for the
+ * worst window.  Non-zero means the worst window is a console write, not a
+ * lock section: each byte is a port exit the host serves (10-50 us on a loaded
+ * KVM host), which is why the same window measures 0.7 us/byte under TCG and
+ * ~14 us/byte under nested KVM. */
+uint64_t lock_audit_irqoff_cons_bytes(void) {
+  uint64_t t = 0;
+  for (uint32_t c = 0; c < MAX_CPUS; c++)
+    t += ls_pc[c].irqoff_cons_total;
+  return t;
+}
+
+uint64_t lock_audit_irqoff_max_bytes(void) {
+  uint64_t m = 0, mx = 0;
+  for (uint32_t c = 0; c < MAX_CPUS; c++)
+    if (ls_pc[c].irqoff_max > mx) {
+      mx = ls_pc[c].irqoff_max;
+      m = ls_pc[c].irqoff_max_bytes;
+    }
+  return m;
+}
+
 void lock_audit_reset_counters(void) {
   ls_blockhold = 0;
   ls_selflock = 0;
@@ -537,6 +590,10 @@ void lock_audit_reset_counters(void) {
     ls_pc[c].irqoff_max = 0;
     ls_pc[c].irqoff_steal_total = 0;
     ls_pc[c].irqoff_wall_max = 0;
+    ls_pc[c].irqoff_max_bytes = 0;
+    ls_pc[c].irqoff_cons_total = 0;
+    ls_pc[c].irqoff_max_begin_pc = 0;
+    ls_pc[c].irqoff_max_end_pc = 0;
   }
   for (uint32_t i = 0; i < LS_MEMO; i++) {
     ls_memo[i].what = 0;
@@ -565,6 +622,10 @@ void lock_print_report(void) {
   kl_i(&k, (long)lock_audit_irqoff_steal_us());
   kl_s(&k, " irqoff_wall_max_us=");
   kl_i(&k, (long)lock_audit_irqoff_wall_max_us());
+  kl_s(&k, " irqoff_max_bytes=");
+  kl_i(&k, (long)lock_audit_irqoff_max_bytes());
+  kl_s(&k, " irqoff_cons_bytes=");
+  kl_i(&k, (long)lock_audit_irqoff_cons_bytes());
   kl_s(&k, " reg_used=");
   kl_i(&k, (long)ls_reg_used);
   kl_s(&k, " reg_dropped=");
@@ -588,6 +649,12 @@ void lock_print_report(void) {
     kl_i(&r, (long)ls_pc[c].irqoff_steal_total);
     kl_s(&r, " wall_max_us=");
     kl_i(&r, (long)ls_pc[c].irqoff_wall_max);
+    kl_s(&r, " bytes=");
+    kl_i(&r, (long)ls_pc[c].irqoff_max_bytes);
+    kl_s(&r, " begin_pc=");
+    kl_hex(&r, ls_pc[c].irqoff_max_begin_pc);
+    kl_s(&r, " end_pc=");
+    kl_hex(&r, ls_pc[c].irqoff_max_end_pc);
     kl_s(&r, " worst_lock=");
     const void *lw = (const void *)(uintptr_t)ls_pc[c].irqoff_max_lock;
     kl_s(&r, lw ? lock_name(lw) : "-");
