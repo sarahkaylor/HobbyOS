@@ -88,6 +88,12 @@ void cons_hw_tx(const char *s, int n);   /* raw bytes, '\n' -> "\r\n"   */
 uint64_t cons_hw_irqsave(void);          /* mask IRQs, return old state */
 void cons_hw_irqrestore(uint64_t flags);
 int cons_hw_irqs_on(uint64_t flags);     /* were IRQs enabled in flags  */
+/* Bytes this CPU has pushed into the console hardware since boot.  A console
+ * byte is not free: on x64 it is a port exit the host serves in userspace
+ * (10-50 us on a loaded KVM host, uart.c com1_put), so the lock audit reads
+ * this to tell an IRQ-off window that is guest compute from one that is
+ * mostly a console write.  Monotonic per CPU; wraps at 4 GiB. */
+uint32_t cons_hw_bytes(uint32_t cpu);
 const void *cons_hw_ctx(uint32_t cpu);   /* the running thread, or 0    */
 int cons_hw_in_panic(void);              /* a fatal record is printing  */
 int cons_hw_bootarg(char *buf, int cap); /* fw_cfg opt/hobbyos/diag     */

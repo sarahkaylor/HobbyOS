@@ -126,9 +126,19 @@ void cons_hw_stall_ms(uint32_t ms) {
   cons_hw_irqrestore(f);
 }
 #endif
+/* Bytes per CPU pushed into the wire (console.h cons_hw_bytes).  Incremented
+   with the in_console mark so the lock audit can attribute an IRQ-off window
+   to a console write instead of to a lock. */
+static volatile uint32_t x64_cons_bytes[MAX_CPUS];
+uint32_t cons_hw_bytes(uint32_t cpu) {
+  return cpu < MAX_CPUS ? __atomic_load_n(&x64_cons_bytes[cpu], __ATOMIC_RELAXED) : 0;
+}
+
 void cons_hw_tx(const char *s, int n) {
   uint32_t me = get_cpuid();
   if (me < MAX_CPUS) __atomic_add_fetch(&x64_in_console[me].in, 1, __ATOMIC_SEQ_CST);
+  if (me < MAX_CPUS && n > 0)
+    __atomic_add_fetch(&x64_cons_bytes[me], (uint32_t)n, __ATOMIC_RELAXED);
   uart_last_activity_ms = timer_get_ms();
   for (int i = 0; i < n; i++) {
     if (s[i] == '\n')
