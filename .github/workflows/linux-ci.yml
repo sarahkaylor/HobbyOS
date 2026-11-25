@@ -11,7 +11,19 @@ name: linux-ci
 on: [push, workflow_dispatch]
 
 concurrency:
-  group: linux-ci-main
+  # One slot per REF, not one global group — same fix and same reasoning as
+  # mac-ci (.github/workflows/ci.yml).  The runner is a single machine, so the
+  # jobs serialise on it anyway, but with one fixed group every branch shared
+  # one queue and GitHub cancels the older PENDING run when another branch
+  # queues a run for that group.  Measured 2026-11-25: 4 of the 20 completed
+  # linux-ci runs of the previous 20 h were `cancelled` with no jobs at all
+  # (t_24e1ea49 lost three verification runs to pushes on
+  # fix/mac-host-wide-parity), each one a tree that had to be re-queued by
+  # hand.  Per-ref groups keep the original intent -- a re-push to the SAME
+  # branch still collapses to its newest commit -- while different branches
+  # queue instead of destroying each other.  NOTE: groups are repo-wide, so the
+  # `linux-ci-` prefix must not collide with mac-ci's `mac-ci-` one.
+  group: linux-ci-${{ github.ref }}
   cancel-in-progress: false
 
 # Literal PATH — never "$PATH" inside a workflow env value: GitHub sets the
