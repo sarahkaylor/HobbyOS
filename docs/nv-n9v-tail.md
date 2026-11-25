@@ -273,6 +273,14 @@ arithmetic (§5) is exact from the committed frame log. Until it runs, the numbe
 window-resolution for present and share-based for the kernel, and are labelled that way in
 every table.
 
+**Update (child card t_0552cbd5):** step 1 is implemented — `hb_present_stats.h` now has
+`HB_PRESENT_EACH=1` writing one `[HBPP]` line per present (`t sub wait flip dt idx`, guest
+`CLOCK_MONOTONIC`), tested by `python3 tools/mesa/venus/test_hb_present_each.py`; the reader
+is `tools/cp/bench/present-split.py --hbpp`. The boot is still the missing step (strix). What
+the child card could answer from counters that already existed — present's share at 720p and
+at 1080p, the flip's `set`/`flush` split, and why 1080p cannot be extrapolated from 720p — is
+`docs/nv-n9v-present-split.md`.
+
 ## 8. What this does not claim
 
 - Not a native/NVIDIA result, not a comparison with NVIDIA's driver, not a claim that the

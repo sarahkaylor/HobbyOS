@@ -391,11 +391,16 @@ wsi_common_queue_present(const struct wsi_device *wsi,
                          const VkPresentInfoKHR *pPresentInfo)
 {
    hb_wait_cyc = 0;
+   const uint64_t t0_ns = (uint64_t)os_time_get_nano();
    const uint64_t t0 = hb_tsc();
    VkResult r = hb_wsi_common_queue_present(wsi, queue, pPresentInfo);
    const uint64_t dt = hb_tsc() - t0;
-   hb_pstats_add(HB_PS_SUB, dt > hb_wait_cyc ? dt - hb_wait_cyc : 0);
+   const uint64_t sub = dt > hb_wait_cyc ? dt - hb_wait_cyc : 0;
+   hb_pstats_add(HB_PS_SUB, sub);
    hb_pstats_add(HB_PS_WAIT, hb_wait_cyc);
+   /* [HBPP]: this present's entry time and its sub/wait, for the WSI thread
+    * that flips it (docs/nv-n9v-tail.md §7, HB_PRESENT_EACH=1). */
+   hb_pp_handoff(t0_ns, sub, hb_wait_cyc);
    return r;
 }
 
@@ -470,15 +475,17 @@ x = x.replace(old, """hb_after_put:
       /* On the scanout: no X traffic.  A size change of a fullscreen window
        * ends the X server's grant, and the next present (put_image) checks
        * the geometry again. */
-      hb_pstats_add(HB_PS_FLIP, hb_tsc() - hb_t0);
+      const uint64_t hb_scan_cyc = hb_tsc() - hb_t0;
+      hb_pstats_add(HB_PS_FLIP, hb_scan_cyc);
       xcb_discard_reply(chain->conn, geom_cookie.sequence);
       hb_x11_present_done(chain, image);
-      hb_pstats_present(1, 0);
+      hb_pstats_present(1, 0, hb_scan_cyc, image_index);
       wsi_queue_push(&chain->acquire_queue, image_index);
       return x11_swapchain_result(chain, VK_SUCCESS);
    }
    xcb_flush(chain->conn);
-   hb_pstats_add(HB_PS_FLIP, hb_tsc() - hb_t0);
+   const uint64_t hb_flip_cyc = hb_tsc() - hb_t0;
+   hb_pstats_add(HB_PS_FLIP, hb_flip_cyc);
 
    /* We don't have queued present here.
     * Immediately let application acquire again, but query geometry first so
@@ -489,7 +496,7 @@ x = x.replace(old, """hb_after_put:
    xcb_get_geometry_reply_t *geom = xcb_get_geometry_reply(chain->conn, geom_cookie, &err);
    hb_pstats_add(HB_PS_GEOM, hb_tsc() - hb_tg);
    hb_x11_present_done(chain, image);
-   hb_pstats_present(2, hb_refused);
+   hb_pstats_present(2, hb_refused, hb_flip_cyc, image_index);
    VkResult result = VK_SUCCESS;""", 1)
 open(ws + '/wsi_common_x11.c', 'w').write(x)
 

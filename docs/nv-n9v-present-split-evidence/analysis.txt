@@ -1,0 +1,97 @@
+== present-split.py: guest-clock present share, budget = 33.33 ms (N9v gate)
+== regenerate with: bash docs/nv-n9v-present-split-evidence/reproduce.sh
+
+### A. 1280x720, the N9v flight (the 29.19 avg / 18.2 1%-low run, renderer=venus)
+#    40 world-rate [HBP] windows, 2384 presents, 2026-11-24 boot (0ac70a7b)
+#    input: docs/nv-n9v-tail-evidence/present-windows.csv (<- hbp.csv of that run)
+label                  input           n   submit   %bud     flip   %bud  present   %bud     wait   %bud     idle   %bud
+1280x720-flight        per-window     40     6.84  20.5%     2.86   8.6%     9.71  29.1%     0.00   0.0%    25.52  76.6%
+  (present = sub + flip = the present path; flip alone is the scanout term)
+  frame (p50)   35.84 ms   = 27.9 fps
+  flip share of the frame (p50)      8.0%
+  present path share of the frame    27.1%   (sub+flip; upper bound on the serial cost, the two halves are on different threads)
+  present path share, all samples    23.5 / 27.8 / 32.1 %  (min/mean/max of 40)
+  overlap: not derivable from window rows (they aggregate; HB_PRESENT_EACH=1 is what measures it per frame)
+  present cost: p95 2.92 ms, max 2.94 ms; present-call wait p50 0.00 ms
+  dump: docs/nv-n9v-present-split-evidence/present-windows-720p-flight.csv (40 rows)
+
+### B. 1280x720, the same run's loading/menu windows (189 fps: the A/B of the
+#    instrument's sensitivity -- present is the limit there, not in the flight)
+label                  input           n   submit   %bud     flip   %bud  present   %bud     wait   %bud     idle   %bud
+1280x720-menu-189fps   per-window     29     2.39   7.2%     2.81   8.4%     5.20  15.6%     0.00   0.0%     0.14   0.4%
+  (present = sub + flip = the present path; flip alone is the scanout term)
+  frame (p50)   5.29 ms   = 189.0 fps
+  flip share of the frame (p50)      53.2%
+  present path share of the frame    98.3%   (sub+flip; upper bound on the serial cost, the two halves are on different threads)
+  present path share, all samples    82.4 / 97.1 / 117.9 %  (min/mean/max of 29)
+  overlap: not derivable from window rows (they aggregate; HB_PRESENT_EACH=1 is what measures it per frame)
+  present cost: p95 3.05 ms, max 3.13 ms; present-call wait p50 0.00 ms
+
+### C. 1920x1080, title -> main menu, renderer=venus (p7-venus2, 2026-11-17, d4b7fdd0)
+#    all 19 windows: the two 17 fps ones are title/loading, not the menu
+#    input: docs/cp-p7-evidence/game-venus2-menu.txt ([X] [HBP] rows of that boot)
+label                  input           n   submit   %bud     flip   %bud  present   %bud     wait   %bud     idle   %bud
+1920x1080-all          per-window     19    10.04  30.1%     9.31  27.9%    19.36  58.1%     0.01   0.0%     3.20   9.6%
+  (present = sub + flip = the present path; flip alone is the scanout term)
+  frame (p50)   22.52 ms   = 44.4 fps
+  flip share of the frame (p50)      41.4%
+  present path share of the frame    85.9%   (sub+flip; upper bound on the serial cost, the two halves are on different threads)
+  present path share, all samples    34.5 / 82.2 / 97.2 %  (min/mean/max of 19)
+  flip = set 0.26 ms + flush 8.84 ms   (flush = 94.9 % of flip)
+  overlap: not derivable from window rows (they aggregate; HB_PRESENT_EACH=1 is what measures it per frame)
+  present cost: p95 10.72 ms, max 13.86 ms; present-call wait p50 0.01 ms
+  dump: docs/nv-n9v-present-split-evidence/present-windows-1080p-menu.csv (19 rows)
+
+### D. 1920x1080, the 17 steady menu windows (fps >= 40)
+#    set/flush are the kernel's two round trips inside the flip: SET_SCANOUT_BLOB
+#    and RESOURCE_FLUSH (src/kernel/virtio_gpu_x64.c:1347)
+label                  input           n   submit   %bud     flip   %bud  present   %bud     wait   %bud     idle   %bud
+1920x1080-menu         per-window     17     9.72  29.2%     9.31  27.9%    19.04  57.1%     0.01   0.0%     3.20   9.6%
+  (present = sub + flip = the present path; flip alone is the scanout term)
+  frame (p50)   22.42 ms   = 44.6 fps
+  flip share of the frame (p50)      41.5%
+  present path share of the frame    84.9%   (sub+flip; upper bound on the serial cost, the two halves are on different threads)
+  present path share, all samples    52.7 / 84.1 / 97.2 %  (min/mean/max of 17)
+  flip = set 0.29 ms + flush 8.88 ms   (flush = 95.3 % of flip)
+  overlap: not derivable from window rows (they aggregate; HB_PRESENT_EACH=1 is what measures it per frame)
+  present cost: p95 10.34 ms, max 10.38 ms; present-call wait p50 0.01 ms
+
+### E. the flip term at 1280x720 across every committed world-phase [HBP] row
+#    (17 rows in docs/cp-k7-evidence and docs/cp-present-evidence, same
+#    921600-pixel surface every time -- the spread is the point: present cost at
+#    a fixed size is not one number, so 1080p cannot be extrapolated from it)
+== world          frames   1830  fps 20.0  [HBP] sub 8.19 ms flip 4.10 ms (avg/frame)
+== world          frames   2174  fps 23.9  [HBP] sub 4.49 ms flip 3.00 ms (avg/frame)
+== world          frames   2269  fps 22.9  [HBP] sub 5.89 ms flip 2.98 ms (avg/frame)
+== world          frames   2277  fps 24.5  [HBP] sub 4.63 ms flip 2.95 ms (avg/frame)
+== world          frames   2319  fps 25.5  [HBP] sub 6.33 ms flip 4.33 ms (avg/frame)
+== world          frames   2331  fps 25.6  [HBP] sub 13.04 ms flip 5.19 ms (avg/frame)
+== world          frames   2337  fps 23.5  [HBP] sub 6.70 ms flip 2.93 ms (avg/frame)
+== world          frames   2373  fps 26.1  [HBP] sub 4.25 ms flip 3.02 ms (avg/frame)
+== world          frames   2403  fps 25.8  [HBP] sub 5.28 ms flip 3.70 ms (avg/frame)
+== world          frames   2451  fps 23.7  [HBP] sub 6.03 ms flip 3.27 ms (avg/frame)
+== world          frames   2650  fps 25.0  [HBP] sub 6.29 ms flip 3.02 ms (avg/frame)
+== world          frames   2687  fps 28.9  [HBP] sub 5.06 ms flip 3.39 ms (avg/frame)
+== world          frames   2714  fps 29.3  [HBP] sub 4.68 ms flip 2.93 ms (avg/frame)
+== world          frames   2910  fps 30.7  [HBP] sub 4.34 ms flip 2.96 ms (avg/frame)
+== world          frames   2917  fps 31.4  [HBP] sub 4.36 ms flip 2.97 ms (avg/frame)
+== world          frames  12653  fps 21.9  [HBP] sub 5.89 ms flip 3.00 ms (avg/frame)
+== world          frames  12838  fps 22.6  [HBP] sub 5.30 ms flip 3.00 ms (avg/frame)
+
+### F. the gate arithmetic these shares feed
+#    budget 33.33 ms; 1280x720x4 = 3686400 B/frame; 1920x1080x4 = 8294400 B/frame
+#    (ratio 2.25x).  flip at 720p p50 2.86 ms -> 1080p p50 9.31 ms = 3.26x.
+
+### G. an independent 1920x1080 surface through the same instrument: f5a's vkcube
+#    (different app, FIFO/vsync, 54.1 fps) -- the flush cost is the surface's, not
+#    the game's; present path 147 % of the frame = sub and flip overlap (async)
+label                  input           n   submit   %bud     flip   %bud  present   %bud     wait   %bud     idle   %bud
+1920x1080-vkcube-f5    per-window     26    16.52  49.5%     9.77  29.3%    26.29  78.9%     0.01   0.0%    -7.71 -23.1%
+  (present = sub + flip = the present path; flip alone is the scanout term)
+  frame (p50)   18.47 ms   = 54.1 fps
+  flip share of the frame (p50)      52.9%
+  present path share of the frame    142.3%   (sub+flip; upper bound on the serial cost, the two halves are on different threads)
+  present path share, all samples    132.3 / 147.0 / 177.3 %  (min/mean/max of 26)
+  flip = set 0.09 ms + flush 9.08 ms   (flush = 93.0 % of flip)
+  overlap: not derivable from window rows (they aggregate; HB_PRESENT_EACH=1 is what measures it per frame)
+  present cost: p95 23.34 ms, max 40.13 ms; present-call wait p50 0.01 ms

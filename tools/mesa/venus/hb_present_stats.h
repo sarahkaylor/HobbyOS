@@ -27,6 +27,32 @@
  * Every number is a per-window average and maximum in microseconds.  Cost
  * of the instrument: a few rdtsc and atomic adds per present and one write(2)
  * per window.
+ *
+ * Per present instead of per window (docs/nv-n9v-tail.md §7, t_0552cbd5):
+ * `HB_PRESENT_EACH=1` writes one line per present, on the guest's
+ * CLOCK_MONOTONIC, and (unless HB_PRESENT_STATS_MS says otherwise) no window
+ * rows:
+ *
+ *   [HBPP] t=<ns> seq=N idx=I path=scanout|putimage sub=<ns> wait=<ns>
+ *          flip=<ns> dt=<ns> nosub=0|1
+ *
+ *   t     os_time_get_nano() at the entry of vkQueuePresentKHR (app thread)
+ *   sub   that call minus its fence waits (blit + semaphore submit + hand-off)
+ *   wait  the software WSI's fence wait inside it: the GPU finishing the frame
+ *   flip  the WSI queue thread's present (the scanout ioctl, or put_image)
+ *   dt    entry -> the flip's return: "frame ready in guest -> scanout has it"
+ *         plus however long the frame sat on the WSI queue
+ *   idx   the swapchain image index (a 3-deep chain cycles 0,1,2)
+ *
+ * The app thread's (t, sub, wait) for one present reaches the WSI thread's
+ * flip through a small single-producer/single-consumer ring (hb_pp_handoff ->
+ * hb_pp_pop), so the line carries both halves of the *same* present even
+ * though they are measured on different threads.  If the ring is empty (a
+ * present that flipped more than one image, or a present that failed before
+ * its hand-off) the line says nosub=1 and the sub/wait fields are 0.  Two
+ * cumulative counters ride on every line: ppn = presents that arrived without
+ * a hand-off, ppd = hand-offs dropped because the ring was full; both must
+ * stay 0 for a clean dump.
  */
 #ifndef HB_PRESENT_STATS_H
 #define HB_PRESENT_STATS_H
@@ -103,17 +129,29 @@ struct hb_vcmd {
    uint64_t cnt, sum, max;
 };
 
+/* Per-present mode (HB_PRESENT_EACH=1): one slot per present, handed from the
+ * app thread (t, sub, wait) to the WSI thread (flip).  Single producer, single
+ * consumer; the ring only has to absorb the swapchain's depth. */
+#define HB_PP_SLOTS 64
+struct hb_pprec {
+   uint64_t t_ns, sub_cyc, wait_cyc;
+};
+
 struct hb_pstats {
    uint64_t vsum[HB_VS_N], vmax[HB_VS_N], vcnt[HB_VS_N];
    struct hb_vcmd vcmd[HB_VS_CMDS];  /* replies waited for, by command type */
    struct hb_vtid vtid[HB_VS_TIDS];
    int state;                  /* 0 unread env, 1 on, -1 off */
+   int each;                   /* 1: one [HBPP] line per present */
    uint64_t window_ms;
    uint64_t tsc0, ns0;         /* calibration origin */
    uint64_t win_tsc, win_ns;   /* current window start */
    uint64_t sum[HB_PS_N], max[HB_PS_N], cnt[HB_PS_N];  /* TSC cycles */
    uint64_t presents, scanout, putimage, refused;
    uint64_t total_presents;
+   /* [HBPP]: the app->WSI hand-off ring, its counters, and the present seq. */
+   struct hb_pprec pp[HB_PP_SLOTS];
+   uint64_t pp_head, pp_tail, pp_dropped, pp_nosub, pp_seq;
 };
 
 #ifdef HB_PSTATS_DEFINE
@@ -142,12 +180,72 @@ hb_pstats_on(void)
    if (st)
       return st > 0;
    const char *e = hb_getenv("HB_PRESENT_STATS_MS");
-   long ms = e ? strtol(e, NULL, 10) : 2000;
+   const char *ea = hb_getenv("HB_PRESENT_EACH");
+   const int each = ea && strtol(ea, NULL, 10) != 0;
+   /* per-present mode without an explicit window size: window rows off */
+   long ms = e ? strtol(e, NULL, 10) : (each ? 0 : 2000);
    s->window_ms = ms > 0 ? (uint64_t)ms : 0;
+   s->each = each;
    s->tsc0 = s->win_tsc = hb_tsc();
    s->ns0 = s->win_ns = (uint64_t)os_time_get_nano();
-   __atomic_store_n(&s->state, ms > 0 ? 1 : -1, __ATOMIC_RELEASE);
-   return ms > 0;
+   __atomic_store_n(&s->state, (ms > 0 || each) ? 1 : -1, __ATOMIC_RELEASE);
+   return ms > 0 || each;
+}
+
+/* 1: one [HBPP] line per present (HB_PRESENT_EACH). */
+static inline int
+hb_pstats_each(void)
+{
+   if (!__atomic_load_n(&hb_pstats.state, __ATOMIC_ACQUIRE))
+      (void)hb_pstats_on();
+   return __atomic_load_n(&hb_pstats.each, __ATOMIC_ACQUIRE);
+}
+
+/* Cycles per ns, from the calibration origin; 1.0 until it has 10 ms of
+ * baseline (the same rule the window rows use). */
+static inline double
+hb_pstats_cpn(void)
+{
+   struct hb_pstats *s = &hb_pstats;
+   const uint64_t dt = hb_tsc() - s->tsc0;
+   const uint64_t dn = (uint64_t)os_time_get_nano() - s->ns0;
+   return dn > 10000000ull ? (double)dt / (double)dn : 1.0;
+}
+
+/* App thread, at the end of vkQueuePresentKHR: hand this present's entry time
+ * (guest ns) and its sub/wait (TSC cycles) to the WSI thread that will flip
+ * it.  Single producer; a full ring drops the record instead of blocking. */
+static inline void
+hb_pp_handoff(uint64_t t_ns, uint64_t sub_cyc, uint64_t wait_cyc)
+{
+   struct hb_pstats *s = &hb_pstats;
+   if (!hb_pstats_each())
+      return;
+   const uint64_t h = __atomic_load_n(&s->pp_head, __ATOMIC_RELAXED);
+   const uint64_t t = __atomic_load_n(&s->pp_tail, __ATOMIC_ACQUIRE);
+   if (h - t >= HB_PP_SLOTS) {
+      __atomic_fetch_add(&s->pp_dropped, 1, __ATOMIC_RELAXED);
+      return;
+   }
+   struct hb_pprec *r = &s->pp[h % HB_PP_SLOTS];
+   r->t_ns = t_ns;
+   r->sub_cyc = sub_cyc;
+   r->wait_cyc = wait_cyc;
+   __atomic_store_n(&s->pp_head, h + 1, __ATOMIC_RELEASE);
+}
+
+/* WSI thread: the oldest hand-off, or 0 if there is none. */
+static inline int
+hb_pp_pop(struct hb_pprec *out)
+{
+   struct hb_pstats *s = &hb_pstats;
+   const uint64_t t = __atomic_load_n(&s->pp_tail, __ATOMIC_RELAXED);
+   const uint64_t h = __atomic_load_n(&s->pp_head, __ATOMIC_ACQUIRE);
+   if (t == h)
+      return 0;
+   *out = s->pp[t % HB_PP_SLOTS];
+   __atomic_store_n(&s->pp_tail, t + 1, __ATOMIC_RELEASE);
+   return 1;
 }
 
 /* One stage sample, in TSC cycles. */
@@ -260,9 +358,11 @@ hb_pstats_add_us(int k, uint32_t us)
 
 /* After each flip (WSI queue thread): count it and, once per window, print
  * the row and start a new window.  path: 1 scanout, 2 putimage; refused:
- * the kernel said not now (fell back to putimage). */
+ * the kernel said not now (fell back to putimage).  flip_cyc: this flip's
+ * TSC cost (the caller measured it); idx: the swapchain image index.  Both
+ * feed the [HBPP] line when HB_PRESENT_EACH=1. */
 static inline void
-hb_pstats_present(int path, int refused)
+hb_pstats_present(int path, int refused, uint64_t flip_cyc, uint32_t idx)
 {
    struct hb_pstats *s = &hb_pstats;
    if (!hb_pstats_on())
@@ -272,6 +372,35 @@ hb_pstats_present(int path, int refused)
    if (refused)
       __atomic_fetch_add(&s->refused, 1, __ATOMIC_RELAXED);
    uint64_t now_ns = (uint64_t)os_time_get_nano();
+   const double pp_cpn = hb_pstats_cpn();
+
+   /* [HBPP]: one line per present, guest CLOCK_MONOTONIC.  The app thread's
+    * (t, sub, wait) comes from the hand-off ring, so sub and flip below are
+    * the two halves of the same present. */
+   if (__atomic_load_n(&s->each, __ATOMIC_ACQUIRE)) {
+      struct hb_pprec r = { 0, 0, 0 };
+      const int have = hb_pp_pop(&r);
+      if (!have)
+         __atomic_fetch_add(&s->pp_nosub, 1, __ATOMIC_RELAXED);
+      const uint64_t seq = __atomic_add_fetch(&s->pp_seq, 1, __ATOMIC_RELAXED);
+      const uint64_t dt_ns = have && now_ns > r.t_ns ? now_ns - r.t_ns : 0;
+      char prow[384];
+      int pl = snprintf(prow, sizeof prow,
+                        "[HBPP] t=%llu seq=%llu idx=%u path=%s sub=%llu wait=%llu "
+                        "flip=%llu dt=%llu nosub=%d ppn=%llu ppd=%llu\n",
+                        (unsigned long long)r.t_ns, (unsigned long long)seq, idx,
+                        path == 1 ? "scanout" : "putimage",
+                        (unsigned long long)(have ? (uint64_t)((double)r.sub_cyc / pp_cpn) : 0),
+                        (unsigned long long)(have ? (uint64_t)((double)r.wait_cyc / pp_cpn) : 0),
+                        (unsigned long long)((double)flip_cyc / pp_cpn),
+                        (unsigned long long)dt_ns, have ? 0 : 1,
+                        (unsigned long long)__atomic_load_n(&s->pp_nosub, __ATOMIC_RELAXED),
+                        (unsigned long long)__atomic_load_n(&s->pp_dropped, __ATOMIC_RELAXED));
+      if (pl > 0)
+         (void)!write(2, prow, (size_t)(pl < (int)sizeof prow ? pl : (int)sizeof prow - 1));
+      if (!s->window_ms)
+         return;
+   }
    if (now_ns - s->win_ns < s->window_ms * 1000000ull)
       return;
    uint64_t now_tsc = hb_tsc();

@@ -333,6 +333,11 @@ difference as a HobbyOS-vs-Linux statement.
    benchmark's camera-path *level* (23.0–43.2 ms medians) plus broadband jitter,
    with no periodic component, and that the 30 fps 1 %-low implies a ~49 fps
    median. Reproduce with `tools/cp/bench/frames-dist.py`.
+6. **Present's share of the budget** — done for both resolutions: `docs/nv-n9v-present-split.md`
+   reads `[HBP]` from the runs above (720p flight, and the only 1920×1080 venus present data,
+   p7-venus2's menu) and gives submit / flip / wait / idle in ms and as a share of the 33.33 ms
+   gate, with the flip's `set`/`flush` split (`RESOURCE_FLUSH` is 95 % of the 1080p flip).
+   Reproduce with `tools/cp/bench/present-split.py`.
 
 ## 7. Evidence map
 
