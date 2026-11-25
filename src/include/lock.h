@@ -303,6 +303,11 @@ uint32_t lock_audit_reg_dropped(void);  /* locks the registry could not hold */
 uint32_t lock_audit_reg_used(void);     /* slots filled (occupancy, not a defect) */
 uint64_t lock_audit_irqoff_max_us(void);
 uint64_t lock_audit_irqoff_total_us(void);
+/* Host steal time removed from those windows, and the raw (uncorrected) TSC
+ * window.  max/total are guest execution time; a large steal with a small max
+ * is an oversubscribed runner, not a lock-scope defect. */
+uint64_t lock_audit_irqoff_steal_us(void);
+uint64_t lock_audit_irqoff_wall_max_us(void);
 void lock_audit_reset_counters(void);
 
 /* One machine-readable console record; the test tiers grep and assert on it. */
