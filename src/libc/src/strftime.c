@@ -14,6 +14,8 @@
  * device and glibc's strftime %s uses mktime, identical under TZ=UTC0).
  */
 #ifdef HOST_TEST
+#include <locale.h> /* locale_t for strftime_l's prototype (Apple's <time.h>
+                     * does not pull it in; glibc's happens to) */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

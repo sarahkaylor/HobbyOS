@@ -16,8 +16,12 @@ import os, re, sys
 
 def check(roadmap="program-2/ROADMAP.md", plan="gaming.md"):
     txt = open(roadmap, encoding="utf-8").read()
-    plan_txt = open(plan, encoding="utf-8").read()
-    plan_ids = set(re.findall(r"\bGB-(\d{3})\b", plan_txt))
+    # gaming.md is not in this repo: it was deleted with the decommissioned swarm
+    # (c3f78668).  Only the last row needs it — the epic/boundary/backlog rows read
+    # the roadmap alone — so a missing plan is a SKIP on that row, not a crash that
+    # reddened every clean checkout's host_tests (linux-ci run 45261954209).
+    plan_txt = open(plan, encoding="utf-8").read() if os.path.exists(plan) else None
+    plan_ids = set(re.findall(r"\bGB-(\d{3})\b", plan_txt)) if plan_txt is not None else None
     out = []
 
     for epic in ("MONO", "RTS", "VULKAN"):
@@ -46,9 +50,13 @@ def check(roadmap="program-2/ROADMAP.md", plan="gaming.md"):
                     f"{card}: the doc states a falsifier policy"))
 
     cited = set(re.findall(r"\bGB-(\d{3})\b", txt))
-    missing = sorted(cited - plan_ids)
-    out.append(("ok" if not missing else "fail",
-                f"every cited GB id exists in gaming.md (missing={missing})"))
+    if plan_ids is None:
+        out.append(("skip", f"cited GB ids resolve against {plan} — {plan} is not in "
+                            "this tree (removed with the decommissioned swarm, c3f78668)"))
+    else:
+        missing = sorted(cited - plan_ids)
+        out.append(("ok" if not missing else "fail",
+                    f"every cited GB id exists in gaming.md (missing={missing})"))
 
     return out
 
@@ -58,8 +66,21 @@ if __name__ == "__main__":
     plan = sys.argv[2] if len(sys.argv) > 2 else "gaming.md"
     res = check(road, plan)
     bad = 0
+    skipped = 0
     for st, msg in res:
-        print(("PASS: " if st == "ok" else "FAIL: ") + msg)
-        bad += st != "ok"
-    print(f"\nROADMAP_DOC_TEST: {'PASS' if not bad else 'FAIL'} ({len(res)} checks, {bad} failed)")
-    sys.exit(1 if bad else 0)
+        if st == "skip":
+            skipped += 1
+            print("SKIP: " + msg)
+        else:
+            print(("PASS: " if st == "ok" else "FAIL: ") + msg)
+            bad += st != "ok"
+    if bad:
+        print(f"\nROADMAP_DOC_TEST: FAIL ({len(res)} checks, {bad} failed)")
+        sys.exit(1)
+    if skipped:
+        # Exit 77 = SKIP (automake's convention): the rows that need no plan doc
+        # passed, one row could not run.  Not a pass and not a failure.
+        print(f"\nROADMAP_DOC_TEST: SKIP ({len(res)} checks, {skipped} skipped, 0 failed)")
+        sys.exit(77)
+    print(f"\nROADMAP_DOC_TEST: PASS ({len(res)} checks, 0 failed)")
+    sys.exit(0)

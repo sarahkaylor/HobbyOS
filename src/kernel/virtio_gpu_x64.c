@@ -1185,6 +1185,7 @@ void virtio_gpu_flush_rects(const struct virtio_gpu_xrect* rects, int count) {
   }
 #endif /* WD_X64_FLUSH_PROBE */
 
+  int bga_present = 0;
   uint64_t flags = spinlock_acquire_irqsave(&gpu_lock);
   if (gpu_mode == VGPU_MODE_VIRTIO && vgpu_so_active) {
     /* P7: a client's blob is on the scanout.  The desktop keeps drawing into
@@ -1200,6 +1201,27 @@ void virtio_gpu_flush_rects(const struct virtio_gpu_xrect* rects, int count) {
     }
     gpu_isr_ack();
   } else if (gpu_mode == VGPU_MODE_BGA) {
+    /* Decided under the lock, done outside it (see below). */
+    bga_present = 1;
+  }
+  spinlock_release_irqrestore(&gpu_lock, flags);
+
+  /* The BGA copy runs with interrupts ENABLED.
+   *
+   * bga_present_rect reads the kernel framebuffer and writes the device's
+   * linear framebuffer; it touches nothing gpu_lock protects (gpu_mode and
+   * bga_framebuffer_phys are fixed at init).  It is also the one path here
+   * whose cost is per PIXEL in the HOST: the BAR is device memory, so each
+   * store is a host-side device access -- ~2 us of EPT-violation exit into
+   * QEMU under KVM, ~90 ns under TCG, ~10-20 ns on real hardware.  Holding
+   * the lock with interrupts off across a 1920x1080 present is therefore
+   * 116 ms of masked time on the nested-KVM CI runner against 5.6 ms under
+   * TCG (t_24e1ea49: the lock-scope gate's red, unattributed because no lock
+   * is held when the window closes).  The answer is to stop masking
+   * interrupts for emulated device memory, not to widen the budget: a
+   * concurrent flush can only interleave pixels, and gpu_mode cannot change
+   * once init has finished. */
+  if (bga_present) {
     for (int i = 0; i < count; i++) {
       int32_t x, y, w, h;
       if (!virtio_gpu_x64_clamp_rect(rects[i].x, rects[i].y, rects[i].w, rects[i].h,
@@ -1208,7 +1230,6 @@ void virtio_gpu_flush_rects(const struct virtio_gpu_xrect* rects, int count) {
       bga_present_rect(x, y, w, h);
     }
   }
-  spinlock_release_irqrestore(&gpu_lock, flags);
 }
 
 uint32_t* virtio_gpu_get_framebuffer(void) {

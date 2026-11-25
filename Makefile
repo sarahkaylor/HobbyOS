@@ -3764,7 +3764,7 @@ $(EXT2_TEST): src/host/ext2_test.c src/kernel/ext2.c src/include/ext2.h
 	$(HOST_CC) -Isrc/include -Wall -Wextra -g -O1 src/kernel/ext2.c src/host/ext2_test.c -o $@
 ext2_test_run: $(EXT2_TEST)
 	$(HOST_RUN_EXT2) ./$(EXT2_TEST)
-host_tests: ext2_test_run
+host_tests_linux: ext2_test_run
 .PHONY: ext2_test_run
 HOST_RUN_EXT2 = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 300 "$$@"; else exec "$$@"; fi' sh
 
@@ -4055,7 +4055,7 @@ $(X11_LIBC_TEST): obj/host_x11_libc_test.o obj/host_hb_inet.o obj/host_hb_utsnam
 	$(HOST_CC) -o $@ $^
 x11_libc_test_run: $(X11_LIBC_TEST)
 	./$(X11_LIBC_TEST)
-host_tests: x11_libc_test_run
+host_tests_linux: x11_libc_test_run
 .PHONY: x11_libc_test_run
 
 # icewm.md M2 (lane xlibs-ext): math_ext.c (frexp/ldexp/scalbn) bit-exact vs glibc.
@@ -4064,7 +4064,7 @@ $(X11EXT_LIBC_TEST): obj/host_x11ext_libc_test.o obj/host_hb_math_ext.o
 	$(HOST_CC) -o $@ $^ -lm
 x11ext_libc_test_run: $(X11EXT_LIBC_TEST)
 	./$(X11EXT_LIBC_TEST)
-host_tests: x11ext_libc_test_run
+host_tests_linux: x11ext_libc_test_run
 .PHONY: x11ext_libc_test_run
 
 STRING_TEST = libc_string_test_host
@@ -4184,8 +4184,16 @@ $(MATH_TX): obj/host_math_transcend_test.o obj/host_hb_math_np.o
 
 # P3.2/P3.3 wide parity: wchar / wctype / strftime / xlocale compiled from
 # the bare-metal sources with -DHOST_TEST (colliding symbols are hb_* there)
-# and raced against glibc (src/host/libc_wide_parity_test.c).
+# and raced against the host libc (src/host/libc_wide_parity_test.c).  The
+# `_l` family the oracle used to require is a POSIX-2008 extension that only
+# glibc declares in full, so the TU now picks its oracle rung at compile time:
+# glibc races the real *_l entry points, everything else races the plain
+# C-locale entry point with the token selected via uselocale().
 WIDE_PARITY = libc_wide_parity_run
+# The same cases and assertions with the portable rung forced, so the code
+# path macOS and musl take is gated on the Linux farm too -- and so the two
+# rungs can be diffed against one another (they must agree check-for-check).
+WIDE_PARITY_PORTABLE = libc_wide_parity_portable_run
 obj/host_hb_wchar_wp.o: src/libc/src/wchar.c src/libc/include/*.h
 	@mkdir -p obj
 	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
@@ -4201,7 +4209,12 @@ obj/host_hb_xlocale_wp.o: src/libc/src/xlocale.c src/libc/include/*.h
 obj/host_libc_wide_parity_test.o: src/host/libc_wide_parity_test.c
 	@mkdir -p obj
 	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
+obj/host_libc_wide_parity_portable_test.o: src/host/libc_wide_parity_test.c
+	@mkdir -p obj
+	$(HOST_CC) $(HOST_CFLAGS) -DHB_ORACLE_PORTABLE=1 -c $< -o $@
 $(WIDE_PARITY): obj/host_libc_wide_parity_test.o obj/host_hb_wchar_wp.o obj/host_hb_wctype_wp.o obj/host_hb_strftime_wp.o obj/host_hb_xlocale_wp.o
+	$(HOST_CC) -o $@ $^
+$(WIDE_PARITY_PORTABLE): obj/host_libc_wide_parity_portable_test.o obj/host_hb_wchar_wp.o obj/host_hb_wctype_wp.o obj/host_hb_strftime_wp.o obj/host_hb_xlocale_wp.o
 	$(HOST_CC) -o $@ $^
 
 # The ported wc built for the host: ours except getopt_long (hb_* via our
@@ -4776,14 +4789,45 @@ test_pr_sync:
 
 # The suite as one list, so a host-portable subset can be derived from it
 # without maintaining a second copy (see host_tests_portable).
-HOST_TESTS_TARGETS = $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness test_pr_sync $(GAMES_SCAN_TEST) $(GFX_STATS_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_SIGFRAME_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(VFS_BIND_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) $(T4_COMPAT_SELFTEST) $(OPEN_MODE_SCAN) $(NFS_RSIZE_SCAN) $(VECTOR_SHAPE_SCAN) $(SDL_TEST_APP_HOST) $(UNAME_PARITY) $(AUDIO_STUB_TEST) $(LINUX_SND_PARAMS_TEST) $(SSP_REPORT_TEST) $(KCONSOLE_TEST) $(KCONSOLE_MT_TEST) $(WD_SILENCE_TEST)
+HOST_TESTS_TARGETS = $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harness test_pr_sync $(GAMES_SCAN_TEST) $(GFX_STATS_TEST) $(DESKTOP_MENU_TEST) $(DESKTOP_DRAG_TEST) $(DESKTOP_DAMAGE_TEST) $(DESKTOP_INPUT_TEST) $(DESKTOP_TERM_TEST) $(DESKTOP_PIXEL_TEST) $(X11_LIB_TEST) $(XCALC_TEST) $(ANTFARM_TEST) $(XEYES_TEST) $(XNIBBLER_TEST) $(NANO_TERM_TEST) $(APPS_SUITE_TEST) $(NFS_PROTO_TEST) $(RESOLV_TEST) $(TIME_MATH_TEST) $(CONSOLE_APP_TEST) $(PONG_TEST_BIN) $(STARDUST_TEST) $(DIALOG_ARROW_TEST) $(GUI_TEST) $(ERRNO_TEST) $(ELF_IMAGE_TEST) $(LINUX_ABI_TEST) $(THRD_TEST_HOST) $(TLS_TEST_HOST) $(WK1C_TEST_HOST) $(IPC_PROTO_TEST) $(IPC_TEST_HOST) $(TORTURE_TEST_HOST) $(WSURF_TEST_HOST) $(GRAPHICS_LIB_TEST) $(WINDOW_DAMAGE_TEST) $(WINDOW_TEXT_TEST) $(STRING_TEST) $(CTYPE_TEST) $(STDLIB_TEST) $(SETJMP_TEST) $(REALLOC_TEST) $(PRINTF_TEST) $(HEADERS_TEST) $(CXXRT_TEST) $(CXX_HEADERS_TEST) $(RTTI_TEST) $(GETOPT_TEST) $(REGEX_TEST) $(LANGINFO_TEST) $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) $(WIDE_PARITY_PORTABLE) $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) $(UNEXPAND_PARITY) $(CKSUM_PARITY) $(MD5SUM_PARITY) $(TAC_PARITY) $(CMP_PARITY_STRICT) $(TAR_TEST) $(HOST_APP_TEST_BINS) $(FB_IOCTL_TEST) $(FB_PIXEL_TEST) $(T4_COMPAT_PARITY) $(EVDEV_TEST) $(XCRYPT_TEST) $(JOYPAD_TEST) $(CLOCKABI_TEST) $(MEMFD_TEST) $(NES_TEST) $(LINUX_LAYOUT_TEST) $(LINUX_SIGFRAME_TEST) $(LINUX_INPUT_TEST) $(INPUT_NODE_TEST) $(FB_MMAP_TEST) $(LINUX_ABI_CONSTANTS_TEST) $(LOCKSTEAL_TEST) $(VFS_BIND_TEST) $(M2_CONTRACT_TEST) $(T4_DEVICE_SELFTEST) $(T4_DEVICE_CHECK) $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) $(T4_COMPAT_SELFTEST) $(OPEN_MODE_SCAN) $(NFS_RSIZE_SCAN) $(VECTOR_SHAPE_SCAN) $(SDL_TEST_APP_HOST) $(UNAME_PARITY) $(AUDIO_STUB_TEST) $(LINUX_SND_PARAMS_TEST) $(SSP_REPORT_TEST) $(KCONSOLE_TEST) $(KCONSOLE_MT_TEST) $(WD_SILENCE_TEST)
 # H4-kglitch: every step of the recipe runs and a red one is recorded, not
 # fatal (tools/host/host_try.sh); the last line lists every failure and exits 1.
 # Before, the first red line (the known-red python suite) ended the recipe and
 # every test binary after it was built but never run.
 HOST_TESTS_FAILS = obj/host_tests.fails.$$PPID
 HOST_TRY = @sh tools/host/host_try.sh $(HOST_TESTS_FAILS)
-host_tests: $(HOST_TESTS_TARGETS)
+# What CI types is `make host_tests`, and it must mean the tier that can
+# actually run here:
+#   - on the Linux farm: the whole tier, glibc/coreutils differentials and the
+#     musl-built probes included (linux-ci's arm job runs exactly this);
+#   - on macOS: the host-portable suite.  The hostbound prerequisites cannot
+#     even *build* there (musl-gcc does not exist for the T4 probes, a Mach-O
+#     process cannot dlopen an x86_64 ELF DSO, pushfq/popfq are x86-only), so
+#     `make host_tests` used to stop at the first of them and the job could
+#     never say anything about the tier.  This is the split linux-ci already
+#     makes, applied where it is forced -- not a silent skip: the excluded
+#     category is enumerated above, with its reason.
+# host_tests_linux is the farm tier explicitly (for a Mac with a musl
+# toolchain, or to bisect one of the differentials by hand).  The five
+# prerequisite-only run targets that used to hang off `host_tests` (ext2,
+# x11_libc, x11ext_libc, vdisplay, w4_doom) hang off it too: two of them are
+# on the hostbound list, and no target should join the Darwin gate by accident
+# because a rule said `host_tests:` instead of `host_tests_linux:`.
+ifeq ($(UNAME_S),Darwin)
+# The hostbound targets are not RUN here, but the wide set is still BUILT: the
+# defect this gate exists to catch is a TU that does not compile on Apple's
+# libc (mac-ci 2026-11-23: "call to undeclared function 'strtoll_l'" x20 in
+# src/host/libc_wide_parity_test.c, then "fatal error: too many errors
+# emitted").  Both rungs are linked -- glibc's *_l oracle and the portable
+# uselocale() one -- so a macOS push proves the port compiles; the differential
+# verdict stays on the farm, where the reference implementation lives.
+host_tests: host_tests_portable $(WIDE_PARITY) $(WIDE_PARITY_PORTABLE)
+else
+host_tests: host_tests_linux
+endif
+.PHONY: host_tests
+
+host_tests_linux: $(HOST_TESTS_TARGETS)
 	@rm -f $(HOST_TESTS_FAILS)
 	$(HOST_TRY) ./$(EDITOR_TEST_BIN)
 	$(HOST_TRY) ./$(GAMES_SCAN_TEST)
@@ -4868,6 +4912,7 @@ endif
 	$(HOST_TRY) ./$(NUM_PARITY)
 	$(HOST_TRY) ./$(MATH_TX)
 	$(HOST_TRY) ./$(WIDE_PARITY)
+	$(HOST_TRY) ./$(WIDE_PARITY_PORTABLE)
 	$(HOST_TRY) ./files_test_host
 	$(HOST_TRY) ./calc_test_host
 	$(HOST_TRY) ./clock_test_host
@@ -5000,7 +5045,7 @@ $(VDISPLAY_TEST): src/host/vdisplay_test.c src/kernel/vdisplay.c src/include/vdi
 	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) -DVDISP_HOST_TEST src/kernel/vdisplay.c src/host/vdisplay_test.c -o $@
 vdisplay_test_run: $(VDISPLAY_TEST)
 	./$(VDISPLAY_TEST)
-host_tests: vdisplay_test_run
+host_tests_linux: vdisplay_test_run
 .PHONY: vdisplay_test_run
 
 # GB-160 (parent GB-041): W4 DOOM static-musl port surface.  The deliverable is
@@ -5010,7 +5055,7 @@ host_tests: vdisplay_test_run
 w4_doom_test:
 	python3 tools/sdl/w4/w4_doom_test.py
 	python3 tools/sdl/w4/w4_doom_test.py --self-test
-host_tests: w4_doom_test
+host_tests_linux: w4_doom_test
 .PHONY: w4_doom_test
 
 # Linux-ABI probe ELFs (docs/linux-abi.md bring-up harness).
@@ -5063,8 +5108,18 @@ doom_elf_test_gen:
 # of it is a bug -- so the portable subset excludes those *by category* rather
 # than skipping failures one at a time:
 #
-#   glibc/coreutils parity .... WIDE_PARITY WC_PARITY (host has no glibc _l,
-#                               no struct re_registers, no GNU coreutils bytes)
+#   glibc/coreutils parity .... WIDE_PARITY $(WC_PARITY) (no glibc * answers
+#                               / no struct re_registers / no GNU coreutils
+#                               bytes).  The wide set's ORACLE has a portable
+#                               rung now, so the TU compiles and links on any
+#                               POSIX host -- but its 1511 assertions are
+#                               glibc's C-locale ANSWERS: Apple's C locale is
+#                               single-byte 1:1 (MB_CUR_MAX == 1, every byte
+#                               decodes; glibc returns EILSEQ for 0x80/C3 A9),
+#                               measured on mac-ci 2026-11-25 (mbrtowc/
+#                               mbrlen/mbtowc/mblen case 4..7).  A macOS host
+#                               still BUILDS both rungs (see the Darwin branch
+#                               of `host_tests`); the verdict is the farm's.
 #   cross-ABI dlopen .......... xcompat_test_run, x11_libc_test_run (an ELF
 #                               DSO cannot be dlopen()ed by a Mach-O process)
 #   x86_64-host-only .......... LOCKSTEAL_TEST (pushfq/popfq), T4 probes,
@@ -5076,6 +5131,17 @@ doom_elf_test_gen:
 #
 # Everything else builds and runs on any POSIX host; that is the set this target
 # proves.  Add to HOST_TESTS_HOSTBOUND only with the reason it cannot work.
+#
+# EDITOR.BIN_host is listed here even though it is an app binary and not a test:
+# `host_tests_portable` builds it as an ORDER-ONLY prerequisite (see the target)
+# because editor_test_host -- which IS portable -- spawns "./EDITOR.BIN_host"
+# from its mock desktop (src/host/compat.c spawn2).  Being on this list keeps it
+# out of the run list (the gate's loop runs $^, and the editor binary would just
+# sit in its event loop until the 40 s timeout); being order-only keeps it out
+# of $^ while still building before the gate runs.  Without that, the test ran
+# against a file nothing built -- measured on mac-ci 2026-11-25: "  FAIL
+# editor_test_host / [LAUNCH] EDITOR.BIN / execv failed: No such file".
+# A target and its payload are one entry.
 # %parity% is the whole family by construction: every one of them compares
 # HobbyOS's implementation against the HOST's glibc or GNU coreutils bytes
 # (head/tail/cut/tr/.../wc, uname, scanf/printf, math transcendentals, the wide
@@ -5084,7 +5150,8 @@ doom_elf_test_gen:
 # only honours a TRAILING % -- "$(filter %parity%,...)" matches nothing there
 # while matching fine under make 4.x on the farm, so a pattern here would mean
 # "everything runs" on one host and "nothing does" on the other (measured).
-HOST_TESTS_HOSTBOUND = $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) \
+HOST_TESTS_HOSTBOUND = $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) \
+                       $(WIDE_PARITY) $(WIDE_PARITY_PORTABLE) \
                        $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) \
                        $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) \
                        $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) \
@@ -5101,7 +5168,7 @@ HOST_TESTS_HOSTBOUND = $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) 
                        $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) \
                        $(SDL_TEST_APP_HOST)
 
-host_tests_portable: $(filter-out $(HOST_TESTS_HOSTBOUND),$(HOST_TESTS_TARGETS))
+host_tests_portable: $(filter-out $(HOST_TESTS_HOSTBOUND),$(HOST_TESTS_TARGETS)) | $(EDITOR_HOST)
 	@printf '== host-portable suite: %s targets (%s excluded)\n' \
 	  "$(words $^)" "$(words $(HOST_TESTS_HOSTBOUND))"
 	@fail=0; pass=0; skip=0; \

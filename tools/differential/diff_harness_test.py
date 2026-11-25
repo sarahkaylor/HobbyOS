@@ -50,8 +50,12 @@ def build_hello():
 def main():
     print("=== build + capture hello ===")
     if not build_hello():
+        # Exit 77 = SKIP (automake's convention, graded apart by
+        # tools/t5/run_t5_tests.py): no cc means this row could not run, which is
+        # not a pass and not a red.  A missing toolchain fails the host_tests
+        # *build* long before this line, so a skip here cannot mask a broken CI.
         print("SKIP: no cc toolchain; cannot build the probe")
-        return 0
+        return 77
     check(os.path.exists(BIN), "hello built")
 
     with tempfile.TemporaryDirectory() as td:

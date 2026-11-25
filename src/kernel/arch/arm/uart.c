@@ -40,7 +40,17 @@ static void uart_putc_body(char c) {
 }
 
 /* ---- C0-console arch hooks (src/kernel/kconsole.c) ---- */
+/* Bytes per CPU pushed into the wire (console.h cons_hw_bytes): the lock audit
+   uses it to attribute an IRQ-off window to a console write. */
+static volatile uint32_t arm_cons_bytes[MAX_CPUS];
+uint32_t cons_hw_bytes(uint32_t cpu) {
+  return cpu < MAX_CPUS ? __atomic_load_n(&arm_cons_bytes[cpu], __ATOMIC_RELAXED) : 0;
+}
+
 void cons_hw_tx(const char *s, int n) {
+  uint32_t me = get_cpuid();
+  if (me < MAX_CPUS && n > 0)
+    __atomic_add_fetch(&arm_cons_bytes[me], (uint32_t)n, __ATOMIC_RELAXED);
   for (int i = 0; i < n; i++)
     uart_putc_body(s[i]);
 }

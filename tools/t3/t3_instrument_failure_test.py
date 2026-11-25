@@ -7,7 +7,9 @@ returned 0).  The fix makes it fire when a STARTED sample's monitor socket is go
 after the read (QEMU killed mid-read removes the unix socket).  This test drives that
 exact gate deterministically with a real unix socket removed mid-sample.
 """
-import os, socket, subprocess, tempfile, time, sys
+import os, shutil, socket, subprocess, tempfile, time, sys
+
+SAMPLE_S = 3        # how long a sample's monitor read lasts
 
 fails = 0
 def check(cond, msg):
@@ -15,9 +17,24 @@ def check(cond, msg):
     if cond: print("  PASS:", msg)
     else: fails += 1; print("  FAIL:", msg)
 
+def connector(sock):
+    """The monitor read: connect to the unix socket and hold it open SAMPLE_S seconds.
+
+    socat where it exists (CI has it), else python3 — which is guaranteed,
+    because this suite *is* python3.  A host without socat used to fail the
+    live case for the wrong reason: `socat: not found` makes the read exit
+    non-zero, and the gate then correctly calls that INSTRUMENT-FAILURE, so the
+    test reported a defect in the gate that was a missing binary on the host.
+    """
+    read = "sleep %d | " % SAMPLE_S
+    if shutil.which("socat"):
+        return read + 'socat - "UNIX-CONNECT:%s"' % sock
+    return (read + 'python3 -c "import socket,sys,time; s=socket.socket(socket.AF_UNIX); '
+            's.connect(sys.argv[1]); time.sleep(%d)" %s' % (SAMPLE_S, sock))
+
 def gate(tmpdir, sock):
-    cmd = ('started=1; ( set +e; set +o pipefail; sleep 3 | socat - "UNIX-CONNECT:%s" >/dev/null 2>&1 ) 2>/dev/null; '
-           'st=$?; if [ "$started" = "1" ] && { [ "$st" != "0" ] || [ ! -S "%s" ]; }; then echo "INSTRUMENT-FAILURE-fired"; else echo "INSTRUMENT-FAILURE-absent"; fi' % (sock, sock))
+    cmd = ('started=1; ( set +e; set +o pipefail; %s >/dev/null 2>&1 ) 2>/dev/null; '
+           'st=$?; if [ "$started" = "1" ] && { [ "$st" != "0" ] || [ ! -S "%s" ]; }; then echo "INSTRUMENT-FAILURE-fired"; else echo "INSTRUMENT-FAILURE-absent"; fi' % (connector(sock), sock))
     return cmd
 
 # --- case CUT: a started sample whose monitor socket is removed mid-read ---------

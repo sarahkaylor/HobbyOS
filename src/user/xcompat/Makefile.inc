@@ -334,5 +334,11 @@ $(XCOMPAT_TEST): $(XCOMPAT_TEST_SRCS) src/host/xcompat_abi_probe.h \
 
 xcompat_test_run: $(XCOMPAT_TEST)
 	./$(XCOMPAT_TEST)
-host_tests: xcompat_test_run
+# On the FARM tier, not on `host_tests` itself: this test dlopens x86_64 ELF
+# DSOs into its own process, which a Mach-O process cannot do, so it is on
+# HOST_TESTS_HOSTBOUND and `make host_tests` on macOS dispatches to the
+# host-portable suite (Makefile: the host_tests/host_tests_linux ifeq).
+# Hung off `host_tests` it silently joined the macOS gate and failed the job
+# with "slice is not valid mach-o file" (measured 2026-11-25).
+host_tests_linux: xcompat_test_run
 .PHONY: xcompat_test_run

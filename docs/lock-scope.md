@@ -124,6 +124,67 @@ The remaining 4.9 ms is `vm_lock`: a page-table walk over a large region, still
 `LOCK_CLASS_IRQ` because the fault path takes it.  It is bounded and measured,
 not hidden — the table above is the number to improve next.
 
+## 4a. The 117 ms window that was not a lock (linuxci nested-KVM, 2026-11)
+
+The x64 unit tier on the `linuxci` runner (Proxmox VM, **nested KVM**) failed
+this gate on every branch from the day the gate landed: `irqoff_max_us`
+110,000-125,000 against the 50,000 budget, with `worst_lock=- pc=0x0` -- no
+lock attributed, no `[BLOCKHOLD]`, no `[LOCKERR]`, and every other test green.
+
+The gate was right to fire.  Three rounds of measurement were needed to find
+out what it was firing on, and the report now carries the fields that make
+that answerable from a single log:
+
+| Round | What the log said | What it ruled out |
+| --- | --- | --- |
+| 1 | 110-125 ms on KVM, 3.4-5.5 ms on TCG, totals 8-9x **smaller** on KVM | "the gate is too tight", "the runner is just slow" |
+| 2 | `irqoff_steal_us=22` (KVM credits the vCPU 22 us of runnable-but-descheduled time inside a 117 ms window) | **vCPU preemption** -- the host never descheduled it |
+| 3 | `irqoff_max_bytes=0`, `begin_pc=0x70131C82` -> `virtio_gpu_flush_rects`, the `spinlock_acquire_irqsave(&gpu_lock)` line; the same site measures 5.6 ms under TCG | console output (0 bytes), and any doubt about which code |
+
+The window is real and it is this: `virtio_gpu_flush_rects()` presented a
+full-width damage rect in **BGA mode** while holding `gpu_lock` with interrupts
+masked -- `bga_present_rect()` copies pixel by pixel into the device's linear
+framebuffer BAR.  Device memory is not RAM: under KVM every store is an
+EPT-violation exit into QEMU (~2 us), under TCG it is a direct host write
+(~90 ns), and on real hardware it is a 10-20 ns uncached store.  A 1920x1080
+present is therefore 116 ms of masked time on the nested-KVM runner, 5.6 ms
+under TCG, and a few ms on a real BGA.  Nothing about it is a lock-scope
+defect, and it only fails the budget on the host where a pixel costs 2 us.
+
+**Decision: fix the code, not the budget and not the runner.**
+
+- `virtio_gpu_flush_rects()` decides the BGA case under `gpu_lock` and does the
+  pixel copy **after** releasing it, with interrupts on.  The copy reads the
+  kernel framebuffer and writes the device BAR; it touches nothing the lock
+  protects (`gpu_mode` and `bga_framebuffer_phys` are fixed at init), so the
+  only effect of dropping the lock is that two concurrent presents may
+  interleave pixels.
+- The budget stays 50,000 us for every arch and every host.  A KVM-specific
+  allowance would have hidden the real defect (and a 25 ms `vm_lock`
+  regression with it), and ARM passing the same number on the same runner
+  showed the gate was not simply too tight.
+- Runner pinning was rejected as well: it would remove the symptom on one host
+  and leave a section that masks interrupts across a device blit.
+
+What the instrument now reports, so the next one is one run and not three:
+
+| Field | Meaning |
+| --- | --- |
+| `irqoff_max_us`, `irqoff_total_us` | guest execution time with interrupts masked (wall minus host steal) |
+| `irqoff_steal_us` | host time the hypervisor attributes to this vCPU being descheduled (0 on ARM/TCG/bare metal) |
+| `irqoff_wall_max_us` | the raw TSC window, before that subtraction |
+| `irqoff_max_bytes` / `irqoff_cons_bytes` | console bytes pushed inside the worst window / inside any window |
+| `begin_pc`, `end_pc` | the call sites that masked and unmasked the worst window -- a symbol lookup names the code even when no lock is held |
+| `worst_lock`, `pc` | the outermost lock still held when the window closed, when there is one |
+
+`src/host/locksteal_test.c` pins the arithmetic (48 checks): steal inside a
+window is not charged to the code but the raw wall time stays visible; a real
+60 ms masked section with no steal still exceeds the budget; a steal record
+coarser than the window clamps instead of underflowing; and the worst window
+carries its console byte count.
+
+---
+
 ## 5. What keeps it from rotting
 
 Four guards, in the order they fire:
