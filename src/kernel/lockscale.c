@@ -24,9 +24,29 @@
  *                         MUTEX-UNDER-PROCLOCK (the documented inversion that
  *                         closes a cycle against any proc_lock holder doing
  *                         filesystem work).
- *        [MUTEX-SELF]     a CPU re-acquired a lock it already holds.  Before
+ *        [MUTEX-SELF]     a CPU re-acquired a lock it already held.  Before
  *                         this instrument that was a silent, unnamed hang; the
  *                         ARM unit suite was wedged on exactly such a site.
+ *
+ * THE CLOCK.  The IRQ-off gate must measure time the GUEST spent with
+ * interrupts masked, and the kernel's cheap clock (timer_get_us) is a TSC wall
+ * clock, so it counts anything the host does while this vCPU is not running.
+ * Two things had to be told apart on the nested-KVM linuxci runner, where the
+ * gate was red on every branch with a 110-125 ms window attributed to no lock
+ * (docs/lock-scope.md §4a):
+ *
+ *   1. vCPU preemption.  KVM publishes per-vCPU steal time in the record the
+ *      CPU already registers for PV TLB flush; timer_steal_us() reads it and
+ *      each window is charged (wall - steal).  It turned out to be 22 us of a
+ *      117 ms window -- so not this -- but the subtraction is right, and it is
+ *      what keeps a genuinely oversubscribed runner from failing the gate.
+ *   2. What the window actually contained.  The instrument therefore records
+ *      the call site that masked and the console bytes the window pushed
+ *      (cons_hw_bytes), and prints both with the raw wall window.  That is how
+ *      the 117 ms was named: virtio_gpu_flush_rects() copying a screen into a
+ *      device BAR pixel by pixel with interrupts off, 20x cheaper under TCG
+ *      because a store there is a host write and not an exit.  The fix belongs
+ *      in that code, and the budget did not move.
  *
  * Counters are plain per-CPU writes; nothing here feeds a scheduling decision.
  */
@@ -34,6 +54,7 @@
 #include <stdint.h>
 #include "lock.h"
 #include "kline.h"
+#include "console.h"
 #include "process.h"
 #include "timer.h"
 
@@ -153,6 +174,19 @@ struct ls_cpu_state {
   volatile uint64_t held[LS_HELD_SLOTS];
   volatile uint64_t held_pc[LS_HELD_SLOTS];
   volatile uint64_t irqoff_start, irqoff_total, irqoff_max, irqoff_max_lock, irqoff_max_pc;
+  /* Host steal inside IRQ-off windows: wall_us - steal_us is the number the
+   * gate uses.  Kept per CPU as a separate total so "the runner descheduled
+   * this vCPU" stays visible instead of silently vanishing from the report. */
+  volatile uint64_t irqoff_start_steal, irqoff_steal_total, irqoff_wall_max;
+  /* Console bytes pushed inside the window, and the same for the worst one:
+   * a console byte is a port exit (see console.h cons_hw_bytes), so this is
+   * what tells "the code computed with interrupts masked" from "the code
+   * printed with interrupts masked". */
+  volatile uint64_t irqoff_start_bytes, irqoff_max_bytes, irqoff_cons_total;
+  /* Call site that opened and closed the worst window.  When no lock is held
+   * at either end (worst_lock=-) this is the only thing that can name the
+   * code, and it is what a symbol lookup needs. */
+  volatile uint64_t irqoff_start_pc, irqoff_max_begin_pc, irqoff_max_end_pc;
   volatile uint64_t preempt_site;
   volatile int32_t preempt;
   volatile uint8_t held_n, irqoff_nest, irqoff_active, in_irq;
@@ -276,12 +310,27 @@ void lock_audit_irq_enter(void) { ls_pc[ls_cpu()].in_irq = 1; }
 void lock_audit_irq_exit(void) { ls_pc[ls_cpu()].in_irq = 0; }
 int lock_audit_in_irq(void) { return ls_pc[ls_cpu()].in_irq != 0; }
 
+/* The IRQ-off call site, one level up from the audit call: the audit is
+ * called from spinlock_acquire_irqsave/release_irqrestore in the arch locks.c
+ * (a separate translation unit, so no inlining), and level 1 is the code that
+ * decided to mask.  Host builds have no frames to walk. */
+#ifdef HOST_TEST
+#define LS_SITE_PC() 0ULL
+#else
+#define LS_SITE_PC() ((uint64_t)(uintptr_t)__builtin_return_address(1))
+#endif
+
 void lock_audit_irqoff_begin(int we_masked) {
   uint32_t c = ls_cpu();
   uint8_t n = ls_pc[c].irqoff_nest;
   ls_pc[c].irqoff_nest = (uint8_t)(n + 1);
   if (n == 0 && we_masked) {
     ls_pc[c].irqoff_start = timer_get_us();
+    /* Snapshot the steal clock in the same breath (see the window end). */
+    ls_pc[c].irqoff_start_steal = timer_steal_us();
+    /* ... and the console byte count: port exits are not guest compute. */
+    ls_pc[c].irqoff_start_bytes = cons_hw_bytes(c);
+    ls_pc[c].irqoff_start_pc = LS_SITE_PC();
     ls_pc[c].irqoff_active = 1;
   }
 }
@@ -295,10 +344,32 @@ void lock_audit_irqoff_end(int we_unmask) {
   }
   ls_pc[c].irqoff_nest = (uint8_t)(n - 1);
   if (n == 1 && ls_pc[c].irqoff_active && we_unmask) {
-    uint64_t d = timer_get_us() - ls_pc[c].irqoff_start;
+    uint64_t wall = timer_get_us() - ls_pc[c].irqoff_start;
+    /* Time the host had this vCPU runnable-but-descheduled is not time the
+     * guest spent with interrupts masked, and it is precisely what a TSC
+     * wall clock cannot tell apart from guest work.  On the nested-KVM CI
+     * runner it was the whole finding: 117 ms "IRQ-off" windows that measure
+     * 3.4-5.5 ms under TCG, with no lock attributed (lockscale.c header).
+     * Subtract it, and report it separately -- the runner's oversubscription
+     * stays measurable, it just stops being charged to the lock scope. */
+    uint64_t steal = timer_steal_us() - ls_pc[c].irqoff_start_steal;
+    if (steal > wall) /* coarse record or a clock that went backwards */
+      steal = wall;
+    uint64_t d = wall - steal;
+    /* Console bytes this window pushed to the wire (wrap-safe: 32-bit
+     * counter, difference taken in 32 bits). */
+    uint32_t bytes = (uint32_t)((uint32_t)cons_hw_bytes(c) -
+                                (uint32_t)ls_pc[c].irqoff_start_bytes);
+    ls_pc[c].irqoff_cons_total += bytes;
+    ls_pc[c].irqoff_steal_total += steal;
+    if (wall > ls_pc[c].irqoff_wall_max)
+      ls_pc[c].irqoff_wall_max = wall;
     ls_pc[c].irqoff_total += d;
     if (d > ls_pc[c].irqoff_max) {
       ls_pc[c].irqoff_max = d;
+      ls_pc[c].irqoff_max_bytes = bytes;
+      ls_pc[c].irqoff_max_begin_pc = ls_pc[c].irqoff_start_pc;
+      ls_pc[c].irqoff_max_end_pc = LS_SITE_PC();
       /* Blame the outermost lock still held when the window closes: it is the
        * one that decided to mask.  Read the stack before it is popped. */
       uint8_t hn = ls_pc[c].held_n;
@@ -473,6 +544,48 @@ uint64_t lock_audit_irqoff_total_us(void) {
   return t;
 }
 
+/* Host steal removed from the IRQ-off windows (all CPUs).  Reported next to
+ * the corrected totals so the correction is auditable: max+total are guest
+ * execution time, steal is what the host took, wall_max is the raw TSC
+ * window.  A large steal with a small max is an oversubscribed runner; a
+ * large max is a code defect and still fails the gate. */
+uint64_t lock_audit_irqoff_steal_us(void) {
+  uint64_t t = 0;
+  for (uint32_t c = 0; c < MAX_CPUS; c++)
+    t += ls_pc[c].irqoff_steal_total;
+  return t;
+}
+
+uint64_t lock_audit_irqoff_wall_max_us(void) {
+  uint64_t m = 0;
+  for (uint32_t c = 0; c < MAX_CPUS; c++)
+    if (ls_pc[c].irqoff_wall_max > m)
+      m = ls_pc[c].irqoff_wall_max;
+  return m;
+}
+
+/* Console bytes pushed inside IRQ-off windows (all CPUs), and the same for the
+ * worst window.  Non-zero means the worst window is a console write, not a
+ * lock section: each byte is a port exit the host serves (10-50 us on a loaded
+ * KVM host), which is why the same window measures 0.7 us/byte under TCG and
+ * ~14 us/byte under nested KVM. */
+uint64_t lock_audit_irqoff_cons_bytes(void) {
+  uint64_t t = 0;
+  for (uint32_t c = 0; c < MAX_CPUS; c++)
+    t += ls_pc[c].irqoff_cons_total;
+  return t;
+}
+
+uint64_t lock_audit_irqoff_max_bytes(void) {
+  uint64_t m = 0, mx = 0;
+  for (uint32_t c = 0; c < MAX_CPUS; c++)
+    if (ls_pc[c].irqoff_max > mx) {
+      mx = ls_pc[c].irqoff_max;
+      m = ls_pc[c].irqoff_max_bytes;
+    }
+  return m;
+}
+
 void lock_audit_reset_counters(void) {
   ls_blockhold = 0;
   ls_selflock = 0;
@@ -481,6 +594,12 @@ void lock_audit_reset_counters(void) {
   for (uint32_t c = 0; c < MAX_CPUS; c++) {
     ls_pc[c].irqoff_total = 0;
     ls_pc[c].irqoff_max = 0;
+    ls_pc[c].irqoff_steal_total = 0;
+    ls_pc[c].irqoff_wall_max = 0;
+    ls_pc[c].irqoff_max_bytes = 0;
+    ls_pc[c].irqoff_cons_total = 0;
+    ls_pc[c].irqoff_max_begin_pc = 0;
+    ls_pc[c].irqoff_max_end_pc = 0;
   }
   for (uint32_t i = 0; i < LS_MEMO; i++) {
     ls_memo[i].what = 0;
@@ -505,6 +624,14 @@ void lock_print_report(void) {
   kl_i(&k, (long)lock_audit_irqoff_max_us());
   kl_s(&k, " irqoff_total_us=");
   kl_i(&k, (long)lock_audit_irqoff_total_us());
+  kl_s(&k, " irqoff_steal_us=");
+  kl_i(&k, (long)lock_audit_irqoff_steal_us());
+  kl_s(&k, " irqoff_wall_max_us=");
+  kl_i(&k, (long)lock_audit_irqoff_wall_max_us());
+  kl_s(&k, " irqoff_max_bytes=");
+  kl_i(&k, (long)lock_audit_irqoff_max_bytes());
+  kl_s(&k, " irqoff_cons_bytes=");
+  kl_i(&k, (long)lock_audit_irqoff_cons_bytes());
   kl_s(&k, " reg_used=");
   kl_i(&k, (long)ls_reg_used);
   kl_s(&k, " reg_dropped=");
@@ -524,6 +651,16 @@ void lock_print_report(void) {
     kl_i(&r, (long)ls_pc[c].irqoff_max);
     kl_s(&r, " total_us=");
     kl_i(&r, (long)ls_pc[c].irqoff_total);
+    kl_s(&r, " steal_us=");
+    kl_i(&r, (long)ls_pc[c].irqoff_steal_total);
+    kl_s(&r, " wall_max_us=");
+    kl_i(&r, (long)ls_pc[c].irqoff_wall_max);
+    kl_s(&r, " bytes=");
+    kl_i(&r, (long)ls_pc[c].irqoff_max_bytes);
+    kl_s(&r, " begin_pc=");
+    kl_hex(&r, ls_pc[c].irqoff_max_begin_pc);
+    kl_s(&r, " end_pc=");
+    kl_hex(&r, ls_pc[c].irqoff_max_end_pc);
     kl_s(&r, " worst_lock=");
     const void *lw = (const void *)(uintptr_t)ls_pc[c].irqoff_max_lock;
     kl_s(&r, lw ? lock_name(lw) : "-");
