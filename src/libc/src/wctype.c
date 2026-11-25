@@ -22,6 +22,19 @@
 #endif
 
 #ifdef HOST_TEST
+/* The wctrans_t handle is OURS, not the host's: <wctype.h> in this port
+ * defines it as `const int *` (a non-NULL token pointing at one of the two
+ * static ids below), which is also what glibc defines -- but Apple's libc
+ * defines wctrans_t as `int`, so returning a token pointer there is a
+ * pointer-to-integer conversion (hard error: "returning 'const int *' from a
+ * function with result type 'wctrans_t' (aka 'int')", mac-ci 2026-11-25).
+ * The hb_* prototypes are the port's ABI, so spell the type out; the host
+ * test (src/host/libc_wide_parity_test.c) declares the same typedef. */
+typedef const int *hb_wctrans_t;
+#define wctrans_t hb_wctrans_t
+#endif
+
+#ifdef HOST_TEST
 #define iswprint hb_iswprint
 #define iswblank hb_iswblank
 #define iswalpha hb_iswalpha

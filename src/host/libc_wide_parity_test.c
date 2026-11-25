@@ -104,8 +104,13 @@ extern int hb_iswupper(wint_t);
 extern int hb_iswxdigit(wint_t);
 extern wctype_t hb_wctype(const char *);
 extern int hb_iswctype(wint_t, wctype_t);
-extern wctrans_t hb_wctrans(const char *);
-extern wint_t hb_towctrans(wint_t, wctrans_t);
+/* HobbyOS's wctrans_t is a token POINTER (<src/libc/include/wctype.h>:
+ * `const int *`); the host's may be an integer (Apple's libc: `int`), so the
+ * hb_* side is declared with the port's type -- these must be the prototypes
+ * src/libc/src/wctype.c defines under HOST_TEST. */
+typedef const int *hb_wctrans_t;
+extern hb_wctrans_t hb_wctrans(const char *);
+extern wint_t hb_towctrans(wint_t, hb_wctrans_t);
 extern wint_t hb_towlower(wint_t);
 extern wint_t hb_towupper(wint_t);
 
@@ -796,18 +801,18 @@ static void test_wctype(void) {
     static const char *const names[] = {"tolower", "toupper"};
     int k, j;
     for (k = 0; k < 2; k++) {
-      wctrans_t ta = hb_wctrans(names[k]);
+      hb_wctrans_t ta = hb_wctrans(names[k]);
       wctrans_t tb = wctrans(names[k]);
       char detail[64];
       snprintf(detail, sizeof detail, "name=%s", names[k]);
-      CHECKV((ta == NULL) == (tb == NULL), "wctrans", detail);
+      CHECKV(!ta == !tb, "wctrans", detail);
       for (j = 0; j < nwctab; j++) {
         CHECKV(hb_towctrans(wctab[j], ta) == towctrans(wctab[j], tb),
                "towctrans", detail);
       }
     }
-    CHECKV((hb_wctrans("bogus") == NULL) == (wctrans("bogus") == NULL),
-           "wctrans", "bogus name");
+    CHECKV(!hb_wctrans("bogus") == !wctrans("bogus"), "wctrans",
+           "bogus name");
   }
 
   /* Literal C-locale facts. */
