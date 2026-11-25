@@ -517,6 +517,10 @@ AHESASC runs **on SEC2**. Re-scoping past GSP-RM therefore does not bypass the w
 relocates it. Option 2 as written cannot deliver a running engine on a part whose SEC2 will
 not execute vendor-signed code.
 
+**Gates on the fold.** The no-RM branch is in the tree and green on both arches:
+intel **594 / 0** (the four new `test_nv_engine_probe_*` rows run) and ARM **473 / 0**,
+both `UNIT TESTS PASSED`, on c4.
+
 **Consequence for the ladder.** N3 and everything above it stay parked, and now for a reason
 that no amount of host-side work changes. What is still live and worth running: the 5090
 lane (GB202 is a *different* SEC2 with its own vendor booter pair — untested), the nvk/shim
