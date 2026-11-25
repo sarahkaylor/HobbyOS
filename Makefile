@@ -4814,7 +4814,14 @@ HOST_TRY = @sh tools/host/host_try.sh $(HOST_TESTS_FAILS)
 # on the hostbound list, and no target should join the Darwin gate by accident
 # because a rule said `host_tests:` instead of `host_tests_linux:`.
 ifeq ($(UNAME_S),Darwin)
-host_tests: host_tests_portable
+# The hostbound targets are not RUN here, but the wide set is still BUILT: the
+# defect this gate exists to catch is a TU that does not compile on Apple's
+# libc (mac-ci 2026-11-23: "call to undeclared function 'strtoll_l'" x20 in
+# src/host/libc_wide_parity_test.c, then "fatal error: too many errors
+# emitted").  Both rungs are linked -- glibc's *_l oracle and the portable
+# uselocale() one -- so a macOS push proves the port compiles; the differential
+# verdict stays on the farm, where the reference implementation lives.
+host_tests: host_tests_portable $(WIDE_PARITY) $(WIDE_PARITY_PORTABLE)
 else
 host_tests: host_tests_linux
 endif
@@ -5101,12 +5108,18 @@ doom_elf_test_gen:
 # of it is a bug -- so the portable subset excludes those *by category* rather
 # than skipping failures one at a time:
 #
-#   glibc/coreutils parity .... WC_PARITY (no struct re_registers, no GNU
-#                               coreutils bytes).  The wide set used to be
-#                               here for the same reason ("host has no glibc
-#                               _l"); its oracle now has a portable rung
-#                               (src/host/libc_wide_parity_test.c section E),
-#                               so it builds and runs on any POSIX host.
+#   glibc/coreutils parity .... WIDE_PARITY $(WC_PARITY) (no glibc * answers
+#                               / no struct re_registers / no GNU coreutils
+#                               bytes).  The wide set's ORACLE has a portable
+#                               rung now, so the TU compiles and links on any
+#                               POSIX host -- but its 1511 assertions are
+#                               glibc's C-locale ANSWERS: Apple's C locale is
+#                               single-byte 1:1 (MB_CUR_MAX == 1, every byte
+#                               decodes; glibc returns EILSEQ for 0x80/C3 A9),
+#                               measured on mac-ci 2026-11-25 (mbrtowc/
+#                               mbrlen/mbtowc/mblen case 4..7).  A macOS host
+#                               still BUILDS both rungs (see the Darwin branch
+#                               of `host_tests`); the verdict is the farm's.
 #   cross-ABI dlopen .......... xcompat_test_run, x11_libc_test_run (an ELF
 #                               DSO cannot be dlopen()ed by a Mach-O process)
 #   x86_64-host-only .......... LOCKSTEAL_TEST (pushfq/popfq), T4 probes,
@@ -5118,16 +5131,27 @@ doom_elf_test_gen:
 #
 # Everything else builds and runs on any POSIX host; that is the set this target
 # proves.  Add to HOST_TESTS_HOSTBOUND only with the reason it cannot work.
+#
+# EDITOR.BIN_host is listed here even though it is an app binary and not a test:
+# `host_tests_portable` builds it as an ORDER-ONLY prerequisite (see the target)
+# because editor_test_host -- which IS portable -- spawns "./EDITOR.BIN_host"
+# from its mock desktop (src/host/compat.c spawn2).  Being on this list keeps it
+# out of the run list (the gate's loop runs $^, and the editor binary would just
+# sit in its event loop until the 40 s timeout); being order-only keeps it out
+# of $^ while still building before the gate runs.  Without that, the test ran
+# against a file nothing built -- measured on mac-ci 2026-11-25: "  FAIL
+# editor_test_host / [LAUNCH] EDITOR.BIN / execv failed: No such file".
+# A target and its payload are one entry.
 # %parity% is the whole family by construction: every one of them compares
 # HobbyOS's implementation against the HOST's glibc or GNU coreutils bytes
-# (head/tail/cut/tr/.../wc, uname, scanf/printf, math transcendentals).  Off
-# Linux there is nothing on the other side of that comparison -- except the
-# wide set, which compares against the plain C-locale entry point there.
+# (head/tail/cut/tr/.../wc, uname, scanf/printf, math transcendentals, the wide
+# set).  Off Linux there is nothing on the other side of that comparison.
 # Enumerated, not pattern-matched: macOS ships GNU Make 3.81, where $(filter)
 # only honours a TRAILING % -- "$(filter %parity%,...)" matches nothing there
 # while matching fine under make 4.x on the farm, so a pattern here would mean
 # "everything runs" on one host and "nothing does" on the other (measured).
 HOST_TESTS_HOSTBOUND = $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) \
+                       $(WIDE_PARITY) $(WIDE_PARITY_PORTABLE) \
                        $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) \
                        $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) \
                        $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) \
@@ -5144,7 +5168,7 @@ HOST_TESTS_HOSTBOUND = $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) \
                        $(T4_W0_SELFTEST) $(T4_WAVE_SELFTEST) $(T4_GLUED_SELFTEST) \
                        $(SDL_TEST_APP_HOST)
 
-host_tests_portable: $(filter-out $(HOST_TESTS_HOSTBOUND),$(HOST_TESTS_TARGETS))
+host_tests_portable: $(filter-out $(HOST_TESTS_HOSTBOUND),$(HOST_TESTS_TARGETS)) | $(EDITOR_HOST)
 	@printf '== host-portable suite: %s targets (%s excluded)\n' \
 	  "$(words $^)" "$(words $(HOST_TESTS_HOSTBOUND))"
 	@fail=0; pass=0; skip=0; \
