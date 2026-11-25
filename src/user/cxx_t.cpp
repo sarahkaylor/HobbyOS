@@ -322,8 +322,34 @@ extern "C" int main(int argc, char **argv) {
       std::thread t(cv_worker);
       {
         std::unique_lock<std::mutex> lk(g_mu);
-        bool notified = g_cv.wait_for(lk, std::chrono::milliseconds(1000),
+        /* The budget is not the assertion.  On the ARM T3 wave this guest
+           runs under TCG, and a freshly created thread's first slice is
+           routinely late: a 150-iteration stress of exactly this pattern at
+           this point in the wave measured 5/150 starts >= 100 ms, 1/150
+           >= 500 ms (worst 552 ms) and 1/150 not scheduled at all inside the
+           old 1000 ms budget -- that iteration returned from wait_for with
+           notified=0 and g_started still 0, i.e. the worker had not run, no
+           wakeup was lost.  That is the intermittent condvar_wait_notify
+           FAIL.  The check below is wait/notify semantics; give the start
+           room outside the measured tail (10 s), and name the mechanism
+           when it fails: g_started > 0 at a timeout WOULD be a lost wakeup
+           in libc/kernel, g_started == 0 is a start that never ran. */
+        auto tw0 = std::chrono::steady_clock::now();
+        bool notified = g_cv.wait_for(lk, std::chrono::milliseconds(10000),
                                       [] { return g_started > 0; });
+        long wait_ms = (long)std::chrono::duration_cast<
+                           std::chrono::milliseconds>(
+                           std::chrono::steady_clock::now() - tw0)
+                           .count();
+        if (!notified || g_started != 1) {
+          print_console("  CXX_T condvar_wait_notify: detail notified=");
+          print_dec(notified);
+          print_console(" g_started=");
+          print_dec(g_started);
+          print_console(" wait_ms=");
+          print_dec(wait_ms);
+          print_console(" (started>0 at a timeout = lost wake; 0 = worker never ran)\n");
+        }
         check("condvar_wait_notify", notified && g_started == 1);
       }
       std::thread notifier(delayed_notifier);

@@ -343,39 +343,107 @@ static void test_once(void) {
 
 /* ---- 8. keys with destructors -------------------------------------------- */
 
+#define KEY_THREADS 2
+
 static pthread_key_t tkey;
-static volatile int key_dtor_count;
+/* One destructor run per thread exit.  The destructors run on the EXITING
+ * threads (pthread_exit), and the two exits can overlap on different CPUs,
+ * so every update here must be an atomic read-modify-write: `count++` on a
+ * plain/volatile int is ldr/add/str, and two concurrent runs then lose one
+ * increment (the intermittent count==1 this check used to report). */
+static int key_dtor_count;
+/* Per-value destructor run counts: which thread's value was destroyed, and
+ * how many times.  Each slot is bumped only by the thread that owns that
+ * value, so these cannot lose an update -- they distinguish "one destructor
+ * ran twice" from "two ran once", which the aggregate count cannot.  Written
+ * before the exiting thread's release-store of tid = 0, so a joiner that
+ * returns from pthread_join() sees them. */
+static int key_dtor_runs[KEY_THREADS];
+
+#define KEY_VALUE(i) ((long)(0x1234 + (i)))
 
 static void key_dtor(void *v) {
-  (void)v;
-  key_dtor_count++;
+  __atomic_fetch_add(&key_dtor_count, 1, __ATOMIC_RELAXED);
+  int i = (int)((long)v - KEY_VALUE(0));
+  if (i >= 0 && i < KEY_THREADS)
+    __atomic_fetch_add(&key_dtor_runs[i], 1, __ATOMIC_RELAXED);
 }
 
 static void *key_fn(void *arg) {
-  (void)arg;
-  if (pthread_setspecific(tkey, (void *)0x1234) != 0)
+  long want = (long)arg;
+  if (pthread_setspecific(tkey, (void *)want) != 0)
     return (void *)1;
-  if (pthread_getspecific(tkey) != (void *)0x1234)
+  if (pthread_getspecific(tkey) != (void *)want)
     return (void *)2;
   return 0;
 }
 
 static void test_keys(void) {
-  pthread_t th[2];
+  pthread_t th[KEY_THREADS];
+  int join_rc[KEY_THREADS] = {-1, -1};
+  void *ret[KEY_THREADS] = {0, 0};
+  int joined = 0;
+  int dtor_before_join = 1; /* pthread_exit runs the dtor BEFORE tid = 0 */
+  int dtor_runs = 0;
   int ok = 1;
+
   key_dtor_count = 0;
+  for (int i = 0; i < KEY_THREADS; i++)
+    key_dtor_runs[i] = 0;
   if (pthread_key_create(&tkey, key_dtor) != 0)
     ok = 0;
-  for (int i = 0; i < 2 && ok; i++)
-    if (create_retry(&th[i], key_fn, 0) != 0)
+  for (int i = 0; i < KEY_THREADS && ok; i++)
+    if (create_retry(&th[i], key_fn, (void *)KEY_VALUE(i)) != 0)
       ok = 0;
-  for (int i = 0; i < 2 && ok; i++) {
-    void *r = (void *)1;
-    if (pthread_join(th[i], &r) != 0 || r != 0)
+  for (int i = 0; i < KEY_THREADS && ok; i++) {
+    join_rc[i] = pthread_join(th[i], &ret[i]);
+    if (join_rc[i] != 0)
       ok = 0;
+    else
+      joined++;
+    /* The exit path runs this thread's destructor and only then
+       release-stores tid = 0; the join above cannot return before that
+       store, so this thread's destructor must already be recorded.  A miss
+       here would be a destructor lost by libc, not a race with the joiner. */
+    if (__atomic_load_n(&key_dtor_runs[i], __ATOMIC_ACQUIRE) < 1)
+      dtor_before_join = 0;
   }
-  /* both threads set a value; both exits must have run the destructor */
-  check("keys-dtor-at-exit", ok && key_dtor_count == 2);
+  for (int i = 0; i < KEY_THREADS; i++)
+    dtor_runs += __atomic_load_n(&key_dtor_runs[i], __ATOMIC_ACQUIRE);
+  /* Both threads set a value on one key with a destructor: after both joins,
+     each value must have been destroyed exactly once. */
+  int good = ok && joined == KEY_THREADS && ret[0] == 0 && ret[1] == 0 &&
+             dtor_runs == KEY_THREADS && dtor_before_join &&
+             key_dtor_count == KEY_THREADS;
+  if (!good) {
+    /* Name the mechanism (no FAIL token: the tier counts those).  A lost
+       update shows as dtor_runs=2/dtor_count=1; a skipped or doubled run as
+       dtor_runs != 2; a join/order problem as join_rc/ok/dtor_before_join. */
+    print_console("  THRD_T keys-dtor-at-exit: detail create_join_ok=");
+    print_dec(ok);
+    print_console(" joined=");
+    print_dec(joined);
+    print_console(" join_rc=");
+    print_dec(join_rc[0]);
+    print_console(",");
+    print_dec(join_rc[1]);
+    print_console(" retval=");
+    print_dec((long)ret[0]);
+    print_console(",");
+    print_dec((long)ret[1]);
+    print_console(" dtor_count=");
+    print_dec(key_dtor_count);
+    print_console(" dtor_runs=");
+    print_dec(dtor_runs);
+    print_console(" dtor_before_join=");
+    print_dec(dtor_before_join);
+    print_console(" runs_per_value=");
+    print_dec(key_dtor_runs[0]);
+    print_console(",");
+    print_dec(key_dtor_runs[1]);
+    print_console("\n");
+  }
+  check("keys-dtor-at-exit", good);
 }
 
 /* ---- 9. detach ----------------------------------------------------------- */
