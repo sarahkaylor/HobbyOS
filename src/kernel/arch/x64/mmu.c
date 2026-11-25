@@ -1297,6 +1297,18 @@ void vm_arch_pv_init_cpu(uint32_t cpu) {
   __atomic_fetch_or(&x64_st_mask, 1u << cpu, __ATOMIC_SEQ_CST);
 }
 
+/* Host steal time for CPU c, in nanoseconds, from the record KVM fills in
+ * (see above).  Read by lock-scope audit's IRQ-off measurement
+ * (lockscale.c -> timer_steal_us): timer_get_us() is a TSC wall clock, so a
+ * window that spans a host deschedule reports the whole deschedule as if the
+ * guest had been executing with interrupts masked.  0 when the record is not
+ * registered (TCG, bare metal), which leaves the wall-clock numbers alone. */
+uint64_t vm_arch_steal_ns(uint32_t c) {
+  if (c >= MAX_CPUS || !(x64_st_mask & (1u << c)))
+    return 0;
+  return __atomic_load_n(&x64_st[c].steal, __ATOMIC_RELAXED);
+}
+
 /* 1 when CPU c is preempted and the host has taken the flush over. */
 static int x64_pv_flush_if_preempted(uint32_t c) {
   if (!(x64_st_mask & (1u << c)))

@@ -289,6 +289,17 @@ uint64_t timer_get_us(void) {
   return (rdtsc() * 1000) / tsc_per_ms;
 }
 
+/* Host steal time for this CPU (timer.h).  The number is the KVM paravirtual
+ * record the CPU brought up in arch/x64/mmu.c (registered for PV TLB flush);
+ * KVM has accounted it since the vCPU was created, so it is a clock, not a
+ * sample.  Under TCG or on bare metal the record is not registered and this
+ * returns 0 -- i.e. "no host deschedules here", which is true of both. */
+uint64_t timer_steal_us(void) {
+  extern uint64_t vm_arch_steal_ns(uint32_t cpu);
+  extern uint32_t get_cpuid(void);
+  return vm_arch_steal_ns(get_cpuid()) / 1000;
+}
+
 /* ---- C1-k6: the high-resolution one-shot (docs/cp-k6.md §1) ------------
  *
  * Each CPU's LAPIC timer, in ONE-SHOT mode on its own vector (HRT_VECTOR,
