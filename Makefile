@@ -3764,7 +3764,7 @@ $(EXT2_TEST): src/host/ext2_test.c src/kernel/ext2.c src/include/ext2.h
 	$(HOST_CC) -Isrc/include -Wall -Wextra -g -O1 src/kernel/ext2.c src/host/ext2_test.c -o $@
 ext2_test_run: $(EXT2_TEST)
 	$(HOST_RUN_EXT2) ./$(EXT2_TEST)
-host_tests: ext2_test_run
+host_tests_linux: ext2_test_run
 .PHONY: ext2_test_run
 HOST_RUN_EXT2 = @sh -c 'if command -v timeout >/dev/null 2>&1; then exec timeout 300 "$$@"; else exec "$$@"; fi' sh
 
@@ -4055,7 +4055,7 @@ $(X11_LIBC_TEST): obj/host_x11_libc_test.o obj/host_hb_inet.o obj/host_hb_utsnam
 	$(HOST_CC) -o $@ $^
 x11_libc_test_run: $(X11_LIBC_TEST)
 	./$(X11_LIBC_TEST)
-host_tests: x11_libc_test_run
+host_tests_linux: x11_libc_test_run
 .PHONY: x11_libc_test_run
 
 # icewm.md M2 (lane xlibs-ext): math_ext.c (frexp/ldexp/scalbn) bit-exact vs glibc.
@@ -4064,7 +4064,7 @@ $(X11EXT_LIBC_TEST): obj/host_x11ext_libc_test.o obj/host_hb_math_ext.o
 	$(HOST_CC) -o $@ $^ -lm
 x11ext_libc_test_run: $(X11EXT_LIBC_TEST)
 	./$(X11EXT_LIBC_TEST)
-host_tests: x11ext_libc_test_run
+host_tests_linux: x11ext_libc_test_run
 .PHONY: x11ext_libc_test_run
 
 STRING_TEST = libc_string_test_host
@@ -4796,7 +4796,31 @@ HOST_TESTS_TARGETS = $(EDITOR_HOST) $(EDITOR_TEST_BIN) test_cache test_diff_harn
 # every test binary after it was built but never run.
 HOST_TESTS_FAILS = obj/host_tests.fails.$$PPID
 HOST_TRY = @sh tools/host/host_try.sh $(HOST_TESTS_FAILS)
-host_tests: $(HOST_TESTS_TARGETS)
+# What CI types is `make host_tests`, and it must mean the tier that can
+# actually run here:
+#   - on the Linux farm: the whole tier, glibc/coreutils differentials and the
+#     musl-built probes included (linux-ci's arm job runs exactly this);
+#   - on macOS: the host-portable suite.  The hostbound prerequisites cannot
+#     even *build* there (musl-gcc does not exist for the T4 probes, a Mach-O
+#     process cannot dlopen an x86_64 ELF DSO, pushfq/popfq are x86-only), so
+#     `make host_tests` used to stop at the first of them and the job could
+#     never say anything about the tier.  This is the split linux-ci already
+#     makes, applied where it is forced -- not a silent skip: the excluded
+#     category is enumerated above, with its reason.
+# host_tests_linux is the farm tier explicitly (for a Mac with a musl
+# toolchain, or to bisect one of the differentials by hand).  The five
+# prerequisite-only run targets that used to hang off `host_tests` (ext2,
+# x11_libc, x11ext_libc, vdisplay, w4_doom) hang off it too: two of them are
+# on the hostbound list, and no target should join the Darwin gate by accident
+# because a rule said `host_tests:` instead of `host_tests_linux:`.
+ifeq ($(UNAME_S),Darwin)
+host_tests: host_tests_portable
+else
+host_tests: host_tests_linux
+endif
+.PHONY: host_tests
+
+host_tests_linux: $(HOST_TESTS_TARGETS)
 	@rm -f $(HOST_TESTS_FAILS)
 	$(HOST_TRY) ./$(EDITOR_TEST_BIN)
 	$(HOST_TRY) ./$(GAMES_SCAN_TEST)
@@ -5014,7 +5038,7 @@ $(VDISPLAY_TEST): src/host/vdisplay_test.c src/kernel/vdisplay.c src/include/vdi
 	$(HOST_CC) -Isrc/include $(HOST_CFLAGS) -DVDISP_HOST_TEST src/kernel/vdisplay.c src/host/vdisplay_test.c -o $@
 vdisplay_test_run: $(VDISPLAY_TEST)
 	./$(VDISPLAY_TEST)
-host_tests: vdisplay_test_run
+host_tests_linux: vdisplay_test_run
 .PHONY: vdisplay_test_run
 
 # GB-160 (parent GB-041): W4 DOOM static-musl port surface.  The deliverable is
@@ -5024,7 +5048,7 @@ host_tests: vdisplay_test_run
 w4_doom_test:
 	python3 tools/sdl/w4/w4_doom_test.py
 	python3 tools/sdl/w4/w4_doom_test.py --self-test
-host_tests: w4_doom_test
+host_tests_linux: w4_doom_test
 .PHONY: w4_doom_test
 
 # Linux-ABI probe ELFs (docs/linux-abi.md bring-up harness).
@@ -5077,8 +5101,12 @@ doom_elf_test_gen:
 # of it is a bug -- so the portable subset excludes those *by category* rather
 # than skipping failures one at a time:
 #
-#   glibc/coreutils parity .... WIDE_PARITY WC_PARITY (host has no glibc _l,
-#                               no struct re_registers, no GNU coreutils bytes)
+#   glibc/coreutils parity .... WC_PARITY (no struct re_registers, no GNU
+#                               coreutils bytes).  The wide set used to be
+#                               here for the same reason ("host has no glibc
+#                               _l"); its oracle now has a portable rung
+#                               (src/host/libc_wide_parity_test.c section E),
+#                               so it builds and runs on any POSIX host.
 #   cross-ABI dlopen .......... xcompat_test_run, x11_libc_test_run (an ELF
 #                               DSO cannot be dlopen()ed by a Mach-O process)
 #   x86_64-host-only .......... LOCKSTEAL_TEST (pushfq/popfq), T4 probes,
@@ -5092,13 +5120,14 @@ doom_elf_test_gen:
 # proves.  Add to HOST_TESTS_HOSTBOUND only with the reason it cannot work.
 # %parity% is the whole family by construction: every one of them compares
 # HobbyOS's implementation against the HOST's glibc or GNU coreutils bytes
-# (head/tail/cut/tr/.../wc, uname, scanf/printf, math transcendentals, the wide
-# set).  Off Linux there is nothing on the other side of that comparison.
+# (head/tail/cut/tr/.../wc, uname, scanf/printf, math transcendentals).  Off
+# Linux there is nothing on the other side of that comparison -- except the
+# wide set, which compares against the plain C-locale entry point there.
 # Enumerated, not pattern-matched: macOS ships GNU Make 3.81, where $(filter)
 # only honours a TRAILING % -- "$(filter %parity%,...)" matches nothing there
 # while matching fine under make 4.x on the farm, so a pattern here would mean
 # "everything runs" on one host and "nothing does" on the other (measured).
-HOST_TESTS_HOSTBOUND = $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) $(WIDE_PARITY) \
+HOST_TESTS_HOSTBOUND = $(SCANFW_PARITY) $(NUM_PARITY) $(MATH_TX) \
                        $(WC_PARITY) $(HEAD_PARITY) $(TAIL_PARITY) $(CUT_PARITY) \
                        $(TR_PARITY) $(PASTE_PARITY) $(FOLD_PARITY) $(NL_PARITY) \
                        $(COMM_PARITY) $(TSORT_PARITY) $(EXPAND_PARITY) \
