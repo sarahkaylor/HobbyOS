@@ -1,7 +1,11 @@
 /*
  * P3.2/P3.3 host test: the wide-character surface (wchar, wctype),
  * strftime/asctime/ctime and the xlocale layer, raced against the
- * workstation glibc.
+ * workstation libc -- against its own `*_l` entry points where the host
+ * declares them (glibc), and against the plain C-locale entry point with
+ * the token selected through uselocale() everywhere else (macOS and musl
+ * declare no `_l` family, or only part of it).  Section E carries the
+ * oracle and the measured per-libc facts.
  *
  * src/libc/src/{wchar,wctype,strftime,xlocale}.c compile a second time for
  * the host with -DHOST_TEST (their public symbols land as hb_*, and the
@@ -944,17 +948,104 @@ static void test_strftime(void) {
 
 /* ================= E. xlocale ========================================== */
 
+/* The oracle for the `_l` family below.
+ *
+ * The `_l` (locale-object) entry points are a POSIX-2008 extension that only
+ * some hosts *declare*.  Measured on the hosts this test runs on:
+ *   glibc            the whole family, via the C headers + _GNU_SOURCE
+ *   musl 1.2.5       all of it except strtoll_l/strtoull_l
+ *   Apple's libc     none of it (mac-ci host-tests, 2026-11-24: 20 errors of
+ *                    "call to undeclared function 'strtoll_l'", then
+ *                    "fatal error: too many errors emitted")
+ * so a test that calls them directly is a Linux-only gate, not a defect in
+ * HobbyOS's libc: src/libc/src/xlocale.c implements the family itself, has
+ * exactly one locale ("C"), and every wrapper ignores its locale_t argument.
+ * That is the invariant this section checks, and it is checkable everywhere:
+ *
+ *   - glibc: race hb_* against the real strtoll_l/isdigit_l/...  Byte-exact
+ *     against the reference implementation, and the prototype the wrapper
+ *     must match is the one being called.
+ *   - everywhere else, and on Linux too with -DHB_ORACLE_PORTABLE=1: race
+ *     hb_* against the PLAIN entry point with the token selected as the
+ *     thread locale -- POSIX says the `_l` form behaves "as if
+ *     uselocale(loc)" had been called, so in the C locale (main() pins
+ *     LC_ALL=C before anything runs) it is the same function by definition,
+ *     and every libc has it.
+ *
+ * Both rungs run the same cases through the same assertions, so the check
+ * count is identical and a disagreement between the rungs would show up as a
+ * failure on Linux, where the portable one is built alongside the glibc one
+ * (WIDE_PARITY_PORTABLE in the Makefile).  macOS takes the portable rung
+ * automatically; the explicit -D is how the Linux gate keeps it tested.
+ */
+#if defined(__GLIBC__) && !defined(HB_ORACLE_PORTABLE)
+#define HB_ORACLE_L 1
+#else
+#define HB_ORACLE_L 0
+#endif
+
+#if HB_ORACLE_L
+#define ORACLE_STRTOLL(s, e, b) strtoll_l((s), (e), (b), gl)
+#define ORACLE_STRTOULL(s, e, b) strtoull_l((s), (e), (b), gl)
+#define ORACLE_ISDIGIT(c) isdigit_l((c), gl)
+#define ORACLE_ISXDIGIT(c) isxdigit_l((c), gl)
+#define ORACLE_TOUPPER(c) toupper_l((c), gl)
+#define ORACLE_TOLOWER(c) tolower_l((c), gl)
+#define ORACLE_ISWSPACE(w) iswspace_l((w), gl)
+#define ORACLE_ISWPRINT(w) iswprint_l((w), gl)
+#define ORACLE_ISWCNTRL(w) iswcntrl_l((w), gl)
+#define ORACLE_ISWUPPER(w) iswupper_l((w), gl)
+#define ORACLE_ISWLOWER(w) iswlower_l((w), gl)
+#define ORACLE_ISWALPHA(w) iswalpha_l((w), gl)
+#define ORACLE_ISWBLANK(w) iswblank_l((w), gl)
+#define ORACLE_ISWDIGIT(w) iswdigit_l((w), gl)
+#define ORACLE_ISWPUNCT(w) iswpunct_l((w), gl)
+#define ORACLE_ISWXDIGIT(w) iswxdigit_l((w), gl)
+#define ORACLE_TOWUPPER(w) towupper_l((w), gl)
+#define ORACLE_TOWLOWER(w) towlower_l((w), gl)
+#define ORACLE_STRCOLL(a, b) strcoll_l((a), (b), gl)
+#define ORACLE_STRXFRM(d, s, n) strxfrm_l((d), (s), (n), gl)
+#define ORACLE_WCSCOLL(a, b) wcscoll_l((a), (b), gl)
+#define ORACLE_WCSXFRM(d, s, n) wcsxfrm_l((d), (s), (n), gl)
+#define ORACLE_STRFTIME(buf, n, fmt, tm) strftime_l((buf), (n), (fmt), (tm), gl)
+#else
+#define ORACLE_STRTOLL(s, e, b) strtoll((s), (e), (b))
+#define ORACLE_STRTOULL(s, e, b) strtoull((s), (e), (b))
+#define ORACLE_ISDIGIT(c) isdigit((c))
+#define ORACLE_ISXDIGIT(c) isxdigit((c))
+#define ORACLE_TOUPPER(c) toupper((c))
+#define ORACLE_TOLOWER(c) tolower((c))
+#define ORACLE_ISWSPACE(w) iswspace((w))
+#define ORACLE_ISWPRINT(w) iswprint((w))
+#define ORACLE_ISWCNTRL(w) iswcntrl((w))
+#define ORACLE_ISWUPPER(w) iswupper((w))
+#define ORACLE_ISWLOWER(w) iswlower((w))
+#define ORACLE_ISWALPHA(w) iswalpha((w))
+#define ORACLE_ISWBLANK(w) iswblank((w))
+#define ORACLE_ISWDIGIT(w) iswdigit((w))
+#define ORACLE_ISWPUNCT(w) iswpunct((w))
+#define ORACLE_ISWXDIGIT(w) iswxdigit((w))
+#define ORACLE_TOWUPPER(w) towupper((w))
+#define ORACLE_TOWLOWER(w) towlower((w))
+#define ORACLE_STRCOLL(a, b) strcoll((a), (b))
+#define ORACLE_STRXFRM(d, s, n) strxfrm((d), (s), (n))
+#define ORACLE_WCSCOLL(a, b) wcscoll((a), (b))
+#define ORACLE_WCSXFRM(d, s, n) wcsxfrm((d), (s), (n))
+#define ORACLE_STRFTIME(buf, n, fmt, tm) strftime((buf), (n), (fmt), (tm))
+#endif
+
 static void race_strtoll_l(const char *s, int base, locale_t hl, locale_t gl) {
   char *ea = NULL, *eb = NULL;
   long long a, b;
   int err_a, err_b;
   char detail[80];
+  (void)gl; /* the portable rung reads it through the thread locale instead */
   snprintf(detail, sizeof detail, "\"%s\" base=%d", s, base);
   errno = 0;
   a = hb_strtoll_l(s, &ea, base, hl);
   err_a = errno;
   errno = 0;
-  b = strtoll_l(s, &eb, base, gl);
+  b = ORACLE_STRTOLL(s, &eb, base);
   err_b = errno;
   CHECKV(a == b && (ea - s) == (eb - s) && err_a == err_b, "strtoll_l",
          detail);
@@ -965,12 +1056,13 @@ static void race_strtoull_l(const char *s, int base, locale_t hl, locale_t gl) {
   unsigned long long a, b;
   int err_a, err_b;
   char detail[80];
+  (void)gl; /* the portable rung reads it through the thread locale instead */
   snprintf(detail, sizeof detail, "\"%s\" base=%d", s, base);
   errno = 0;
   a = hb_strtoull_l(s, &ea, base, hl);
   err_a = errno;
   errno = 0;
-  b = strtoull_l(s, &eb, base, gl);
+  b = ORACLE_STRTOULL(s, &eb, base);
   err_b = errno;
   CHECKV(a == b && (ea - s) == (eb - s) && err_a == err_b, "strtoull_l",
          detail);
@@ -979,6 +1071,7 @@ static void race_strtoull_l(const char *s, int base, locale_t hl, locale_t gl) {
 static void test_xlocale(void) {
   locale_t hl = hb_newlocale(LC_ALL_MASK, "C", 0);
   locale_t gl = newlocale(LC_ALL_MASK, "C", 0);
+  locale_t oracle_prev;
   int i;
 
   CHECKV(hl != NULL && gl != NULL, "newlocale", "C");
@@ -1049,6 +1142,13 @@ static void test_xlocale(void) {
     uselocale(pb);
   }
 
+  /* Select `gl` as this thread's locale for the rest of the section: the
+   * portable rung of the oracle is the plain entry point, and POSIX defines
+   * the `_l` form as "as if uselocale(loc) had been called".  On the glibc
+   * rung this is redundant (both sides are the C locale main() pinned).
+   * Restored before gl is freed. */
+  oracle_prev = uselocale(gl);
+
   /* strto*_l parity. */
   {
     static const char *const nums[] = {"42",   "  0x1F", "-0",
@@ -1067,12 +1167,12 @@ static void test_xlocale(void) {
     for (i = 0; i < 256; i += 7) {
       char detail[64];
       snprintf(detail, sizeof detail, "c=%d", i);
-      CHECKV((hb_isdigit_l(i, hl) != 0) == (isdigit_l(i, gl) != 0),
+      CHECKV((hb_isdigit_l(i, hl) != 0) == (ORACLE_ISDIGIT(i) != 0),
              "isdigit_l", detail);
-      CHECKV((hb_isxdigit_l(i, hl) != 0) == (isxdigit_l(i, gl) != 0),
+      CHECKV((hb_isxdigit_l(i, hl) != 0) == (ORACLE_ISXDIGIT(i) != 0),
              "isxdigit_l", detail);
-      CHECKV(hb_toupper_l(i, hl) == toupper_l(i, gl), "toupper_l", detail);
-      CHECKV(hb_tolower_l(i, hl) == tolower_l(i, gl), "tolower_l", detail);
+      CHECKV(hb_toupper_l(i, hl) == ORACLE_TOUPPER(i), "toupper_l", detail);
+      CHECKV(hb_tolower_l(i, hl) == ORACLE_TOLOWER(i), "tolower_l", detail);
     }
   }
 
@@ -1082,38 +1182,38 @@ static void test_xlocale(void) {
       char detail[64];
       snprintf(detail, sizeof detail, "wc=0x%X", (unsigned)wctab[i]);
       CHECKV((hb_iswspace_l(wctab[i], hl) != 0) ==
-                 (iswspace_l(wctab[i], gl) != 0),
+                 (ORACLE_ISWSPACE(wctab[i]) != 0),
              "iswspace_l", detail);
       CHECKV((hb_iswprint_l(wctab[i], hl) != 0) ==
-                 (iswprint_l(wctab[i], gl) != 0),
+                 (ORACLE_ISWPRINT(wctab[i]) != 0),
              "iswprint_l", detail);
       CHECKV((hb_iswcntrl_l(wctab[i], hl) != 0) ==
-                 (iswcntrl_l(wctab[i], gl) != 0),
+                 (ORACLE_ISWCNTRL(wctab[i]) != 0),
              "iswcntrl_l", detail);
       CHECKV((hb_iswupper_l(wctab[i], hl) != 0) ==
-                 (iswupper_l(wctab[i], gl) != 0),
+                 (ORACLE_ISWUPPER(wctab[i]) != 0),
              "iswupper_l", detail);
       CHECKV((hb_iswlower_l(wctab[i], hl) != 0) ==
-                 (iswlower_l(wctab[i], gl) != 0),
+                 (ORACLE_ISWLOWER(wctab[i]) != 0),
              "iswlower_l", detail);
       CHECKV((hb_iswalpha_l(wctab[i], hl) != 0) ==
-                 (iswalpha_l(wctab[i], gl) != 0),
+                 (ORACLE_ISWALPHA(wctab[i]) != 0),
              "iswalpha_l", detail);
       CHECKV((hb_iswblank_l(wctab[i], hl) != 0) ==
-                 (iswblank_l(wctab[i], gl) != 0),
+                 (ORACLE_ISWBLANK(wctab[i]) != 0),
              "iswblank_l", detail);
       CHECKV((hb_iswdigit_l(wctab[i], hl) != 0) ==
-                 (iswdigit_l(wctab[i], gl) != 0),
+                 (ORACLE_ISWDIGIT(wctab[i]) != 0),
              "iswdigit_l", detail);
       CHECKV((hb_iswpunct_l(wctab[i], hl) != 0) ==
-                 (iswpunct_l(wctab[i], gl) != 0),
+                 (ORACLE_ISWPUNCT(wctab[i]) != 0),
              "iswpunct_l", detail);
       CHECKV((hb_iswxdigit_l(wctab[i], hl) != 0) ==
-                 (iswxdigit_l(wctab[i], gl) != 0),
+                 (ORACLE_ISWXDIGIT(wctab[i]) != 0),
              "iswxdigit_l", detail);
-      CHECKV(hb_towupper_l(wctab[i], hl) == towupper_l(wctab[i], gl),
+      CHECKV(hb_towupper_l(wctab[i], hl) == ORACLE_TOWUPPER(wctab[i]),
              "towupper_l", detail);
-      CHECKV(hb_towlower_l(wctab[i], hl) == towlower_l(wctab[i], gl),
+      CHECKV(hb_towlower_l(wctab[i], hl) == ORACLE_TOWLOWER(wctab[i]),
              "towlower_l", detail);
     }
   }
@@ -1140,13 +1240,13 @@ static void test_xlocale(void) {
       char detail[64];
       snprintf(detail, sizeof detail, "pair %d", k);
       ca = hb_strcoll_l(pairs[k][0], pairs[k][1], hl);
-      cb = strcoll_l(pairs[k][0], pairs[k][1], gl);
+      cb = ORACLE_STRCOLL(pairs[k][0], pairs[k][1]);
       CHECKV((ca < 0) == (cb < 0) && (ca == 0) == (cb == 0), "strcoll_l",
              detail);
       memset(fa, 0, sizeof fa);
       memset(fb, 0, sizeof fb);
       ra = hb_strxfrm_l(fa, pairs[k][0], 32, hl);
-      rb = strxfrm_l(fb, pairs[k][0], 32, gl);
+      rb = ORACLE_STRXFRM(fb, pairs[k][0], 32);
       CHECKV(ra == rb && memcmp(fa, fb, sizeof fa) == 0, "strxfrm_l",
              detail);
     }
@@ -1162,13 +1262,13 @@ static void test_xlocale(void) {
         char detail[64];
         snprintf(detail, sizeof detail, "wpair %d", k);
         ca = hb_wcscoll_l(wp[k][0], wp[k][1], hl);
-        cb = wcscoll_l(wp[k][0], wp[k][1], gl);
+        cb = ORACLE_WCSCOLL(wp[k][0], wp[k][1]);
         CHECKV((ca < 0) == (cb < 0) && (ca == 0) == (cb == 0), "wcscoll_l",
                detail);
         memset(fa, 0, sizeof fa);
         memset(fb, 0, sizeof fb);
         ra = hb_wcsxfrm_l(fa, wp[k][0], 32, hl);
-        rb = wcsxfrm_l(fb, wp[k][0], 32, gl);
+        rb = ORACLE_WCSXFRM(fb, wp[k][0], 32);
         CHECKV(ra == rb && memcmp(fa, fb, sizeof fa) == 0, "wcsxfrm_l",
                detail);
       }
@@ -1180,12 +1280,13 @@ static void test_xlocale(void) {
     char ba[64], bb[64];
     const struct tm tm = make_fixture();
     size_t ra = hb_strftime_l(ba, sizeof ba, "%Y-%m-%d %H:%M:%S", &tm, hl);
-    size_t rb = strftime_l(bb, sizeof bb, "%Y-%m-%d %H:%M:%S", &tm, gl);
+    size_t rb = ORACLE_STRFTIME(bb, sizeof bb, "%Y-%m-%d %H:%M:%S", &tm);
     CHECKV(ra == rb && strcmp(ba, bb) == 0 &&
                strcmp(ba, "2023-07-14 15:37:05") == 0,
            "strftime_l", "second precision");
   }
 
+  uselocale(oracle_prev);
   hb_freelocale(hl);
   freelocale(gl);
 }
