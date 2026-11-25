@@ -11,7 +11,7 @@ name: linux-ci
 on: [push, workflow_dispatch]
 
 concurrency:
-  group: linux-ci-main
+  group: linux-ci-${{ github.ref }}
   cancel-in-progress: false
 
 # Literal PATH — never "$PATH" inside a workflow env value: GitHub sets the
