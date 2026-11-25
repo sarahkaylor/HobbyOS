@@ -485,6 +485,54 @@ bring-up rather than against GSP-RM.
 harness and the present-path work are independent of how the booter question resolves,
 so they keep dispatching; only the ladder's GSP-RM-dependent rungs (N3 onward) wait.
 
+### 2.11 The box closed negative, and the fallback hits the same wall (2026-11-25)
+
+Both cards opened by §2.10 are done. The result is a clean, useful loss.
+
+**Option 1 — no vendor booter is accepted (MEASURED).** Four images, three of them distinct
+AD102 builds (the 550–565 and 570–580 images recovered from OpenRM bindata and validated
+byte-identically against NVIDIA's published files):
+
+| Row | Chip tag | Driver | Layout | Gate word | Time after START | Exit |
+|---|---|---|---|---|---|---|
+| v1a | AD102 | 535.113.01 | `0x7600`/`0x6000`, patchsite `0x7710` | **`0x002B0009`** | +4.208 ms | `0x10` EXIT |
+| v2a | AD102 | 570.144 (= 580.178.04) | `0x7D00`/`0x6000`, patchsite `0x7E10` | **`0x002B0009`** | +4.163 ms | `0x10` EXIT |
+| v3a | AD102 | 550.54.14 (= 555/560/565) | `0x7D00`/`0x6000`, patchsite `0x7E10` | **`0x002B0009`** | +4.176 ms | `0x10` EXIT |
+| v4a | GA102 | 570.144 (= 580) | `0x8900`/`0x6200`, patchsite `0x8A10` | **`0x00250009`** | +4.212 ms | `0x10` EXIT |
+
+The gate **discriminates**: a GA102 image returns `0x00250009`, so SEC2 reads the part
+identity correctly and the failure is AD102-specific authorisation, not a broken container.
+An AD102 image whose *only* difference is a debug-signed 384-byte block still returns
+`0x002B0009` — the signature block, not the layout, is the discriminator. The sentinel
+`0x5EC2A0A0` survives every attempt, so nothing was clobbered on the way out.
+
+`t_90ef924c` closed as an invalid premise: `nvidia/ga102/sec2/hs_bl_sig.bin` is an ls-hsbl
+signature *descriptor*, not a bootable container, so no vendor-shipped HS bootloader exists
+to test for this part.
+
+**Option 2 — the wall is SEC2, not GSP-RM (MEASURED, `docs/nv-no-rm-path.md`).**
+`ga102_gr_new()` refuses only under `nvkm_gsp_rm()`, so the host-side engine path *is*
+reachable without GSP-RM. But the ucode behind it (FECS/GPCCS) loads through the ACR, whose
+AHESASC runs **on SEC2**. Re-scoping past GSP-RM therefore does not bypass the wall — it
+relocates it. Option 2 as written cannot deliver a running engine on a part whose SEC2 will
+not execute vendor-signed code.
+
+**Consequence for the ladder.** N3 and everything above it stay parked, and now for a reason
+that no amount of host-side work changes. What is still live and worth running: the 5090
+lane (GB202 is a *different* SEC2 with its own vendor booter pair — untested), the nvk/shim
+rows that do not need RM, the present path, and the harness work.
+
+**Three options for the owner, in the order this plan recommends:**
+
+1. **Ask the same question of GB202** (one boot, existing harness, existing lane). If SEC2 on
+   a 5090 accepts its own vendor booter, the driver's future is the 5090 and the 4090 becomes
+   the virtio/venus machine. Cheap, and the only remaining path to "our driver runs NVIDIA's
+   firmware".
+2. **Accept the ceiling honestly.** L1 plus the measured part of L2 is the native driver's
+   claim; the games data points move to the virtio/venus path and are labelled as such.
+3. **Research SEC2's signature path.** No time box; expected value low without vendor signing,
+   and it is the one option that can consume unbounded effort for no ladder progress.
+
 ## 3. Work packages (parallel, each with a gate)
 
 | WP | Scope | Gate | Needs 4090? | Status 2026-11-23 |
