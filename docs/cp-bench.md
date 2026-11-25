@@ -328,6 +328,11 @@ difference as a HobbyOS-vs-Linux statement.
    at ManualSave-86 is the heavier scene; a benchmark-sized claim should not
    be used to reopen P9's 30 fps gate, and P9's number should not be used to
    predict the benchmark.
+5. **The 1 %-low's shape** — done for the HobbyOS column: `docs/nv-n9v-tail.md`
+   reads this run's own `frames.csv` + `hbp.csv` and shows the tail is the
+   benchmark's camera-path *level* (23.0–43.2 ms medians) plus broadband jitter,
+   with no periodic component, and that the 30 fps 1 %-low implies a ~49 fps
+   median. Reproduce with `tools/cp/bench/frames-dist.py`.
 
 ## 7. Evidence map
 

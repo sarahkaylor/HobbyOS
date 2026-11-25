@@ -64,12 +64,16 @@ and settles whether anything above it can even be attempted.
 | N3v | virgl 3-D submit + read-after-clear (kernel only, no Mesa) | `[VIRGL3D] match=4096/4096` | M1 gate green in-tree | `renderer=virgl` |
 | N6v | `vkcube` draws + presents | two screendumps, frames > 0 | Gate P5/P6 harness in `tools/cp/venus/` | `renderer=venus` |
 | N8v | Cyberpunk 2077 benchmark, 720p | P9 script end to end | **29.19 avg / 29.7 median / 18.2 1%-low**; host native control 139.41 avg | `renderer=venus` |
-| N9v | "reasonable performance" on the fallback | 720p ≥30 fps incl. present | RimWorld met; Cyberpunk 1%-low below target | as above |
+| N9v | "reasonable performance" on the fallback | 720p ≥30 fps incl. present | RimWorld met. Cyberpunk **not met, and not a tail fix away**: avg 29.19 / median 29.66 / 1 %-low 18.18, with the gate line at the run's own *median* (51.9 % of frames over it) — the frame cost has to move ~1.65×. Analysis and the named wall: `docs/nv-n9v-tail.md` | `renderer=venus` |
 
-The fallback's remaining lever is the **r1 host renderer**
-(`docs/nv-r1-host-renderer.md`): installing a host driver for the 4090 would move
-N8v from llvmpipe-class numbers to GPU numbers, and it is blocked on owner
-approval because it changes the host the card lanes depend on.
+The fallback's remaining lever **for r1's rows** is the **r1 host renderer**
+(`docs/nv-r1-host-renderer.md`): r1 has no `/dev/dri` at all, so its games rows are
+llvmpipe-class; installing a host driver for the 4090 would move them to GPU numbers,
+and it is blocked on owner approval because it changes the host the card lanes depend
+on. It is **not** the lever for N8v's 29.19: that number was measured on strix, whose
+host already renders on the 9070 XT through
+`egl-headless,rendernode=/dev/dri/renderD129`, so a host renderer is present in that
+datum (`docs/nv-n9v-tail.md` §6).
 
 ---
 
