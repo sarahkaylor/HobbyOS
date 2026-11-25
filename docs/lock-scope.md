@@ -124,6 +124,62 @@ The remaining 4.9 ms is `vm_lock`: a page-table walk over a large region, still
 `LOCK_CLASS_IRQ` because the fault path takes it.  It is bounded and measured,
 not hidden — the table above is the number to improve next.
 
+## 4a. The clock the gate measures (linuxci nested-KVM, 2026-11)
+
+The x64 unit tier on the `linuxci` runner (Proxmox VM, **nested KVM**) failed
+this gate on every branch from the day the gate landed: `irqoff_max_us`
+110,000-125,000 against the 50,000 budget, with `worst_lock=- pc=0x0` -- no
+lock attributed, no `[BLOCKHOLD]`, no `[LOCKERR]`, and every other test in the
+suite green.
+
+It was not a kernel defect, and it was not a budget that is too tight:
+
+| | nested KVM (linuxci) | TCG (VM 201) | TCG (mac-studio) |
+| --- | --- | --- | --- |
+| `irqoff_max_us` | 112,995-124,985 | 5,489 | 3,401 |
+| `irqoff_total_us` | 626,933 | 5,405,000 | 3,095,472 |
+
+Compute-bound sections cannot get **8x cheaper** under emulation, and the total
+is 8-9x *larger* on TCG.  The same suite passing on ARM on the same runner
+rules out "the gate is too tight for CI" as well.  The difference is what a TSC
+wall clock measures: `timer_get_us()` keeps running while the host has the vCPU
+descheduled, so a 117 ms host deschedule inside a 4 ms `irqsave` section was
+reported as a 117 ms IRQ-off window and charged to the kernel.
+
+**Decision: fix the measurement.**  One window is now
+
+```
+execution = wall - host steal
+```
+
+with `host steal` read from the hypervisor's own per-vCPU account
+(`timer_steal_us()`: on x64 the steal record the CPU already registers for PV
+TLB flush, `arch/x64/mmu.c`; 0 on ARM/TCG/bare metal, where there is no such
+account and nothing is subtracted).  It is not a sampling heuristic and it does
+not infer the deschedule from the numbers it is correcting.
+
+The two alternatives were rejected for reasons worth recording:
+
+- **Raise the budget (or add a KVM-specific one).**  ARM passes the 50 ms
+  budget on the same runner, and a 25 ms real `vm_lock` regression would hide
+  under a 125 ms KVM allowance.  The gate is the only thing holding the
+  lock-scope invariant, so it is not the thing to loosen.
+- **Dedicate/pin the runner's vCPUs.**  That removes the symptom on one host
+  and leaves the instrument wrong: every future oversubscribed runner, live
+  migration, or host IRQ storm would produce the same false red, and the
+  numbers would stay unattributable.  Runner capacity is also a separate
+  question -- one this gate should not be answering.
+
+What keeps both facts visible: the report now carries `irqoff_steal_us` (host
+time removed) and `irqoff_wall_max_us` (the raw TSC window) next to the
+corrected `irqoff_max_us` / `irqoff_total_us`.  A large steal with a small max
+is an oversubscribed runner; a large **max** is still a code defect and still
+fails the tier.  `src/host/locksteal_test.c` pins the arithmetic, including the
+falsifier (a real 60 ms masked section with no steal still exceeds the budget),
+so the correction cannot grow into a way to hide a violation.
+
+---
+
 ## 5. What keeps it from rotting
 
 Four guards, in the order they fire:

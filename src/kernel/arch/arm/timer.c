@@ -70,3 +70,9 @@ uint64_t timer_get_us(void) {
   if (freq == 0) return 0;
   return (count * 1000000) / freq;
 }
+
+/* No host steal accounting on ARM: cntpct_el0 is the physical counter of a
+ * guest that owns its vCPUs (TCG here has no scheduler to be preempted by
+ * that would report it), so the wall clock IS execution time and the lock
+ * audit subtracts nothing.  See timer.h. */
+uint64_t timer_steal_us(void) { return 0; }

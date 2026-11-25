@@ -41,6 +41,7 @@ static uint8_t host_halted[16];
    tested in microseconds. */
 volatile uint64_t cpu_heartbeat_ms[16];
 static uint64_t host_now_ms;
+static uint64_t host_now_us; /* wall clock the audit's IRQ-off windows see */
 
 uint32_t get_cpuid(void) { return (uint32_t)host_cpu; }
 int cpu_is_halted(uint32_t cpu) { return cpu < 16 ? host_halted[cpu] : 0; }
@@ -57,7 +58,13 @@ void uart_puts(const char *s) { (void)s; }  /* its dumps: not exercised here */
 void print_int(int v) { (void)v; }
 struct process *process_get_pcb(int pid) { (void)pid; return 0; }
 void blk_token_diag_row(const char *why) { (void)why; } /* lockscale wedge hook (cp-fat) */
-uint64_t timer_get_us(void) { return host_now_ms * 1000; }
+uint64_t timer_get_us(void) { return host_now_us; }
+/* Host steal clock (timer.h): what the audit subtracts from an IRQ-off
+   window so that a vCPU the host descheduled is not charged to the code.
+   Zero by default = bare metal / TCG, which is what the other tests here
+   want; the correction tests below drive it explicitly. */
+static uint64_t host_steal_us;
+uint64_t timer_steal_us(void) { return host_steal_us; }
 
 
 /* Capture the console: the steal must be announced, never silent. */
@@ -233,6 +240,116 @@ static void test_lockcnt_summary(void) {
   check(lock_cnt_stallbreak > 0, "STALLBREAK counter incremented by a real break");
 }
 
+/* IRQ-off windows: wall clock minus host steal.
+ *
+ * This is the linuxci intel red (t_24e1ea49).  The audit timed a window with
+ * timer_get_us(), a TSC wall clock, on a nested-KVM runner whose host
+ * descheduled vCPUs in the middle of irqsave sections: 117 ms "IRQ-off"
+ * reported against a 50 ms budget, with no lock attributed, while the same
+ * binary measures 3.4-5.5 ms under TCG.  The fix is the measurement: the
+ * window is now (wall - steal), so a deschedule is charged to the runner
+ * (and reported as irqoff_steal_us) instead of to the code -- and a real
+ * long masked section still fails.
+ *
+ * These checks are the contract, not a smoke test: the numbers below are the
+ * arithmetic the gate depends on, and the last case proves the correction
+ * cannot hide a genuine violation. */
+#define BUDGET_US 50000 /* LOCK_IRQOFF_BUDGET_US, src/kernel/unit_test.c */
+
+static void test_irqoff_steal_correction(void) {
+  host_cpu = 0;
+
+  /* A: guest work only.  4 ms of masked execution, nothing stolen. */
+  lock_audit_reset_counters();
+  host_now_us = 1000000;
+  host_steal_us = 700000;
+  lock_audit_irqoff_begin(1);
+  host_now_us += 4000;
+  lock_audit_irqoff_end(1);
+  check(lock_audit_irqoff_max_us() == 4000,
+        "irqoff: 4 ms of guest work with no steal is 4000 us");
+  check(lock_audit_irqoff_steal_us() == 0, "irqoff: no steal, nothing removed");
+  check(lock_audit_irqoff_wall_max_us() == 4000,
+        "irqoff: the raw wall window is recorded too");
+
+  /* B: THE REGRESSION.  4 ms of guest work, but the host descheduled the
+     vCPU for 117 ms inside the window: wall 121 ms, steal 117 ms.  The gate
+     must see 4 ms (under budget), and the steal must be visible. */
+  lock_audit_reset_counters();
+  host_now_us = 2000000;
+  host_steal_us = 5000000;
+  lock_audit_irqoff_begin(1);
+  host_now_us += 121000;
+  host_steal_us += 117000;
+  lock_audit_irqoff_end(1);
+  check(lock_audit_irqoff_max_us() == 4000,
+        "irqoff: 117 ms of host steal inside the window is not charged to the code");
+  check(lock_audit_irqoff_max_us() < BUDGET_US,
+        "irqoff: the nested-KVM shape passes the 50 ms budget after correction");
+  check(lock_audit_irqoff_steal_us() == 117000,
+        "irqoff: the removed steal is reported separately (117000 us)");
+  check(lock_audit_irqoff_wall_max_us() == 121000,
+        "irqoff: the raw 121 ms wall window stays visible for the runner question");
+
+  /* C: the falsifier -- a genuine long masked section, no steal at all,
+     still fails.  A correction that also swallowed real violations would
+     make the whole gate meaningless. */
+  lock_audit_reset_counters();
+  host_now_us = 3000000;
+  lock_audit_irqoff_begin(1);
+  host_now_us += 60000;
+  lock_audit_irqoff_end(1);
+  check(lock_audit_irqoff_max_us() == 60000,
+        "irqoff: a real 60 ms masked section is measured in full");
+  check(lock_audit_irqoff_max_us() > BUDGET_US,
+        "irqoff: ... and still over the budget, so the gate still fires");
+
+  /* D: partial steal -- the correction subtracts the stolen part only. */
+  lock_audit_reset_counters();
+  host_now_us = 4000000;
+  host_steal_us = 9000000;
+  lock_audit_irqoff_begin(1);
+  host_now_us += 30000;
+  host_steal_us += 20000;
+  lock_audit_irqoff_end(1);
+  check(lock_audit_irqoff_max_us() == 10000,
+        "irqoff: 30 ms wall with 20 ms stolen is 10 ms of execution");
+  check(lock_audit_irqoff_steal_us() == 20000, "irqoff: only the stolen part is removed");
+
+  /* E: a steal record coarser than the window (steal > wall) must clamp, not
+     underflow: a negative window would read as an absurd max_us. */
+  lock_audit_reset_counters();
+  host_now_us = 5000000;
+  host_steal_us = 12000000;
+  lock_audit_irqoff_begin(1);
+  host_now_us += 1000;
+  host_steal_us += 500000; /* record rounds up past the window */
+  lock_audit_irqoff_end(1);
+  check(lock_audit_irqoff_max_us() == 0,
+        "irqoff: steal larger than the wall window clamps to 0, never underflows");
+  check(lock_audit_irqoff_steal_us() == 1000,
+        "irqoff: ... and only the wall time is credited as steal");
+
+  /* F: nesting.  A window opened inside another one is one window; the
+     inner end must not close it (that is what made the 117 ms visible as a
+     single section rather than as noise). */
+  lock_audit_reset_counters();
+  host_now_us = 6000000;
+  host_steal_us = 20000000;
+  lock_audit_irqoff_begin(1);
+  host_now_us += 1000;
+  lock_audit_irqoff_begin(1); /* nested: same window */
+  host_now_us += 1000;
+  lock_audit_irqoff_end(1);
+  host_now_us += 1000;
+  lock_audit_irqoff_end(1);
+  check(lock_audit_irqoff_max_us() == 3000,
+        "irqoff: nested windows are measured once, from the outermost begin to end");
+
+  lock_audit_reset_counters();
+  host_steal_us = 0;
+}
+
 int main(void) {
   printf("locksteal_test_host: GB-060 stale-owner steal + wedged-owner stall break\n");
   test_decision_table();
@@ -240,6 +357,7 @@ int main(void) {
   test_stallbreak_table();
   test_end_to_end_stallbreak();
   test_lockcnt_summary();
+  test_irqoff_steal_correction();
   printf("locksteal_test_host: %d checks, %d failed\n", checks_run,
          checks_failed);
   return checks_failed == 0 ? 0 : 1;

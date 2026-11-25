@@ -24,9 +24,23 @@
  *                         MUTEX-UNDER-PROCLOCK (the documented inversion that
  *                         closes a cycle against any proc_lock holder doing
  *                         filesystem work).
- *        [MUTEX-SELF]     a CPU re-acquired a lock it already holds.  Before
+ *        [MUTEX-SELF]     a CPU re-acquired a lock it already held.  Before
  *                         this instrument that was a silent, unnamed hang; the
  *                         ARM unit suite was wedged on exactly such a site.
+ *
+ * THE CLOCK.  The IRQ-off gate must measure time the GUEST spent with
+ * interrupts masked, and the kernel's cheap clock (timer_get_us) is a TSC wall
+ * clock: it keeps running while the host has the vCPU descheduled.  On the
+ * nested-KVM linuxci runner that difference alone produced the gate's red:
+ * 110-125 ms windows, unattributed to any lock, from a binary that measures
+ * 3.4-5.5 ms under TCG -- and with LESS total IRQ-off time on KVM than under
+ * emulation, which no compute-bound section can do.  So each window is now
+ * charged (wall - host steal), with the steal read from the hypervisor's own
+ * per-vCPU account (timer_steal_us); it is reported separately as
+ * irqoff_steal_us instead of being silently dropped, so an oversubscribed
+ * runner stays visible while the invariant stays about the code
+ * (docs/lock-scope.md §4a).  A real long masked section has no steal in it and
+ * still fails the budget.
  *
  * Counters are plain per-CPU writes; nothing here feeds a scheduling decision.
  */
@@ -153,6 +167,10 @@ struct ls_cpu_state {
   volatile uint64_t held[LS_HELD_SLOTS];
   volatile uint64_t held_pc[LS_HELD_SLOTS];
   volatile uint64_t irqoff_start, irqoff_total, irqoff_max, irqoff_max_lock, irqoff_max_pc;
+  /* Host steal inside IRQ-off windows: wall_us - steal_us is the number the
+   * gate uses.  Kept per CPU as a separate total so "the runner descheduled
+   * this vCPU" stays visible instead of silently vanishing from the report. */
+  volatile uint64_t irqoff_start_steal, irqoff_steal_total, irqoff_wall_max;
   volatile uint64_t preempt_site;
   volatile int32_t preempt;
   volatile uint8_t held_n, irqoff_nest, irqoff_active, in_irq;
@@ -282,6 +300,8 @@ void lock_audit_irqoff_begin(int we_masked) {
   ls_pc[c].irqoff_nest = (uint8_t)(n + 1);
   if (n == 0 && we_masked) {
     ls_pc[c].irqoff_start = timer_get_us();
+    /* Snapshot the steal clock in the same breath (see the window end). */
+    ls_pc[c].irqoff_start_steal = timer_steal_us();
     ls_pc[c].irqoff_active = 1;
   }
 }
@@ -295,7 +315,21 @@ void lock_audit_irqoff_end(int we_unmask) {
   }
   ls_pc[c].irqoff_nest = (uint8_t)(n - 1);
   if (n == 1 && ls_pc[c].irqoff_active && we_unmask) {
-    uint64_t d = timer_get_us() - ls_pc[c].irqoff_start;
+    uint64_t wall = timer_get_us() - ls_pc[c].irqoff_start;
+    /* Time the host had this vCPU runnable-but-descheduled is not time the
+     * guest spent with interrupts masked, and it is precisely what a TSC
+     * wall clock cannot tell apart from guest work.  On the nested-KVM CI
+     * runner it was the whole finding: 117 ms "IRQ-off" windows that measure
+     * 3.4-5.5 ms under TCG, with no lock attributed (lockscale.c header).
+     * Subtract it, and report it separately -- the runner's oversubscription
+     * stays measurable, it just stops being charged to the lock scope. */
+    uint64_t steal = timer_steal_us() - ls_pc[c].irqoff_start_steal;
+    if (steal > wall) /* coarse record or a clock that went backwards */
+      steal = wall;
+    uint64_t d = wall - steal;
+    ls_pc[c].irqoff_steal_total += steal;
+    if (wall > ls_pc[c].irqoff_wall_max)
+      ls_pc[c].irqoff_wall_max = wall;
     ls_pc[c].irqoff_total += d;
     if (d > ls_pc[c].irqoff_max) {
       ls_pc[c].irqoff_max = d;
@@ -473,6 +507,26 @@ uint64_t lock_audit_irqoff_total_us(void) {
   return t;
 }
 
+/* Host steal removed from the IRQ-off windows (all CPUs).  Reported next to
+ * the corrected totals so the correction is auditable: max+total are guest
+ * execution time, steal is what the host took, wall_max is the raw TSC
+ * window.  A large steal with a small max is an oversubscribed runner; a
+ * large max is a code defect and still fails the gate. */
+uint64_t lock_audit_irqoff_steal_us(void) {
+  uint64_t t = 0;
+  for (uint32_t c = 0; c < MAX_CPUS; c++)
+    t += ls_pc[c].irqoff_steal_total;
+  return t;
+}
+
+uint64_t lock_audit_irqoff_wall_max_us(void) {
+  uint64_t m = 0;
+  for (uint32_t c = 0; c < MAX_CPUS; c++)
+    if (ls_pc[c].irqoff_wall_max > m)
+      m = ls_pc[c].irqoff_wall_max;
+  return m;
+}
+
 void lock_audit_reset_counters(void) {
   ls_blockhold = 0;
   ls_selflock = 0;
@@ -481,6 +535,8 @@ void lock_audit_reset_counters(void) {
   for (uint32_t c = 0; c < MAX_CPUS; c++) {
     ls_pc[c].irqoff_total = 0;
     ls_pc[c].irqoff_max = 0;
+    ls_pc[c].irqoff_steal_total = 0;
+    ls_pc[c].irqoff_wall_max = 0;
   }
   for (uint32_t i = 0; i < LS_MEMO; i++) {
     ls_memo[i].what = 0;
@@ -505,6 +561,10 @@ void lock_print_report(void) {
   kl_i(&k, (long)lock_audit_irqoff_max_us());
   kl_s(&k, " irqoff_total_us=");
   kl_i(&k, (long)lock_audit_irqoff_total_us());
+  kl_s(&k, " irqoff_steal_us=");
+  kl_i(&k, (long)lock_audit_irqoff_steal_us());
+  kl_s(&k, " irqoff_wall_max_us=");
+  kl_i(&k, (long)lock_audit_irqoff_wall_max_us());
   kl_s(&k, " reg_used=");
   kl_i(&k, (long)ls_reg_used);
   kl_s(&k, " reg_dropped=");
@@ -524,6 +584,10 @@ void lock_print_report(void) {
     kl_i(&r, (long)ls_pc[c].irqoff_max);
     kl_s(&r, " total_us=");
     kl_i(&r, (long)ls_pc[c].irqoff_total);
+    kl_s(&r, " steal_us=");
+    kl_i(&r, (long)ls_pc[c].irqoff_steal_total);
+    kl_s(&r, " wall_max_us=");
+    kl_i(&r, (long)ls_pc[c].irqoff_wall_max);
     kl_s(&r, " worst_lock=");
     const void *lw = (const void *)(uintptr_t)ls_pc[c].irqoff_max_lock;
     kl_s(&r, lw ? lock_name(lw) : "-");

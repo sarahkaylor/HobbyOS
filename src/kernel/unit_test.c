@@ -7,7 +7,13 @@
 /* Longest single IRQ-off window the unit tier tolerates.  4x the measured
  * worst case (vm_lock, ~4.9 ms during the bulk page-table tests), and 90x
  * below the 435 ms the filesystem used to spend masked -- so it catches the
- * regression class without being flaky about a slow host. */
+ * regression class without being flaky about a slow host.
+ *
+ * The window it is compared against is guest execution time: lockscale.c
+ * subtracts host steal from the TSC wall clock (docs/lock-scope.md §4a), so a
+ * vCPU the runner descheduled cannot fail this budget.  The budget itself is
+ * deliberately arch- and host-independent -- no KVM-specific allowance -- and
+ * ARM (TCG) and x64 (KVM) are held to the same number. */
 #define LOCK_IRQOFF_BUDGET_US 50000
 
 int tests_run = 0;
