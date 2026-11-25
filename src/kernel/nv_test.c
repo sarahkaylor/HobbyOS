@@ -68,6 +68,12 @@ struct fake_gpu {
   int reset_stuck; /* 1 = the 0x3C0 pulse never completes the reset */
   uint32_t reset_pulses;
   uint32_t v600, v624, v10c;
+  /* GR-window probe model (nv_engine.c): one word per named register, then the
+   * per-GPC tpc masks.  Defaults to 0xffffffff ("absent") so this stage cannot
+   * change the result of any test that is not about it. */
+  uint32_t eng[NV_ENG_PROBE_REGS];
+  uint32_t tpc[NV_ENG_MAX_GPC];
+  uint32_t eng_absent;
 };
 
 static struct fake_gpu fg;
@@ -100,6 +106,11 @@ static void fake_reset(void) {
   fg.falcon_caps2[NV_FALCON_IDX_SEC2] = 0xffffffffu; /* SEC2 window absent */
   fg.uctl[NV_FALCON_IDX_PMU] = NV_FALCON_UC_CTRL_STOPPED;
   fg.uctl[NV_FALCON_IDX_GSP] = NV_FALCON_UC_CTRL_STOPPED;
+  /* The GR window is absent unless a test says otherwise: the probe must not
+   * inherit a "data" answer from a model that was never asked. */
+  for (int i = 0; i < NV_ENG_PROBE_REGS; i++) fg.eng[i] = 0xffffffffu;
+  for (int i = 0; i < NV_ENG_MAX_GPC; i++) fg.tpc[i] = 0xffffffffu;
+  fg.eng_absent = 1;
 }
 
 static uint32_t fake_rd32(void *ctx, uint32_t off) {
@@ -155,6 +166,13 @@ static uint32_t fake_rd32(void *ctx, uint32_t off) {
   if (off == NV_PMC_ENABLE) return fg.pmc_enable;
   if (off == NV_PMC_INTR_0) return fg.pmc_intr;
   if (off == NV_PBUS_INTR_0) return fg.pbus_intr;
+  /* GR-window probe model: named registers by address, then per-GPC masks. */
+  for (int i = 0; i < NV_ENG_PROBE_REGS; i++) {
+    if (off == nv_eng_probe_regs[i].addr) return fg.eng[i];
+  }
+  for (int i = 0; i < NV_ENG_MAX_GPC; i++) {
+    if (off == nv_eng_gpc_unit(i, 0x2608u)) return fg.tpc[i];
+  }
   if (off == NV_PTIMER_TIME_0) {
     uint32_t v = fg.timer_lo;
     fg.timer_lo += fg.timer_step;
@@ -474,6 +492,84 @@ static void test_nv_falcon_fenced_vs_absent(void) {
   ASSERT(nv_falcon_probe_all(d2) == 0);
   EXPECT_EQ(d2->falcon[NV_FALCON_IDX_SEC2].present, 0);
   EXPECT_EQ(d2->falcon[NV_FALCON_IDX_SEC2].fenced, 0);
+}
+
+/* ---- GR-window reachability probe (nv_engine.c) ------------------------
+ *
+ * Four outcomes, and the reason each is worth pinning: a no-RM path's first
+ * question is whether the engine window answers at all, and its second is
+ * whether the answer is a topology or a zero that only looks like one.  The
+ * model drives the same function the card drives, so a regression in the
+ * sentinel handling fails here instead of costing a boot. */
+static void test_nv_engine_probe_absent(void) {
+  uart_puts("  Running test_nv_engine_probe_absent...\n");
+  tests_run++;
+  struct nv_dev *d = fake_attach(); /* fake_reset: every eng word 0xffffffff */
+  ASSERT(nv_engine_probe(d) == 0);
+  EXPECT_EQ(d->eng.window, NV_ENG_ABSENT);
+  EXPECT_EQ(d->eng.n_absent, NV_ENG_PROBE_REGS);
+  EXPECT_EQ(d->eng.n_data, 0);
+  EXPECT_EQ(d->eng.gpc_nr, -1);
+  EXPECT_EQ(d->eng.topo_verdict, NV_TOPO_UNMEASURED);
+}
+
+static void test_nv_engine_probe_fenced(void) {
+  uart_puts("  Running test_nv_engine_probe_fenced...\n");
+  tests_run++;
+  struct nv_dev *d = fake_attach();
+  for (int i = 0; i < NV_ENG_PROBE_REGS; i++) fg.eng[i] = NV_REG_FENCED;
+  ASSERT(nv_engine_probe(d) == 0);
+  EXPECT_EQ(d->eng.window, NV_ENG_FENCED); /* fenced != absent */
+  EXPECT_EQ(d->eng.n_fenced, NV_ENG_PROBE_REGS);
+  EXPECT_EQ(d->eng.gpc_nr, -1);
+  /* A fenced window must not be misread as the "unreadable" word either: the
+   * three sentinels have three meanings (nv_regs.h). */
+  EXPECT_EQ(d->eng.n_unreadable, 0);
+}
+
+static void test_nv_engine_probe_topology(void) {
+  uart_puts("  Running test_nv_engine_probe_topology...\n");
+  tests_run++;
+  struct nv_dev *d = fake_attach();
+  /* The 4090's published shape: 11 GPC, 64 TPC.  Masks: ten GPCs of 6 TPC and
+   * one of 4, which is a shape the popcount must reproduce exactly. */
+  fg.eng[0] = 0x00000000u; /* window first word: data */
+  fg.eng[1] = 0x00000010u; /* intr vector: data (the control the probe needs) */
+  fg.eng[2] = 0x00000000u; /* nonstall */
+  fg.eng[3] = 0x0000000bu; /* topology: gpc_nr = 11 in the low 5 bits */
+  fg.eng[4] = fg.eng[5] = fg.eng[6] = 0x00000000u;
+  for (int i = 0; i < 10; i++) fg.tpc[i] = 0x3fu; /* 6 TPC each */
+  fg.tpc[10] = 0x0fu;                             /* 4 TPC */
+  ASSERT(nv_engine_probe(d) == 0);
+  EXPECT_EQ(d->eng.window, NV_ENG_ADDRESSABLE);
+  EXPECT_EQ(d->eng.gpc_nr, 11);
+  EXPECT_EQ(d->eng.tpc_nr, 64);
+  EXPECT_EQ(d->eng.topo_verdict, NV_TOPO_MEASURED);
+  EXPECT_EQ((int)d->eng.tpc_ok, 0x7ff); /* 11 answering GPCs */
+}
+
+static void test_nv_engine_probe_zero_topology_is_not_a_measurement(void) {
+  uart_puts("  Running test_nv_engine_probe_zero_topology_is_not_a_measurement...\n");
+  tests_run++;
+  struct nv_dev *d = fake_attach();
+  /* The window answers data, but the topology word reads 0 while its control
+   * does too.  "Zero GPCs" and "unreadable" have looked alike on this project
+   * before (nv-plan.md section 6 rule 1), so this must NOT publish a topology. */
+  fg.eng[1] = 0x00000010u;
+  fg.eng[3] = 0x00000000u;
+  ASSERT(nv_engine_probe(d) == 0);
+  EXPECT_EQ(d->eng.window, NV_ENG_ADDRESSABLE);
+  EXPECT_EQ(d->eng.topo_verdict, NV_TOPO_IMPLAUSIBLE);
+  EXPECT_EQ(d->eng.gpc_nr, -1);
+  EXPECT_EQ(d->eng.tpc_nr, 0);
+  /* The other direction: a plausible count with NO control answering is also
+   * not a measurement. */
+  struct nv_dev *d2 = fake_attach();
+  fg.eng[1] = 0xffffffffu; /* control absent */
+  fg.eng[3] = 0x0000000bu;
+  ASSERT(nv_engine_probe(d2) == 0);
+  EXPECT_EQ(d2->eng.topo_verdict, NV_TOPO_IMPLAUSIBLE);
+  EXPECT_EQ(d2->eng.gpc_nr, -1);
 }
 
 /* The GSP reset that FWSEC requires: the exact writes, in order.  The reset is
@@ -961,6 +1057,10 @@ void nv_test_suite(void) {
   test_nv_gsp_probe_reports_wpr2();
   test_nv_gsp_probe_wpr_verdicts();
   test_nv_falcon_fenced_vs_absent();
+  test_nv_engine_probe_absent();
+  test_nv_engine_probe_fenced();
+  test_nv_engine_probe_topology();
+  test_nv_engine_probe_zero_topology_is_not_a_measurement();
   test_nv_gsp_boot_stops_at_gate();
   test_nv_gsp_fwsec_reset();
   test_nv_bringup_stages();

@@ -518,6 +518,13 @@ Mesa stack, or the virtio-gpu path, and a machine with no NVIDIA card costs one
 
 ## 7. The ladder to hardware 3D
 
+> **Re-pointed 2026-11-24.** The live ladder is `docs/nv-games-ladder.md`: after
+> the booter wall (`0x002B0009`, `docs/nv-no-rm-path.md`), the native branch's
+> next gate is SEC2 accepting a non-booter HS container, the GSP-RM rung is
+> parked behind "when a signed booter exists", and every games row names the
+> renderer that produced it. The table below is the pre-pivot stage list, kept
+> because the P-stages are still the harness's shape.
+
 | stage | content | state |
 |---|---|---|
 | P0 | harness: HobbyOS VM on `r1` with the 4090 passed through, serial + screenshot capture, deploy script | **done** |

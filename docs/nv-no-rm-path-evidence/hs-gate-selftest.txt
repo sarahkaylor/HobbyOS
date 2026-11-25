@@ -1,0 +1,9 @@
+  PASS ad102-booter_load-570.144.bin      verdict=IDENTITY-COMPATIBLE      triple=(1/0x1/3) want=(1/0x1/3)
+  PASS ga102-booter_load-570.144.bin      verdict=IDENTITY-COMPATIBLE      triple=(1/0x1/3) want=(1/0x1/3)
+  PASS tu102-booter_load-570.144.bin      verdict=UCODE-ID-NOT-FOR-THIS-PART triple=(0/0x1/13) want=(0/0x1/13)
+  PASS ga102-sec2-hs_bl_sig.bin           verdict=IDENTITY-COMPATIBLE      triple=(1/0x1/5) want=(1/0x1/5)
+  PASS ga102-acr-ucode_ahesasc.bin        verdict=FUSE-PRECEDENT-MISSING   triple=(2/0x1/1) want=(2/0x1/1)
+  PASS ga102-acr-ucode_asb.bin            verdict=FUSE-PRECEDENT-MISSING   triple=(2/0x400/1) want=(2/0x400/1)
+  PASS ga102-acr-ucode_unload.bin         verdict=FUSE-PRECEDENT-MISSING   triple=(2/0x1/1) want=(2/0x1/1)
+
+selftest: 7 containers checked, 0 mismatched

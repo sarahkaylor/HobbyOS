@@ -1,0 +1,71 @@
+  Running test_nv_engine_probe_absent...
+[NV-ENG] gr_window_first 0x0x0000000000400000=0x00000000FFFFFFFF absent
+[NV-ENG] gr_intr_vector 0x0x0000000000400154=0x00000000FFFFFFFF absent
+[NV-ENG] gr_nonstall 0x0x0000000000400160=0x00000000FFFFFFFF absent
+[NV-ENG] gr_topology 0x0x0000000000409604=0x00000000FFFFFFFF absent
+[NV-ENG] fecs_reset 0x0x0000000000409614=0x00000000FFFFFFFF absent
+[NV-ENG] gpccs_reset 0x0x000000000041A614=0x00000000FFFFFFFF absent
+[NV-ENG] zbc_clear_color 0x0x000000000041BCB4=0x00000000FFFFFFFF absent
+[NV-ENG] pgraph window 0x400000..0x5FFFFF regs=7 data=0 fenced=0 unreadable=0 absent=7 verdict=ABSENT note=read-only (reachability is not permission to write)
+  Running test_nv_engine_probe_fenced...
+[NV-ENG] gr_window_first 0x0x0000000000400000=0x00000000BADF5620 fenced
+[NV-ENG] gr_intr_vector 0x0x0000000000400154=0x00000000BADF5620 fenced
+[NV-ENG] gr_nonstall 0x0x0000000000400160=0x00000000BADF5620 fenced
+[NV-ENG] gr_topology 0x0x0000000000409604=0x00000000BADF5620 fenced
+[NV-ENG] fecs_reset 0x0x0000000000409614=0x00000000BADF5620 fenced
+[NV-ENG] gpccs_reset 0x0x000000000041A614=0x00000000BADF5620 fenced
+[NV-ENG] zbc_clear_color 0x0x000000000041BCB4=0x00000000BADF5620 fenced
+[NV-ENG] pgraph window 0x400000..0x5FFFFF regs=7 data=0 fenced=7 unreadable=0 absent=0 verdict=FENCED note=read-only (reachability is not permission to write)
+  Running test_nv_engine_probe_topology...
+[NV-ENG] gr_window_first 0x0x0000000000400000=0x0000000000000000 data
+[NV-ENG] gr_intr_vector 0x0x0000000000400154=0x0000000000000010 data
+[NV-ENG] gr_nonstall 0x0x0000000000400160=0x0000000000000000 data
+[NV-ENG] gr_topology 0x0x0000000000409604=0x000000000000000B data
+[NV-ENG] fecs_reset 0x0x0000000000409614=0x0000000000000000 data
+[NV-ENG] gpccs_reset 0x0x000000000041A614=0x0000000000000000 data
+[NV-ENG] zbc_clear_color 0x0x000000000041BCB4=0x0000000000000000 data
+[NV-ENG] pgraph window 0x400000..0x5FFFFF regs=7 data=7 fenced=0 unreadable=0 absent=0 verdict=ADDRESSABLE note=read-only (reachability is not permission to write)
+[NV-ENG] gr topology 0x409604=0x000000000000000B gpc_nr=11 fbp_or_ltc=0 control_ok=1
+[NV-ENG] gpc tpc masks (GPC_UNIT(i,0x2608)): 0x000000000000003F 0x000000000000003F 0x000000000000003F 0x000000000000003F 0x000000000000003F 0x000000000000003F 0x000000000000003F 0x000000000000003F 0x000000000000003F 0x000000000000003F 0x000000000000000F
+[NV-ENG] topology verdict=MEASURED (this replaces the declared 11/64 row for gpc/tpc on the next nvk boot)
+[NV-ENG] measured gpc=11 tpc=64 src=register
+  Running test_nv_engine_probe_zero_topology_is_not_a_measurement...
+[NV-ENG] gr_window_first 0x0x0000000000400000=0x00000000FFFFFFFF absent
+[NV-ENG] gr_intr_vector 0x0x0000000000400154=0x0000000000000010 data
+[NV-ENG] gr_nonstall 0x0x0000000000400160=0x00000000FFFFFFFF absent
+[NV-ENG] gr_topology 0x0x0000000000409604=0x0000000000000000 data
+[NV-ENG] fecs_reset 0x0x0000000000409614=0x00000000FFFFFFFF absent
+[NV-ENG] gpccs_reset 0x0x000000000041A614=0x00000000FFFFFFFF absent
+[NV-ENG] zbc_clear_color 0x0x000000000041BCB4=0x00000000FFFFFFFF absent
+[NV-ENG] pgraph window 0x400000..0x5FFFFF regs=7 data=2 fenced=0 unreadable=0 absent=5 verdict=ADDRESSABLE note=read-only (reachability is not permission to write)
+[NV-ENG] gr topology 0x409604=0x0000000000000000 gpc_nr=0 fbp_or_ltc=0 control_ok=1
+[NV-ENG] topology verdict=IMPLAUSIBLE (word answered data but no control register in the block did, or the count is out of range: NOT a measurement)
+[NV-ENG] gr_window_first 0x0x0000000000400000=0x00000000FFFFFFFF absent
+[NV-ENG] gr_intr_vector 0x0x0000000000400154=0x00000000FFFFFFFF absent
+[NV-ENG] gr_nonstall 0x0x0000000000400160=0x00000000FFFFFFFF absent
+[NV-ENG] gr_topology 0x0x0000000000409604=0x000000000000000B data
+[NV-ENG] fecs_reset 0x0x0000000000409614=0x00000000FFFFFFFF absent
+[NV-ENG] gpccs_reset 0x0x000000000041A614=0x00000000FFFFFFFF absent
+[NV-ENG] zbc_clear_color 0x0x000000000041BCB4=0x00000000FFFFFFFF absent
+[NV-ENG] pgraph window 0x400000..0x5FFFFF regs=7 data=1 fenced=0 unreadable=0 absent=6 verdict=ADDRESSABLE note=read-only (reachability is not permission to write)
+[NV-ENG] gr topology 0x409604=0x000000000000000B gpc_nr=11 fbp_or_ltc=0 control_ok=0
+[NV-ENG] topology verdict=IMPLAUSIBLE (word answered data but no control register in the block did, or the count is out of range: NOT a measurement)
+[NV-ENG] gr_window_first 0x0x0000000000400000=0x00000000FFFFFFFF absent
+[NV-ENG] gr_intr_vector 0x0x0000000000400154=0x00000000FFFFFFFF absent
+[NV-ENG] gr_nonstall 0x0x0000000000400160=0x00000000FFFFFFFF absent
+[NV-ENG] gr_topology 0x0x0000000000409604=0x00000000FFFFFFFF absent
+[NV-ENG] fecs_reset 0x0x0000000000409614=0x00000000FFFFFFFF absent
+[NV-ENG] gpccs_reset 0x0x000000000041A614=0x00000000FFFFFFFF absent
+[NV-ENG] zbc_clear_color 0x0x000000000041BCB4=0x00000000FFFFFFFF absent
+[NV-ENG] pgraph window 0x400000..0x5FFFFF regs=7 data=0 fenced=0 unreadable=0 absent=7 verdict=ABSENT note=read-only (reachability is not permission to write)
+[NV-ENG] gr_window_first 0x0x0000000000400000=0x00000000FFFFFFFF absent
+[NV-ENG] gr_intr_vector 0x0x0000000000400154=0x00000000FFFFFFFF absent
+[NV-ENG] gr_nonstall 0x0x0000000000400160=0x00000000FFFFFFFF absent
+[NV-ENG] gr_topology 0x0x0000000000409604=0x00000000FFFFFFFF absent
+[NV-ENG] fecs_reset 0x0x0000000000409614=0x00000000FFFFFFFF absent
+[NV-ENG] gpccs_reset 0x0x000000000041A614=0x00000000FFFFFFFF absent
+[NV-ENG] zbc_clear_color 0x0x000000000041BCB4=0x00000000FFFFFFFF absent
+[NV-ENG] pgraph window 0x400000..0x5FFFFF regs=7 data=0 fenced=0 unreadable=0 absent=7 verdict=ABSENT note=read-only (reachability is not permission to write)
+Tests run:    594
+Tests failed: 0
+UNIT TESTS PASSED
