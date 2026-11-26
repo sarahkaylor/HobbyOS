@@ -214,7 +214,7 @@ sync_file flags inside the fd rows), and that is unchanged from WP-SYNC.
 
 ## 6. Measured
 
-Both tiers ran in the card's worktree on this commit's code, with the card's own
+Both tiers ran in the card's worktree on the code commit `e6fb0233`, with the card's own
 invocation. No KVM on this box (this uid is not in group `kvm`; `/dev/kvm` is
 `root:kvm 660`), so both tiers ran TCG.
 

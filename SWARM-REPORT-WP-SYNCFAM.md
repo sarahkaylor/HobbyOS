@@ -21,7 +21,7 @@ measurement."* The seam check was run; §4 is the report.
 ## 2. The measurement
 
 Both tiers, in the card's worktree, with the card's invocation line, on the
-commit that carries this branch (`git log -1` on `nv/wp-syncfam`). No KVM: this
+code commit `e6fb0233` on `nv/wp-syncfam` (the doc commit after it is .md only). No KVM: this
 uid is not in group `kvm` (`/dev/kvm` is `root:kvm 660`), so both ran TCG.
 
 | tier | invocation | baseline, same tree | this rung | delta |
