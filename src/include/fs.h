@@ -123,7 +123,15 @@ typedef enum {
      nv_shim_dmabuf_release() -- which is what drops the object's reference.
      read/write have no data path (a dma-buf is shared memory, not a stream).
      Appended last: no values shift. */
-  FILE_TYPE_DMABUF
+  FILE_TYPE_DMABUF,
+  /* WP-SYNC: a syncobj fd exported by /dev/nvshim (DRM_IOCTL_SYNCOBJ_HANDLE_
+     TO_FD).  The object is nv_shim.c's syncobj record (f->syncobj.obj, opaque
+     here); read/write have no data path, mmap is refused, and because it is an
+     ordinary file DESCRIPTION the fd table's ref_count is what keeps the
+     syncobj alive -- dup(2), fork and SCM_RIGHTS need no per-type code.  The
+     last close calls nv_shim_syncobj_release(), which drops the object's
+     reference.  Appended last: no values shift. */
+  FILE_TYPE_SYNCOBJ
 } file_type_t;
 
 struct vm_object;
@@ -234,6 +242,13 @@ struct file {
                                         (dup/fork/SCM_RIGHTS share the slot's
                                         ref_count, so release runs once) */
     } dmabuf;
+    struct {
+      void *obj;                   /**< WP-SYNC: struct shim_sobj owned by
+                                        nv_shim.c; one reference per file
+                                        description (dup/fork/SCM_RIGHTS share
+                                        the slot's ref_count, so release runs
+                                        once) */
+    } syncobj;
   };
   int gidx;                        /**< C1-k5: this slot's global index (the
                                         table is chunked, fs.c gfile) */
@@ -644,5 +659,14 @@ int fs_msg_install_gfd(struct process *p, int gfd);
 int file_dmabuf_install(struct process *p, void *obj, int cloexec);
 void *file_dmabuf_obj(struct process *p, int fd);
 int file_is_dmabuf(struct process *p, int fd);
+
+/* --- WP-SYNC: syncobj fds (nv_shim.h declares the object side) ----------
+ * Identical machinery, one type later: an ordinary file slot of type
+ * FILE_TYPE_SYNCOBJ whose payload is the exporter's syncobj record, so dup(2),
+ * fork, close(2) and SCM_RIGHTS work unchanged.  The last close calls
+ * nv_shim_syncobj_release(), which drops the syncobj's reference. */
+int file_syncobj_install(struct process *p, void *obj, int cloexec);
+void *file_syncobj_obj(struct process *p, int fd);
+int file_is_syncobj(struct process *p, int fd);
 
 #endif // FS_H

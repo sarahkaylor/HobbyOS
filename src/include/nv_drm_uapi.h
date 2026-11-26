@@ -34,9 +34,21 @@
  *  the probe in this branch uses -- the point is to be reachable by that code,
  *  not by a HobbyOS-shaped imitation of it.
  *
- *  WHAT IS NOT HERE: sync files, the timeline half of syncobj, SVM,
- *  relocations and the legacy pushbuf path.  Each is a named refusal (-ENOSYS
- *  with a console row), never a silent no-op: see nv_shim_drm_refusal_name().
+ *  WHAT IS NOT HERE: sync files (a dma_fence as an fd, i.e.
+ *  SYNCOBJ_HANDLE_TO_FD with EXPORT_SYNC_FILE), SVM, relocations and the
+ *  legacy pushbuf path.  Each is a named refusal (-ENOSYS with a console row),
+ *  never a silent no-op: see nv_shim_drm_refusal_name().
+ *
+ *  WHAT IS HERE SINCE WP-SYNC: the timeline half of syncobj and the syncobj
+ *  fd.  SYNCOBJ_TIMELINE_SIGNAL / SYNCOBJ_TIMELINE_WAIT address one 64-bit
+ *  point on a syncobj (a binary syncobj is that same object at point 1), an
+ *  EXEC's `timeline_value` is accepted and signals its point when the fence
+ *  retires, and SYNCOBJ_HANDLE_TO_FD returns a real fd whose object IS the
+ *  syncobj -- SYNCOBJ_FD_TO_HANDLE from it resolves to the same object, so a
+ *  signal through either name is visible through the other.  That fd is not a
+ *  sync_file: EXPORT_SYNC_FILE / IMPORT_SYNC_FILE ask for a different object
+ *  type and are refused by name.  NVSHIM_DRM_CAP_SYNCOBJ_TIMELINE answers 1
+ *  because those rows are served, not because the id exists.
  *
  *  WHAT IS HERE SINCE WP-PRIME: dma-buf/PRIME -- DRM_IOCTL_PRIME_HANDLE_TO_FD
  *  (nr 0x2d) exports a GEM object as a real fd, DRM_IOCTL_PRIME_FD_TO_HANDLE
@@ -159,6 +171,73 @@ struct nvshim_drm_syncobj_wait {
 #define NVSHIM_DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT (1u << 1)
 #define NVSHIM_DRM_SYNCOBJ_WAIT_FLAGS_WAIT_AVAILABLE  (1u << 2)
 #define NVSHIM_DRM_SYNCOBJ_WAIT_FLAGS_WAIT_DEADLINE   (1u << 3)
+
+/* ---- the timeline half of syncobj (WP-SYNC) ----------------------------
+ *
+ * ONE object, ONE 64-bit point.  That is not a simplification: in Linux a
+ * "binary" syncobj is a syncobj whose point is 0 (never signalled) or 1
+ * (signalled), and CREATE_SIGNALED is exactly "point 1".  So the timeline rows
+ * below address the same field the binary rows do, at a point the client
+ * chooses.
+ *
+ *   SYNCOBJ_TIMELINE_SIGNAL  point <- points[i].  Linux replaces the chain
+ *                            head here; a point that is zero or that does not
+ *                            exceed every point already submitted for that
+ *                            syncobj is refused BY NAME (-EINVAL) rather than
+ *                            clamped at a kernel WARN, which this node has no
+ *                            way to report.
+ *   SYNCOBJ_TIMELINE_WAIT    waits for point >= points[i].  "Not there yet" is
+ *                            -ETIME -- the uAPI's own answer for a timed-out
+ *                            wait, and what this node already returns for the
+ *                            binary row.  -EAGAIN is poll(2)'s errno; DRM's
+ *                            wait never uses it.
+ *
+ * Both structs are drm.h's, field for field and size for size. */
+struct nvshim_drm_syncobj_timeline_array {
+  uint64_t handles; /* user pointer to u32[] */
+  uint64_t points;  /* user pointer to u64[] */
+  uint32_t count_handles;
+  uint32_t flags;   /* SIGNAL: must be 0 */
+};                  /* 24 bytes */
+
+struct nvshim_drm_syncobj_timeline_wait {
+  uint64_t handles;        /* user pointer to u32[] */
+  uint64_t points;         /* user pointer to u64[] */
+  int64_t timeout_nsec;    /* absolute CLOCK_MONOTONIC, 0 = poll, ~0 = forever */
+  uint32_t count_handles;
+  uint32_t flags;
+  uint32_t first_signaled; /* out, only meaningful without WAIT_ALL */
+  uint32_t pad;
+  uint64_t deadline_nsec;
+};                         /* 48 bytes */
+
+/* ---- syncobj as an fd (DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD, nr 0xc1) --------
+ *
+ * struct drm_syncobj_handle: 24 bytes.  `point` is the point an
+ * export/import addresses when the TIMELINE flag is set; the plain form
+ * ignores the flag and refuses a non-zero point, exactly as drm_syncobj.c does.
+ *
+ *   direction A (handle -> fd): in handle, flags, point; out fd
+ *   direction B (fd -> handle): in fd, flags, point; out handle
+ *
+ * The fd this node returns names the SYNCOBJ (an ordinary file description
+ * whose object is the syncobj, refcounted), so FD_TO_HANDLE from it yields a
+ * handle on the SAME object.  It is not a sync_file: EXPORT_SYNC_FILE and
+ * IMPORT_SYNC_FILE ask for a dma_fence as a file -- a different object type
+ * this node does not have -- and are refused by name. */
+struct nvshim_drm_syncobj_handle {
+  uint32_t handle;
+  uint32_t flags;
+  int32_t fd;
+  uint32_t pad;    /* must be 0 */
+  uint64_t point;
+};                 /* 24 bytes */
+
+#define NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE (1u << 0)
+#define NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_TIMELINE         (1u << 1)
+#define NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE (1u << 0)
+#define NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_TIMELINE         (1u << 1)
+
 
 /* ---- DRM_IOCTL_NOUVEAU_GETPARAM --------------------------------------- */
 
@@ -423,6 +502,21 @@ struct nvshim_drm_exec {
   NVSHIM_DRM_IOWR(0xc4, struct nvshim_drm_syncobj_array)               /* 0xC01064C4 */
 #define NVSHIM_DRM_IOC_SYNCOBJ_SIGNAL                                                          \
   NVSHIM_DRM_IOWR(0xc5, struct nvshim_drm_syncobj_array)               /* 0xC01064C5 */
+/* WP-SYNC: the served rows.  The encoded sizes are drm.h's own: 24 for both
+ * directions of the syncobj fd (struct drm_syncobj_handle gained a `point`
+ * field), 24 for the timeline array (SIGNAL) and 48 for the timeline wait. */
+#define NVSHIM_DRM_IOC_SYNCOBJ_HANDLE_TO_FD                                                    \
+  NVSHIM_DRM_IOWR(NVSHIM_DRM_NR_SYNCOBJ_HANDLE_TO_FD,                                          \
+                  struct nvshim_drm_syncobj_handle)                    /* 0xC01864C1 */
+#define NVSHIM_DRM_IOC_SYNCOBJ_FD_TO_HANDLE                                                    \
+  NVSHIM_DRM_IOWR(NVSHIM_DRM_NR_SYNCOBJ_FD_TO_HANDLE,                                          \
+                  struct nvshim_drm_syncobj_handle)                    /* 0xC01864C2 */
+#define NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_SIGNAL                                                 \
+  NVSHIM_DRM_IOWR(NVSHIM_DRM_NR_SYNCOBJ_TIMELINE_SIGNAL,                                       \
+                  struct nvshim_drm_syncobj_timeline_array)            /* 0xC01864CD */
+#define NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT                                                   \
+  NVSHIM_DRM_IOWR(NVSHIM_DRM_NR_SYNCOBJ_TIMELINE_WAIT,                                         \
+                  struct nvshim_drm_syncobj_timeline_wait)             /* 0xC03064CA */
 
 /* ---- NVIF (nr 0x47): served since WP-NVIF, and the one row whose encoded
  * size is a BUFFER LENGTH rather than a struct width.  The kernel validates
@@ -458,6 +552,10 @@ struct nvshim_drm_exec {
 #define NVSHIM_DRM_NR_GEM_PUSHBUF         0x81
 #define NVSHIM_DRM_NR_GEM_CPU_PREP        0x82
 #define NVSHIM_DRM_NR_GEM_CPU_FINI        0x83
+/* WP-SYNC: of the seven syncobj rows, 0xc1 / 0xc2 / 0xca / 0xcb / 0xcd are
+ * defined here for the contract; 0xc1, 0xc2, 0xca and 0xcd are SERVED (macros
+ * below carry their real structs), and 0xcb (QUERY), 0xcc (TRANSFER) and 0xcf
+ * (EVENTFD) are named refusals. */
 #define NVSHIM_DRM_NR_SYNCOBJ_HANDLE_TO_FD 0xc1
 #define NVSHIM_DRM_NR_SYNCOBJ_FD_TO_HANDLE 0xc2
 #define NVSHIM_DRM_NR_SYNCOBJ_TIMELINE_WAIT 0xca
@@ -484,12 +582,11 @@ struct nvshim_drm_exec {
 #define NVSHIM_DRM_IOC_GEM_CPU_PREP     NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_GEM_CPU_PREP, 8)
 #define NVSHIM_DRM_IOC_GEM_CPU_FINI     NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_GEM_CPU_FINI, 4)
 #define NVSHIM_DRM_IOC_GEM_FLINK        NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_GEM_FLINK, 8)
-#define NVSHIM_DRM_IOC_SYNCOBJ_HANDLE_TO_FD NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_SYNCOBJ_HANDLE_TO_FD, 24)
-#define NVSHIM_DRM_IOC_SYNCOBJ_FD_TO_HANDLE NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_SYNCOBJ_FD_TO_HANDLE, 24)
-#define NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_SYNCOBJ_TIMELINE_WAIT, 48)
-#define NVSHIM_DRM_IOC_SYNCOBJ_QUERY    NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_SYNCOBJ_QUERY, 32)
+/* WP-SYNC: 0xc1, 0xc2, 0xca and 0xcd are SERVED now (macros above).  The three
+ * below are still refusals, and their sizes are drm.h's true encoded sizes so a
+ * probe built from this header is a request a real client could have sent. */
+#define NVSHIM_DRM_IOC_SYNCOBJ_QUERY    NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_SYNCOBJ_QUERY, 24)
 #define NVSHIM_DRM_IOC_SYNCOBJ_TRANSFER NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_SYNCOBJ_TRANSFER, 32)
-#define NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_SIGNAL NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_SYNCOBJ_TIMELINE_SIGNAL, 32)
 #define NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD  NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_SYNCOBJ_EVENTFD, 24)
 
 /* Limits of the DRM face.  NVSHIM_DRM_VA_MAX is 1 TiB because that is the

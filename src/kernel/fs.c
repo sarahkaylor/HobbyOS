@@ -3195,6 +3195,7 @@ int file_close(struct process *cur, int fd) {
   int isnvshim = (f->type == FILE_TYPE_DEVNVSHIM); /* WP-F: same rule */
   int snd_last = -1; /* C4-audio: ALSA minor whose last reference went away */
   void *dmabuf_obj = 0; /* WP-PRIME: the dma-buf this description owned */
+  void *syncobj_obj = 0; /* WP-SYNC: the syncobj this description owned */
 
   /* SEC-OBS-B (security-plan.md observation B): pipe/usock close wakes
    * blocked peers, which takes proc_lock — and the documented order is
@@ -3251,6 +3252,10 @@ int file_close(struct process *cur, int fd) {
        * release itself is outside f->lock below (it unmaps, which takes
        * vm_lock). */
       dmabuf_obj = f->dmabuf.obj;
+    } else if (f->type == FILE_TYPE_SYNCOBJ) {
+      /* WP-SYNC: same rule -- one reference per file DESCRIPTION, so this runs
+       * exactly once however many dup/fork/SCM_RIGHTS copies exist. */
+      syncobj_obj = f->syncobj.obj;
     }
     /* FILE_TYPE_NFS keeps no backend state: nothing to release. */
     f->type = FILE_TYPE_EMPTY;
@@ -3269,6 +3274,7 @@ int file_close(struct process *cur, int fd) {
   /* WP-PRIME: the exported dma-buf's last close.  Drops the object reference
    * (and, if that was the last one, the frames) and this fd's mappings. */
   if (dmabuf_obj) nv_shim_dmabuf_release(cur, fd, dmabuf_obj);
+  if (syncobj_obj) nv_shim_syncobj_release(cur, fd, syncobj_obj); /* WP-SYNC */
   /* C4-audio: the device teardown sends control commands: outside f->lock. */
   if (snd_last >= 0) linux_snd_release(snd_last);
 
@@ -3381,6 +3387,7 @@ void fs_close_global(int g_fd) {
   int bend = 0;
   int snd_last = -1; /* C4-audio */
   void *dmb_obj = 0; /* WP-PRIME */
+  void *sob_obj = 0; /* WP-SYNC */
 
   ylock_acquire(&f->lock);
   if (f->type == FILE_TYPE_EMPTY) {
@@ -3425,6 +3432,10 @@ void fs_close_global(int g_fd) {
        * a failed open).  The reference still has to go; the release is called
        * below, after f->lock, with fd = -1. */
       dmb_obj = f->dmabuf.obj;
+    } else if (f->type == FILE_TYPE_SYNCOBJ) {
+      /* WP-SYNC: same case as the dma-buf above -- no process context, the
+       * reference still has to go, release runs below with fd = -1. */
+      sob_obj = f->syncobj.obj;
     }
     f->type = FILE_TYPE_EMPTY;
   }
@@ -3436,6 +3447,7 @@ void fs_close_global(int g_fd) {
   else if (uu) usock_close(uu, bend);
   if (snd_last >= 0) linux_snd_release(snd_last);
   if (dmb_obj) nv_shim_dmabuf_release(0, -1, dmb_obj); /* WP-PRIME */
+  if (sob_obj) nv_shim_syncobj_release(0, -1, sob_obj); /* WP-SYNC */
 }
 
 /**
@@ -5006,6 +5018,50 @@ void *file_dmabuf_obj(struct process *p, int fd) {
 
 int file_is_dmabuf(struct process *p, int fd) {
   return file_dmabuf_obj(p, fd) != 0;
+}
+
+/* ---- WP-SYNC: syncobj fds ----------------------------------------------
+ * Same three operations, same reasoning as the dma-buf block above: the slot is
+ * a normal file description, so every way an fd can be copied already works and
+ * only install / resolve / the release hook are new.  The payload is the
+ * syncobj record the exporter allocated; nv_shim.c owns what is inside it.
+ */
+
+int file_syncobj_install(struct process *p, void *obj, int cloexec) {
+  p = process_group(p);
+  if (!p || !obj) return -EINVAL;
+  if (p->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
+  struct file *f = file_alloc();
+  if (!f) return -ENFILE;
+  f->type = FILE_TYPE_SYNCOBJ;
+  f->syncobj.obj = obj;
+  /* O_RDWR: the fd is a handle to an object, not a stream; Linux's syncobj fd
+   * is likewise readable/writable in F_GETFL terms and useless to read(2). */
+  f->open_flags = 0x2;
+  int fd = fd_install_cloexec(p, f, cloexec != 0);
+  if (fd < 0) {
+    f->type = FILE_TYPE_EMPTY;
+    f->ref_count = 0;
+    return -EMFILE;
+  }
+  return fd;
+}
+
+/* The syncobj behind an fd, or NULL when the fd is not a syncobj fd.  This is
+ * the check that makes SYNCOBJ_FD_TO_HANDLE refuse a dma-buf, a file or the
+ * node itself by name instead of resolving garbage. */
+void *file_syncobj_obj(struct process *p, int fd) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return 0;
+  int gfd = p->open_fds[fd];
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES) return 0;
+  struct file *f = gfile(gfd);
+  if (!f || f->type != FILE_TYPE_SYNCOBJ) return 0;
+  return f->syncobj.obj;
+}
+
+int file_is_syncobj(struct process *p, int fd) {
+  return file_syncobj_obj(p, fd) != 0;
 }
 
 /* ---- C2-ntsync (docs/cp-ntsync.md): the driver's view of its fds ------- */
