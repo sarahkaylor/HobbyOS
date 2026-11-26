@@ -160,12 +160,48 @@ Three new tests in `nv_shim_drm_test.c`, all driven through the real route
 
 ## 6. Measurements
 
-_Filled in by the run that produced them; the sha each run belongs to is quoted._
+Both tiers were run on the committed tree (`c9b1fb2c`), full tier, nothing
+skipped but the two local-environment switches named below.
 
-| gate | sha | result |
-|---|---|---|
-| `run_unit_tests_intel.sh` (SKIP_KVM=1, TCG) | _see below_ | _pending_ |
-| `run_unit_tests.sh` (aarch64, `UNIT_TESTS_TIMEOUT=900`) | _see below_ | _pending_ |
+| gate | sha | result | log |
+|---|---|---|---|
+| `run_unit_tests_intel.sh` | `c9b1fb2c` | `Tests run:    597` / `Tests failed: 0` / **`UNIT TESTS PASSED`** | `evidence/nv/unit-tier-intel-prime-597.log` |
+| `run_unit_tests.sh` (aarch64) | `c9b1fb2c` | `Tests run:    476` / `Tests failed: 0` / **`UNIT TESTS PASSED`** | `evidence/nv/unit-tier-arm-prime-476.log` |
+
+Baseline at the parent sha `4a70f062` was **intel 594 / ARM 473** (plan §2.5 and
+the `nv/wp-units` fold), so both runs are baseline **+3** — the three new
+suites, one `tests_run++` each. `UNIT_TESTS_TIMEOUT=900` was not needed: both
+runs finished inside the script's own deadline.
+
+Local environment, stated because it is not CI's: this uid is not in group
+`kvm`, so the intel tier ran TCG (`SKIP_KVM=1`, the same mode the parent's
+`590/0` and this lane's `597/0` were measured in), and both runs used
+`TOOLS_SKIP=1` because the in-OS LLVM dist-staging is a CI prefetch artefact
+that does not exist in this checkout (`/TOOLS` is absent from the disk image;
+the kernel unit tier does not use it). The ARM boot needed
+`~/.local/share/AAVMF/AAVMF_CODE.fd`, which the Makefile expects and this host
+ships under `/usr/share/AAVMF` — symlinked, no tree change.
+
+Rows from the intel log (one per stage, quoted as they print):
+
+    [NVSHIM] prime export handle=1 fd=4 size=0x2000 domain=0x9 buf=1
+    [NVSHIM] prime mmap fd=4 buf=1 handle=1 va=0x1080006000 phys=0x209500000
+    [NVSHIM] prime import buf=3 fd=4 handle=1 size=0x2000
+    [NVSHIM] drm gem_close handle=1 kept refs=1 reason=prime_fd_open
+    [NVSHIM] prime release buf=3 fd=4 last=1
+    [NVSHIM] prime refuse dir=export handle=1 reason=no_share
+    [NVSHIM] prime refuse dir=import buf=4 reason=cross_device bufdev=99 dev=1
+    [NVSHIM] prime mmap refused fd=4 buf=6 domain=0x2 reason=domain_never_offered_a_cpu_mapping
+
+CI: branch `nv/wp-prime` pushed at `c9b1fb2c`; `linux-ci` run
+**45894370800** was created for that sha and sat `queued` — the self-hosted
+Linux runner `linuxci-hobbyos` reported `offline` for the whole window, so no
+job started. The gate evidence for this card is therefore the two local runs
+above; the CI run id and sha are recorded here so the next dispatch can quote
+the run that eventually executes. (For context, the same runner's run for the
+parent sha `4a70f062` is red — job `139348443154`, `Tests run: 594 / Tests
+failed: 1`, and the failure is `[LOCKHEALTH-IRQOFF] cpu=0 max_us=117540`, the
+interrupt-masked budget, not a test function; it did not reproduce here.)
 
 ## 7. Verification gaps (stated, not hidden)
 
