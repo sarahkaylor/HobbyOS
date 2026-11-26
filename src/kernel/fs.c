@@ -3194,6 +3194,7 @@ int file_close(struct process *cur, int fd) {
   int isgpu = (f->type == FILE_TYPE_DEVGPU); /* M1: released after f->lock */
   int isnvshim = (f->type == FILE_TYPE_DEVNVSHIM); /* WP-F: same rule */
   int snd_last = -1; /* C4-audio: ALSA minor whose last reference went away */
+  void *dmabuf_obj = 0; /* WP-PRIME: the dma-buf this description owned */
 
   /* SEC-OBS-B (security-plan.md observation B): pipe/usock close wakes
    * blocked peers, which takes proc_lock — and the documented order is
@@ -3244,6 +3245,12 @@ int file_close(struct process *cur, int fd) {
       net_socket_close(f->socket.pcb);
     } else if (f->type == FILE_TYPE_DEVSND) {
       snd_last = f->snd.minor;
+    } else if (f->type == FILE_TYPE_DMABUF) {
+      /* WP-PRIME: the object's reference goes with the file DESCRIPTION, so
+       * dup/fork/SCM_RIGHTS keep it alive and this runs exactly once.  The
+       * release itself is outside f->lock below (it unmaps, which takes
+       * vm_lock). */
+      dmabuf_obj = f->dmabuf.obj;
     }
     /* FILE_TYPE_NFS keeps no backend state: nothing to release. */
     f->type = FILE_TYPE_EMPTY;
@@ -3259,6 +3266,9 @@ int file_close(struct process *cur, int fd) {
   /* WP-F /dev/nvshim: dropping the fd destroys every object the client made.
    * The mock's ops are plain C, but the rule is the same: never under f->lock. */
   if (isnvshim) nv_shim_release_fd(cur, fd);
+  /* WP-PRIME: the exported dma-buf's last close.  Drops the object reference
+   * (and, if that was the last one, the frames) and this fd's mappings. */
+  if (dmabuf_obj) nv_shim_dmabuf_release(cur, fd, dmabuf_obj);
   /* C4-audio: the device teardown sends control commands: outside f->lock. */
   if (snd_last >= 0) linux_snd_release(snd_last);
 
@@ -3370,6 +3380,7 @@ void fs_close_global(int g_fd) {
   struct usock *uu = 0;
   int bend = 0;
   int snd_last = -1; /* C4-audio */
+  void *dmb_obj = 0; /* WP-PRIME */
 
   ylock_acquire(&f->lock);
   if (f->type == FILE_TYPE_EMPTY) {
@@ -3409,6 +3420,11 @@ void fs_close_global(int g_fd) {
       net_socket_close(f->socket.pcb);
     } else if (f->type == FILE_TYPE_DEVSND) {
       snd_last = f->snd.minor; /* C4-audio */
+    } else if (f->type == FILE_TYPE_DMABUF) {
+      /* WP-PRIME: no process context here (a received fd being discarded, or
+       * a failed open).  The reference still has to go; the release is called
+       * below, after f->lock, with fd = -1. */
+      dmb_obj = f->dmabuf.obj;
     }
     f->type = FILE_TYPE_EMPTY;
   }
@@ -3419,6 +3435,7 @@ void fs_close_global(int g_fd) {
   if (pp) pipe_close(pp, bend);
   else if (uu) usock_close(uu, bend);
   if (snd_last >= 0) linux_snd_release(snd_last);
+  if (dmb_obj) nv_shim_dmabuf_release(0, -1, dmb_obj); /* WP-PRIME */
 }
 
 /**
@@ -4945,6 +4962,50 @@ int file_is_devnvshim(struct process *p, int fd) {
   if (gfd < 0 || gfd >= MAX_GLOBAL_FILES)
     return 0;
   return gfile(gfd)->type == FILE_TYPE_DEVNVSHIM;
+}
+
+/* ---- WP-PRIME: dma-buf fds ---------------------------------------------
+ * A dma-buf is an ordinary file slot of type FILE_TYPE_DMABUF whose payload is
+ * the exporter's object.  Everything a client can do with an fd (dup, fork,
+ * close, SCM_RIGHTS) therefore works without new code here; the only special
+ * cases are install, resolve, and the release hook in file_close/
+ * fs_close_global. */
+
+/* Install `obj` as the lowest free fd.  0 success (fd returned), -EMFILE when
+ * the table is full, -ENFILE when the global file table is. */
+int file_dmabuf_install(struct process *p, void *obj, int cloexec) {
+  p = process_group(p);
+  if (!p || !obj) return -EINVAL;
+  if (p->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
+  struct file *f = file_alloc();
+  if (!f) return -ENFILE;
+  f->type = FILE_TYPE_DMABUF;
+  f->dmabuf.obj = obj;
+  f->open_flags = 0x2; /* O_RDWR: what Linux's DRM_RDWR export produces */
+  int fd = fd_install_cloexec(p, f, cloexec != 0);
+  if (fd < 0) {
+    f->type = FILE_TYPE_EMPTY;
+    f->ref_count = 0;
+    return -EMFILE;
+  }
+  return fd;
+}
+
+/* The dma-buf object an fd names, or NULL when it is not a dma-buf fd (a
+ * /dev/nvshim fd, a file, anything else).  This is the check that makes
+ * PRIME_FD_TO_HANDLE refuse a non-dma-buf fd by name. */
+void *file_dmabuf_obj(struct process *p, int fd) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return 0;
+  int gfd = p->open_fds[fd];
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES) return 0;
+  struct file *f = gfile(gfd);
+  if (!f || f->type != FILE_TYPE_DMABUF) return 0;
+  return f->dmabuf.obj;
+}
+
+int file_is_dmabuf(struct process *p, int fd) {
+  return file_dmabuf_obj(p, fd) != 0;
 }
 
 /* ---- C2-ntsync (docs/cp-ntsync.md): the driver's view of its fds ------- */

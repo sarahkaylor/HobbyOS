@@ -133,6 +133,7 @@
 #define NVSHIM_FEAT_SUBMIT   (1u << 4)
 #define NVSHIM_FEAT_FENCE    (1u << 5)
 #define NVSHIM_FEAT_RM_MOCK  (1u << 6) /* no engine: fences retire on submit */
+#define NVSHIM_FEAT_PRIME    (1u << 7) /* WP-PRIME: GEM <-> dma-buf fd, both ways */
 
 struct nvshim_device {
   uint32_t abi;          /* in: NVSHIM_ABI_VERSION */
@@ -319,6 +320,34 @@ const char *nv_shim_drm_refusal_name(unsigned long req);
 int64_t nv_shim_mmap(struct process *grp, int fd, uint64_t offset, uint64_t len,
                      uint16_t prot, uint32_t flags);
 
+/* WP-PRIME: the dma-buf fd.  fs.c installs it (file_dmabuf_install, fs.h) and
+ * calls nv_shim_dmabuf_release() when the LAST file reference to it closes;
+ * vm.c routes mmap(2) of such an fd here.  `obj` is opaque above this file.
+ *
+ * The mmap contract is the object's, with offset 0 naming the whole buffer
+ * (a dma-buf fd has no map_handle): same pages as the exporting GEM handle,
+ * MAP_SHARED only, length <= object size.  Release runs with the closing
+ * group's fd (or fd < 0 / grp NULL when the fd table discards a received fd
+ * with no process context) and takes down every mapping that fd made before
+ * the object's last reference can free the frames. */
+int64_t nv_shim_dmabuf_mmap(struct process *grp, int fd, uint64_t offset,
+                            uint64_t len, uint16_t prot, uint32_t flags);
+void nv_shim_dmabuf_release(struct process *grp, int fd, void *obj);
+
+/* Why a PRIME request was refused.  Exported so the tier asserts the NAME a
+ * client would see on the console, not just the errno.  The name is COPIED into
+ * `dst` rather than returned as a pointer: clang folds a pointer-returning
+ * literal selector into a .rodata table of pointers, which the AArch64
+ * relocation audit gates on (tools/kernel_reloc_audit.py). */
+#define NVSHIM_PRIME_OK           0
+#define NVSHIM_PRIME_NO_SHARE     1
+#define NVSHIM_PRIME_CROSS_DEVICE 2
+#define NVSHIM_PRIME_NOT_DMABUF   3
+#define NVSHIM_PRIME_NOT_MAPPABLE 4
+#define NVSHIM_PRIME_BAD_FLAGS    5
+#define NVSHIM_PRIME_REASON_MAX   40
+void nv_shim_prime_refusal_name(int why, char *dst, int cap);
+
 /* Pure helpers, exported for the kernel unit suite. */
 int nv_shim_req_size(unsigned long req);          /* -1 = not a request */
 const char *nv_shim_refusal_name(unsigned long req); /* NULL = not refused */
@@ -356,5 +385,15 @@ int nv_shim_test_last_exec(struct process *p, int fd, uint32_t *sum, uint32_t *l
 /* FNV-1a 32 over a buffer -- the same function the EXEC path digests with, so a
  * test's expected value comes from the bytes, not from a copy of the code. */
 uint32_t nv_shim_test_sum(const void *buf, uint32_t len);
+
+/* --- WP-PRIME kernel-tier seams (not ABI) -------------------------------
+ * The mock RM has exactly ONE device (MOCK_DEV_ID), so `cross_device` has no
+ * reachable input from userspace: these seams are how the tier holds that
+ * refusal (and the object's refcount) to a value instead of a paragraph.
+ *   set_dev: make a live dma-buf claim another device (0, or -EINVAL).
+ *   refs:    live references on the object behind a dma-buf (handle entries +
+ *            exports), -1 when `obj` is not a live buffer. */
+int nv_shim_test_prime_set_dev(void *obj, uint32_t dev);
+int nv_shim_test_prime_refs(void *obj);
 
 #endif /* NV_SHIM_H */

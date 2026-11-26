@@ -5370,6 +5370,14 @@ int64_t vm_mmap(struct process *grp, uint64_t addr, uint64_t len, uint16_t prot,
        * memory, not a copy of it. */
       return nv_shim_mmap(grp, fd, offset, len, p, fl2);
     }
+    if (file_is_dmabuf(grp, fd)) {
+      /* WP-PRIME: a GEM object exported as a dma-buf fd.  mmap of the fd is
+       * the same mapping as mmap of the exporting handle -- the object's own
+       * pool frames -- so a store through either is visible through the other
+       * and through the RM's view of the object.  offset names nothing here (a
+       * dma-buf fd is one buffer): it must be 0. */
+      return nv_shim_dmabuf_mmap(grp, fd, offset, len, p, fl2);
+    }
     obj = file_memfd_obj(grp, fd);
     if (obj) {
       /* The S4 memfd contract (MAP_SHARED), plus cp/wine2's MAP_PRIVATE:
