@@ -116,7 +116,14 @@ typedef enum {
      closing the fd destroys every object the client owns.  Not x64-only: the
      mock needs no hardware, so the node is useful on both arches.
      Appended last: no values shift. */
-  FILE_TYPE_DEVNVSHIM
+  FILE_TYPE_DEVNVSHIM,
+  /* WP-PRIME: a dma-buf fd exported by /dev/nvshim (DRM_IOCTL_PRIME_HANDLE_TO_
+     FD).  The object is nv_shim.c's (f->dmabuf.obj, opaque here); mmap of this
+     fd maps the exported GEM object's own frames, and the last close calls
+     nv_shim_dmabuf_release() -- which is what drops the object's reference.
+     read/write have no data path (a dma-buf is shared memory, not a stream).
+     Appended last: no values shift. */
+  FILE_TYPE_DMABUF
 } file_type_t;
 
 struct vm_object;
@@ -221,6 +228,12 @@ struct file {
       void *obj;                   /**< C2-ntsync: struct ns_obj (device or
                                         object); one reference per slot */
     } ntsync;
+    struct {
+      void *obj;                   /**< WP-PRIME: struct shim_dmabuf owned by
+                                        nv_shim.c; one reference per file slot
+                                        (dup/fork/SCM_RIGHTS share the slot's
+                                        ref_count, so release runs once) */
+    } dmabuf;
   };
   int gidx;                        /**< C1-k5: this slot's global index (the
                                         table is chunked, fs.c gfile) */
@@ -618,5 +631,18 @@ int file_gfd_is_ipc_endpoint(int gfd);
  * lowest free user fd (no ref bump: the reference transfers). */
 int fs_msg_ref_gfd(int gfd);
 int fs_msg_install_gfd(struct process *p, int gfd);
+
+/* --- WP-PRIME: dma-buf fds (nv_shim.h declares the object side) ---------
+ * The fd is an ordinary file slot whose type is FILE_TYPE_DMABUF, so dup(2),
+ * fork, close(2) and SCM_RIGHTS all work through the machinery that already
+ * exists for every other fd; only three things are new here:
+ *   file_dmabuf_install  install `obj` as the lowest free fd (cloexec honoured)
+ *   file_dmabuf_obj      resolve an fd to its dma-buf object (NULL if not one)
+ *   file_is_dmabuf       the predicate vm.c and the close hooks share
+ * The last close of the slot calls nv_shim_dmabuf_release(), which drops the
+ * exported object's reference. */
+int file_dmabuf_install(struct process *p, void *obj, int cloexec);
+void *file_dmabuf_obj(struct process *p, int fd);
+int file_is_dmabuf(struct process *p, int fd);
 
 #endif // FS_H

@@ -34,10 +34,17 @@
  *  the probe in this branch uses -- the point is to be reachable by that code,
  *  not by a HobbyOS-shaped imitation of it.
  *
- *  WHAT IS NOT HERE: dma-buf/PRIME, sync files, the timeline half of syncobj,
- *  SVM, relocations and the legacy pushbuf path.  Each is a named refusal
- *  (-ENOSYS with a console row), never a silent no-op: see
- *  nv_shim_drm_refusal_name().
+ *  WHAT IS NOT HERE: sync files, the timeline half of syncobj, SVM,
+ *  relocations and the legacy pushbuf path.  Each is a named refusal (-ENOSYS
+ *  with a console row), never a silent no-op: see nv_shim_drm_refusal_name().
+ *
+ *  WHAT IS HERE SINCE WP-PRIME: dma-buf/PRIME -- DRM_IOCTL_PRIME_HANDLE_TO_FD
+ *  (nr 0x2d) exports a GEM object as a real fd, DRM_IOCTL_PRIME_FD_TO_HANDLE
+ *  (nr 0x2e) imports one back as a GEM handle, and mmap(2) of the exported fd
+ *  maps the SAME pool frames (no copy, no flush).  The object is refcounted
+ *  (GEM handles + exported fds), so the pages live until the last of them
+ *  closes, in either close order.  The contract is the "PRIME contract" block
+ *  at the bottom of this header.
  *
  *  WHAT IS HERE SINCE WP-NVIF: DRM_IOCTL_NOUVEAU_NVIF (nr 0x47) -- the
  *  object model a stock winsys uses before it can make a channel object:
@@ -225,6 +232,31 @@ struct nvshim_drm_gem_new {
   uint32_t align;        /* in: 0 or a power-of-two >= 4096 */
 };                       /* 48 bytes */
 
+/* ---- dma-buf / PRIME (WP-PRIME) ---------------------------------------- */
+
+/* struct drm_prime_handle { __u32 handle; __u32 flags; __s32 fd; } -- the SAME
+ * struct both directions use, and the one libdrm fills in.  12 bytes: the
+ * encoded size is 0xC00C642D / 0xC00C642E, which is what a client built
+ * against include/uapi/drm/drm.h sends (DRM_IOWR(0x2d, struct drm_prime_handle),
+ * DRM_IOWR(0x2e, ...)).  The two numbers are generic DRM rows, not
+ * NOUVEAU_* ones: they carry no DRM_COMMAND_BASE offset.
+ *
+ *   direction A (handle -> fd): in  handle, flags; out fd
+ *   direction B (fd -> handle): in  fd, flags (must be 0); out handle
+ *
+ * flags: DRM_CLOEXEC (0x01) and DRM_RDWR (0x02) are the only bits Linux
+ * accepts; DRM_RDWR only means "the importer may write through the mapping",
+ * which this node always allows for a CPU-mappable object.  Direction B takes
+ * no flags -- Linux refuses any non-zero value there, and so does this node. */
+struct nvshim_drm_prime_handle {
+  uint32_t handle; /* in/out: GEM handle */
+  uint32_t flags;  /* in: NVSHIM_DRM_PRIME_* */
+  int32_t fd;      /* in/out: dma-buf fd */
+};                 /* 12 bytes */
+
+#define NVSHIM_DRM_PRIME_CLOEXEC 0x01
+#define NVSHIM_DRM_PRIME_RDWR    0x02
+
 /* ---- GPU VA space ------------------------------------------------------ */
 
 /* struct drm_nouveau_vm_init.  The VA space is [0, addr) for the UMD and
@@ -377,6 +409,10 @@ struct nvshim_drm_exec {
 #define NVSHIM_DRM_IOC_GEM_INFO                                                                \
   NVSHIM_DRM_IOWR(NVSHIM_DRM_COMMAND_BASE + NVSHIM_DRM_NOUVEAU_GEM_INFO,                        \
                   struct nvshim_drm_gem_info)                          /* 0xC0286484 */
+#define NVSHIM_DRM_IOC_PRIME_HANDLE_TO_FD                                                      \
+  NVSHIM_DRM_IOWR(NVSHIM_DRM_NR_PRIME_HANDLE_TO_FD, struct nvshim_drm_prime_handle) /* 0xC00C642D */
+#define NVSHIM_DRM_IOC_PRIME_FD_TO_HANDLE                                                      \
+  NVSHIM_DRM_IOWR(NVSHIM_DRM_NR_PRIME_FD_TO_HANDLE, struct nvshim_drm_prime_handle) /* 0xC00C642E */
 #define NVSHIM_DRM_IOC_SYNCOBJ_CREATE                                                          \
   NVSHIM_DRM_IOWR(0xbf, struct nvshim_drm_syncobj_create)              /* 0xC00864BF */
 #define NVSHIM_DRM_IOC_SYNCOBJ_DESTROY                                                         \
@@ -406,6 +442,9 @@ struct nvshim_drm_exec {
  * so there is no size to check against.  Answered -ENOSYS with a named
  * [NVSHIM] drm refuse row, whatever size the request encodes. */
 #define NVSHIM_DRM_NR_GEM_FLINK           0x0a
+/* WP-PRIME: 0x2d / 0x2e are SERVED now (macros above).  They stay defined here
+ * because the numbers are part of the contract and one test asserts they are
+ * NOT in the refusal table any more. */
 #define NVSHIM_DRM_NR_PRIME_HANDLE_TO_FD  0x2d
 #define NVSHIM_DRM_NR_PRIME_FD_TO_HANDLE  0x2e
 #define NVSHIM_DRM_NR_SETPARAM            0x41
@@ -445,8 +484,6 @@ struct nvshim_drm_exec {
 #define NVSHIM_DRM_IOC_GEM_CPU_PREP     NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_GEM_CPU_PREP, 8)
 #define NVSHIM_DRM_IOC_GEM_CPU_FINI     NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_GEM_CPU_FINI, 4)
 #define NVSHIM_DRM_IOC_GEM_FLINK        NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_GEM_FLINK, 8)
-#define NVSHIM_DRM_IOC_PRIME_HANDLE_TO_FD NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_PRIME_HANDLE_TO_FD, 16)
-#define NVSHIM_DRM_IOC_PRIME_FD_TO_HANDLE NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_PRIME_FD_TO_HANDLE, 16)
 #define NVSHIM_DRM_IOC_SYNCOBJ_HANDLE_TO_FD NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_SYNCOBJ_HANDLE_TO_FD, 24)
 #define NVSHIM_DRM_IOC_SYNCOBJ_FD_TO_HANDLE NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_SYNCOBJ_FD_TO_HANDLE, 24)
 #define NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_SYNCOBJ_TIMELINE_WAIT, 48)
@@ -484,9 +521,12 @@ struct nvshim_drm_exec {
  * The pages ARE the object's memory (the RM's frames), so:
  *   - a store through the mapping is visible to the next EXEC with no flush and
  *     no write-back request -- there is nothing to flush, the bytes are here;
- *   - GEM_CLOSE takes the mapping down before the frames are freed (Linux keeps
- *     the object alive while a VMA refers to it; this node has no object
- *     refcount, so the object must not outlive its client instead);
+ *   - GEM_CLOSE takes THIS CLIENT's mapping down before any frame is freed.
+ *     Since WP-PRIME the object itself is refcounted (GEM handles + exported
+ *     dma-buf fds), so a close that leaves another reference behind keeps the
+ *     object alive -- but a mapping is not itself a reference (this kernel has
+ *     no munmap hook to learn that a VMA went away), so the mapping dies with
+ *     the handle or fd that made it.  See the PRIME contract below.
  *   - a page is faulted in on first touch, and a page with no frame is a hole
  *     (BUS), never a fresh zero page.
  *
@@ -495,6 +535,57 @@ struct nvshim_drm_exec {
  * than MAP_SHARED, a handle this client does not own, a domain that never
  * offered a CPU mapping (VRAM/GART alone, or MAPPABLE without CPU), and an
  * object the RM has no pool memory for.
+ * ---------------------------------------------------------------------- */
+
+/* ---- PRIME / dma-buf contract (WP-PRIME) --------------------------------
+ *
+ * EXPORT  ioctl(fd, DRM_IOCTL_PRIME_HANDLE_TO_FD, {handle, flags, out fd})
+ *   - handle must be a GEM object this client owns; a foreign one is -EINVAL.
+ *   - flags may carry DRM_CLOEXEC / DRM_RDWR only; anything else is -EINVAL.
+ *   - the returned fd is a REAL fd in this process's table: dup(2), fork,
+ *     close(2), poll-able as a file, passable over SCM_RIGHTS.  It names a
+ *     dma-buf object that holds one reference on the GEM object.
+ *   - the object may be exported more than once; each export is its own fd and
+ *     its own reference.
+ *   - an object allocated with NOUVEAU_GEM_DOMAIN_NO_SHARE refuses export by
+ *     name (reason=no_share, -EINVAL).  That is what the bit is FOR: the object
+ *     is private to the client that made it.  (Before WP-PRIME the bit was
+ *     refused at GEM_NEW, because PRIME did not exist and accepting it would
+ *     have been the silent drop this project forbids.  Now the hint is honoured
+ *     where it matters.)
+ *
+ * MMAP OF AN EXPORTED FD
+ *   mmap(2) on the dma-buf fd, offset 0, length <= object size, MAP_SHARED,
+ *   PROT_READ [| PROT_WRITE].  The pages are the SAME pool frames the exporting
+ *   GEM handle maps: a store through either mapping is visible through the
+ *   other and through the RM's own view of the object.  A domain that never
+ *   offered a CPU mapping (e.g. plain VRAM) exports fine -- a device-visible
+ *   buffer is what PRIME is for -- but mmap of its fd refuses by name.
+ *
+ * IMPORT  ioctl(fd, DRM_IOCTL_PRIME_FD_TO_HANDLE, {fd, 0, out handle})
+ *   - `fd` must be a dma-buf fd this process holds, including one received over
+ *     SCM_RIGHTS (the fd table's message-owned reference is what makes that
+ *     work; no extra machinery here).
+ *   - flags must be 0 (-EINVAL otherwise, as in Linux).
+ *   - the returned handle is in THIS client's GEM table and maps/binds the same
+ *     pages.  Handles are RM-global on this node, so an import returns the
+ *     object's own handle number -- documented divergence from Linux's
+ *     per-file handle namespace: importing the same fd twice in one client adds
+ *     a second reference under the same number, and each GEM_CLOSE drops one.
+ *   - an object exported by a DIFFERENT device is refused by name
+ *     (reason=cross_device, -EINVAL): this node has one mock device
+ *     (MOCK_DEV_ID), so a second /dev/nvshim instance would be a different
+ *     device only when a real RM backend lands, and importing across devices is
+ *     not something this RM can do (there is no dma_buf_attach equivalent in the
+ *     seam).  Refused, never silently imported.
+ *
+ * LIFETIME  refs = one per GEM handle entry + one per exported dma-buf.
+ *   The frames are freed when the LAST reference goes, in any close order:
+ *   handle-then-fd, fd-then-handle, or a client teardown that takes every
+ *   handle while an fd is still open (pages stay alive for the fd's holder).
+ *   Mappings are taken down when their owner (the node fd's handle, or the
+ *   dma-buf fd) goes away or when the object reaches refs == 0, whichever
+ *   comes first -- never left pointing at recycled frames.
  * ---------------------------------------------------------------------- */
 
 #endif /* NV_DRM_UAPI_H */

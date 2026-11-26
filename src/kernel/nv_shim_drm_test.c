@@ -184,8 +184,11 @@ static void test_nvshim_drm_refusals(void) {
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_GEM_CPU_PREP, 0), -ENOSYS);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_GEM_CPU_FINI, 0), -ENOSYS);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_GEM_FLINK, 0), -ENOSYS);
-  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_PRIME_HANDLE_TO_FD, 0), -ENOSYS);
-  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_PRIME_FD_TO_HANDLE, 0), -ENOSYS);
+  /* WP-PRIME: 0x2d / 0x2e are SERVED now -- with no process they answer the
+   * same -EINVAL every other served row does, and they are no longer in the
+   * named-refusal table.  test_nvshim_drm_prime_* drives both for real. */
+  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_PRIME_HANDLE_TO_FD, 0), -EINVAL);
+  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_PRIME_FD_TO_HANDLE, 0), -EINVAL);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_HANDLE_TO_FD, 0), -ENOSYS);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_FD_TO_HANDLE, 0), -ENOSYS);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT, 0), -ENOSYS);
@@ -1194,8 +1197,14 @@ static void test_nvshim_drm_cpu_map_refusals(void) {
 
   gn.info.domain = NVSHIM_DOMAIN_VRAM | NVSHIM_DOMAIN_MAPPABLE;
   EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_NEW, &gn, (int)sizeof gn), -EINVAL);
+  /* WP-PRIME: NO_SHARE is ACCEPTED at allocation now and refused at EXPORT
+   * (test_nvshim_drm_prime_refusals).  Before PRIME existed there was no
+   * export to refuse, so the bit was refused here; the hint now has somewhere
+   * to be honoured, and refusing the allocation would be the wrong refusal. */
   gn.info.domain = NVSHIM_DOMAIN_NO_SHARE | NVSHIM_DOMAIN_CPU | NVSHIM_DOMAIN_MAPPABLE;
-  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_NEW, &gn, (int)sizeof gn), -EINVAL);
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_NEW, &gn, (int)sizeof gn), 0);
+  uint32_t nsh = gn.info.handle;
+  EXPECT_EQ((int)(nsh != 0 && nsh != 0xFFFFFFFFu), 1);
   gn.info.domain = NVSHIM_DOMAIN_COHERENT; /* a coherence promise, no mapping */
   EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_NEW, &gn, (int)sizeof gn), -EINVAL);
   gn.info.domain = 0;
@@ -1255,8 +1264,590 @@ static void test_nvshim_drm_cpu_map_refusals(void) {
   gc.handle = mh;
   gc.pad = 0;
   EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_CLOSE, &gc, (int)sizeof gc), 0);
+  gc.handle = nsh; /* the NO_SHARE object from above */
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_CLOSE, &gc, (int)sizeof gc), 0);
   gc.handle = vh;
   EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_CLOSE, &gc, (int)sizeof gc), 0);
+
+  drm_probe_down(&pr);
+  EXPECT_EQ(nv_rm_mock_live(), 0);
+}
+
+/* ============================================================================
+ *  6b. PRIME / dma-buf (WP-PRIME): a GEM object <-> a real fd, same pages.
+ *
+ *  What these suites are FOR.  A compositor or a second process takes a buffer
+ *  by mmap'ing a dma-buf fd, and the ONLY thing that makes that useful is that
+ *  the pages are the exporting object's pages -- not a copy, not a snapshot.
+ *  So every direction below is checked twice: once through the other mapping,
+ *  and once through nv_rm_mock_read_bo(), which is the RM's own view of the
+ *  object and therefore cannot be fooled by a mapping that lies.
+ *
+ *  What passing does NOT mean: nothing here says the driver can RENDER.  This
+ *  is the ABI rung that lets a winsys present when there is something to
+ *  present; the engine-class wall (need=gsp_rm) is untouched by it.
+ * ========================================================================== */
+
+/* Both PRIME directions through the real route, with the struct in the probe's
+ * own user pages (so the copy-in/copy-out path is exercised, not bypassed). */
+static int prime_export(struct drm_probe *pr, uint32_t handle, uint32_t flags,
+                        int *fdp) {
+  struct nvshim_drm_prime_handle ph;
+  ph.handle = handle;
+  ph.flags = flags;
+  ph.fd = -1;
+  int rc = drm_ioc(pr, NVSHIM_DRM_IOC_PRIME_HANDLE_TO_FD, &ph, (int)sizeof ph);
+  if (rc == 0) *fdp = ph.fd;
+  return rc;
+}
+
+static int prime_import(struct drm_probe *pr, int ufd, uint32_t flags,
+                        uint32_t *handlep) {
+  struct nvshim_drm_prime_handle ph;
+  ph.handle = 0xFFFFFFFFu;
+  ph.flags = flags;
+  ph.fd = ufd;
+  int rc = drm_ioc(pr, NVSHIM_DRM_IOC_PRIME_FD_TO_HANDLE, &ph, (int)sizeof ph);
+  if (rc == 0) *handlep = ph.handle;
+  return rc;
+}
+
+/* Compare a PRIME refusal's name (it is copied into a buffer, nv_shim.h). */
+static int prime_name_is(int why, const char *want) {
+  char b[NVSHIM_PRIME_REASON_MAX];
+  nv_shim_prime_refusal_name(why, b, (int)sizeof b);
+  int i = 0;
+  while (want[i] && b[i] == want[i]) i++;
+  return want[i] == 0 && b[i] == 0;
+}
+
+/* A CPU|MAPPABLE object of `size` bytes; returns its handle and map_handle. */
+static int prime_make_bo(struct drm_probe *pr, uint64_t size, uint32_t domain,
+                         uint32_t *hp, uint64_t *moffp) {
+  struct nvshim_drm_gem_new gn;
+  for (unsigned i = 0; i < sizeof(gn); i++) ((unsigned char *)&gn)[i] = 0;
+  gn.info.domain = domain;
+  gn.info.size = size;
+  gn.info.handle = 0xFFFFFFFFu;
+  int rc = drm_ioc(pr, NVSHIM_DRM_IOC_GEM_NEW, &gn, (int)sizeof gn);
+  if (rc != 0) return rc;
+  if (hp) *hp = gn.info.handle;
+  if (moffp) *moffp = gn.info.map_handle;
+  return 0;
+}
+
+#define PRIME_PAT_A 0x5Au
+#define PRIME_PAT_B 0xC3u
+
+static void test_nvshim_drm_prime_export(void) {
+  uart_puts("  Running test_nvshim_drm_prime_export...\n");
+  tests_run++;
+
+  /* The struct is the uAPI's own 12 bytes and the encoded sizes are the two
+   * DRM_IOWR() numbers a libdrm client sends.  Asserted here as literals so a
+   * header edit that shifts them fails loudly. */
+  EXPECT_EQ((int)sizeof(struct nvshim_drm_prime_handle), 12);
+  EXPECT_EQ((int)NVSHIM_DRM_IOC_PRIME_HANDLE_TO_FD, (int)0xC00C642Du);
+  EXPECT_EQ((int)NVSHIM_DRM_IOC_PRIME_FD_TO_HANDLE, (int)0xC00C642Eu);
+  EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_PRIME_HANDLE_TO_FD), 12);
+  EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_PRIME_FD_TO_HANDLE), 12);
+  /* ... and they are SERVED now, so the named-refusal table has no row for
+   * them.  (They were the last two -ENOSYS rows of the old WP-F contract.) */
+  EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_PRIME_HANDLE_TO_FD) == 0), 1);
+  EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_PRIME_FD_TO_HANDLE) == 0), 1);
+
+  struct drm_probe pr;
+  EXPECT_EQ(drm_probe_up(&pr, 97), 0);
+  if (!pr.up) return;
+
+  struct nvshim_drm_vm_init vmi;
+  vmi.kernel_managed_addr = 1ull << 39;
+  vmi.kernel_managed_size = 1ull << 39;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_VM_INIT, &vmi, (int)sizeof vmi), 0);
+
+  uint32_t h = 0;
+  uint64_t moff = 0;
+  EXPECT_EQ(prime_make_bo(&pr, 8192, NVSHIM_DOMAIN_CPU | NVSHIM_DOMAIN_MAPPABLE,
+                          &h, &moff), 0);
+  EXPECT_EQ((int)(h != 0 && h != 0xFFFFFFFFu), 1);
+
+  /* --- export: a REAL fd in this process's table --- */
+  int ufd = -1;
+  EXPECT_EQ(prime_export(&pr, h, 0, &ufd), 0);
+  EXPECT_EQ((int)(ufd >= 0), 1);
+  EXPECT_EQ((int)(ufd != pr.fd), 1);
+  if (ufd < 0) {
+    drm_probe_down(&pr);
+    return;
+  }
+  /* "Real" is measured, not assumed: the fd answers a file query, it is in the
+   * fd table as a dma-buf, and its object resolves back to the export. */
+  uint32_t ofl = 0;
+  EXPECT_EQ(file_open_flags(pr.p, ufd, &ofl), 0);
+  EXPECT_EQ((int)((ofl & 3u) == 2u), 1); /* O_RDWR, what DRM_RDWR produces */
+  EXPECT_EQ(file_is_dmabuf(pr.p, ufd), 1);
+  void *obj = file_dmabuf_obj(pr.p, ufd);
+  EXPECT_EQ((int)(obj != 0), 1);
+  /* One reference for the GEM handle entry, one for the export. */
+  EXPECT_EQ(nv_shim_test_prime_refs(obj), 2);
+
+  /* --- the two mappings --- */
+  int64_t va_h = vm_mmap(pr.p, 0, 8192, VM_PROT_READ | VM_PROT_WRITE,
+                         VM_MAP_SHARED, pr.fd, moff);
+  EXPECT_EQ((va_h > 0), 1);
+  int64_t va_fd = vm_mmap(pr.p, 0, 8192, VM_PROT_READ | VM_PROT_WRITE,
+                          VM_MAP_SHARED, ufd, 0);
+  EXPECT_EQ((va_fd > 0), 1);
+  if (va_h <= 0 || va_fd <= 0) {
+    drm_probe_down(&pr);
+    return;
+  }
+  EXPECT_EQ((int)(va_h != va_fd), 1);
+  /* Both are the ordinary shared region over an object: same region kind, an
+   * object page list, and (below) the same frames. */
+  struct vm_region *rh = vm_region_find(pr.as, (uint64_t)va_h);
+  struct vm_region *rf = vm_region_find(pr.as, (uint64_t)va_fd);
+  EXPECT_EQ((int)(rh && rf && rh->kind == VMK_SHARED && rf->kind == VMK_SHARED), 1);
+  EXPECT_EQ((int)(rh && rf && rh->obj != 0 && rf->obj != 0), 1);
+
+  uint8_t pat_a[256], got[256];
+  for (int i = 0; i < 256; i++) pat_a[i] = (uint8_t)(PRIME_PAT_A ^ ((i * 11 + 3) & 0xFF));
+
+  /* DIRECTION 1: store through the FD's mapping, read through the HANDLE's. */
+  EXPECT_EQ(vm_kwrite(pr.p, (uint64_t)va_fd, pat_a, 256), 0);
+  for (int i = 0; i < 256; i++) got[i] = 0;
+  EXPECT_EQ(vm_user_read(pr.p, (uint64_t)va_h, got, 256), 0);
+  int diff = 0;
+  for (int i = 0; i < 256; i++)
+    if (got[i] != pat_a[i]) diff++;
+  EXPECT_EQ(diff, 0);
+  /* ... and through the RM's own view of the object: the mapping is the
+   * object, not a copy of it. */
+  for (int i = 0; i < 256; i++) got[i] = 0;
+  EXPECT_EQ(nv_rm_mock_read_bo(DDEV, h, 0, got, 256), 0);
+  diff = 0;
+  for (int i = 0; i < 256; i++)
+    if (got[i] != pat_a[i]) diff++;
+  EXPECT_EQ(diff, 0);
+
+  /* DIRECTION 2: store through the HANDLE's mapping at a non-zero offset, read
+   * through the FD's.  An offset-shifted copy cannot pass both directions. */
+  uint8_t pat_b[64];
+  for (int i = 0; i < 64; i++) pat_b[i] = (uint8_t)(PRIME_PAT_B + i);
+  EXPECT_EQ(vm_kwrite(pr.p, (uint64_t)va_h + 64, pat_b, 64), 0);
+  for (int i = 0; i < 64; i++) got[i] = 0;
+  EXPECT_EQ(vm_user_read(pr.p, (uint64_t)va_fd + 64, got, 64), 0);
+  diff = 0;
+  for (int i = 0; i < 64; i++)
+    if (got[i] != pat_b[i]) diff++;
+  EXPECT_EQ(diff, 0);
+  for (int i = 0; i < 64; i++) got[i] = 0;
+  EXPECT_EQ(nv_rm_mock_read_bo(DDEV, h, 64, got, 64), 0);
+  diff = 0;
+  for (int i = 0; i < 64; i++)
+    if (got[i] != pat_b[i]) diff++;
+  EXPECT_EQ(diff, 0);
+
+  /* The bytes NOT written are still the object's zeroes: the two mappings are
+   * one allocation, not two buffers that happened to be filled. */
+  for (int i = 0; i < 64; i++) got[i] = 0xFF;
+  EXPECT_EQ(nv_rm_mock_read_bo(DDEV, h, 4096, got, 64), 0);
+  int nz = 0;
+  for (int i = 0; i < 64; i++)
+    if (got[i]) nz++;
+  EXPECT_EQ(nz, 0);
+
+  /* A second export of the same handle is its own fd and its own reference. */
+  int ufd2 = -1;
+  EXPECT_EQ(prime_export(&pr, h, NVSHIM_DRM_PRIME_CLOEXEC, &ufd2), 0);
+  EXPECT_EQ((int)(ufd2 >= 0 && ufd2 != ufd), 1);
+  EXPECT_EQ(nv_shim_test_prime_refs(obj), 3);
+  if (ufd2 >= 0) EXPECT_EQ(file_close(pr.p, ufd2), 0);
+  EXPECT_EQ(nv_shim_test_prime_refs(obj), 2);
+
+  /* --- teardown: the fd is a file, so closing it is the release --- */
+  EXPECT_EQ(file_close(pr.p, ufd), 0);
+  EXPECT_EQ(file_is_dmabuf(pr.p, ufd), 0);
+  /* The handle still holds the object, so the FD's mapping is gone but the
+   * object's pages are not: the handle's mapping still reads the pattern. */
+  EXPECT_EQ(vm_user_read(pr.p, (uint64_t)va_fd, got, 256), -1);
+  for (int i = 0; i < 256; i++) got[i] = 0;
+  EXPECT_EQ(vm_user_read(pr.p, (uint64_t)va_h, got, 256), 0);
+  /* The expected content is pat_a with direction 2's pat_b laid over
+   * [64,128): both writes went through mappings of this one object. */
+  diff = 0;
+  for (int i = 0; i < 256; i++) {
+    uint8_t want = (i >= 64 && i < 128) ? pat_b[i - 64] : pat_a[i];
+    if (got[i] != want) diff++;
+  }
+  EXPECT_EQ(diff, 0);
+
+  struct nvshim_drm_gem_close gc;
+  gc.handle = h;
+  gc.pad = 0;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_CLOSE, &gc, (int)sizeof gc), 0);
+  EXPECT_EQ(vm_user_read(pr.p, (uint64_t)va_h, got, 8), -1);
+
+  drm_probe_down(&pr);
+  EXPECT_EQ(nv_rm_mock_live(), 0);
+}
+
+static void test_nvshim_drm_prime_import(void) {
+  uart_puts("  Running test_nvshim_drm_prime_import...\n");
+  tests_run++;
+
+  struct drm_probe pr;
+  EXPECT_EQ(drm_probe_up(&pr, 98), 0);
+  if (!pr.up) return;
+  struct drm_probe pr2;
+  /* A DIFFERENT tgid: the AS pool is indexed by it (GB124-AS collision), and
+   * two probes here are two real clients of the same node.  Must stay below
+   * MAX_PROCESSES (192 on ARM). */
+  EXPECT_EQ(drm_probe_up(&pr2, 100), 0);
+  if (!pr2.up) {
+    drm_probe_down(&pr);
+    return;
+  }
+
+  struct nvshim_drm_vm_init vmi;
+  vmi.kernel_managed_addr = 1ull << 39;
+  vmi.kernel_managed_size = 1ull << 39;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_VM_INIT, &vmi, (int)sizeof vmi), 0);
+  EXPECT_EQ(drm_ioc(&pr2, NVSHIM_DRM_IOC_VM_INIT, &vmi, (int)sizeof vmi), 0);
+
+  uint32_t h = 0;
+  uint64_t moff = 0;
+  EXPECT_EQ(prime_make_bo(&pr, 8192, NVSHIM_DOMAIN_CPU | NVSHIM_DOMAIN_MAPPABLE,
+                          &h, &moff), 0);
+  int ufd = -1;
+  EXPECT_EQ(prime_export(&pr, h, 0, &ufd), 0);
+  if (ufd < 0) {
+    drm_probe_down(&pr2);
+    drm_probe_down(&pr);
+    return;
+  }
+  void *obj = file_dmabuf_obj(pr.p, ufd);
+  EXPECT_EQ((int)(obj != 0), 1);
+  EXPECT_EQ(nv_shim_test_prime_refs(obj), 2);
+
+  /* --- import in the SAME client --- */
+  uint32_t h2 = 0;
+  EXPECT_EQ(prime_import(&pr, ufd, 0, &h2), 0);
+  /* Handles are RM-global on this node: the import returns the object's own
+   * handle number (nv_drm_uapi.h, "PRIME contract", documents the divergence
+   * from Linux's per-file namespace). */
+  EXPECT_EQ((int)h2, (int)h);
+  EXPECT_EQ(nv_shim_test_prime_refs(obj), 3);
+  struct nvshim_drm_gem_info gi;
+  for (unsigned i = 0; i < sizeof(gi); i++) ((unsigned char *)&gi)[i] = 0xFF;
+  gi.handle = h2;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_INFO, &gi, (int)sizeof gi), 0);
+  EXPECT_EQ((int)gi.size, 8192);
+  EXPECT_EQ(gi.map_handle, moff);
+  EXPECT_EQ(gi.domain, NVSHIM_DOMAIN_CPU | NVSHIM_DOMAIN_MAPPABLE);
+
+  /* The imported handle maps the same pages... */
+  int64_t va_h2 = vm_mmap(pr.p, 0, 8192, VM_PROT_READ | VM_PROT_WRITE,
+                          VM_MAP_SHARED, pr.fd, moff);
+  EXPECT_EQ((va_h2 > 0), 1);
+  int64_t va_fd = vm_mmap(pr.p, 0, 8192, VM_PROT_READ | VM_PROT_WRITE,
+                          VM_MAP_SHARED, ufd, 0);
+  EXPECT_EQ((va_fd > 0), 1);
+  uint8_t pat[128], got[128];
+  for (int i = 0; i < 128; i++) pat[i] = (uint8_t)(0x21 + i);
+  if (va_h2 > 0 && va_fd > 0) {
+    EXPECT_EQ(vm_kwrite(pr.p, (uint64_t)va_h2, pat, 128), 0);
+    for (int i = 0; i < 128; i++) got[i] = 0;
+    EXPECT_EQ(vm_user_read(pr.p, (uint64_t)va_fd, got, 128), 0);
+    int diff = 0;
+    for (int i = 0; i < 128; i++)
+      if (got[i] != pat[i]) diff++;
+    EXPECT_EQ(diff, 0);
+    for (int i = 0; i < 128; i++) got[i] = 0;
+    EXPECT_EQ(nv_rm_mock_read_bo(DDEV, h, 0, got, 128), 0);
+    diff = 0;
+    for (int i = 0; i < 128; i++)
+      if (got[i] != pat[i]) diff++;
+    EXPECT_EQ(diff, 0);
+  }
+
+  /* --- SCM_RIGHTS: the fd machine hands the SAME file description to a
+   * SECOND process, and the import there is a real import of the same pages.
+   * These two calls are exactly what unix.c's sendmsg/recvmsg use. --- */
+  int gfd = pr.p->open_fds[ufd];
+  EXPECT_EQ((int)(gfd >= 0), 1);
+  EXPECT_EQ(fs_msg_ref_gfd(gfd), 0);
+  int fd2 = fs_msg_install_gfd(pr2.p, gfd);
+  EXPECT_EQ((fd2 >= 0), 1);
+  if (fd2 >= 0) {
+    EXPECT_EQ(file_is_dmabuf(pr2.p, fd2), 1);
+    /* The receiver's fd names the same object: no copy was made by passing it. */
+    EXPECT_EQ((int)(file_dmabuf_obj(pr2.p, fd2) == obj), 1);
+
+    uint32_t h3 = 0;
+    EXPECT_EQ(prime_import(&pr2, fd2, 0, &h3), 0);
+    EXPECT_EQ((int)h3, (int)h);
+    EXPECT_EQ(nv_shim_test_prime_refs(obj), 4);
+
+    int64_t va2 = vm_mmap(pr2.p, 0, 8192, VM_PROT_READ | VM_PROT_WRITE,
+                          VM_MAP_SHARED, fd2, 0);
+    EXPECT_EQ((va2 > 0), 1);
+    if (va2 > 0 && va_fd > 0) {
+      uint8_t pat2[64];
+      for (int i = 0; i < 64; i++) pat2[i] = (uint8_t)(0x90 + i);
+      /* Write in process 2, read in process 1 through ITS mapping. */
+      EXPECT_EQ(vm_kwrite(pr2.p, (uint64_t)va2, pat2, 64), 0);
+      for (int i = 0; i < 64; i++) got[i] = 0;
+      EXPECT_EQ(vm_user_read(pr.p, (uint64_t)va_fd, got, 64), 0);
+      int diff = 0;
+      for (int i = 0; i < 64; i++)
+        if (got[i] != pat2[i]) diff++;
+      EXPECT_EQ(diff, 0);
+      for (int i = 0; i < 64; i++) got[i] = 0;
+      EXPECT_EQ(nv_rm_mock_read_bo(DDEV, h, 0, got, 64), 0);
+      diff = 0;
+      for (int i = 0; i < 64; i++)
+        if (got[i] != pat2[i]) diff++;
+      EXPECT_EQ(diff, 0);
+    }
+
+    /* CLOSE ORDER 1 (importer first).  An SCM_RIGHTS pass shares the FILE
+     * DESCRIPTION: the receiver's fd is the same description, so closing it
+     * drops a reference to the description, not the buffer.  The dma-buf is
+     * released when the LAST holder of the description closes -- here, the
+     * exporter.  That is why the refcount stays 3 after the receiver's close,
+     * and why the receiver's MAPPING survives until the object frees (the
+     * mapping is not itself a reference, so it dies with the object). */
+    struct nvshim_drm_gem_close gc;
+    gc.pad = 0;
+    gc.handle = h3; /* the importer's handle */
+    EXPECT_EQ(drm_ioc(&pr2, NVSHIM_DRM_IOC_GEM_CLOSE, &gc, (int)sizeof gc), 0);
+    EXPECT_EQ(nv_shim_test_prime_refs(obj), 3);
+    /* The object is still readable through the RM after the import closed. */
+    for (int i = 0; i < 64; i++) got[i] = 0;
+    EXPECT_EQ(nv_rm_mock_read_bo(DDEV, h, 0, got, 64), 0);
+    /* The receiver drops its fd: the description is still open in the
+     * exporter, so nothing is freed and the receiver's mapping still reads. */
+    EXPECT_EQ(file_close(pr2.p, fd2), 0);
+    EXPECT_EQ(nv_shim_test_prime_refs(obj), 3);
+    if (va2 > 0) {
+      for (int i = 0; i < 64; i++) got[i] = 0;
+      EXPECT_EQ(vm_user_read(pr2.p, (uint64_t)va2, got, 64), 0);
+    }
+
+    /* Import in process 1 closed, then its handle: the export fd keeps it. */
+    gc.handle = h2;
+    EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_CLOSE, &gc, (int)sizeof gc), 0);
+    EXPECT_EQ(nv_shim_test_prime_refs(obj), 2);
+    gc.handle = h;
+    EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_CLOSE, &gc, (int)sizeof gc), 0);
+    EXPECT_EQ(nv_shim_test_prime_refs(obj), 1);
+    /* ... the object is STILL there: one exported fd is open. */
+    for (int i = 0; i < 64; i++) got[i] = 0;
+    EXPECT_EQ(nv_rm_mock_read_bo(DDEV, h, 0, got, 64), 0);
+    if (va_fd > 0) {
+      for (int i = 0; i < 64; i++) got[i] = 0;
+      EXPECT_EQ(vm_user_read(pr.p, (uint64_t)va_fd, got, 64), 0);
+    }
+    /* ... and the last close of the DESCRIPTION frees the frames.  Every
+     * mapping of the object goes with it, including the one the receiver made
+     * in its own address space (that is the drop_object sweep resolving the
+     * group from the stored tgid). */
+    EXPECT_EQ(file_close(pr.p, ufd), 0);
+    EXPECT_EQ(vm_user_read(pr.p, (uint64_t)va_fd, got, 8), -1);
+    if (va2 > 0) EXPECT_EQ(vm_user_read(pr2.p, (uint64_t)va2, got, 8), -1);
+    EXPECT_EQ(nv_rm_mock_read_bo(DDEV, h, 0, got, 8), -EINVAL);
+  }
+
+  /* CLOSE ORDER 2 (exporter's fd first): a fresh object, exported and mapped,
+   * the fd closed FIRST.  The handle keeps the pages, the handle's mapping
+   * still works, and the frames go when the handle goes. */
+  uint32_t h4 = 0;
+  uint64_t mo4 = 0;
+  EXPECT_EQ(prime_make_bo(&pr, 4096, NVSHIM_DOMAIN_CPU | NVSHIM_DOMAIN_MAPPABLE,
+                          &h4, &mo4), 0);
+  int ufd4 = -1;
+  EXPECT_EQ(prime_export(&pr, h4, 0, &ufd4), 0);
+  EXPECT_EQ(nv_shim_test_prime_refs(file_dmabuf_obj(pr.p, ufd4)), 2);
+  int64_t va4 = vm_mmap(pr.p, 0, 4096, VM_PROT_READ | VM_PROT_WRITE,
+                        VM_MAP_SHARED, ufd4, 0);
+  EXPECT_EQ((va4 > 0), 1);
+  uint8_t b4[16];
+  for (int i = 0; i < 16; i++) b4[i] = (uint8_t)(0x40 + i);
+  if (va4 > 0) EXPECT_EQ(vm_kwrite(pr.p, (uint64_t)va4, b4, 16), 0);
+  EXPECT_EQ(file_close(pr.p, ufd4), 0); /* fd first */
+  if (va4 > 0) EXPECT_EQ(vm_user_read(pr.p, (uint64_t)va4, got, 16), -1);
+  for (int i = 0; i < 16; i++) got[i] = 0;
+  EXPECT_EQ(nv_rm_mock_read_bo(DDEV, h4, 0, got, 16), 0);
+  int diff4 = 0;
+  for (int i = 0; i < 16; i++)
+    if (got[i] != b4[i]) diff4++;
+  EXPECT_EQ(diff4, 0);
+  int64_t va4h = vm_mmap(pr.p, 0, 4096, VM_PROT_READ | VM_PROT_WRITE,
+                         VM_MAP_SHARED, pr.fd, mo4);
+  EXPECT_EQ((va4h > 0), 1);
+  struct nvshim_drm_gem_close gc4;
+  gc4.handle = h4;
+  gc4.pad = 0;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_CLOSE, &gc4, (int)sizeof gc4), 0);
+  if (va4h > 0) EXPECT_EQ(vm_user_read(pr.p, (uint64_t)va4h, got, 8), -1);
+  EXPECT_EQ(nv_rm_mock_read_bo(DDEV, h4, 0, got, 8), -EINVAL);
+
+  /* CLOSE ORDER 3 (client teardown with an fd out): the node fd closes first,
+   * which destroys the client and every handle it held -- and the exported fd
+   * still holds the pages, so they must NOT be freed.  This is the case that
+   * proves the reference is on the OBJECT and not on the client. */
+  uint32_t h5 = 0;
+  EXPECT_EQ(prime_make_bo(&pr, 4096, NVSHIM_DOMAIN_CPU | NVSHIM_DOMAIN_MAPPABLE,
+                          &h5, 0), 0);
+  int ufd5 = -1;
+  EXPECT_EQ(prime_export(&pr, h5, 0, &ufd5), 0);
+  void *obj5 = file_dmabuf_obj(pr.p, ufd5);
+  EXPECT_EQ(nv_shim_test_prime_refs(obj5), 2);
+  EXPECT_EQ(file_close(pr.p, pr.fd), 0); /* the node fd: teardown */
+  pr.fd = -1;
+  EXPECT_EQ(nv_shim_test_prime_refs(obj5), 1);
+  for (int i = 0; i < 16; i++) got[i] = 0;
+  EXPECT_EQ(nv_rm_mock_read_bo(DDEV, h5, 0, got, 16), 0); /* pages alive */
+  EXPECT_EQ(file_close(pr.p, ufd5), 0);
+  EXPECT_EQ(nv_rm_mock_read_bo(DDEV, h5, 0, got, 16), -EINVAL); /* freed */
+
+  drm_probe_down(&pr2);
+  drm_probe_down(&pr);
+  EXPECT_EQ(nv_rm_mock_live(), 0);
+}
+
+static void test_nvshim_drm_prime_refusals(void) {
+  uart_puts("  Running test_nvshim_drm_prime_refusals...\n");
+  tests_run++;
+
+  /* The refusal names are part of the contract: a client in a log has to be able
+   * to read WHY.  The name is copied (see nv_shim.h), so this compares it. */
+  EXPECT_EQ(prime_name_is(NVSHIM_PRIME_NO_SHARE, "no_share"), 1);
+  EXPECT_EQ(prime_name_is(NVSHIM_PRIME_CROSS_DEVICE, "cross_device"), 1);
+  EXPECT_EQ(prime_name_is(NVSHIM_PRIME_NOT_DMABUF, "not_a_dmabuf"), 1);
+  EXPECT_EQ(prime_name_is(NVSHIM_PRIME_NOT_MAPPABLE,
+                          "domain_never_offered_a_cpu_mapping"), 1);
+  EXPECT_EQ(prime_name_is(NVSHIM_PRIME_BAD_FLAGS, "flags"), 1);
+  EXPECT_EQ(prime_name_is(77, "unknown"), 1);
+
+  struct drm_probe pr;
+  EXPECT_EQ(drm_probe_up(&pr, 99), 0);
+  if (!pr.up) return;
+
+  struct nvshim_drm_vm_init vmi;
+  vmi.kernel_managed_addr = 1ull << 39;
+  vmi.kernel_managed_size = 1ull << 39;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_VM_INIT, &vmi, (int)sizeof vmi), 0);
+
+  /* --- NO_SHARE: the object is MADE, maps locally, and cannot be exported ---
+   * (Before WP-PRIME the bit was refused at GEM_NEW because there was no
+   * export to refuse; this is the row that changed, and it changed because the
+   * hint now has somewhere to be honoured.) */
+  uint32_t nh = 0;
+  uint64_t nmoff = 0;
+  EXPECT_EQ(prime_make_bo(&pr, 4096,
+                          NVSHIM_DOMAIN_CPU | NVSHIM_DOMAIN_MAPPABLE |
+                              NVSHIM_DOMAIN_NO_SHARE,
+                          &nh, &nmoff), 0);
+  EXPECT_EQ((int)(nmoff == ((uint64_t)nh << 12)), 1);
+  int64_t nva = vm_mmap(pr.p, 0, 4096, VM_PROT_READ | VM_PROT_WRITE,
+                        VM_MAP_SHARED, pr.fd, nmoff);
+  EXPECT_EQ((nva > 0), 1); /* a private object still maps for its owner */
+  int nfd = -1;
+  EXPECT_EQ(prime_export(&pr, nh, 0, &nfd), -EINVAL);
+  EXPECT_EQ(nfd, -1);
+  struct nvshim_drm_gem_close gc;
+  gc.pad = 0;
+  gc.handle = nh;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_CLOSE, &gc, (int)sizeof gc), 0);
+
+  /* --- a domain with no CPU mapping: EXPORT is fine, MMAP of the fd is named
+   * (a device-visible buffer is exactly what PRIME shares) --- */
+  uint32_t vh = 0;
+  EXPECT_EQ(prime_make_bo(&pr, 4096, NVSHIM_DOMAIN_VRAM, &vh, 0), 0);
+  int vfd = -1;
+  EXPECT_EQ(prime_export(&pr, vh, 0, &vfd), 0);
+  EXPECT_EQ((vfd >= 0), 1);
+  if (vfd >= 0) {
+    void *vobj = file_dmabuf_obj(pr.p, vfd);
+    EXPECT_EQ((int)(vobj != 0), 1);
+    EXPECT_EQ(vm_mmap(pr.p, 0, 4096, VM_PROT_READ | VM_PROT_WRITE, VM_MAP_SHARED,
+                      vfd, 0), -EINVAL);
+    /* ... and memory_offset 0 is the only offset a dma-buf fd accepts. */
+    EXPECT_EQ(vm_mmap(pr.p, 0, 4096, VM_PROT_READ | VM_PROT_WRITE, VM_MAP_SHARED,
+                      vfd, 4096), -EINVAL);
+    /* Import works without a CPU mapping: a device-visible buffer can be bound
+     * by the importer, which is the whole point. */
+    uint32_t vh2 = 0;
+    EXPECT_EQ(prime_import(&pr, vfd, 0, &vh2), 0);
+    EXPECT_EQ((int)vh2, (int)vh);
+    struct nvshim_drm_gem_close gv;
+    gv.handle = vh2;
+    gv.pad = 0;
+    EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_CLOSE, &gv, (int)sizeof gv), 0);
+    EXPECT_EQ(file_close(pr.p, vfd), 0);
+  }
+  gc.handle = vh;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_CLOSE, &gc, (int)sizeof gc), 0);
+
+  /* --- the shapes that are refused before any work is done --- */
+  uint32_t ch = 0;
+  EXPECT_EQ(prime_make_bo(&pr, 4096, NVSHIM_DOMAIN_CPU | NVSHIM_DOMAIN_MAPPABLE,
+                          &ch, 0), 0);
+  int bad = -1;
+  EXPECT_EQ(prime_export(&pr, ch, 0x80u, &bad), -EINVAL);   /* unknown flag */
+  EXPECT_EQ(prime_export(&pr, ch + 777u, 0, &bad), -EINVAL); /* foreign handle */
+  EXPECT_EQ(prime_export(&pr, 0, 0, &bad), -EINVAL);         /* no such handle */
+  uint32_t hh = 0;
+  EXPECT_EQ(prime_import(&pr, -1, 0, &hh), -EINVAL);
+  EXPECT_EQ(prime_import(&pr, pr.fd, 0, &hh), -EINVAL); /* the node is not a buf */
+  EXPECT_EQ(prime_import(&pr, 999, 0, &hh), -EINVAL);   /* no such fd */
+
+  int cfd = -1;
+  EXPECT_EQ(prime_export(&pr, ch, 0, &cfd), 0);
+  if (cfd >= 0) {
+    EXPECT_EQ(prime_import(&pr, cfd, NVSHIM_DRM_PRIME_CLOEXEC, &hh), -EINVAL);
+    /* --- cross-device: the one branch userspace cannot reach on this node.
+     * The mock has a single device, so the seam lies about the exporter's dev;
+     * the import must answer the NAMED refusal instead of importing memory the
+     * RM could not attach.  The dev is restored before the close, because the
+     * release path frees the object through the device it recorded. --- */
+    void *cobj = file_dmabuf_obj(pr.p, cfd);
+    EXPECT_EQ((int)(cobj != 0), 1);
+    int refs_before = nv_shim_test_prime_refs(cobj);
+    EXPECT_EQ(nv_shim_test_prime_set_dev(cobj, 99), 0);
+    EXPECT_EQ(prime_import(&pr, cfd, 0, &hh), -EINVAL);
+    EXPECT_EQ(prime_import(&pr, cfd, 0, &hh), -EINVAL); /* still refused */
+    /* The refs seam resolves the object through the buffer's recorded device,
+     * so it is read after restoring it: a refusal must not have taken a
+     * reference, and with the real device back the count is what it was. */
+    EXPECT_EQ(nv_shim_test_prime_set_dev(cobj, DDEV), 0);
+    EXPECT_EQ(nv_shim_test_prime_refs(cobj), refs_before); /* no ref leaked */
+    /* ... and with its real device it imports, so the refusal was about the
+     * device and nothing else. */
+    EXPECT_EQ(prime_import(&pr, cfd, 0, &hh), 0);
+    struct nvshim_drm_gem_close gh;
+    gh.handle = hh;
+    gh.pad = 0;
+    EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_CLOSE, &gh, (int)sizeof gh), 0);
+    EXPECT_EQ(file_close(pr.p, cfd), 0);
+  }
+  gc.handle = ch;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_CLOSE, &gc, (int)sizeof gc), 0);
+
+  /* --- every OTHER named refusal keeps its row: the table did not lose
+   * anything when PRIME left it --- */
+  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_GEM_FLINK, 0), -ENOSYS);
+  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_HANDLE_TO_FD, 0), -ENOSYS);
+  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_GEM_PUSHBUF, 0), -ENOSYS);
+  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SETPARAM, 0), -ENOSYS);
+  EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_GEM_FLINK) != 0), 1);
+  EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT) != 0), 1);
+  /* ... and the two PRIME numbers are served, not refused-by-size: a wrong
+   * encoded size is -EINVAL (the number exists), never -ENOSYS. */
+  EXPECT_EQ(nv_shim_ioctl(pr.p, pr.fd, NVSHIM_DRM_IOC_ANY(0x2d, 16), pr.base), -EINVAL);
+  EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_ANY(0x2d, 16)), 12);
 
   drm_probe_down(&pr);
   EXPECT_EQ(nv_rm_mock_live(), 0);
@@ -1858,6 +2449,9 @@ void nv_shim_drm_test_suite(void) {
   test_nvshim_drm_limits();
   test_nvshim_drm_cpu_map();
   test_nvshim_drm_cpu_map_refusals();
+  test_nvshim_drm_prime_export();    /* WP-PRIME: real fd, same pages, both ways */
+  test_nvshim_drm_prime_import();    /* WP-PRIME: import, SCM_RIGHTS, close orders */
+  test_nvshim_drm_prime_refusals();  /* WP-PRIME: NO_SHARE, cross-device, shapes */
   test_nvshim_nvif_layout();
   test_nvshim_nvif_device();
   test_nvshim_nvif_sclass();

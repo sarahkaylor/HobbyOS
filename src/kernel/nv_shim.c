@@ -34,6 +34,7 @@
 
 #include "arch/cpu.h" /* get_cpuid for the per-CPU row buffer */
 #include "errno.h"
+#include "fs.h" /* WP-PRIME: the dma-buf fd (file_dmabuf_install/_obj) */
 #include "lock.h"
 #include "process.h"
 #include "timer.h"
@@ -77,14 +78,22 @@ struct shim_sigpend {
  * a leaf that outlives its frame would point at whatever the allocator hands
  * out next.  Linux keeps the object alive while a VMA refers to it; the mock
  * has no object refcount, so the order is inverted instead, and a test asserts
- * the mapping is gone after GEM_CLOSE. */
+ * the mapping is gone after GEM_CLOSE.
+ *
+ * WP-PRIME: `prime`/`owner` extend the same record to mappings made through a
+ * dma-buf fd.  A mapping is still not itself a reference (this kernel has no
+ * munmap hook to learn a VMA went away), so it is dropped by its OWNER going
+ * away -- the node fd's handle, or the dma-buf fd -- or by the object reaching
+ * refs == 0, whichever comes first. */
 struct shim_map {
   int used;
-  int pid;
-  int fd;
+  int pid;   /* process GROUP pid (tgid): the AS to unmap from */
+  int fd;    /* the user fd that made it: the node, or the dma-buf */
   uint64_t handle;
   uint64_t va;
   uint64_t len;
+  int prime;   /* 1 = made through a dma-buf fd */
+  void *owner; /* prime: the struct shim_dmabuf it was made from */
 };
 
 /* WP-NVIF: one object in a client's NVIF tree (nv_nvif_uapi.h).  `cookie` is
@@ -149,6 +158,50 @@ static spinlock_t g_shim_lock;
  * that made it and has to be found from GEM_CLOSE / fd close. */
 #define SHIM_MAX_MAPS 16
 static struct shim_map g_maps[SHIM_MAX_MAPS];
+
+/* ---- WP-PRIME: object records and dma-bufs ------------------------------
+ *
+ * BEFORE PRIME a handle WAS the object: GEM_CLOSE (or fd close) called the
+ * RM's mem_free and that was the end of it.  A dma-buf breaks that identity --
+ * the pages must outlive the handle that made them, for as long as an exported
+ * fd exists -- so the object gets its own refcounted record here:
+ *
+ *     refs = one per client GEM-handle TABLE ENTRY (a handle entry, not the
+ *            numeric handle: importing one fd twice in a client is two
+ *            entries and two references)
+ *          + one per exported dma-buf fd
+ *
+ * `handle` is the RM's handle, the object's identity (RM-global); it is also
+ * the number a client sees, which is the documented divergence from Linux's
+ * per-file handle namespace (nv_drm_uapi.h, "PRIME contract"). */
+struct shim_bo {
+  int used;
+  uint32_t dev;
+  uint64_t handle;
+  uint64_t bus;
+  uint64_t size;
+  uint32_t domain;
+  uint64_t phys; /* cached CPU view: 0 = not resolved yet */
+  int refs;
+};
+#define SHIM_MAX_BOS 64 /* the mock's own table (MOCK_MAX_ALLOC) is 64 */
+static struct shim_bo g_bos[SHIM_MAX_BOS];
+
+/* One exported dma-buf.  Owned by exactly one open file DESCRIPTION: the fd
+ * table's own ref_count covers dup(2)/fork/SCM_RIGHTS, so this object does not
+ * recount them, and nv_shim_dmabuf_release() runs when the last reference to
+ * that description goes. */
+struct shim_dmabuf {
+  int used;
+  uint32_t dev;   /* the device that exported it */
+  uint64_t handle;
+  uint64_t size;
+  uint32_t domain;
+  int id;         /* serial for the console rows */
+};
+#define SHIM_MAX_DMABUF 16
+static struct shim_dmabuf g_dmabufs[SHIM_MAX_DMABUF];
+static int g_dmabuf_serial;
 /* One bounce buffer for command streams: the RM (and later GSP-RM) takes a
  * kernel pointer, and SUBMIT is the only variable-length request. */
 static uint8_t g_cs_buf[NVSHIM_MAX_CS] __attribute__((aligned(16)));
@@ -247,6 +300,10 @@ static int r_dev = SHIM_ROW_BUDGET, r_alloc = SHIM_ROW_BUDGET,
                         * suite, hiding the `drm getparam param=13 ... src=
                         * declared` row this lane exists to produce.  Each row
                         * is still one line, and the budget is per BOOT. */
+/* WP-PRIME's own bucket: export, import, every refusal and every close-order
+ * row names itself, and the suites drive the same rows several times (three
+ * close orders), so this is sized for the evidence, not for one call. */
+static int r_prime = 24;
 
 static void row_end(void) {
   uint32_t cpu = row_cpu();
@@ -462,22 +519,132 @@ static int client_reserved_ch(const struct shim_client *c) {
   return -1;
 }
 
+/* ---- object refcounts (WP-PRIME) --------------------------------------
+ * Every function in this block runs with g_shim_lock held.  `refs` counts
+ * client handle-table entries and exported dma-bufs; the frames are freed
+ * exactly once, by whoever drops the last reference. */
+static struct shim_bo *bo_find(uint32_t dev, uint64_t handle) {
+  for (int i = 0; i < SHIM_MAX_BOS; i++)
+    if (g_bos[i].used && g_bos[i].dev == dev && g_bos[i].handle == handle)
+      return &g_bos[i];
+  return 0;
+}
+
+/* Register a freshly created RM object with one reference (the handle entry the
+ * caller is about to publish).  0 = registered, -1 = table full. */
+static int bo_add(uint32_t dev, uint64_t handle, uint64_t bus, uint64_t size,
+                  uint32_t domain) {
+  if (bo_find(dev, handle)) return -1; /* already tracked: a caller's bug */
+  for (int i = 0; i < SHIM_MAX_BOS; i++)
+    if (!g_bos[i].used) {
+      struct shim_bo *b = &g_bos[i];
+      b->used = 1;
+      b->dev = dev;
+      b->handle = handle;
+      b->bus = bus;
+      b->size = size;
+      b->domain = domain;
+      b->phys = 0;
+      b->refs = 1;
+      return 0;
+    }
+  return -1;
+}
+
+static int bo_ref(uint32_t dev, uint64_t handle) {
+  struct shim_bo *b = bo_find(dev, handle);
+  if (!b) return -1;
+  b->refs++;
+  return 0;
+}
+
+/* Drop one reference.  Returns 1 when this WAS the last one: the caller must
+ * take the object's mappings down and then free the frames. */
+static int bo_unref(uint32_t dev, uint64_t handle) {
+  struct shim_bo *b = bo_find(dev, handle);
+  if (!b) return 1; /* not tracked (never registered): the caller owns frames */
+  if (--b->refs > 0) return 0;
+  b->used = 0;
+  b->dev = 0;
+  b->handle = 0;
+  b->bus = 0;
+  b->size = 0;
+  b->domain = 0;
+  b->phys = 0;
+  b->refs = 0;
+  return 1;
+}
+
+/* The name a PRIME refusal prints.  Exported (nv_shim.h) so the tier asserts
+ * the NAME, not only the errno -- a refusal nobody can read is the failure
+ * mode this project keeps paying for. */
+/* The name a PRIME refusal prints.  It is COPIED into the caller's buffer, not
+ * returned as a pointer: clang folds a function that only SELECTS among string
+ * literals into a .rodata array of string pointers, and this project's AArch64
+ * image is slid by Limine, so such a table is a link-address hazard the
+ * relocation audit gates on (tools/kernel_reloc_audit.py).  Bytes need no
+ * relocation; a pointer does.  (Measured: the pointer-returning form added a
+ * 6-word .rodata table and failed the ARM link.) */
+static const char k_prime_reasons[][36] = {
+    "ok", "no_share", "cross_device", "not_a_dmabuf",
+    "domain_never_offered_a_cpu_mapping", "flags",
+};
+#define PRIME_NUM_REASONS (int)(sizeof k_prime_reasons / sizeof k_prime_reasons[0])
+
+void nv_shim_prime_refusal_name(int why, char *dst, int cap) {
+  if (!dst || cap <= 0) return;
+  const char *s = "unknown";
+  if (why >= 0 && why < PRIME_NUM_REASONS) s = k_prime_reasons[why];
+  int i = 0;
+  while (s[i] && i < cap - 1) {
+    dst[i] = s[i];
+    i++;
+  }
+  dst[i] = 0;
+}
+
+/* Drop a PRIME refusal's name into the current row. */
+static void row_prime_why(int why) {
+  char b[NVSHIM_PRIME_REASON_MAX];
+  nv_shim_prime_refusal_name(why, b, (int)sizeof b);
+  row_s(b);
+}
+
+/* Dropping a live dma-buf's mapping table entries (defined with the mapping
+ * block; declared here because teardown runs before it). */
+static void shim_maps_drop_object(struct process *p, uint64_t handle);
+
 /* Detach a client and destroy everything it owns.  Runs without the lock: the
- * RM calls are outside it, exactly as every other op does. */
-static void client_teardown(const struct shim_client *snap) {
+ * RM calls are outside it, exactly as every other op does.
+ *
+ * WP-PRIME: an object may outlive the client (an exported dma-buf holds a
+ * reference), so this drops REFERENCES rather than freeing outright; the frames
+ * go when the last one goes. */
+static void client_teardown(struct process *p, int fd,
+                            const struct shim_client *snap) {
   for (int i = snap->nch - 1; i >= 0; i--) {
     if (snap->ch_id[i] && snap->ch_id[i] != SHIM_RESERVED)
       rm()->channel_destroy(snap->dev_id, snap->ch_id[i]);
-    /* The push buffer went in after the channel and must come out after it. */
+    /* The push buffer went in after the channel and must come out after it.
+     * It is the shim's own object (no handle ever published, never exported),
+     * so it is freed directly. */
     if (snap->ch_pushbuf[i])
       rm()->mem_free(snap->dev_id, snap->ch_pushbuf[i]);
   }
   for (int i = snap->nvm - 1; i >= 0; i--)
     if (snap->vm_id[i] && snap->vm_id[i] != SHIM_RESERVED)
       rm()->vm_destroy(snap->dev_id, snap->vm_id[i]);
-  for (int i = snap->nalloc - 1; i >= 0; i--)
-    if (snap->alloc_handle[i] && snap->alloc_handle[i] != SHIM_RESERVED)
-      rm()->mem_free(snap->dev_id, snap->alloc_handle[i]);
+  for (int i = snap->nalloc - 1; i >= 0; i--) {
+    uint64_t h = snap->alloc_handle[i];
+    if (!h || h == SHIM_RESERVED) continue;
+    spinlock_acquire(&g_shim_lock);
+    int last = bo_unref(snap->dev_id, h);
+    spinlock_release(&g_shim_lock);
+    if (!last) continue; /* an exported fd still holds these pages */
+    shim_maps_drop_object(p, h);
+    rm()->mem_free(snap->dev_id, h);
+  }
+  (void)fd;
   if (snap->dev_id && snap->dev_id != SHIM_RESERVED)
     rm()->device_close(snap->dev_id);
 }
@@ -594,7 +761,7 @@ static int device_release(struct process *p, int fd, uint32_t expect) {
   /* WP-F3: mappings first -- their leaves name the RM's frames, so the frames
    * must not be freed while a mapping is live. */
   shim_maps_drop(p, fd, 0);
-  client_teardown(&snap);
+  client_teardown(p, fd, &snap);
   return 0;
 }
 
@@ -712,7 +879,8 @@ static int op_alloc(struct process *p, int fd, uint64_t arg) {
   int done = 0;
   if (rc == 0 && c) {
     int at = client_reserved_alloc(c);
-    if (at >= 0) {
+    if (at >= 0 && handle <= 0xFFFFFFFFull &&
+        bo_add(dev, handle, bus, granted, a.domain) == 0) {
       c->alloc_handle[at] = handle;
       c->alloc_bus[at] = bus;
       c->alloc_size[at] = granted;
@@ -777,6 +945,14 @@ static int op_free(struct process *p, int fd, uint64_t arg) {
   c->nalloc--;
   spinlock_release(&g_shim_lock);
 
+  /* WP-PRIME: drop this handle's REFERENCE.  The frames go only when the last
+   * reference goes -- an exported dma-buf keeps the object (and its pages)
+   * alive after the handle that made it is gone. */
+  spinlock_acquire(&g_shim_lock);
+  int last = bo_unref(dev, handle);
+  spinlock_release(&g_shim_lock);
+  if (!last) return 0;
+  shim_maps_drop_object(p, handle);
   int rc = rm()->mem_free(dev, handle);
   return rc == 0 ? 0 : -EIO;
 }
@@ -1155,6 +1331,8 @@ static const struct drm_row g_drm_rows[] = {
     {0x00, 64}, /* DRM_IOCTL_VERSION           struct drm_version           */
     {0x09, 8},  /* DRM_IOCTL_GEM_CLOSE         struct drm_gem_close         */
     {0x0c, 16}, /* DRM_IOCTL_GET_CAP           struct drm_get_cap           */
+    {0x2d, 12}, /* DRM_IOCTL_PRIME_HANDLE_TO_FD  (WP-PRIME)                 */
+    {0x2e, 12}, /* DRM_IOCTL_PRIME_FD_TO_HANDLE  (WP-PRIME)                 */
     {0x40, 16}, /* NOUVEAU_GETPARAM            struct drm_nouveau_getparam  */
     {0x42, 88}, /* NOUVEAU_CHANNEL_ALLOC       struct ..._channel_alloc     */
     {0x43, 4},  /* NOUVEAU_CHANNEL_FREE        struct ..._channel_free      */
@@ -1183,8 +1361,6 @@ static const struct {
   char name[DRM_REFUSAL_NAME_MAX];
 } g_drm_refusals[] = {
     {NVSHIM_DRM_NR_GEM_FLINK, "gem_flink"},
-    {NVSHIM_DRM_NR_PRIME_HANDLE_TO_FD, "prime_handle_to_fd"},
-    {NVSHIM_DRM_NR_PRIME_FD_TO_HANDLE, "prime_fd_to_handle"},
     {NVSHIM_DRM_NR_SETPARAM, "setparam"},
     {NVSHIM_DRM_NR_GROBJ_ALLOC, "grobj_alloc"},
     {NVSHIM_DRM_NR_NOTIFIEROBJ_ALLOC, "notifier_obj"},
@@ -1479,9 +1655,11 @@ static int op_drm_getparam(struct process *p, int fd, uint64_t arg) {
  *                       memory (Normal-NC pool RAM the device already sees)
  *  MAPPABLE w/o CPU     refused: there is no BAR to map VRAM through
  *  COHERENT w/o MAPPABLE refused: a coherence promise with no mapping
- *  NO_SHARE             refused: it tells PRIME not to export the object, and
- *                       PRIME is refused by name -- accepting it would be the
- *                       silent drop this project forbids
+ *  NO_SHARE             accepted and recorded (WP-PRIME): the object is made
+ *                       and maps locally, and PRIME EXPORT of it is refused by
+ *                       name (reason=no_share).  Before PRIME existed there was
+ *                       no export to refuse, so the bit was refused here
+ *                       instead of being a silent drop.
  */
 #define DRM_DOMAIN_CPU_BITS                                                        \
   (NVSHIM_DOMAIN_CPU | NVSHIM_DOMAIN_MAPPABLE | NVSHIM_DOMAIN_COHERENT |           \
@@ -1491,7 +1669,10 @@ static int op_drm_getparam(struct process *p, int fd, uint64_t arg) {
 static int drm_domain_ok(uint32_t domain) {
   if ((domain & (NVSHIM_DOMAIN_VRAM | NVSHIM_DOMAIN_GART | NVSHIM_DOMAIN_CPU)) == 0)
     return -1; /* nothing to allocate from */
-  if (domain & NVSHIM_DOMAIN_NO_SHARE) return -1;
+  /* WP-PRIME: NO_SHARE is ACCEPTED here now and honoured where it means
+   * something -- PRIME export refuses such an object by name.  Before PRIME
+   * existed the bit was refused at allocation because there was no export to
+   * refuse, and accepting it would have been a silent drop. */
   if ((domain & NVSHIM_DOMAIN_MAPPABLE) && !(domain & NVSHIM_DOMAIN_CPU))
     return -1; /* no BAR: VRAM cannot be CPU-mapped here */
   if ((domain & NVSHIM_DOMAIN_COHERENT) && !(domain & NVSHIM_DOMAIN_MAPPABLE))
@@ -1579,7 +1760,8 @@ static int op_drm_gem_new(struct process *p, int fd, uint64_t arg) {
   int done = 0;
   if (rc == 0 && c) {
     int at = client_reserved_alloc(c);
-    if (at >= 0 && handle <= 0xFFFFFFFFull) {
+    if (at >= 0 && handle <= 0xFFFFFFFFull &&
+        bo_add(dev, handle, bus, granted, domain) == 0) {
       c->alloc_handle[at] = handle;
       c->alloc_bus[at] = bus;
       c->alloc_size[at] = granted;
@@ -1673,7 +1855,9 @@ static void shim_maps_drop(struct process *p, int fd, uint64_t handle) {
   spinlock_acquire(&g_shim_lock);
   for (int i = 0; i < SHIM_MAX_MAPS; i++) {
     struct shim_map *m = &g_maps[i];
-    if (!m->used || m->pid != pid || m->fd != fd) continue;
+    /* `prime` maps belong to a dma-buf fd, never to the node fd: a node
+     * GEM_CLOSE must not take them down. */
+    if (!m->used || m->prime || m->pid != pid || m->fd != fd) continue;
     if (handle && m->handle != handle) continue;
     va[n] = m->va;
     len[n] = m->len;
@@ -1685,6 +1869,131 @@ static void shim_maps_drop(struct process *p, int fd, uint64_t handle) {
   }
   spinlock_release(&g_shim_lock);
   for (int i = 0; i < n; i++) (void)vm_munmap_range(grp, va[i], len[i]);
+}
+
+/* Unmap and forget every mapping of one object, of either kind.  Used when the
+ * object reaches refs == 0: its frames are about to go back to the pool, so no
+ * VMA may still name them.  Entries can belong to OTHER process groups (a
+ * dma-buf imported and mapped by a second client), which is why the group is
+ * resolved from the stored tgid rather than from the caller.  A group that is
+ * already gone has had its address space torn down, so there is nothing to
+ * unmap there. */
+static void shim_maps_drop_object(struct process *p, uint64_t handle) {
+  uint64_t va[SHIM_MAX_MAPS], len[SHIM_MAX_MAPS];
+  int tgs[SHIM_MAX_MAPS];
+  int n = 0;
+  spinlock_acquire(&g_shim_lock);
+  for (int i = 0; i < SHIM_MAX_MAPS; i++) {
+    struct shim_map *m = &g_maps[i];
+    if (!m->used || m->handle != handle) continue;
+    va[n] = m->va;
+    len[n] = m->len;
+    tgs[n] = m->pid;
+    n++;
+    m->used = 0;
+    m->va = 0;
+    m->len = 0;
+    m->handle = 0;
+    m->prime = 0;
+    m->owner = 0;
+  }
+  spinlock_release(&g_shim_lock);
+  for (int i = 0; i < n; i++) {
+    struct process *grp = 0;
+    if (p && shim_pid(p) == tgs[i]) grp = process_group(p);
+    else {
+      struct process *pcb = tgs[i] > 0 ? process_get_pcb(tgs[i]) : 0;
+      grp = pcb ? process_group(pcb) : 0;
+    }
+    if (grp) (void)vm_munmap_range(grp, va[i], len[i]);
+  }
+}
+
+/* Unmap and forget the mappings ONE dma-buf fd made.  `fd` < 0 (or a NULL
+ * group) means "every mapping of this buffer", which is what the fd table's
+ * context-free release path gets; `pid` < 0 means any group. */
+static void shim_maps_drop_prime(void *owner, int pid, int fd,
+                                 struct process *fallback) {
+  uint64_t va[SHIM_MAX_MAPS], len[SHIM_MAX_MAPS];
+  int tgs[SHIM_MAX_MAPS];
+  int n = 0;
+  spinlock_acquire(&g_shim_lock);
+  for (int i = 0; i < SHIM_MAX_MAPS; i++) {
+    struct shim_map *m = &g_maps[i];
+    if (!m->used || !m->prime || m->owner != owner) continue;
+    if (pid >= 0 && m->pid != pid) continue;
+    if (fd >= 0 && m->fd != fd) continue;
+    va[n] = m->va;
+    len[n] = m->len;
+    tgs[n] = m->pid;
+    n++;
+    m->used = 0;
+    m->va = 0;
+    m->len = 0;
+    m->handle = 0;
+    m->prime = 0;
+    m->owner = 0;
+  }
+  spinlock_release(&g_shim_lock);
+  for (int i = 0; i < n; i++) {
+    struct process *grp = 0;
+    if (fallback && shim_pid(fallback) == tgs[i]) grp = process_group(fallback);
+    else {
+      struct process *pcb = tgs[i] > 0 ? process_get_pcb(tgs[i]) : 0;
+      grp = pcb ? process_group(pcb) : 0;
+    }
+    if (grp) (void)vm_munmap_range(grp, va[i], len[i]);
+  }
+}
+
+/* Build one MAP_SHARED region over the object's own frames [phys, phys+len)
+ * and record it so the right owner can take it down later.  Shared by the node
+ * fd's mmap (prime = 0, `owner` unused) and the dma-buf fd's mmap (prime = 1),
+ * which is what makes "an mmap of the fd is the same pages" a property of one
+ * code path instead of two that agree by luck.
+ * Returns the region's base VA, or a negative errno (nothing is left mapped). */
+static int64_t shim_region_build(struct process *grp, uint64_t phys, uint64_t len,
+                                 uint16_t prot, int pid, int fd, uint64_t handle,
+                                 int prime, void *owner) {
+  if (!grp || !grp->as || !phys || !len) return -EINVAL;
+  struct vm_object *obj = vm_object_create(VM_OBJ_NVBO, len);
+  if (!obj) return -ENOMEM;
+  for (uint64_t off = 0; off < len; off += SHIM_PAGE) {
+    if (!vm_object_install_foreign(obj, off, phys + off)) {
+      vm_object_unref(obj);
+      return -ENOMEM;
+    }
+  }
+  uint64_t base = 0;
+  int hrc = vm_region_alloc_hole(grp->as, USER_MMAP_BASE_V2, USER_MMAP_LIMIT_V2,
+                                len, prot, VMK_SHARED, VM_MAP_SHARED, obj, 0,
+                                &base);
+  vm_object_unref(obj); /* the region record holds its own reference (S4) */
+  if (hrc != 0) return -ENOMEM;
+
+  spinlock_acquire(&g_shim_lock);
+  int slot = -1;
+  for (int i = 0; i < SHIM_MAX_MAPS; i++)
+    if (!g_maps[i].used) {
+      slot = i;
+      break;
+    }
+  if (slot >= 0) {
+    g_maps[slot].used = 1;
+    g_maps[slot].pid = pid;
+    g_maps[slot].fd = fd;
+    g_maps[slot].handle = handle;
+    g_maps[slot].va = base;
+    g_maps[slot].len = len;
+    g_maps[slot].prime = prime;
+    g_maps[slot].owner = owner;
+  }
+  spinlock_release(&g_shim_lock);
+  if (slot < 0) {
+    (void)vm_munmap_range(grp, base, len);
+    return -ENOSPC;
+  }
+  return (int64_t)base;
 }
 
 /* mmap(2) of a GEM object (declared in nv_shim.h; vm_mmap routes here). */
@@ -1788,71 +2097,38 @@ int64_t nv_shim_mmap(struct process *grp, int fd, uint64_t offset, uint64_t len,
 
   /* One vm_object names the object's page list; the ordinary fault path maps
    * leaf pages from it.  Nothing is copied, and no page is touched until the
-   * client touches it. */
-  struct vm_object *obj = vm_object_create(VM_OBJ_NVBO, len);
-  if (!obj) return -ENOMEM;
-  for (uint64_t off = 0; off < len; off += SHIM_PAGE) {
-    if (!vm_object_install_foreign(obj, off, phys + off)) {
-      vm_object_unref(obj);
-      row_begin("drm mmap refused", &r_mmap);
-      row_s("handle=");
-      row_say((int)handle);
-      row_s(" reason=page_list");
-      row_end();
-      return -ENOMEM;
-    }
-  }
-  uint64_t base = 0;
-  int hrc = vm_region_alloc_hole(grp->as, USER_MMAP_BASE_V2, USER_MMAP_LIMIT_V2,
-                                len, prot, VMK_SHARED, VM_MAP_SHARED, obj, 0,
-                                &base);
-  vm_object_unref(obj); /* the region record holds its own reference (S4) */
-  if (hrc != 0) {
+   * client touches it.  The builder is shared with the dma-buf path below, so
+   * "same pages" is one piece of code, not two that can drift. */
+  int64_t built = shim_region_build(grp, phys, len, prot, pid, fd, handle, 0, 0);
+  if (built < 0) {
     row_begin("drm mmap refused", &r_mmap);
-    row_s("len=");
-    row_hex(len);
-    row_s(" reason=no_va");
+    row_s("handle=");
+    row_say((int)handle);
+    if (built == -ENOSPC) row_s(" reason=map_table_full");
+    else row_s(" reason=page_list_or_no_va");
     row_end();
-    return -ENOMEM;
+    return built;
   }
+  uint64_t base = (uint64_t)built;
 
   /* The object must still be the one we validated: the client could have closed
    * it while the region was being built.  Cheap re-check, and the mapping is
    * taken down rather than left pointing at freed frames. */
-  int still = 0, slot = -1;
+  int still = 0;
   spinlock_acquire(&g_shim_lock);
   c = client_find(pid, fd);
   at = c ? client_find_alloc(c, (uint32_t)handle) : -1;
   still = (at >= 0 && c->dev_id == dev && c->alloc_size[at] == size &&
            c->alloc_domain[at] == domain);
-  if (still) {
-    for (int i = 0; i < SHIM_MAX_MAPS; i++)
-      if (!g_maps[i].used) { slot = i; break; }
-    if (slot >= 0) {
-      g_maps[slot].used = 1;
-      g_maps[slot].pid = pid;
-      g_maps[slot].fd = fd;
-      g_maps[slot].handle = handle;
-      g_maps[slot].va = base;
-      g_maps[slot].len = len;
-    }
-  }
   spinlock_release(&g_shim_lock);
   if (!still) {
-    (void)vm_munmap_range(grp, base, len);
+    shim_maps_drop(grp, fd, handle);
     row_begin("drm mmap refused", &r_mmap);
     row_s("handle=");
     row_say((int)handle);
     row_s(" reason=object_closed_during_map");
     row_end();
     return -EBADF;
-  }
-  if (slot < 0) {
-    (void)vm_munmap_range(grp, base, len);
-    row_begin("drm mmap refused", &r_mmap);
-    row_s("reason=map_table_full");
-    row_end();
-    return -ENOSPC;
   }
 
   row_begin("drm mmap", &r_mmap);
@@ -1868,6 +2144,474 @@ int64_t nv_shim_mmap(struct process *grp, int fd, uint64_t offset, uint64_t len,
   row_hex(domain);
   row_end();
   return (int64_t)base;
+}
+
+/* ---- PRIME / dma-buf (WP-PRIME) ----------------------------------------
+ *
+ * The contract is nv_drm_uapi.h's "PRIME contract" block.  In one sentence:
+ * an exported fd names a dma-buf that holds ONE reference on the GEM object,
+ * mmap of that fd maps the object's own frames, and the frames are freed by
+ * whoever drops the last reference -- handle entry or exported fd.
+ *
+ * The fd itself lives in the ordinary file table (fs.c FILE_TYPE_DMABUF), so
+ * dup(2), fork, close(2) and SCM_RIGHTS need no new machinery here: the file
+ * description's ref_count is what keeps the dma-buf alive, and
+ * nv_shim_dmabuf_release() runs exactly once, when the last reference goes.
+ * ---------------------------------------------------------------------- */
+
+static struct shim_dmabuf *dmabuf_alloc_locked(void) {
+  for (int i = 0; i < SHIM_MAX_DMABUF; i++)
+    if (!g_dmabufs[i].used) {
+      struct shim_dmabuf *b = &g_dmabufs[i];
+      b->used = 1;
+      b->dev = 0;
+      b->handle = 0;
+      b->size = 0;
+      b->domain = 0;
+      b->id = ++g_dmabuf_serial;
+      return b;
+    }
+  return 0;
+}
+
+static int op_drm_prime_handle_to_fd(struct process *p, int fd, uint64_t arg) {
+  struct nvshim_drm_prime_handle ph;
+  if (vm_user_read(p, arg, &ph, (int)sizeof ph) != 0) return -EFAULT;
+  if (ph.flags & ~(uint32_t)(NVSHIM_DRM_PRIME_CLOEXEC | NVSHIM_DRM_PRIME_RDWR)) {
+    row_begin("prime refuse", &r_prime);
+    row_s("dir=export handle=");
+    row_say((int)ph.handle);
+    row_s(" reason=");
+    row_prime_why(NVSHIM_PRIME_BAD_FLAGS);
+    row_s(" flags=");
+    row_hex(ph.flags);
+    row_end();
+    return -EINVAL;
+  }
+
+  uint32_t dev = 0;
+  int rc = drm_client_ensure(p, fd, &dev);
+  if (rc != 0) return rc;
+
+  int pid = shim_pid(p);
+  uint32_t domain = 0;
+  uint64_t handle = 0, size = 0;
+  struct shim_dmabuf *buf = 0;
+  int why = NVSHIM_PRIME_OK;
+
+  spinlock_acquire(&g_shim_lock);
+  struct shim_client *c = client_find(pid, fd);
+  int at = c ? client_find_alloc(c, ph.handle) : -1;
+  if (at < 0) {
+    spinlock_release(&g_shim_lock);
+    row_begin("prime refuse", &r_prime);
+    row_s("dir=export handle=");
+    row_say((int)ph.handle);
+    row_s(" reason=not_this_clients_object");
+    row_end();
+    return -EINVAL;
+  }
+  domain = c->alloc_domain[at];
+  handle = c->alloc_handle[at];
+  size = c->alloc_size[at];
+  if (domain & NVSHIM_DOMAIN_NO_SHARE) {
+    spinlock_release(&g_shim_lock);
+    row_begin("prime refuse", &r_prime);
+    row_s("dir=export handle=");
+    row_say((int)ph.handle);
+    row_s(" reason=");
+    row_prime_why(NVSHIM_PRIME_NO_SHARE);
+    row_end();
+    return -EINVAL;
+  }
+  buf = dmabuf_alloc_locked();
+  if (buf && bo_ref(dev, handle) != 0) {
+    buf->used = 0;
+    buf = 0;
+    why = NVSHIM_PRIME_NOT_DMABUF; /* not a tracked object: refuse, never guess */
+  }
+  if (buf) {
+    buf->dev = dev;
+    buf->handle = handle;
+    buf->size = size;
+    buf->domain = domain;
+  }
+  spinlock_release(&g_shim_lock);
+
+  if (!buf) {
+    row_begin("prime refuse", &r_prime);
+    row_s("dir=export handle=");
+    row_say((int)ph.handle);
+    row_s(" reason=");
+    if (why == NVSHIM_PRIME_OK) row_s("no_dmabuf_slot");
+    else row_prime_why(why);
+    row_end();
+    return why == NVSHIM_PRIME_OK ? -ENOSPC : -EINVAL;
+  }
+
+  /* The fd is a real one: the file table installs it (lowest free fd, the
+   * DRM_CLOEXEC bit from `flags`), and from here on its lifetime is the file
+   * description's, not ours. */
+  int ufd = file_dmabuf_install(p, buf, (ph.flags & NVSHIM_DRM_PRIME_CLOEXEC) != 0);
+  if (ufd < 0) {
+    spinlock_acquire(&g_shim_lock);
+    buf->used = 0;
+    int last = bo_unref(dev, handle);
+    spinlock_release(&g_shim_lock);
+    if (last) {
+      shim_maps_drop_object(p, handle);
+      rm()->mem_free(dev, handle);
+    }
+    row_begin("prime refuse", &r_prime);
+    row_s("dir=export handle=");
+    row_say((int)ph.handle);
+    row_s(" reason=no_fd_slot rc=");
+    row_say(ufd);
+    row_end();
+    return ufd == -ENFILE ? -ENFILE : -EMFILE;
+  }
+
+  ph.fd = ufd;
+  if (vm_kwrite(p, arg, &ph, (int)sizeof ph) != 0) {
+    /* The fd is installed; close(2) semantics apply, so drop it here. */
+    (void)file_close(p, ufd);
+    return -EFAULT;
+  }
+  row_begin("prime export", &r_prime);
+  row_s("handle=");
+  row_say((int)ph.handle);
+  row_s(" fd=");
+  row_say(ufd);
+  row_s(" size=");
+  row_hex(size);
+  row_s(" domain=");
+  row_hex(domain);
+  row_s(" buf=");
+  row_say(buf->id);
+  row_end();
+  return 0;
+}
+
+static int op_drm_prime_fd_to_handle(struct process *p, int fd, uint64_t arg) {
+  struct nvshim_drm_prime_handle ph;
+  if (vm_user_read(p, arg, &ph, (int)sizeof ph) != 0) return -EFAULT;
+  if (ph.flags != 0) {
+    row_begin("prime refuse", &r_prime);
+    row_s("dir=import reason=");
+    row_prime_why(NVSHIM_PRIME_BAD_FLAGS);
+    row_s(" flags=");
+    row_hex(ph.flags);
+    row_end();
+    return -EINVAL;
+  }
+  if (ph.fd < 0) return -EINVAL;
+
+  /* Resolve the dma-buf through the fd table: this accepts ANY fd the process
+   * holds, including one received over SCM_RIGHTS (fs_msg_install_gfd puts the
+   * message's reference in this very table). */
+  struct shim_dmabuf *buf = (struct shim_dmabuf *)file_dmabuf_obj(p, ph.fd);
+  if (!buf) {
+    row_begin("prime refuse", &r_prime);
+    row_s("dir=import fd=");
+    row_say(ph.fd);
+    row_s(" reason=");
+    row_prime_why(NVSHIM_PRIME_NOT_DMABUF);
+    row_end();
+    return -EINVAL;
+  }
+
+  uint32_t dev = 0;
+  int rc = drm_client_ensure(p, fd, &dev);
+  if (rc != 0) return rc;
+
+  /* Cross-device import is a NAMED refusal: this node has one mock device, so
+   * a buffer exported by another one is not something the RM seam can attach
+   * (there is no dma_buf_attach equivalent), and importing it silently would
+   * be a lie about which device owns the memory. */
+  if (buf->dev != dev) {
+    row_begin("prime refuse", &r_prime);
+    row_s("dir=import buf=");
+    row_say(buf->id);
+    row_s(" reason=");
+    row_prime_why(NVSHIM_PRIME_CROSS_DEVICE);
+    row_s(" bufdev=");
+    row_say((int)buf->dev);
+    row_s(" dev=");
+    row_say((int)dev);
+    row_end();
+    return -EINVAL;
+  }
+
+  int pid = shim_pid(p);
+  int why = NVSHIM_PRIME_OK;
+  spinlock_acquire(&g_shim_lock);
+  struct shim_client *c = client_find(pid, fd);
+  if (!c || c->dev_id != dev) {
+    spinlock_release(&g_shim_lock);
+    return -ENODEV;
+  }
+  if (c->nalloc >= SHIM_MAX_ALLOCS) {
+    spinlock_release(&g_shim_lock);
+    row_begin("prime refuse", &r_prime);
+    row_s("dir=import reason=table_full");
+    row_end();
+    return -ENOSPC;
+  }
+  if (c->alloc_bytes > SHIM_MAX_ALLOC_BYTES - buf->size) {
+    spinlock_release(&g_shim_lock);
+    row_begin("prime refuse", &r_prime);
+    row_s("dir=import reason=client_bytes");
+    row_end();
+    return -ENOMEM;
+  }
+  if (bo_ref(dev, buf->handle) != 0) why = NVSHIM_PRIME_NOT_DMABUF;
+  int slot = -1;
+  if (why == NVSHIM_PRIME_OK) {
+    slot = c->nalloc;
+    c->alloc_handle[slot] = buf->handle;
+    c->alloc_bus[slot] = 0;
+    c->alloc_size[slot] = buf->size;
+    c->alloc_domain[slot] = buf->domain;
+    c->nalloc++;
+    c->alloc_bytes += buf->size;
+    /* The object's own address, so GEM_INFO on an imported handle answers the
+     * truth rather than 0. */
+    struct shim_bo *b = bo_find(dev, buf->handle);
+    if (b) c->alloc_bus[slot] = b->bus;
+  }
+  spinlock_release(&g_shim_lock);
+  if (why != NVSHIM_PRIME_OK) {
+    row_begin("prime refuse", &r_prime);
+    row_s("dir=import reason=");
+    row_prime_why(why);
+    row_end();
+    return -EINVAL;
+  }
+
+  ph.handle = (uint32_t)buf->handle;
+  if (vm_kwrite(p, arg, &ph, (int)sizeof ph) != 0) return -EFAULT;
+  row_begin("prime import", &r_prime);
+  row_s("buf=");
+  row_say(buf->id);
+  row_s(" fd=");
+  row_say(ph.fd);
+  row_s(" handle=");
+  row_say((int)ph.handle);
+  row_s(" size=");
+  row_hex(buf->size);
+  row_end();
+  return 0;
+}
+
+/* mmap(2) of a dma-buf fd (declared in nv_shim.h; vm.c routes here). */
+int64_t nv_shim_dmabuf_mmap(struct process *grp, int fd, uint64_t offset,
+                            uint64_t len, uint16_t prot, uint32_t flags) {
+  if (!grp || !grp->as) return -EINVAL;
+  if ((flags & VM_MAP_SHARED) == 0 ||
+      (flags & (VM_MAP_PRIVATE | VM_MAP_ANONYMOUS | VM_MAP_FIXED | VM_MAP_NOREPLACE))) {
+    row_begin("prime mmap refused", &r_prime);
+    row_s("fd=");
+    row_say(fd);
+    row_s(" reason=needs_shared flags=");
+    row_hex(flags);
+    row_end();
+    return -EINVAL;
+  }
+  if (offset != 0) { /* a dma-buf fd has one offset: the start of the buffer */
+    row_begin("prime mmap refused", &r_prime);
+    row_s("fd=");
+    row_say(fd);
+    row_s(" off=");
+    row_hex(offset);
+    row_s(" reason=offset_must_be_zero");
+    row_end();
+    return -EINVAL;
+  }
+  if (len == 0 || (len & (SHIM_PAGE - 1))) {
+    row_begin("prime mmap refused", &r_prime);
+    row_s("fd=");
+    row_say(fd);
+    row_s(" len=");
+    row_hex(len);
+    row_s(" reason=length");
+    row_end();
+    return -EINVAL;
+  }
+  if (!(prot & VM_PROT_READ) || (prot & VM_PROT_EXEC)) {
+    row_begin("prime mmap refused", &r_prime);
+    row_s("fd=");
+    row_say(fd);
+    row_s(" prot=");
+    row_hex(prot);
+    row_s(" reason=protection");
+    row_end();
+    return -EINVAL;
+  }
+
+  struct shim_dmabuf *buf = (struct shim_dmabuf *)file_dmabuf_obj(grp, fd);
+  if (!buf) {
+    row_begin("prime mmap refused", &r_prime);
+    row_s("fd=");
+    row_say(fd);
+    row_s(" reason=");
+    row_prime_why(NVSHIM_PRIME_NOT_DMABUF);
+    row_end();
+    return -EINVAL;
+  }
+  if (!drm_domain_cpu_mappable(buf->domain)) {
+    row_begin("prime mmap refused", &r_prime);
+    row_s("fd=");
+    row_say(fd);
+    row_s(" buf=");
+    row_say(buf->id);
+    row_s(" domain=");
+    row_hex(buf->domain);
+    row_s(" reason=");
+    row_prime_why(NVSHIM_PRIME_NOT_MAPPABLE);
+    row_end();
+    return -EINVAL;
+  }
+  if (len > buf->size) {
+    row_begin("prime mmap refused", &r_prime);
+    row_s("fd=");
+    row_say(fd);
+    row_s(" len=");
+    row_hex(len);
+    row_s(" size=");
+    row_hex(buf->size);
+    row_s(" reason=beyond_object");
+    row_end();
+    return -EINVAL;
+  }
+
+  /* The CPU view comes from the RM, exactly as the node-fd path asks for it:
+   * the pages are the object's, so there is nothing to copy and nothing to
+   * translate.  Cached on the object once resolved. */
+  uint64_t phys = 0, plen = 0;
+  spinlock_acquire(&g_shim_lock);
+  struct shim_bo *b = bo_find(buf->dev, buf->handle);
+  if (b && b->phys) {
+    phys = b->phys;
+    plen = b->size;
+  }
+  uint32_t bdev = buf->dev;
+  uint64_t bhandle = buf->handle;
+  spinlock_release(&g_shim_lock);
+  if (!phys) {
+    int rc = rm()->mem_phys(bdev, bhandle, &phys, &plen);
+    if (rc != 0 || !phys) {
+      row_begin("prime mmap refused", &r_prime);
+      row_s("fd=");
+      row_say(fd);
+      row_s(" rm=");
+      row_say(rc);
+      row_s(" reason=");
+      row_prime_why(NVSHIM_PRIME_NOT_MAPPABLE);
+      row_end();
+      return rc == -ENOTSUP ? -ENOTSUP : -EINVAL;
+    }
+    spinlock_acquire(&g_shim_lock);
+    b = bo_find(bdev, bhandle);
+    if (b) b->phys = phys;
+    spinlock_release(&g_shim_lock);
+  }
+  if (plen < len) return -EINVAL;
+
+  int64_t base = shim_region_build(grp, phys, len, prot, shim_pid(grp), fd,
+                                   bhandle, 1, buf);
+  if (base < 0) {
+    row_begin("prime mmap refused", &r_prime);
+    row_s("fd=");
+    row_say(fd);
+    row_s(" reason=no_va rc=");
+    row_say((int)base);
+    row_end();
+    return base;
+  }
+  row_begin("prime mmap", &r_prime);
+  row_s("fd=");
+  row_say(fd);
+  row_s(" buf=");
+  row_say(buf->id);
+  row_s(" handle=");
+  row_say((int)bhandle);
+  row_s(" va=");
+  row_hex((uint64_t)base);
+  row_s(" phys=");
+  row_hex(phys);
+  row_end();
+  return base;
+}
+
+/* The last reference to a dma-buf file description is going away: forget its
+ * mappings, drop its reference on the GEM object and (if that was the last
+ * one) hand the frames back.  Called by fs.c's close paths, outside the file
+ * slot's lock, because unmapping takes vm_lock. */
+void nv_shim_dmabuf_release(struct process *grp, int fd, void *obj) {
+  struct shim_dmabuf *buf = (struct shim_dmabuf *)obj;
+  if (!buf) return;
+  int pid = (grp && fd >= 0) ? shim_pid(grp) : -1;
+  shim_maps_drop_prime(buf, pid, pid >= 0 ? fd : -1, grp);
+  uint32_t dev = 0;
+  uint64_t handle = 0;
+  int id = 0;
+  spinlock_acquire(&g_shim_lock);
+  if (buf->used) {
+    dev = buf->dev;
+    handle = buf->handle;
+    id = buf->id;
+    buf->used = 0;
+    buf->dev = 0;
+    buf->handle = 0;
+  }
+  int last = handle ? bo_unref(dev, handle) : 0;
+  spinlock_release(&g_shim_lock);
+  if (handle && last) {
+    shim_maps_drop_object(grp, handle);
+    rm()->mem_free(dev, handle);
+  }
+  row_begin("prime release", &r_prime);
+  row_s("buf=");
+  row_say(id);
+  row_s(" fd=");
+  row_say(fd);
+  row_s(" last=");
+  row_say(last);
+  row_end();
+}
+
+/* --- kernel-tier seams (not ABI; no client can reach these) -------------- */
+
+/* Make a live dma-buf claim another device.  The mock has exactly one device
+ * (MOCK_DEV_ID), so the cross-device import branch has no reachable input from
+ * userspace; without this seam the refusal would be untested prose. */
+int nv_shim_test_prime_set_dev(void *obj, uint32_t dev) {
+  struct shim_dmabuf *buf = (struct shim_dmabuf *)obj;
+  if (!buf) return -EINVAL;
+  spinlock_acquire(&g_shim_lock);
+  if (!buf->used) {
+    spinlock_release(&g_shim_lock);
+    return -EINVAL;
+  }
+  buf->dev = dev;
+  spinlock_release(&g_shim_lock);
+  return 0;
+}
+
+/* Live references on the object behind a dma-buf: handle entries + exports.
+ * -1 when `obj` is not a live buffer.  This is how a close-order test states
+ * "still alive" / "freed" instead of inferring it. */
+int nv_shim_test_prime_refs(void *obj) {
+  struct shim_dmabuf *buf = (struct shim_dmabuf *)obj;
+  if (!buf) return -1;
+  int refs = -1;
+  spinlock_acquire(&g_shim_lock);
+  if (buf->used) {
+    struct shim_bo *b = bo_find(buf->dev, buf->handle);
+    refs = b ? b->refs : 0;
+  }
+  spinlock_release(&g_shim_lock);
+  return refs;
 }
 
 static int op_drm_gem_close(struct process *p, int fd, uint64_t arg) {
@@ -1896,13 +2640,30 @@ static int op_drm_gem_close(struct process *p, int fd, uint64_t arg) {
   spinlock_release(&g_shim_lock);
 
   /* WP-F3: the mapping's leaves name frames of this object; take it down before
-   * the RM frees them. */
+   * the RM frees them.  WP-PRIME: this client's mapping goes with this handle
+   * even when the OBJECT survives (an exported fd holds it), because a mapping
+   * is owned by the handle that made it -- not a reference of its own. */
   shim_maps_drop(p, fd, handle);
+  spinlock_acquire(&g_shim_lock);
+  int last = bo_unref(dev, handle);
+  spinlock_release(&g_shim_lock);
+  if (!last) {
+    row_begin("drm gem_close", &r_drm);
+    row_s("handle=");
+    row_say((int)gc.handle);
+    row_s(" kept refs=");
+    row_say(1);
+    row_s(" reason=prime_fd_open");
+    row_end();
+    return 0;
+  }
+  shim_maps_drop_object(p, handle);
   int rc = rm()->mem_free(dev, handle);
   if (rc != 0) return -EIO;
   row_begin("drm gem_close", &r_drm);
   row_s("handle=");
   row_say((int)gc.handle);
+  row_s(" freed=1 refs=0");
   row_end();
   return 0;
 }
@@ -3186,6 +3947,8 @@ int nv_shim_drm_ioctl(struct process *p, int fd, unsigned long req, uint64_t arg
   case 0x00: return op_drm_version(p, arg);
   case 0x09: return op_drm_gem_close(p, fd, arg);
   case 0x0c: return op_drm_get_cap(p, arg);
+  case 0x2d: return op_drm_prime_handle_to_fd(p, fd, arg);
+  case 0x2e: return op_drm_prime_fd_to_handle(p, fd, arg);
   case 0x40: return op_drm_getparam(p, fd, arg);
   case 0x42: return op_drm_channel_alloc(p, fd, arg);
   case 0x43: return op_drm_channel_free(p, fd, arg);
