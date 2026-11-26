@@ -380,6 +380,11 @@ void nv_shim_syncobj_release(struct process *grp, int fd, void *obj);
 #define NVSHIM_SYNC_BAD_SHAPE          9 /* pad != 0, count 0, or a bad width */
 #define NVSHIM_SYNC_WAIT_UNSUPPORTED  10 /* WAIT_FOR_SUBMIT / AVAILABLE / DEADLINE */
 #define NVSHIM_SYNC_NOT_THIS_CLIENTS  11 /* a handle this client does not hold */
+/* WP-SYNCFAM: QUERY LAST_SUBMITTED on a record whose point came from a
+ * HOST-side stub (CREATE_SIGNALED, binary SIGNAL).  The point is there; the
+ * submitted ledger has no entry for it, and answering 0 would be
+ * indistinguishable from "nothing was ever submitted" -- so the row names it. */
+#define NVSHIM_SYNC_POINT_BEYOND_LEDGER 12
 #define NVSHIM_SYNC_REASON_MAX         40
 void nv_shim_sync_refusal_name(int why, char *dst, int cap);
 

@@ -171,6 +171,13 @@ struct nvshim_drm_syncobj_wait {
 #define NVSHIM_DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT (1u << 1)
 #define NVSHIM_DRM_SYNCOBJ_WAIT_FLAGS_WAIT_AVAILABLE  (1u << 2)
 #define NVSHIM_DRM_SYNCOBJ_WAIT_FLAGS_WAIT_DEADLINE   (1u << 3)
+/* WP-SYNCFAM: DRM_IOCTL_SYNCOBJ_QUERY's one flag (drm.h).  QUERY carries the
+ * SAME struct as TIMELINE_SIGNAL -- `handles` + `points` -- except that here
+ * `points` is the kernel's OUTPUT array, one u64 per handle.  With this flag
+ * the kernel writes the last point SUBMITTED to the object's timeline (drm.h:
+ * "last available point on timeline syncobj"); without it, the last point
+ * SIGNALLED. */
+#define NVSHIM_DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED (1u << 0)
 
 /* ---- the timeline half of syncobj (WP-SYNC) ----------------------------
  *
@@ -191,6 +198,11 @@ struct nvshim_drm_syncobj_wait {
  *                            wait, and what this node already returns for the
  *                            binary row.  -EAGAIN is poll(2)'s errno; DRM's
  *                            wait never uses it.
+ *   SYNCOBJ_QUERY (WP-SYNCFAM)  writes, per handle, the point the object is at:
+ *                            the last SUBMITTED point with LAST_SUBMITTED, the
+ *                            last SIGNALLED point without it.  Same struct, but
+ *                            `points` is the kernel's OUTPUT array -- see the
+ *                            flag above and docs/nv-shim-syncfam.md §3.
  *
  * Both structs are drm.h's, field for field and size for size. */
 struct nvshim_drm_syncobj_timeline_array {
@@ -517,6 +529,11 @@ struct nvshim_drm_exec {
 #define NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT                                                   \
   NVSHIM_DRM_IOWR(NVSHIM_DRM_NR_SYNCOBJ_TIMELINE_WAIT,                                         \
                   struct nvshim_drm_syncobj_timeline_wait)             /* 0xC03064CA */
+/* WP-SYNCFAM: QUERY is SERVED and reuses the timeline array; drm.h encodes it
+ * as DRM_IOWR(0xcb, struct drm_syncobj_timeline_array), i.e. 24 bytes. */
+#define NVSHIM_DRM_IOC_SYNCOBJ_QUERY                                                           \
+  NVSHIM_DRM_IOWR(NVSHIM_DRM_NR_SYNCOBJ_QUERY,                                                 \
+                  struct nvshim_drm_syncobj_timeline_array)            /* 0xC01864CB */
 
 /* ---- NVIF (nr 0x47): served since WP-NVIF, and the one row whose encoded
  * size is a BUFFER LENGTH rather than a struct width.  The kernel validates
@@ -553,9 +570,9 @@ struct nvshim_drm_exec {
 #define NVSHIM_DRM_NR_GEM_CPU_PREP        0x82
 #define NVSHIM_DRM_NR_GEM_CPU_FINI        0x83
 /* WP-SYNC: of the seven syncobj rows, 0xc1 / 0xc2 / 0xca / 0xcb / 0xcd are
- * defined here for the contract; 0xc1, 0xc2, 0xca and 0xcd are SERVED (macros
- * below carry their real structs), and 0xcb (QUERY), 0xcc (TRANSFER) and 0xcf
- * (EVENTFD) are named refusals. */
+ * defined here for the contract; 0xc1, 0xc2, 0xca and 0xcd were served by
+ * WP-SYNC and WP-SYNCFAM served 0xcb (QUERY), so 0xcc (TRANSFER) and 0xcf
+ * (EVENTFD) are the two named refusals left. */
 #define NVSHIM_DRM_NR_SYNCOBJ_HANDLE_TO_FD 0xc1
 #define NVSHIM_DRM_NR_SYNCOBJ_FD_TO_HANDLE 0xc2
 #define NVSHIM_DRM_NR_SYNCOBJ_TIMELINE_WAIT 0xca
@@ -582,10 +599,10 @@ struct nvshim_drm_exec {
 #define NVSHIM_DRM_IOC_GEM_CPU_PREP     NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_GEM_CPU_PREP, 8)
 #define NVSHIM_DRM_IOC_GEM_CPU_FINI     NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_GEM_CPU_FINI, 4)
 #define NVSHIM_DRM_IOC_GEM_FLINK        NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_GEM_FLINK, 8)
-/* WP-SYNC: 0xc1, 0xc2, 0xca and 0xcd are SERVED now (macros above).  The three
- * below are still refusals, and their sizes are drm.h's true encoded sizes so a
- * probe built from this header is a request a real client could have sent. */
-#define NVSHIM_DRM_IOC_SYNCOBJ_QUERY    NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_SYNCOBJ_QUERY, 24)
+/* WP-SYNC: 0xc1, 0xc2, 0xca and 0xcd are SERVED now (macros above), and
+ * WP-SYNCFAM served 0xcb (QUERY, also above).  The two below are still
+ * refusals; their sizes are drm.h's true encoded sizes so a probe built from
+ * this header is a request a real client could have sent. */
 #define NVSHIM_DRM_IOC_SYNCOBJ_TRANSFER NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_SYNCOBJ_TRANSFER, 32)
 #define NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD  NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_SYNCOBJ_EVENTFD, 24)
 
