@@ -338,7 +338,7 @@ int nv_shim_present(void) { return 1; }
 int nv_shim_features(void) {
   return NVSHIM_FEAT_DEVICE | NVSHIM_FEAT_ALLOC | NVSHIM_FEAT_VM_BIND |
          NVSHIM_FEAT_CHANNEL | NVSHIM_FEAT_SUBMIT | NVSHIM_FEAT_FENCE |
-         NVSHIM_FEAT_RM_MOCK;
+         NVSHIM_FEAT_RM_MOCK | NVSHIM_FEAT_PRIME;
 }
 
 /* ---- request tables ---------------------------------------------------- */

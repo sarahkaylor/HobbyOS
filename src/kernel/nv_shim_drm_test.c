@@ -1355,6 +1355,9 @@ static void test_nvshim_drm_prime_export(void) {
    * them.  (They were the last two -ENOSYS rows of the old WP-F contract.) */
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_PRIME_HANDLE_TO_FD) == 0), 1);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_PRIME_FD_TO_HANDLE) == 0), 1);
+  /* The 'N' face's DEVICE_ALLOC advertises what the node can do: the PRIME
+   * bit must be set, or a client asking first would be told otherwise. */
+  EXPECT_EQ((nv_shim_features() & NVSHIM_FEAT_PRIME) != 0, 1);
 
   struct drm_probe pr;
   EXPECT_EQ(drm_probe_up(&pr, 97), 0);
