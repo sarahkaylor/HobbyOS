@@ -37,20 +37,26 @@ Sum of GPUs on r1: 1× AD102 (the driver target, VM 300 owns `01:00.0`), 2× GB2
 | Level | Claim | Status |
 |---|---|---|
 | L1 | HobbyOS owns the card, verifies NVIDIA's firmware, and builds every structure GSP-RM will consume | **done, measured** |
-| L2 | FWSEC runs → SEC2 unfences → booter runs → GSP-RM reports `INIT_DONE` | **moved: FWSEC now addresses its image into IMEM and writes the verdict word; SEC2 still fenced** |
-| L3 | A kernel submit reaches the 3-D engine and a clear reads back | not started |
-| L4 | nvk enumerates AD102; `vkcube` draws and presents | not started |
-| L5 | RimWorld / Cyberpunk render at 720p ≥30 fps | not started |
+| L2 (vendor-firmware part, GB202 only) | NVIDIA's own FSP reports SUCCESS at its published gate, authenticates our COT, and runs NVIDIA's FMC | **measured on GB202, narrowly stated (§2.12)** |
+| L2 (the rest) | our code on SEC2 → booter runs → GSP-RM reports `INIT_DONE` → status queue published | **not met on either part; declared final 2026-11-26 (§2.13).** AD102: SEC2's boot ROM rejects every reachable vendor booter (`0x840094=0x002B0009`). GB202: ACR ends at `MAILBOX0=0x0B` (570 FMC, 19 boots) / `0x824` (620 pair) |
+| L3 | A kernel submit reaches the 3-D engine and a clear reads back | not started — parked with L2 (§2.13); nearest measured row is N3v `[VIRGL3D] match=4096/4096`, kernel **virgl**, not `nv` |
+| L4 | nvk enumerates AD102; `vkcube` draws and presents | not started — parked; measured substitute N6v `vkcube` draws+presents `renderer=venus` |
+| L5 | RimWorld / Cyberpunk render at 720p ≥30 fps | **partially met on the platform, not met natively (§2.13)**: RimWorld 51.02 fps median `renderer=virgl`; Cyberpunk 29.19 avg / 29.66 median / 18.18 1 %-low `renderer=venus` |
 
 L1 stands on its own: a from-scratch driver that identifies the part, brings up
 the register window, reads 38 MB of vendor firmware from disk and proves it
-byte-for-byte, and lays out VRAM the way the vendor booter expects. L2 is the wall.
+byte-for-byte, and lays out VRAM the way the vendor booter expects. L2 is the wall,
+and it is now a **declared ceiling**, not an open question.
 
-L2 is now **time-boxed** (decision, 2026-11-24; §2.10): 3 hours extendable to 5 on
-finding a vendor-signed booter SEC2 will authenticate, then the plan re-scopes past
-GSP-RM to a register-level bring-up. Read §2.10 before starting anything on rung N3:
-until that box closes, the ladder above L2 is not the critical path — the 5090 lanes,
-nvk/shim rows and the Cyberpunk harness are.
+The L2 question was asked to exhaustion and answered twice: the time box of §2.10
+closed negative (§2.11), the fallback was measured to relocate the wall rather than
+bypass it (§2.11), the same question asked of GB202 closed negative at the ACR
+(§2.12), and on 2026-11-26 the owner declared the ceiling final (§2.13). **The
+native ladder above L2 is parked behind the two blocked `kind=capability` walls, with
+a written revive condition (§2.13, R1–R4); do not reopen it to re-derive a wall.**
+What keeps running is the platform work — the shim/PRIME rows, the present path, the
+in-tree nvk build, the games harness and both soak tiers — and every games number
+stays labelled with the renderer that produced it.
 
 ---
 
@@ -537,6 +543,128 @@ rows that do not need RM, the present path, and the harness work.
 3. **Research SEC2's signature path.** No time box; expected value low without vendor signing,
    and it is the one option that can consume unbounded effort for no ladder progress.
 
+**Decision (owner, 2026-11-26): option 1 was taken and closed negative (§2.12), and
+option 2 is now final — the ceiling is declared and the ladder is re-pointed (§2.13).
+Option 3 is not funded.** Read §2.12–§2.13 before touching any native rung.
+
+### 2.12 GB202: the ACR wall is parked, and what it means for the claim (2026-11-26)
+
+Option 1 of §2.11 — ask the same question of GB202 — was asked and answered. The ACR
+wall on the 5090 (`41:00.0`, VM 313) is **parked** after 19 boots on three cards
+(`t_0936a17f` 8, `t_a769beaa` 9, `t_7178dca2` 2) on top of `t_a1c5bdd8`'s 21, and the
+last lever on it (`t_320e84e5`, the 620-generation FMC + 620 boot image) closed
+**negative**. Full row-by-row record: `docs/gb202-rm-parked.md`.
+
+**The ladder is measured and stable.** Descriptor unusable → `MAILBOX0=0x1C`;
+descriptor accepted, FRTS pair absent → `0x5`; running → `0x0`; signature zeroed →
+`0x1D`; radix3 ELF unreachable → `0x02`; boot image in the wrong container → `0x1C`;
+everything accepted → **`0x0B` in 0.2–55 s with the PFB WPR2 pair torn down in the
+same row** (`wpr2_lo=0x7FFFFE00 wpr2_hi=0`). Every host-supplied value has been
+varied with a row: `gspRmDescTarget`/args `+56=2`, `fbSize`, descriptor `frtsSize`,
+the FB-side FRTS object handed to the ACR inside its window, the whole WPR2 band at
+a 256-byte stride (`nz_head=0 meta=0 nz_all=0`), and the vendor's own heap pair
+(WPR2 +7.000 MiB exactly, `m0` still `0x0B`).
+
+The 620 pair moved the abort, not the wall: the 620 FMC is accepted
+(`cot answer errorCode=0`, `FSP_OK`) and ends at **`0x824`** with
+`NV_PBUS_ZB_SW_SCRATCH_GSP_FMC_ERROR (0x14DC)=0x12000824` (variant 1, partition 1)
+at all 11 samples and WPR2 down — **byte-identical to the 570-boot-image control**
+(`mode=60`), so `0x824` is emitted before the boot image matters. The vendor FSP is
+not stageable by any host either (`kern_fsp_gb202.c`: the BootFSM starts it out of
+chip reset; 620.70.10 ships no FSP image bindata), so the remaining variable cannot
+be varied from the host at all.
+
+**What GB202 does measure, stated narrowly.** `NV_THERM_I2CS_SCRATCH.FSP_BOOT_COMPLETE`
+at `0x00AD00BC` reads `0xFF` = SUCCESS at the first sample (+2 ms), proved live by a
+write sentinel that landed and was restored; the FSP authenticates our COT
+(`errorCode=0`) and runs NVIDIA's FMC. That the FSP was started *by this boot* is
+vendor source plus an untested reset boundary (`t_72dc36b2`) — not a measurement.
+There is **no host-loadable SEC2 on GB202** and no GB202 `booter_load`
+(`0x840000` answers `0xBADF4100` in 7/7 fields; `BooterLoadUcode` ships only for
+TU102/TU116/GA100/GA102/AD102), so **no HobbyOS-authored code has ever executed on
+GB202's security processor.**
+
+**Do not re-spend boots on:** the heap pair, `fbSize`, `frtsSize`,
+`gspRmDescTarget`, the FRTS object or any `frtsVidmemOffset`, signature/ELF/boot-image
+identity or address, the boot image's container form vs. the 620 generation, the WPR2
+band census, a second COT as a sweep, or any 6xx-FMC-with-570-inputs variant. Each of
+those has a row that rules it out in `docs/gb202-rm-parked.md` §5.
+
+### 2.13 The native ceiling is declared final, and the ladder is re-pointed (decision, 2026-11-26)
+
+The owner chose **option 2 of §2.11 — accept the ceiling honestly** — on 2026-11-26,
+after option 1 (ask GB202) came back negative (§2.12) and with option 3 (research
+SEC2's signature path) **not funded**: no time box, low expected value without vendor
+signing, and the one option that can consume unbounded effort for no ladder progress.
+
+**The claim, final.** The native driver stands at **L1 plus the vendor-firmware part
+of L2**:
+
+| level | claim | status |
+|---|---|---|
+| L1 | part identification, BAR windows, firmware read + byte-for-byte digest, WPR metadata / radix3 / WPR2 layout, COT construction, the 129-page publish block and the RPC transport | **measured on both parts** (AD102 and GB202) |
+| L2, vendor-firmware part (GB202 only) | NVIDIA's FSP reports SUCCESS at its published gate, authenticates our COT (`errorCode=0`), runs NVIDIA's FMC | **measured** (§2.12) |
+| L2, the rest | our code runs on SEC2; the booter runs; GSP-RM reports `INIT_DONE`; a status queue is published | **not met on either part** — AD102 `0x002B0009` (three builds, GA102 control `0x00250009`); GB202 `0x0B` / `0x824`, `statq_written=0 linked=0 initdone=0` |
+| L3–L5 | a submit reaches the 3-D engine and reads back; nvk enumerates; a game renders on `nv` | **not started on either part, not claimed** |
+
+The one-line version, and the only one to quote: **"HobbyOS verifies and feeds
+NVIDIA's firmware, and on GB202 NVIDIA's own FSP boots and authenticates it."** Not
+"we boot the GPU."
+
+**Every games number is a platform row, permanently labelled.** Neither was produced
+by `nv`, and each keeps its renderer wherever it is quoted:
+
+| title | number | renderer | what it ran on |
+|---|---|---|---|
+| RimWorld, main menu 720p | **51.02 fps median** (7,600 presents / 149,848 guest ms, guest clock) | `renderer=virgl` (host **llvmpipe**) | r1, VM 311 `hobbyos-games`, `virtio-vga`, **no passthrough**; audio not reachable |
+| Cyberpunk 2077, own benchmark, 1280×720 Custom/Low scaling off | **29.19 avg / 29.66 median / 18.18 1 %-low** | `renderer=venus` (virtio-gpu-gl-pci, `venus=true`) | the **AMD** host (`RX 9070 XT`, RADV) — not either NVIDIA part |
+
+**The nine open native rungs are parked behind the two walls, each with a revive
+condition.** `t_470a9443`, `t_a350b5ac`, `t_9e711a78`, `t_652caa8d`, `t_b410e3f5`,
+`t_c38b0d00`, `t_2bee66b5`, `t_430cb397`, `t_938ced62`. Their acceptance text names
+AD102 or GB202, so reassignment cannot re-point them; each carries a comment naming
+the measured row that replaces its claim (`docs/nv-ladder-repoint.md`).
+
+*Board mechanics, as measured on 2026-11-26:* the nine stay `todo`, which on this
+board means "waiting on a parent" and is exactly true — every one of them descends
+from `t_9bf9bc0c` or `t_a769beaa`, both `blocked` `kind=capability`. `block` refuses a
+`todo` card (it writes the reason, then exits 1) and `promote` refuses while parents
+are open, so forcing `blocked` onto them would have meant unlinking the real
+dependency — worse than the state it would fix. Each card therefore carries two
+comments: the park note (claim, fallback row, R1–R4) and a status correction saying
+why `todo` is deliberate and that no tick will spawn them (`nv-plat`/`nv-shim` have
+no dispatch timer on this host, and the three `nv-card` ones sit behind blocked
+parents).
+
+One rung is **withdrawn rather than replaced**: *present at 1080p through the driver*
+has no fallback fps row — the fallback has the N0 present gate at 1080p and a fps row
+at 720p, and that is all it has. N9 is therefore **partially met on the fallback**
+(RimWorld clears ≥30 median; Cyberpunk clears it on avg and median, misses on the
+1 %-low) and **not met natively on either part**.
+
+**Revive conditions — any one of these, and the ladder is worth re-opening:**
+
+- **R1 — a signed SEC2 booter appears.** A booter the AD102 BROM accepts for ucode id
+  3 / fuse version 1 becomes reachable, i.e. `0x840094 != 0x002B0009` and SEC2 leaves
+  `INTR`; the named lever is a newer *generation* of `booter_load` in a vendor
+  package, not another hand-built image.
+- **R2 — a GB202 GSP-RM peer appears.** `MAILBOX0` moves off `0x0B`/`0x824` to
+  `GSP_INIT_DONE` (`0x1001`) with the status-queue header written
+  (`statq_written=1 linked=1 initdone=1`).
+- **R3 — a different part arrives** whose SEC2 accepts vendor-signed code and whose
+  firmware the host can reach.
+- **R4 — the owner reverses this decision.**
+
+**When a revive condition fires, mint successors — do not reopen the nine.** Their
+acceptance names the part they were written for, so reopening them produces
+wrong-part work. The rule that keeps any revival honest: **a mock RM object, a stub
+ICD, a shim refusal satisfied by construction, or a number produced on another
+renderer is not acceptance.**
+
+**What does not stop.** The shim/PRIME rows (`t_78fce566`), the present path, the
+in-tree nvk build, the games harness and both nightly soak tiers are independent of
+this ceiling and keep running.
+
 ## 3. Work packages (parallel, each with a gate)
 
 | WP | Scope | Gate | Needs 4090? | Status 2026-11-23 |
@@ -563,22 +691,24 @@ stuck.
 | N0 | 1080p present gate | 8,294,400 B maps; pixel visible | **closed 2026-11-23**: full frame maps, `(1919,1079)=(255,0,0)` in a QMP screendump; the recorded `-ENOMEM` did not reproduce on this tip (see `SWARM-REPORT-WP-E.md`) |
 | N1 | RimWorld's own menu on virgl 720p | ≥30 fps median, input, audio | **MET on fps and input (2026-11-23)**: the real menu (steam modal dismissed by 3 presses after the `input_target` fix) presents at **51.02 fps median**, verified from a dumped frame; **audio not reachable**, renderer host **llvmpipe** (r1 has no NVIDIA driver — the 4090 stays on `vfio-pci`). Round 3's 51.02 fps was the same number measured on a modal no press could dismiss |
 | N2 | `/dev/nv*` shim over a mock RM | probe + fence retire | **done**: 16 real `DRM_IOCTL_NOUVEAU_*` rows (magic `'d'`, real struct sizes), 21 named refusals, CPU-mapped BOs with `mmap`; NVIF (round 5) and `GETPARAM GRAPH_UNITS` (round 6) served, so a stock winsys's device probe now ends at the copy-class object by name; PRIME still missing |
-| N3 | GSP-RM boots | mailbox moves, first RPC answered | FWSEC never ran |
-| N4 | RM objects + first submit | 64×64 clear reads back | absent |
-| N5 | nvk enumerates AD102 | `vulkaninfo` lists `AD102 (NVK)` | absent |
-| N6 | **first frame** (`vkcube`) | draws + presents | absent |
-| N7 | RimWorld via Zink+nvk | menu ≥30 fps, world loads | 170.9 fps synthetic only |
-| N8 | Cyberpunk via vkd3d+nvk | P9 script end to end | **benchmark run on HobbyOS (2026-11-24)**: 29.19 avg / 29.7 median / 18.2 1%-low at 720p, Custom preset, scaling off — on **Venus** (platform), not the nv driver; host native control 139.41 avg. The nv driver cannot run it: no 3D engine |
-| N9 | "reasonable performance" | 720p ≥30 fps incl. present | unmeasurable today |
+| N3 | GSP-RM boots | mailbox moves, first RPC answered | **parked 2026-11-26 (§2.12–§2.13)**: AD102 `0x002B0009` over three vendor builds (GA102 control `0x00250009`); GB202 `0x0B` on 19 boots and `0x824` on the 620 pair. No GSP-RM peer on either part, `t_9bf9bc0c` / `t_a769beaa` stay blocked |
+| N4 | RM objects + first submit | 64×64 clear reads back | parked with N3. **No measured fallback allocates RM objects or reads a clear back on `nv`**; the nearest measured row is N3v `[VIRGL3D] match=4096/4096`, which is kernel **virgl** — a substitute for "a driver-owned submit exists at all", not for this claim |
+| N5 | nvk enumerates AD102 | `vulkaninfo` lists `AD102 (NVK)` | parked with N3 (the engine-class object `0xc7b5 ampere_dma_copy_b` is refused by name `need=gsp_rm`); replaced by **N6v** (`vkcube` draws+presents, `renderer=venus`). No `AD102 (NVK)` row exists |
+| N6 | **first frame** (`vkcube`) | draws + presents | parked; measured substitute **N6v — `vkcube` draws and presents, `renderer=venus`**. The native frame is **not** claimed |
+| N7 | RimWorld via Zink+nvk | menu ≥30 fps, world loads | on `nv`: parked. The measured rung is **N1v — 51.02 fps median, `renderer=virgl`** (host llvmpipe, no passthrough, audio not reachable): a platform row, not the driver |
+| N8 | Cyberpunk via vkd3d+nvk | P9 script end to end | **benchmark run on HobbyOS (2026-11-24)**: 29.19 avg / 29.7 median / 18.2 1%-low at 720p, Custom preset, scaling off — on **Venus** (platform), not the nv driver; host native control 139.41 avg. The nv driver cannot run it: no 3D engine. **Native row parked 2026-11-26** |
+| N9 | "reasonable performance" | 720p ≥30 fps incl. present | **partially met on the fallback, not met natively (§2.13)**: RimWorld **51.02 fps median `renderer=virgl`** clears ≥30; Cyberpunk **29.19 avg / 29.66 median / 18.18 1 %-low `renderer=venus`** clears it on avg and median and misses on the 1 %-low. No native fps row exists |
 
-**Highest-leverage rung: N6** — the one observation where VRAM, VA, submit,
-fences, shader upload and present all work at once, and exactly where both games'
-already-proven userspace attaches. Critical path N3→N6 ≈ 20-37 weeks.
-
-Two facts that keep it honest: both titles' non-graphics stacks already work on
-HobbyOS (audio via virtio-snd/ALSA; Cyberpunk played 10.5 min and reloaded), and
-Venus and the native driver are mutually exclusive on this card — Venus needs the
-GPU on the host, `nv` needs it in the guest, and r1 has one.
+**With §2.13 landed, this ladder's native column is parked, not abandoned.** Its gates
+are left exactly as written so that a revival (R1–R4 in §2.13) measures the same thing
+it would have measured today; what changed is the claim, not the definitions. The
+previously named critical path N3→N6 (≈ 20–37 weeks) is **not** the live path: nothing
+above N2 can be worked on either part, and the platform rows — N0's 1080p present gate,
+N1v/N6v/N8v — are what the project can demonstrate. Two facts that keep it honest:
+both titles' non-graphics stacks already work on HobbyOS (audio via virtio-snd/ALSA;
+Cyberpunk played 10.5 min and reloaded), and Venus and the native driver are mutually
+exclusive on this card — Venus needs the GPU on the host, `nv` needs it in the guest,
+and r1 has one of each part.
 
 ---
 
