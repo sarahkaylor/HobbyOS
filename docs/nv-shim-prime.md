@@ -160,13 +160,13 @@ Three new tests in `nv_shim_drm_test.c`, all driven through the real route
 
 ## 6. Measurements
 
-Both tiers were run on the committed tree (`c9b1fb2c`), full tier, nothing
+Both tiers were run on the committed tree (`46603a46`), full tier, nothing
 skipped but the two local-environment switches named below.
 
 | gate | sha | result | log |
 |---|---|---|---|
-| `run_unit_tests_intel.sh` | `c9b1fb2c` | `Tests run:    597` / `Tests failed: 0` / **`UNIT TESTS PASSED`** | `evidence/nv/unit-tier-intel-prime-597.log` |
-| `run_unit_tests.sh` (aarch64) | `c9b1fb2c` | `Tests run:    476` / `Tests failed: 0` / **`UNIT TESTS PASSED`** | `evidence/nv/unit-tier-arm-prime-476.log` |
+| `run_unit_tests_intel.sh` | `46603a46` | `Tests run:    597` / `Tests failed: 0` / **`UNIT TESTS PASSED`** | `evidence/nv/unit-tier-intel-prime-597.log` |
+| `run_unit_tests.sh` (aarch64) | `46603a46` | `Tests run:    476` / `Tests failed: 0` / **`UNIT TESTS PASSED`** | `evidence/nv/unit-tier-arm-prime-476.log` |
 
 Baseline at the parent sha `4a70f062` was **intel 594 / ARM 473** (plan §2.5 and
 the `nv/wp-units` fold), so both runs are baseline **+3** — the three new
@@ -193,15 +193,17 @@ Rows from the intel log (one per stage, quoted as they print):
     [NVSHIM] prime refuse dir=import buf=4 reason=cross_device bufdev=99 dev=1
     [NVSHIM] prime mmap refused fd=4 buf=6 domain=0x2 reason=domain_never_offered_a_cpu_mapping
 
-CI: branch `nv/wp-prime` pushed at `c9b1fb2c`; `linux-ci` run
-**45894370800** was created for that sha and sat `queued` — the self-hosted
-Linux runner `linuxci-hobbyos` reported `offline` for the whole window, so no
-job started. The gate evidence for this card is therefore the two local runs
-above; the CI run id and sha are recorded here so the next dispatch can quote
-the run that eventually executes. (For context, the same runner's run for the
-parent sha `4a70f062` is red — job `139348443154`, `Tests run: 594 / Tests
-failed: 1`, and the failure is `[LOCKHEALTH-IRQOFF] cpu=0 max_us=117540`, the
-interrupt-masked budget, not a test function; it did not reproduce here.)
+CI: the branch `nv/wp-prime` was pushed at `c9b1fb2c` (the WP-PRIME code
+commit, parent of this one) and `linux-ci` created run **45894370800** for that
+sha; it sat `queued` for the whole window because the self-hosted Linux runner
+`linuxci-hobbyos` reported **`offline`**, so no job ever started. The gate
+evidence for this card is therefore the two local runs above — both arches,
+full tier, on `46603a46` — and the run id is recorded here and on the card so
+the next dispatch can quote whichever run the runner eventually executes. (For
+context, the same runner's run for the parent sha `4a70f062` is red — job
+`139348443154`, `Tests run: 594 / Tests failed: 1`, and the failure is
+`[LOCKHEALTH-IRQOFF] cpu=0 max_us=117540`, the interrupt-masked budget, not a
+test function; it did not reproduce here.)
 
 ## 7. Verification gaps (stated, not hidden)
 
