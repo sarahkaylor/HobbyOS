@@ -78,6 +78,10 @@ static void test_nvshim_drm_layout(void) {
   EXPECT_EQ((int)sizeof(struct nvshim_drm_vm_bind_op), 40);
   EXPECT_EQ((int)sizeof(struct nvshim_drm_vm_bind), 40);
   EXPECT_EQ((int)sizeof(struct nvshim_drm_sync), 16);
+  /* WP-SYNC */
+  EXPECT_EQ((int)sizeof(struct nvshim_drm_syncobj_timeline_array), 24);
+  EXPECT_EQ((int)sizeof(struct nvshim_drm_syncobj_timeline_wait), 48);
+  EXPECT_EQ((int)sizeof(struct nvshim_drm_syncobj_handle), 24);
   EXPECT_EQ((int)sizeof(struct nvshim_drm_channel_alloc), 88);
   EXPECT_EQ((int)sizeof(struct nvshim_drm_channel_free), 4);
   EXPECT_EQ((int)sizeof(struct nvshim_drm_exec_push), 16);
@@ -97,6 +101,17 @@ static void test_nvshim_drm_layout(void) {
   EXPECT_EQ(OFF(struct nvshim_drm_exec, push_ptr), 32);
   EXPECT_EQ(OFF(struct nvshim_drm_syncobj_wait, first_signaled), 24);
   EXPECT_EQ(OFF(struct nvshim_drm_syncobj_wait, deadline_nsec), 32);
+  /* WP-SYNC: drm.h's field order, which is the contract the size check uses. */
+  EXPECT_EQ(OFF(struct nvshim_drm_syncobj_timeline_wait, points), 8);
+  EXPECT_EQ(OFF(struct nvshim_drm_syncobj_timeline_wait, timeout_nsec), 16);
+  EXPECT_EQ(OFF(struct nvshim_drm_syncobj_timeline_wait, first_signaled), 32);
+  EXPECT_EQ(OFF(struct nvshim_drm_syncobj_timeline_wait, deadline_nsec), 40);
+  EXPECT_EQ(OFF(struct nvshim_drm_syncobj_timeline_array, points), 8);
+  EXPECT_EQ(OFF(struct nvshim_drm_syncobj_timeline_array, count_handles), 16);
+  EXPECT_EQ(OFF(struct nvshim_drm_syncobj_handle, flags), 4);
+  EXPECT_EQ(OFF(struct nvshim_drm_syncobj_handle, fd), 8);
+  EXPECT_EQ(OFF(struct nvshim_drm_syncobj_handle, pad), 12);
+  EXPECT_EQ(OFF(struct nvshim_drm_syncobj_handle, point), 16);
   EXPECT_EQ(OFF(struct nvshim_drm_version, name_len), 16);
   EXPECT_EQ(OFF(struct nvshim_drm_version, desc), 56);
 
@@ -119,6 +134,13 @@ static void test_nvshim_drm_layout(void) {
   EXPECT_EQ((int)NVSHIM_DRM_IOC_SYNCOBJ_WAIT, (int)0xC02864C3u);
   EXPECT_EQ((int)NVSHIM_DRM_IOC_SYNCOBJ_RESET, (int)0xC01064C4u);
   EXPECT_EQ((int)NVSHIM_DRM_IOC_SYNCOBJ_SIGNAL, (int)0xC01064C5u);
+  /* WP-SYNC: the served rows, with drm.h's own widths.  24 for the syncobj
+   * handle struct (it carries `point`), 24 for the timeline array, 48 for the
+   * timeline wait. */
+  EXPECT_EQ((int)NVSHIM_DRM_IOC_SYNCOBJ_HANDLE_TO_FD, (int)0xC01864C1u);
+  EXPECT_EQ((int)NVSHIM_DRM_IOC_SYNCOBJ_FD_TO_HANDLE, (int)0xC01864C2u);
+  EXPECT_EQ((int)NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_SIGNAL, (int)0xC01864CDu);
+  EXPECT_EQ((int)NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT, (int)0xC03064CAu);
 
   /* Field decomposition: magic 'd', the uAPI sub-number, the struct size. */
   EXPECT_EQ((int)NVSHIM_DRM_TYPE(NVSHIM_DRM_IOC_EXEC), 0x64);
@@ -133,6 +155,16 @@ static void test_nvshim_drm_layout(void) {
   EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_GETPARAM), 16);
   EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_CHANNEL_ALLOC), 88);
   EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_SYNCOBJ_WAIT), 40);
+  /* WP-SYNC: the four served rows carry their real sizes, so a client built from
+   * the public header passes the size check rather than failing it. */
+  EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_SYNCOBJ_HANDLE_TO_FD), 24);
+  EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_SYNCOBJ_FD_TO_HANDLE), 24);
+  EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_SIGNAL), 24);
+  EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT), 48);
+  /* ... and the three that stay refused answer 0 (refused) at any width. */
+  EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_SYNCOBJ_QUERY), 0);
+  EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_SYNCOBJ_TRANSFER), 0);
+  EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD), 0);
   /* NVIF is served since WP-NVIF, and it is the ONE row whose encoded size is
    * a buffer length: the table states the bare header as its minimum, and the
    * handler applies each type's own shape rule.  So any encoded size >= 24
@@ -148,7 +180,15 @@ static void test_nvshim_drm_layout(void) {
   /* Refusal names exist for every refused row, and for nothing served. */
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_NVIF) != 0), 0);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_GEM_PUSHBUF) != 0), 1);
-  EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT) != 0), 1);
+  /* WP-SYNC: the four served syncobj rows left the refusal table; the three that
+   * are still refusals kept their names. */
+  EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT) != 0), 0);
+  EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_SIGNAL) != 0), 0);
+  EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_HANDLE_TO_FD) != 0), 0);
+  EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_FD_TO_HANDLE) != 0), 0);
+  EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_QUERY) != 0), 1);
+  EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_TRANSFER) != 0), 1);
+  EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD) != 0), 1);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_EXEC) != 0), 0);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_GEM_NEW) != 0), 0);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_ANY(0x7e, 8)) != 0), 0);
@@ -189,12 +229,15 @@ static void test_nvshim_drm_refusals(void) {
    * named-refusal table.  test_nvshim_drm_prime_* drives both for real. */
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_PRIME_HANDLE_TO_FD, 0), -EINVAL);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_PRIME_FD_TO_HANDLE, 0), -EINVAL);
-  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_HANDLE_TO_FD, 0), -ENOSYS);
-  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_FD_TO_HANDLE, 0), -ENOSYS);
-  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT, 0), -ENOSYS);
+  /* WP-SYNC: 0xc1 / 0xc2 / 0xca / 0xcd are SERVED now, so with no process they
+   * answer the same -EINVAL every served row does; the three syncobj rows this
+   * node still refuses stay -ENOSYS by name. */
+  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_HANDLE_TO_FD, 0), -EINVAL);
+  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_FD_TO_HANDLE, 0), -EINVAL);
+  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT, 0), -EINVAL);
+  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_SIGNAL, 0), -EINVAL);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_QUERY, 0), -ENOSYS);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_TRANSFER, 0), -ENOSYS);
-  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_SIGNAL, 0), -ENOSYS);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD, 0), -ENOSYS);
 
   /* A number nobody implements is -ENOTTY (not a silent 0, not a refusal). */
@@ -344,9 +387,10 @@ static void test_nvshim_drm_probe(void) {
   EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GET_CAP, &cap, (int)sizeof cap), 0);
   EXPECT_EQ((int)cap.value, 1);
   cap.capability = NVSHIM_DRM_CAP_SYNCOBJ_TIMELINE;
-  cap.value = 1;
+  cap.value = 0;
   EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GET_CAP, &cap, (int)sizeof cap), 0);
-  EXPECT_EQ((int)cap.value, 0);
+  /* WP-SYNC: 1 -- and the timeline suite is what makes that honest. */
+  EXPECT_EQ((int)cap.value, 1);
   cap.capability = 0x7777;
   EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GET_CAP, &cap, (int)sizeof cap), -EINVAL);
 
@@ -884,7 +928,10 @@ static void test_nvshim_drm_limits(void) {
   EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_EXEC, &ex, (int)sizeof ex), -ENOSYS);
   ex.wait_count = 0;
 
-  /* A timeline sync in the sig array is refused (binary syncobjs only). */
+  /* A timeline sync in the sig array is SERVED since WP-SYNC: the shape is
+   * accepted, and what is refused here is the HANDLE this client never created
+   * (-EINVAL, not -ENOSYS).  test_nvshim_drm_syncobj_timeline drives the
+   * served case and the malformed/out-of-order ones. */
   struct nvshim_drm_sync ts;
   ts.flags = NVSHIM_DRM_SYNC_TIMELINE_SYNCOBJ;
   ts.handle = 1;
@@ -892,7 +939,7 @@ static void test_nvshim_drm_limits(void) {
   EXPECT_EQ(vm_kwrite(pr.p, DREQ_STR, &ts, (int)sizeof ts), 0);
   ex.sig_count = 1;
   ex.sig_ptr = DREQ_STR;
-  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_EXEC, &ex, (int)sizeof ex), -ENOSYS);
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_EXEC, &ex, (int)sizeof ex), -EINVAL);
   ts.flags = NVSHIM_DRM_SYNC_SYNCOBJ;
   ts.handle = 999; /* a syncobj this client does not own */
   EXPECT_EQ(vm_kwrite(pr.p, DREQ_STR, &ts, (int)sizeof ts), 0);
@@ -1840,13 +1887,15 @@ static void test_nvshim_drm_prime_refusals(void) {
   EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_CLOSE, &gc, (int)sizeof gc), 0);
 
   /* --- every OTHER named refusal keeps its row: the table did not lose
-   * anything when PRIME left it --- */
+   * anything when PRIME left it, and WP-SYNC removed exactly the four syncobj
+   * rows it serves --- */
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_GEM_FLINK, 0), -ENOSYS);
-  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_HANDLE_TO_FD, 0), -ENOSYS);
+  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_QUERY, 0), -ENOSYS);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_GEM_PUSHBUF, 0), -ENOSYS);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SETPARAM, 0), -ENOSYS);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_GEM_FLINK) != 0), 1);
-  EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT) != 0), 1);
+  EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT) != 0), 0);
+  EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_QUERY) != 0), 1);
   /* ... and the two PRIME numbers are served, not refused-by-size: a wrong
    * encoded size is -EINVAL (the number exists), never -ENOSYS. */
   EXPECT_EQ(nv_shim_ioctl(pr.p, pr.fd, NVSHIM_DRM_IOC_ANY(0x2d, 16), pr.base), -EINVAL);
@@ -1944,6 +1993,666 @@ static int nvif_mthd(struct drm_probe *pr, uint64_t cookie, uint8_t method,
                 (int)sizeof info) != 0)
     return -1002;
   return nvif_call(pr, len);
+}
+
+/* ============================================================================
+ *  WP-SYNC: the timeline half of syncobj, and the syncobj fd.
+ *
+ *  What these three suites are for, in the order the acceptance items put them:
+ *
+ *   1. A point is signalled by SYNCOBJ_TIMELINE_SIGNAL or by an EXEC's timeline
+ *      sig, and a wait is satisfied by the POINT -- not by "an EXEC retired".
+ *      The discriminating case is an EXEC that signals 11 while a wait asks for
+ *      12: it returns -ETIME both before and after the fence retires.
+ *   2. An EXEC carrying NVSHIM_DRM_SYNC_TIMELINE_SYNCOBJ with a real
+ *      timeline_value is accepted, signals that point on retire, and the
+ *      malformed/out-of-order forms are refused BY NAME.
+ *   3. SYNCOBJ_HANDLE_TO_FD returns a real fd; SYNCOBJ_FD_TO_HANDLE from it
+ *      gives a handle on the SAME object -- including from another process that
+ *      received the fd over SCM_RIGHTS -- and a signal through either name is
+ *      visible through the other.  The record outlives the client that made it,
+ *      because the fd holds a reference.
+ *   4. GET_CAP's SYNCOBJ_TIMELINE answer is 1, and the suites above are the
+ *      evidence for it rather than the cap id existing.
+ * ========================================================================== */
+
+#define DREQ_POINTS (DREQ_BASE + 0x1800) /* 64 * 8 bytes of u64 points */
+
+/* Compare a syncobj refusal's name (it is copied into a buffer, nv_shim.h). */
+static int sync_name_is(int why, const char *want) {
+  char b[NVSHIM_SYNC_REASON_MAX];
+  nv_shim_sync_refusal_name(why, b, (int)sizeof b);
+  int i = 0;
+  while (want[i] && b[i] == want[i]) i++;
+  return want[i] == 0 && b[i] == 0;
+}
+
+static int sobj_create(struct drm_probe *pr, uint32_t flags, uint32_t *hp) {
+  struct nvshim_drm_syncobj_create sc;
+  sc.handle = 0xFFFFFFFFu;
+  sc.flags = flags;
+  int rc = drm_ioc(pr, NVSHIM_DRM_IOC_SYNCOBJ_CREATE, &sc, (int)sizeof sc);
+  if (rc == 0 && hp) *hp = sc.handle;
+  return rc;
+}
+
+static int sobj_destroy(struct drm_probe *pr, uint32_t h) {
+  struct nvshim_drm_syncobj_destroy sd;
+  sd.handle = h;
+  sd.pad = 0;
+  return drm_ioc(pr, NVSHIM_DRM_IOC_SYNCOBJ_DESTROY, &sd, (int)sizeof sd);
+}
+
+static int sobj_binary_wait(struct drm_probe *pr, const uint32_t *hs, uint32_t n,
+                            int64_t timeout) {
+  struct nvshim_drm_syncobj_wait w;
+  for (unsigned i = 0; i < sizeof w; i++) ((unsigned char *)&w)[i] = 0;
+  w.handles = DREQ_HANDLES;
+  w.timeout_nsec = timeout;
+  w.count_handles = n;
+  w.first_signaled = 0xFFFFFFFFu;
+  if (n && vm_kwrite(pr->p, DREQ_HANDLES, (void *)hs, (int)(n * sizeof(uint32_t))) != 0)
+    return -1000;
+  return drm_ioc(pr, NVSHIM_DRM_IOC_SYNCOBJ_WAIT, &w, (int)sizeof w);
+}
+
+static int sobj_tl_signal(struct drm_probe *pr, const uint32_t *hs, const uint64_t *ps,
+                          uint32_t n) {
+  struct nvshim_drm_syncobj_timeline_array sa;
+  sa.handles = DREQ_HANDLES;
+  sa.points = DREQ_POINTS;
+  sa.count_handles = n;
+  sa.flags = 0;
+  if (n && vm_kwrite(pr->p, DREQ_HANDLES, (void *)hs, (int)(n * sizeof(uint32_t))) != 0)
+    return -1000;
+  if (n && vm_kwrite(pr->p, DREQ_POINTS, (void *)ps, (int)(n * sizeof(uint64_t))) != 0)
+    return -1001;
+  return drm_ioc(pr, NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_SIGNAL, &sa, (int)sizeof sa);
+}
+
+static int sobj_tl_wait(struct drm_probe *pr, const uint32_t *hs, const uint64_t *ps,
+                        uint32_t n, int64_t timeout) {
+  struct nvshim_drm_syncobj_timeline_wait w;
+  for (unsigned i = 0; i < sizeof w; i++) ((unsigned char *)&w)[i] = 0;
+  w.handles = DREQ_HANDLES;
+  w.points = DREQ_POINTS;
+  w.timeout_nsec = timeout;
+  w.count_handles = n;
+  w.first_signaled = 0xFFFFFFFFu;
+  if (n && vm_kwrite(pr->p, DREQ_HANDLES, (void *)hs, (int)(n * sizeof(uint32_t))) != 0)
+    return -1000;
+  if (n && vm_kwrite(pr->p, DREQ_POINTS, (void *)ps, (int)(n * sizeof(uint64_t))) != 0)
+    return -1001;
+  return drm_ioc(pr, NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT, &w, (int)sizeof w);
+}
+
+static int sobj_export(struct drm_probe *pr, uint32_t h, uint32_t flags, uint64_t point,
+                       int *fdp) {
+  struct nvshim_drm_syncobj_handle sh;
+  for (unsigned i = 0; i < sizeof sh; i++) ((unsigned char *)&sh)[i] = 0;
+  sh.handle = h;
+  sh.flags = flags;
+  sh.fd = -1;
+  sh.point = point;
+  int rc = drm_ioc(pr, NVSHIM_DRM_IOC_SYNCOBJ_HANDLE_TO_FD, &sh, (int)sizeof sh);
+  if (rc == 0) *fdp = sh.fd;
+  return rc;
+}
+
+static int sobj_import(struct drm_probe *pr, int ufd, uint32_t flags, uint64_t point,
+                       uint32_t *hp) {
+  struct nvshim_drm_syncobj_handle sh;
+  for (unsigned i = 0; i < sizeof sh; i++) ((unsigned char *)&sh)[i] = 0;
+  sh.handle = 0xFFFFFFFFu;
+  sh.flags = flags;
+  sh.fd = ufd;
+  sh.point = point;
+  int rc = drm_ioc(pr, NVSHIM_DRM_IOC_SYNCOBJ_FD_TO_HANDLE, &sh, (int)sizeof sh);
+  if (rc == 0 && hp) *hp = sh.handle;
+  return rc;
+}
+
+/* The VM + BO + mapping + channel an EXEC needs.  Shared by the two suites that
+ * carry a timeline sig into EXEC. */
+static int sync_exec_setup(struct drm_probe *pr, uint32_t *bop, int32_t *chp) {
+  struct nvshim_drm_vm_init vmi;
+  vmi.kernel_managed_addr = 1ull << 39;
+  vmi.kernel_managed_size = 1ull << 39;
+  if (drm_ioc(pr, NVSHIM_DRM_IOC_VM_INIT, &vmi, (int)sizeof vmi) != 0) return -1;
+  uint32_t bo = 0;
+  uint64_t moff = 0;
+  if (prime_make_bo(pr, 65536, NVSHIM_DOMAIN_CPU | NVSHIM_DOMAIN_MAPPABLE, &bo, &moff) != 0)
+    return -1;
+  struct nvshim_drm_vm_bind_op op;
+  for (unsigned i = 0; i < sizeof op; i++) ((unsigned char *)&op)[i] = 0;
+  op.op = NVSHIM_DRM_VM_BIND_OP_MAP;
+  op.handle = bo;
+  op.addr = 0x10000;
+  op.range = 65536;
+  if (vm_kwrite(pr->p, DREQ_OPS, &op, (int)sizeof op) != 0) return -1;
+  struct nvshim_drm_vm_bind vb;
+  for (unsigned i = 0; i < sizeof vb; i++) ((unsigned char *)&vb)[i] = 0;
+  vb.op_count = 1;
+  vb.op_ptr = DREQ_OPS;
+  if (drm_ioc(pr, NVSHIM_DRM_IOC_VM_BIND, &vb, (int)sizeof vb) != 0) return -1;
+  struct nvshim_drm_channel_alloc ca;
+  for (unsigned i = 0; i < sizeof ca; i++) ((unsigned char *)&ca)[i] = 0;
+  if (drm_ioc(pr, NVSHIM_DRM_IOC_CHANNEL_ALLOC, &ca, (int)sizeof ca) != 0) return -1;
+  struct nvshim_drm_exec_push push;
+  push.va = 0x10000;
+  push.va_len = 64;
+  push.flags = 0;
+  if (vm_kwrite(pr->p, DREQ_PUSH, &push, (int)sizeof push) != 0) return -1;
+  if (bop) *bop = bo;
+  if (chp) *chp = ca.channel;
+  return 0;
+}
+
+/* One EXEC of the setup's single push, signalling the given syncs (n <= 1 here:
+ * the suites below send exactly one, which is what the acceptance measures). */
+static int sync_exec_with(struct drm_probe *pr, int32_t ch, const struct nvshim_drm_sync *sig,
+                          uint32_t nsig) {
+  struct nvshim_drm_exec ex;
+  for (unsigned i = 0; i < sizeof ex; i++) ((unsigned char *)&ex)[i] = 0;
+  ex.channel = (uint32_t)ch;
+  ex.push_count = 1;
+  ex.push_ptr = DREQ_PUSH;
+  if (nsig) {
+    if (vm_kwrite(pr->p, DREQ_STR, (void *)sig,
+                  (int)(nsig * sizeof(struct nvshim_drm_sync))) != 0)
+      return -1000;
+    ex.sig_count = nsig;
+    ex.sig_ptr = DREQ_STR;
+  }
+  return drm_ioc(pr, NVSHIM_DRM_IOC_EXEC, &ex, (int)sizeof ex);
+}
+
+static void test_nvshim_drm_syncobj_timeline(void) {
+  uart_puts("  Running test_nvshim_drm_syncobj_timeline...\n");
+  tests_run++;
+
+  struct drm_probe pr;
+  EXPECT_EQ(drm_probe_up(&pr, 102), 0);
+  if (!pr.up) return;
+  uint32_t bo = 0;
+  int32_t ch = 0;
+  int setup = sync_exec_setup(&pr, &bo, &ch);
+  EXPECT_EQ(setup, 0);
+  if (setup != 0) {
+    drm_probe_down(&pr);
+    return;
+  }
+
+  uint32_t h = 0, h2 = 0;
+  uint32_t hs[1];
+  uint64_t pts[1];
+  EXPECT_EQ(sobj_create(&pr, 0, &h), 0);
+  hs[0] = h;
+
+  /* --- (1) SIGNAL at 5: everything at or below it returns 0, above it is
+   * -ETIME.  The error is ETIME and not EAGAIN because that is the uAPI's own
+   * answer for a wait that timed out (drm_syncobj_wait returns ETIME for a poll
+   * and for an expired deadline), and it is what the binary row here already
+   * returns -- one errno for one condition. */
+  pts[0] = 5;
+  EXPECT_EQ(sobj_tl_signal(&pr, hs, pts, 1), 0);
+  pts[0] = 5;
+  EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), 0);
+  pts[0] = 4;
+  EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), 0);
+  pts[0] = 1;
+  EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), 0);
+  pts[0] = 6;
+  EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), -ETIME);
+  /* A real millisecond deadline, not a spin: still nothing retired, so the same
+   * -ETIME comes back after the deadline expires. */
+  pts[0] = 6;
+  EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, (int64_t)((timer_get_ms() + 1) * 1000000ull)),
+            -ETIME);
+
+  /* The binary row reads the SAME field: point 5 is signalled, so a binary wait
+   * is satisfied.  One object, one state machine. */
+  EXPECT_EQ(sobj_binary_wait(&pr, hs, 1, 0), 0);
+
+  /* --- (2) EXEC with a timeline sig: hold the kick, so the fence cannot
+   * retire; the wait must stay outstanding, then the retire must signal exactly
+   * the point the EXEC asked for and no other. */
+  EXPECT_EQ(sobj_create(&pr, 0, &h2), 0);
+  struct nvshim_drm_sync sig;
+  sig.flags = NVSHIM_DRM_SYNC_TIMELINE_SYNCOBJ;
+  sig.handle = h2;
+  sig.timeline_value = 11;
+  nv_rm_mock_hold(1);
+  EXPECT_EQ(sync_exec_with(&pr, ch, &sig, 1), 0);
+  EXPECT_EQ(nv_rm_mock_pending(), 1);
+  hs[0] = h2;
+  pts[0] = 11;
+  EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), -ETIME);
+  pts[0] = 11;
+  EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, (int64_t)((timer_get_ms() + 1) * 1000000ull)),
+            -ETIME);
+  pts[0] = 1;
+  EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), -ETIME);
+
+  /* Release the hold and submit one unsigned EXEC: that kick retires the first
+   * fence, so point 11 lands. */
+  nv_rm_mock_hold(0);
+  EXPECT_EQ(sync_exec_with(&pr, ch, 0, 0), 0);
+  EXPECT_EQ(nv_rm_mock_pending(), 0);
+  pts[0] = 11;
+  EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), 0);
+  pts[0] = 12;
+  EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), -ETIME); /* still outstanding */
+  /* ... and the binary row agrees the object is signalled. */
+  EXPECT_EQ(sobj_binary_wait(&pr, hs, 1, 0), 0);
+
+  /* A higher point is accepted and signals on its own retire. */
+  sig.timeline_value = 12;
+  EXPECT_EQ(sync_exec_with(&pr, ch, &sig, 1), 0);
+  pts[0] = 12;
+  EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), 0);
+
+  /* --- (3) the malformed / out-of-order forms, refused by name --- */
+  /* A timeline sig with a zero point: not a point (Linux WARNs and calls it 1). */
+  sig.timeline_value = 0;
+  EXPECT_EQ(sync_exec_with(&pr, ch, &sig, 1), -EINVAL);
+  /* Going back in time: the object is at 12, so 12 and below are refused. */
+  sig.timeline_value = 12;
+  EXPECT_EQ(sync_exec_with(&pr, ch, &sig, 1), -EINVAL);
+  sig.timeline_value = 5;
+  EXPECT_EQ(sync_exec_with(&pr, ch, &sig, 1), -EINVAL);
+  /* ... and the object's point did not move because a refused EXEC enqueued
+   * nothing. */
+  pts[0] = 12;
+  EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), 0);
+  /* A binary syncobj carrying a timeline_value is the other malformed shape. */
+  sig.flags = NVSHIM_DRM_SYNC_SYNCOBJ;
+  sig.handle = h;
+  sig.timeline_value = 3;
+  EXPECT_EQ(sync_exec_with(&pr, ch, &sig, 1), -EINVAL);
+  /* ... and the timeline type with an extra flag bit is refused too. */
+  sig.flags = NVSHIM_DRM_SYNC_TIMELINE_SYNCOBJ | 0x100;
+  sig.timeline_value = 20;
+  EXPECT_EQ(sync_exec_with(&pr, ch, &sig, 1), -EINVAL);
+  /* A handle this client does not hold, in a served timeline sig. */
+  sig.flags = NVSHIM_DRM_SYNC_TIMELINE_SYNCOBJ;
+  sig.handle = h2 + 500;
+  EXPECT_EQ(sync_exec_with(&pr, ch, &sig, 1), -EINVAL);
+
+  /* --- (4) the timeline SIGNAL row is the client-forced form of the same write,
+   * and it refuses a point that is not new (Linux clamps at a WARN; this node
+   * says why instead). */
+  hs[0] = h;
+  pts[0] = 6;
+  EXPECT_EQ(sobj_tl_signal(&pr, hs, pts, 1), 0);
+  pts[0] = 6;
+  EXPECT_EQ(sobj_tl_signal(&pr, hs, pts, 1), -EINVAL);
+  pts[0] = 5;
+  EXPECT_EQ(sobj_tl_signal(&pr, hs, pts, 1), -EINVAL);
+  pts[0] = 0;
+  EXPECT_EQ(sobj_tl_signal(&pr, hs, pts, 1), -EINVAL);
+  pts[0] = 7;
+  EXPECT_EQ(sobj_tl_signal(&pr, hs, pts, 1), 0);
+  EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), 0);
+
+  /* Two handles in one wait, WAIT_ALL: 7 (h) and 12 (h2) are both there. */
+  {
+    uint32_t two[2];
+    uint64_t tp[2];
+    struct nvshim_drm_syncobj_timeline_wait w;
+    two[0] = h;
+    two[1] = h2;
+    tp[0] = 7;
+    tp[1] = 12;
+    EXPECT_EQ(vm_kwrite(pr.p, DREQ_HANDLES, two, (int)sizeof two), 0);
+    EXPECT_EQ(vm_kwrite(pr.p, DREQ_POINTS, tp, (int)sizeof tp), 0);
+    for (unsigned i = 0; i < sizeof w; i++) ((unsigned char *)&w)[i] = 0;
+    w.handles = DREQ_HANDLES;
+    w.points = DREQ_POINTS;
+    w.count_handles = 2;
+    w.flags = NVSHIM_DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL;
+    w.first_signaled = 0xFFFFFFFFu;
+    EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT, &w, (int)sizeof w), 0);
+    /* WAIT_ALL with one point too high is not satisfied. */
+    tp[1] = 13;
+    EXPECT_EQ(vm_kwrite(pr.p, DREQ_POINTS, tp, (int)sizeof tp), 0);
+    EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT, &w, (int)sizeof w),
+              -ETIME);
+    /* Without WAIT_ALL any one of them is enough. */
+    w.flags = 0;
+    EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT, &w, (int)sizeof w), 0);
+  }
+
+  uart_puts("  [NVSHIM] syncobj timeline: signal/wait both directions, EXEC point on "
+            "retire, refused shapes: PASS\n");
+
+  /* --- teardown --- */
+  EXPECT_EQ(sobj_destroy(&pr, h), 0);
+  EXPECT_EQ(sobj_destroy(&pr, h2), 0);
+  struct nvshim_drm_channel_free cf;
+  cf.channel = ch;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_CHANNEL_FREE, &cf, (int)sizeof cf), 0);
+  struct nvshim_drm_gem_close gc;
+  gc.handle = bo;
+  gc.pad = 0;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_CLOSE, &gc, (int)sizeof gc), 0);
+  drm_probe_down(&pr);
+  EXPECT_EQ(nv_rm_mock_live(), 0);
+}
+
+static void test_nvshim_drm_syncobj_fd(void) {
+  uart_puts("  Running test_nvshim_drm_syncobj_fd...\n");
+  tests_run++;
+
+  struct drm_probe pr;
+  EXPECT_EQ(drm_probe_up(&pr, 103), 0);
+  if (!pr.up) return;
+  struct drm_probe pr2;
+  EXPECT_EQ(drm_probe_up(&pr2, 104), 0);
+  if (!pr2.up) {
+    drm_probe_down(&pr);
+    return;
+  }
+  /* pr2 needs a client before it can hold a handle: the node creates one on the
+   * first request that needs a device (GETPARAM), exactly as a winsys starts. */
+  struct nvshim_drm_getparam q;
+  q.param = NVSHIM_PARAM_CHIPSET_ID;
+  q.value = 0;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GETPARAM, &q, (int)sizeof q), 0);
+  EXPECT_EQ(drm_ioc(&pr2, NVSHIM_DRM_IOC_GETPARAM, &q, (int)sizeof q), 0);
+
+  uint32_t h1 = 0;
+  EXPECT_EQ(sobj_create(&pr, 0, &h1), 0);
+
+  /* --- export: a REAL fd, and its payload is the syncobj itself --- */
+  int ufd = -1;
+  EXPECT_EQ(sobj_export(&pr, h1, 0, 0, &ufd), 0);
+  EXPECT_EQ((int)(ufd >= 0), 1);
+  EXPECT_EQ((int)(ufd != pr.fd), 1);
+  if (ufd < 0) {
+    drm_probe_down(&pr2);
+    drm_probe_down(&pr);
+    return;
+  }
+  uint32_t ofl = 0;
+  EXPECT_EQ(file_open_flags(pr.p, ufd, &ofl), 0);
+  EXPECT_EQ((int)((ofl & 3u) == 2u), 1); /* O_RDWR */
+  EXPECT_EQ(file_is_syncobj(pr.p, ufd), 1);
+  EXPECT_EQ(file_is_dmabuf(pr.p, ufd), 0);
+  void *obj = file_syncobj_obj(pr.p, ufd);
+  EXPECT_EQ((int)(obj != 0), 1);
+  if (!obj) {
+    drm_probe_down(&pr2);
+    drm_probe_down(&pr);
+    return;
+  }
+  /* One reference for the handle entry, one for the exported fd. */
+  EXPECT_EQ(nv_shim_test_syncobj_refs(obj), 2);
+
+  /* --- FD_TO_HANDLE: a SECOND handle on the SAME object --- */
+  uint32_t h2 = 0;
+  EXPECT_EQ(sobj_import(&pr, ufd, 0, 0, &h2), 0);
+  EXPECT_EQ((int)(h2 != h1), 1); /* a new handle entry, not an echo */
+  EXPECT_EQ(nv_shim_test_syncobj_refs(obj), 3);
+
+  /* A signal through the ORIGINAL handle is visible through the imported one,
+   * and through the fd's own object -- one object, one point. */
+  uint32_t hs[1];
+  uint64_t pts[1];
+  hs[0] = h1;
+  pts[0] = 7;
+  EXPECT_EQ(sobj_tl_signal(&pr, hs, pts, 1), 0);
+  hs[0] = h2;
+  pts[0] = 7;
+  EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), 0);
+  EXPECT_EQ(nv_shim_test_syncobj_point(obj), 7ull);
+  /* ... and the other way: the imported handle signals, the original waits. */
+  hs[0] = h2;
+  pts[0] = 8;
+  EXPECT_EQ(sobj_tl_signal(&pr, hs, pts, 1), 0);
+  hs[0] = h1;
+  pts[0] = 8;
+  EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), 0);
+  EXPECT_EQ(nv_shim_test_syncobj_point(obj), 8ull);
+
+  /* --- SCM_RIGHTS: the same file description in a SECOND process --- */
+  int gfd = pr.p->open_fds[ufd];
+  EXPECT_EQ((int)(gfd >= 0), 1);
+  EXPECT_EQ(fs_msg_ref_gfd(gfd), 0);
+  int fd2 = fs_msg_install_gfd(pr2.p, gfd);
+  EXPECT_EQ((int)(fd2 >= 0), 1);
+  if (fd2 >= 0) {
+    EXPECT_EQ(file_is_syncobj(pr2.p, fd2), 1);
+    /* No copy was made by passing the fd. */
+    EXPECT_EQ((int)(file_syncobj_obj(pr2.p, fd2) == obj), 1);
+    uint32_t h3 = 0;
+    EXPECT_EQ(sobj_import(&pr2, fd2, 0, 0, &h3), 0);
+    EXPECT_EQ(nv_shim_test_syncobj_refs(obj), 4);
+    /* A signal in PROCESS 2 through its handle is seen in process 1. */
+    hs[0] = h3;
+    pts[0] = 12;
+    EXPECT_EQ(sobj_tl_signal(&pr2, hs, pts, 1), 0);
+    hs[0] = h1;
+    pts[0] = 12;
+    EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), 0);
+    EXPECT_EQ(nv_shim_test_syncobj_point(obj), 12ull);
+
+    /* CLOSE ORDER 1: the importer's handle goes, then its fd.  The fd is the
+     * SAME description as pr's, so neither close frees anything. */
+    EXPECT_EQ(sobj_destroy(&pr2, h3), 0);
+    EXPECT_EQ(nv_shim_test_syncobj_refs(obj), 3);
+    EXPECT_EQ(file_close(pr2.p, fd2), 0);
+    EXPECT_EQ(nv_shim_test_syncobj_refs(obj), 3);
+    EXPECT_EQ(nv_shim_test_syncobj_point(obj), 12ull);
+  }
+
+  /* CLOSE ORDER 2: the importing handle first, then the exporting one, then the
+   * fd -- the record lives until the fd goes, which is the whole point. */
+  EXPECT_EQ(sobj_destroy(&pr, h2), 0);
+  EXPECT_EQ(nv_shim_test_syncobj_refs(obj), 2);
+  EXPECT_EQ(sobj_destroy(&pr, h1), 0);
+  EXPECT_EQ(nv_shim_test_syncobj_refs(obj), 1);
+  EXPECT_EQ(nv_shim_test_syncobj_point(obj), 12ull); /* still readable */
+  EXPECT_EQ(file_close(pr.p, ufd), 0);
+  EXPECT_EQ(file_is_syncobj(pr.p, ufd), 0);
+  EXPECT_EQ(nv_shim_test_syncobj_refs(obj), -1); /* the record is gone */
+  EXPECT_EQ(nv_shim_test_syncobj_refs(0), -1);
+
+  /* CLOSE ORDER 3: the client outlives nothing -- the NODE fd closes while the
+   * syncobj fd is open, so the handle entries go but the fd keeps the record. */
+  uint32_t h4 = 0;
+  EXPECT_EQ(sobj_create(&pr, NVSHIM_DRM_SYNCOBJ_CREATE_SIGNALED, &h4), 0);
+  int ufd4 = -1;
+  EXPECT_EQ(sobj_export(&pr, h4, 0, 0, &ufd4), 0);
+  void *obj4 = ufd4 >= 0 ? file_syncobj_obj(pr.p, ufd4) : 0;
+  EXPECT_EQ((int)(obj4 != 0), 1);
+  if (obj4) {
+    EXPECT_EQ(nv_shim_test_syncobj_refs(obj4), 2);
+    EXPECT_EQ(nv_shim_test_syncobj_point(obj4), 1ull); /* CREATE_SIGNALED = 1 */
+    EXPECT_EQ(file_close(pr.p, pr.fd), 0); /* teardown: handles go */
+    pr.fd = -1;
+    EXPECT_EQ(nv_shim_test_syncobj_refs(obj4), 1);
+    EXPECT_EQ(nv_shim_test_syncobj_point(obj4), 1ull);
+    EXPECT_EQ(file_close(pr.p, ufd4), 0);
+    EXPECT_EQ(nv_shim_test_syncobj_refs(obj4), -1);
+  }
+
+  drm_probe_down(&pr2);
+  drm_probe_down(&pr);
+  EXPECT_EQ(nv_rm_mock_live(), 0);
+}
+
+static void test_nvshim_drm_syncobj_refusals(void) {
+  uart_puts("  Running test_nvshim_drm_syncobj_refusals...\n");
+  tests_run++;
+
+  /* The names are the contract: a client reading the log has to see WHY. */
+  EXPECT_EQ(sync_name_is(NVSHIM_SYNC_NOT_SYNCOBJ, "not_a_syncobj"), 1);
+  EXPECT_EQ(sync_name_is(NVSHIM_SYNC_EXPORT_SYNC_FILE, "export_sync_file"), 1);
+  EXPECT_EQ(sync_name_is(NVSHIM_SYNC_IMPORT_SYNC_FILE, "import_sync_file"), 1);
+  EXPECT_EQ(sync_name_is(NVSHIM_SYNC_BAD_FLAGS, "bad_flags"), 1);
+  EXPECT_EQ(sync_name_is(NVSHIM_SYNC_POINT_ZERO, "timeline_point_zero"), 1);
+  EXPECT_EQ(sync_name_is(NVSHIM_SYNC_POINT_ORDER, "timeline_point_order"), 1);
+  EXPECT_EQ(sync_name_is(NVSHIM_SYNC_POINT_WITHOUT_FILE, "point_without_sync_file"), 1);
+  EXPECT_EQ(sync_name_is(NVSHIM_SYNC_NO_SLOT, "no_syncobj_slot"), 1);
+  EXPECT_EQ(sync_name_is(NVSHIM_SYNC_BAD_SHAPE, "bad_shape"), 1);
+  EXPECT_EQ(sync_name_is(NVSHIM_SYNC_WAIT_UNSUPPORTED, "wait_flag_unsupported"), 1);
+  EXPECT_EQ(sync_name_is(NVSHIM_SYNC_NOT_THIS_CLIENTS, "not_this_clients_syncobj"), 1);
+  /* The 'N' face's feature mask advertises what the node can do. */
+  EXPECT_EQ((nv_shim_features() & NVSHIM_FEAT_SYNCOBJ_TIMELINE) != 0, 1);
+
+  struct drm_probe pr;
+  EXPECT_EQ(drm_probe_up(&pr, 105), 0);
+  if (!pr.up) return;
+
+  /* The node creates its client on the first request that needs a device
+   * (GETPARAM here), exactly as a winsys starts; a syncobj row needs a client
+   * to hold the handle, so it is created before any syncobj call. */
+  struct nvshim_drm_getparam q;
+  q.param = NVSHIM_PARAM_CHIPSET_ID;
+  q.value = 0;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GETPARAM, &q, (int)sizeof q), 0);
+
+  /* GET_CAP answers 1, and this suite is part of what makes that honest. */
+  struct nvshim_drm_cap cap;
+  cap.capability = NVSHIM_DRM_CAP_SYNCOBJ_TIMELINE;
+  cap.value = 0;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GET_CAP, &cap, (int)sizeof cap), 0);
+  EXPECT_EQ((int)cap.value, 1);
+
+  uint32_t h = 0;
+  EXPECT_EQ(sobj_create(&pr, 0, &h), 0);
+  int fd_out = -1;
+  uint32_t hs[1];
+  uint64_t pts[1];
+  hs[0] = h;
+
+  /* --- HANDLE_TO_FD shapes --- */
+  EXPECT_EQ(sobj_export(&pr, h, NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE, 0,
+                        &fd_out), -ENOSYS);
+  EXPECT_EQ(sobj_export(&pr, h, 0x80, 0, &fd_out), -EINVAL);
+  EXPECT_EQ(sobj_export(&pr, h, 0, 5, &fd_out), -EINVAL); /* point without a sync_file */
+  EXPECT_EQ(sobj_export(&pr, h + 900, 0, 0, &fd_out), -EINVAL);
+  {
+    struct nvshim_drm_syncobj_handle sh;
+    for (unsigned i = 0; i < sizeof sh; i++) ((unsigned char *)&sh)[i] = 0;
+    sh.handle = h;
+    sh.pad = 1;
+    EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_SYNCOBJ_HANDLE_TO_FD, &sh, (int)sizeof sh),
+              -EINVAL);
+  }
+  /* A well-formed one does work, so the refusals above are not "always says no". */
+  EXPECT_EQ(sobj_export(&pr, h, NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_TIMELINE, 0,
+                        &fd_out), 0);
+
+  /* --- FD_TO_HANDLE shapes --- */
+  if (fd_out >= 0) {
+    uint32_t hx = 0;
+    EXPECT_EQ(sobj_import(&pr, fd_out, NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE,
+                          0, &hx), -ENOSYS);
+    EXPECT_EQ(sobj_import(&pr, fd_out, 0x80, 0, &hx), -EINVAL);
+    EXPECT_EQ(sobj_import(&pr, fd_out, 0, 3, &hx), -EINVAL);
+    {
+      struct nvshim_drm_syncobj_handle sh;
+      for (unsigned i = 0; i < sizeof sh; i++) ((unsigned char *)&sh)[i] = 0;
+      sh.fd = fd_out;
+      sh.pad = 1;
+      EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_SYNCOBJ_FD_TO_HANDLE, &sh, (int)sizeof sh),
+                -EINVAL);
+    }
+    EXPECT_EQ(sobj_import(&pr, fd_out, 0, 0, &hx), 0);
+    if (hx) EXPECT_EQ(sobj_destroy(&pr, hx), 0);
+    EXPECT_EQ(file_close(pr.p, fd_out), 0);
+  }
+  /* The NODE fd is not a syncobj, and neither is a bad fd: both -EINVAL. */
+  {
+    uint32_t hx = 0;
+    EXPECT_EQ(sobj_import(&pr, pr.fd, 0, 0, &hx), -EINVAL);
+    EXPECT_EQ(sobj_import(&pr, 900, 0, 0, &hx), -EINVAL);
+  }
+
+  /* --- TIMELINE_SIGNAL shapes --- */
+  EXPECT_EQ(sobj_tl_signal(&pr, hs, pts, 0), -EINVAL); /* count 0 */
+  {
+    struct nvshim_drm_syncobj_timeline_array sa;
+    sa.handles = DREQ_HANDLES;
+    sa.points = DREQ_POINTS;
+    sa.count_handles = 1;
+    sa.flags = 1; /* SIGNAL takes no flags */
+    EXPECT_EQ(vm_kwrite(pr.p, DREQ_HANDLES, hs, (int)sizeof(uint32_t)), 0);
+    pts[0] = 1;
+    EXPECT_EQ(vm_kwrite(pr.p, DREQ_POINTS, pts, (int)sizeof(uint64_t)), 0);
+    EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_SIGNAL, &sa, (int)sizeof sa),
+              -EINVAL);
+    /* No points array: nothing to signal, so the shape is refused rather than
+     * treated as point 0. */
+    sa.flags = 0;
+    sa.points = 0;
+    EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_SIGNAL, &sa, (int)sizeof sa),
+              -EINVAL);
+    /* A zero point in the array: not a point, refused by name. */
+    sa.points = DREQ_POINTS;
+    pts[0] = 0;
+    EXPECT_EQ(vm_kwrite(pr.p, DREQ_POINTS, pts, (int)sizeof(uint64_t)), 0);
+    EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_SIGNAL, &sa, (int)sizeof sa),
+              -EINVAL);
+    /* A handle this client does not hold. */
+    uint32_t bad[1];
+    bad[0] = h + 700;
+    pts[0] = 3;
+    EXPECT_EQ(vm_kwrite(pr.p, DREQ_HANDLES, bad, (int)sizeof(uint32_t)), 0);
+    EXPECT_EQ(vm_kwrite(pr.p, DREQ_POINTS, pts, (int)sizeof(uint64_t)), 0);
+    EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_SIGNAL, &sa, (int)sizeof sa),
+              -EINVAL);
+  }
+
+  /* --- TIMELINE_WAIT shapes --- */
+  EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 0, 0), -EINVAL); /* count 0 */
+  {
+    struct nvshim_drm_syncobj_timeline_wait w;
+    hs[0] = h;
+    pts[0] = 1;
+    EXPECT_EQ(vm_kwrite(pr.p, DREQ_HANDLES, hs, (int)sizeof(uint32_t)), 0);
+    EXPECT_EQ(vm_kwrite(pr.p, DREQ_POINTS, pts, (int)sizeof(uint64_t)), 0);
+    for (unsigned i = 0; i < sizeof w; i++) ((unsigned char *)&w)[i] = 0;
+    w.handles = DREQ_HANDLES;
+    w.points = DREQ_POINTS;
+    w.count_handles = 1;
+    /* WAIT_FOR_SUBMIT / WAIT_AVAILABLE / WAIT_DEADLINE are not polls: refused
+     * with -ENOSYS, the same answer the binary row gives. */
+    w.flags = NVSHIM_DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
+    EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT, &w, (int)sizeof w),
+              -ENOSYS);
+    w.flags = NVSHIM_DRM_SYNCOBJ_WAIT_FLAGS_WAIT_DEADLINE;
+    w.deadline_nsec = timer_get_ms() * 1000000ull;
+    EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT, &w, (int)sizeof w),
+              -ENOSYS);
+    w.flags = 0x80;
+    EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT, &w, (int)sizeof w),
+              -EINVAL);
+    w.flags = 0;
+    w.pad = 1;
+    EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT, &w, (int)sizeof w),
+              -EINVAL);
+    w.pad = 0;
+    /* A handle this client does not hold. */
+    uint32_t bad[1];
+    bad[0] = h + 800;
+    EXPECT_EQ(vm_kwrite(pr.p, DREQ_HANDLES, bad, (int)sizeof(uint32_t)), 0);
+    EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT, &w, (int)sizeof w),
+              -EINVAL);
+  }
+
+  /* --- the rows this rung did NOT serve are still -ENOSYS by name --- */
+  EXPECT_EQ(nv_shim_ioctl(pr.p, pr.fd, NVSHIM_DRM_IOC_SYNCOBJ_QUERY, DREQ_BASE), -ENOSYS);
+  EXPECT_EQ(nv_shim_ioctl(pr.p, pr.fd, NVSHIM_DRM_IOC_SYNCOBJ_TRANSFER, DREQ_BASE),
+            -ENOSYS);
+  EXPECT_EQ(nv_shim_ioctl(pr.p, pr.fd, NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD, DREQ_BASE),
+            -ENOSYS);
+
+  EXPECT_EQ(sobj_destroy(&pr, h), 0);
+  drm_probe_down(&pr);
+  EXPECT_EQ(nv_rm_mock_live(), 0);
 }
 
 static void test_nvshim_nvif_layout(void) {
@@ -2455,6 +3164,9 @@ void nv_shim_drm_test_suite(void) {
   test_nvshim_drm_prime_export();    /* WP-PRIME: real fd, same pages, both ways */
   test_nvshim_drm_prime_import();    /* WP-PRIME: import, SCM_RIGHTS, close orders */
   test_nvshim_drm_prime_refusals();  /* WP-PRIME: NO_SHARE, cross-device, shapes */
+  test_nvshim_drm_syncobj_timeline();  /* WP-SYNC: timeline points, EXEC retire */
+  test_nvshim_drm_syncobj_fd();        /* WP-SYNC: syncobj fd, SCM_RIGHTS, refs */
+  test_nvshim_drm_syncobj_refusals();  /* WP-SYNC: the names and the shapes */
   test_nvshim_nvif_layout();
   test_nvshim_nvif_device();
   test_nvshim_nvif_sclass();

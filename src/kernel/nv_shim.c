@@ -68,9 +68,10 @@ extern void uart_print_hex(uint64_t v);
 #define SHIM_WAIT_SPINS 100000 /* hard bound on FENCE_WAIT's poll loop */
 
 struct shim_sigpend {
-  uint32_t sobj;  /* a syncobj this client owns */
+  uint8_t obj;    /* WP-SYNC: index+1 into g_sobjs -- the syncobj this signals */
   uint32_t ch;    /* the channel whose fence must retire first */
   uint64_t fence;
+  uint64_t point; /* WP-SYNC: the point this fence writes when it retires */
 };
 
 /* WP-F3: one live CPU mapping of a GEM object.  Tracked so GEM_CLOSE (or the
@@ -136,8 +137,8 @@ struct shim_client {
   int drm;
   uint32_t drm_vm;
   int nsobj;
-  uint32_t sobj[SHIM_MAX_SYNCOBJS];
-  uint8_t sobj_sig[SHIM_MAX_SYNCOBJS];
+  uint32_t sobj[SHIM_MAX_SYNCOBJS];      /* the handle this client sees */
+  uint8_t sobj_obj[SHIM_MAX_SYNCOBJS];   /* WP-SYNC: index+1 into g_sobjs */
   int npend;
   struct shim_sigpend pend[SHIM_MAX_SIGPEND];
 
@@ -202,6 +203,73 @@ struct shim_dmabuf {
 #define SHIM_MAX_DMABUF 16
 static struct shim_dmabuf g_dmabufs[SHIM_MAX_DMABUF];
 static int g_dmabuf_serial;
+
+/* ---- WP-SYNC: syncobj records ------------------------------------------
+ *
+ * Before this rung a syncobj was a number in the client's handle table and a
+ * bit next to it.  An exported fd breaks that identity the same way a dma-buf
+ * broke it for a GEM object, so the syncobj gets its own refcounted record:
+ *
+ *     refs = one per client GEM-handle-STYLE table entry (a handle entry, not
+ *            the numeric handle) + one per exported syncobj fd
+ *
+ * `point` is the whole state: 0 = never signalled, N = the last point reached.
+ * A binary syncobj is this same field at 1 (Linux's syncobj is a fence pointer
+ * and CREATE_SIGNALED installs the stub fence), so the binary rows and the
+ * timeline rows cannot drift apart.  The table is node-wide and bounded; a
+ * create that finds it full refuses -ENOSPC by name.
+ *
+ * The record and its refcount helpers live here, above the client table, because
+ * client_clear()/client_teardown() have to drop the handle entries' references.
+ */
+struct shim_sobj {
+  int used;
+  int refs;
+  int id;         /* serial for the console rows */
+  uint64_t point; /* the signalled point; 0 = never */
+};
+#define SHIM_MAX_SOBJ_OBJS 32
+static struct shim_sobj g_sobjs[SHIM_MAX_SOBJ_OBJS];
+static int g_sobj_serial;
+
+static struct shim_sobj *sobj_lookup(uint32_t idx /* 1-based */) {
+  if (idx == 0 || idx > SHIM_MAX_SOBJ_OBJS) return 0;
+  return g_sobjs[idx - 1].used ? &g_sobjs[idx - 1] : 0;
+}
+
+/* 1-based index of a record, 0 for a pointer outside the table. */
+static uint32_t sobj_index(const struct shim_sobj *o) {
+  if (!o) return 0;
+  long i = (long)(o - g_sobjs);
+  if (i < 0 || i >= SHIM_MAX_SOBJ_OBJS || !o->used) return 0;
+  return (uint32_t)i + 1;
+}
+
+/* A fresh record with ONE reference (the handle entry about to be published). */
+static struct shim_sobj *sobj_alloc_locked(void) {
+  for (int i = 0; i < SHIM_MAX_SOBJ_OBJS; i++)
+    if (!g_sobjs[i].used) {
+      struct shim_sobj *o = &g_sobjs[i];
+      o->used = 1;
+      o->refs = 1;
+      o->point = 0;
+      o->id = ++g_sobj_serial;
+      return o;
+    }
+  return 0;
+}
+
+/* Drop one reference.  1 = this was the last one, the record is free now. */
+static int sobj_unref_locked(struct shim_sobj *o) {
+  if (!o || !o->used) return 1;
+  if (--o->refs > 0) return 0;
+  o->used = 0;
+  o->refs = 0;
+  o->point = 0;
+  o->id = 0;
+  return 1;
+}
+
 /* One bounce buffer for command streams: the RM (and later GSP-RM) takes a
  * kernel pointer, and SUBMIT is the only variable-length request. */
 static uint8_t g_cs_buf[NVSHIM_MAX_CS] __attribute__((aligned(16)));
@@ -304,6 +372,14 @@ static int r_dev = SHIM_ROW_BUDGET, r_alloc = SHIM_ROW_BUDGET,
  * row names itself, and the suites drive the same rows several times (three
  * close orders), so this is sized for the evidence, not for one call. */
 static int r_prime = 24;
+/* WP-SYNC's own bucket.  A syncobj row is the evidence that a fence exists and
+ * what it is waiting on (create/wait/timeline/fd, success AND refusal), and the
+ * suites drive the same rows in both directions several times.  The budget is
+ * per BOOT: the timeline suite alone prints ~30 rows, the fd suite walks three
+ * close orders, and the refusal suite names every shape -- 48 was spent inside
+ * the timeline suite and hid the fd/release rows, which are the evidence for
+ * acceptance item 3. */
+static int r_sync = 128;
 
 static void row_end(void) {
   uint32_t cpu = row_cpu();
@@ -338,7 +414,7 @@ int nv_shim_present(void) { return 1; }
 int nv_shim_features(void) {
   return NVSHIM_FEAT_DEVICE | NVSHIM_FEAT_ALLOC | NVSHIM_FEAT_VM_BIND |
          NVSHIM_FEAT_CHANNEL | NVSHIM_FEAT_SUBMIT | NVSHIM_FEAT_FENCE |
-         NVSHIM_FEAT_RM_MOCK | NVSHIM_FEAT_PRIME;
+         NVSHIM_FEAT_RM_MOCK | NVSHIM_FEAT_PRIME | NVSHIM_FEAT_SYNCOBJ_TIMELINE;
 }
 
 /* ---- request tables ---------------------------------------------------- */
@@ -443,13 +519,14 @@ static void client_clear(struct shim_client *c) {
   c->nsobj = 0;
   for (int i = 0; i < SHIM_MAX_SYNCOBJS; i++) {
     c->sobj[i] = 0;
-    c->sobj_sig[i] = 0;
+    c->sobj_obj[i] = 0;
   }
   c->npend = 0;
   for (int i = 0; i < SHIM_MAX_SIGPEND; i++) {
-    c->pend[i].sobj = 0;
+    c->pend[i].obj = 0;
     c->pend[i].ch = 0;
     c->pend[i].fence = 0;
+    c->pend[i].point = 0;
   }
   c->exec_have = 0;
   c->exec_sum = 0;
@@ -644,6 +721,11 @@ static void client_teardown(struct process *p, int fd,
     shim_maps_drop_object(p, h);
     rm()->mem_free(snap->dev_id, h);
   }
+  /* WP-SYNC: the handle entries' references go with the client; an exported
+   * syncobj fd keeps its record (and the point a consumer waits on) alive. */
+  spinlock_acquire(&g_shim_lock);
+  for (int i = 0; i < snap->nsobj; i++) sobj_unref_locked(sobj_lookup(snap->sobj_obj[i]));
+  spinlock_release(&g_shim_lock);
   (void)fd;
   if (snap->dev_id && snap->dev_id != SHIM_RESERVED)
     rm()->device_close(snap->dev_id);
@@ -1343,9 +1425,16 @@ static const struct drm_row g_drm_rows[] = {
     {0x84, 40}, /* NOUVEAU_GEM_INFO            struct ..._gem_info          */
     {0xbf, 8},  /* SYNCOBJ_CREATE              struct drm_syncobj_create    */
     {0xc0, 8},  /* SYNCOBJ_DESTROY             struct drm_syncobj_destroy   */
+    /* WP-SYNC: the four served syncobj rows.  24 is drm.h's
+     * struct drm_syncobj_handle (it carries a `point`), 24 the timeline array,
+     * 48 the timeline wait. */
+    {0xc1, 24}, /* SYNCOBJ_HANDLE_TO_FD        struct drm_syncobj_handle    */
+    {0xc2, 24}, /* SYNCOBJ_FD_TO_HANDLE        struct drm_syncobj_handle    */
     {0xc3, 40}, /* SYNCOBJ_WAIT                struct drm_syncobj_wait      */
     {0xc4, 16}, /* SYNCOBJ_RESET               struct drm_syncobj_array     */
     {0xc5, 16}, /* SYNCOBJ_SIGNAL              struct drm_syncobj_array     */
+    {0xca, 48}, /* SYNCOBJ_TIMELINE_WAIT       struct ..._timeline_wait     */
+    {0xcd, 24}, /* SYNCOBJ_TIMELINE_SIGNAL     struct ..._timeline_array    */
 };
 
 /* The refusal rows' names are FIXED-SIZE ARRAYS, not `const char *`.  The
@@ -1371,12 +1460,13 @@ static const struct {
     {NVSHIM_DRM_NR_GEM_PUSHBUF, "gem_pushbuf"},
     {NVSHIM_DRM_NR_GEM_CPU_PREP, "gem_cpu_prep"},
     {NVSHIM_DRM_NR_GEM_CPU_FINI, "gem_cpu_fini"},
-    {NVSHIM_DRM_NR_SYNCOBJ_HANDLE_TO_FD, "syncobj_handle_to_fd"},
-    {NVSHIM_DRM_NR_SYNCOBJ_FD_TO_HANDLE, "syncobj_fd_to_handle"},
-    {NVSHIM_DRM_NR_SYNCOBJ_TIMELINE_WAIT, "syncobj_timeline_wait"},
+    /* WP-SYNC: 0xc1 / 0xc2 / 0xca / 0xcd are SERVED now (the row table above),
+     * so they are no longer refusals.  What remains of the syncobj surface is
+     * named here: QUERY would need a submitted-point ledger, TRANSFER a
+     * sync_file/point move this node has no object for, and EVENTFD an
+     * eventfd registration -- each is a different rung, not a poll. */
     {NVSHIM_DRM_NR_SYNCOBJ_QUERY, "syncobj_query"},
     {NVSHIM_DRM_NR_SYNCOBJ_TRANSFER, "syncobj_transfer"},
-    {NVSHIM_DRM_NR_SYNCOBJ_TIMELINE_SIGNAL, "syncobj_timeline_signal"},
     {NVSHIM_DRM_NR_SYNCOBJ_EVENTFD, "syncobj_eventfd"},
 };
 
@@ -1578,7 +1668,12 @@ static int op_drm_get_cap(struct process *p, uint64_t arg) {
   if (vm_user_read(p, arg, &cap, (int)sizeof cap) != 0) return -EFAULT;
   switch (cap.capability) {
   case NVSHIM_DRM_CAP_SYNCOBJ: cap.value = 1; break;
-  case NVSHIM_DRM_CAP_SYNCOBJ_TIMELINE: cap.value = 0; break;
+  /* WP-SYNC: HONEST, and only because the rows are served: TIMELINE_SIGNAL and
+   * TIMELINE_WAIT both work (the unit tier drives both directions) and an EXEC's
+   * timeline sig is accepted.  The three syncobj rows this node still refuses
+   * (QUERY, TRANSFER, EVENTFD) are not what this cap promises; it is Linux's
+   * "timeline operations on sync objects". */
+  case NVSHIM_DRM_CAP_SYNCOBJ_TIMELINE: cap.value = 1; break;
   case NVSHIM_DRM_CAP_DUMB_BUFFER: cap.value = 0; break;
   default: return -EINVAL;
   }
@@ -2614,6 +2709,63 @@ int nv_shim_test_prime_refs(void *obj) {
   return refs;
 }
 
+/* ---- WP-SYNC: the syncobj fd's release + its seams --------------------- */
+
+/* Called by fs.c when the LAST reference to a syncobj fd's file description
+ * goes.  One reference -- the fd's -- drops here; the record survives while a
+ * handle entry or another exported fd still names it, which is what lets a
+ * consumer hold a fence after the renderer's node fd is closed. */
+void nv_shim_syncobj_release(struct process *grp, int fd, void *obj) {
+  (void)grp;
+  struct shim_sobj *o = (struct shim_sobj *)obj;
+  if (!o) return;
+  int id = 0, last = 0, refs = 0;
+  uint64_t point = 0;
+  spinlock_acquire(&g_shim_lock);
+  if (o->used) {
+    id = o->id;
+    point = o->point;
+    last = sobj_unref_locked(o);
+    refs = o->refs;
+  }
+  spinlock_release(&g_shim_lock);
+  row_begin("syncobj release", &r_sync);
+  row_s("obj=");
+  row_say(id);
+  row_s(" fd=");
+  row_say(fd);
+  row_s(" point=");
+  row_hex(point);
+  row_s(" refs=");
+  row_say(refs);
+  row_s(" freed=");
+  row_say(last);
+  row_end();
+}
+
+/* Live references on a syncobj record: handle entries + exported fds.  -1 when
+ * `obj` is not a live record.  The tier states "still alive"/"freed" with it. */
+int nv_shim_test_syncobj_refs(void *obj) {
+  struct shim_sobj *o = (struct shim_sobj *)obj;
+  if (!o) return -1;
+  int refs = -1;
+  spinlock_acquire(&g_shim_lock);
+  if (o->used) refs = o->refs;
+  spinlock_release(&g_shim_lock);
+  return refs;
+}
+
+/* The point the object is signalled at, (uint64_t)-1 when it is not live. */
+uint64_t nv_shim_test_syncobj_point(void *obj) {
+  struct shim_sobj *o = (struct shim_sobj *)obj;
+  if (!o) return (uint64_t)-1;
+  uint64_t point = (uint64_t)-1;
+  spinlock_acquire(&g_shim_lock);
+  if (o->used) point = o->point;
+  spinlock_release(&g_shim_lock);
+  return point;
+}
+
 static int op_drm_gem_close(struct process *p, int fd, uint64_t arg) {
   struct nvshim_drm_gem_close gc;
   if (vm_user_read(p, arg, &gc, (int)sizeof gc) != 0) return -EFAULT;
@@ -3011,7 +3163,27 @@ static int op_drm_channel_free(struct process *p, int fd, uint64_t arg) {
   return 0;
 }
 
-/* ---- syncobjs (binary only) -------------------------------------------- */
+/* ---- syncobjs: one object, one point -----------------------------------
+ *
+ * WP-SYNC.  A syncobj is ONE record with ONE 64-bit point, and a "binary"
+ * syncobj is that same record at point 1 -- in Linux a syncobj is a
+ * dma_fence pointer, CREATE_SIGNALED installs the stub fence, and the timeline
+ * ioctls replace the chain head.  So the binary rows and the timeline rows
+ * below read and write the SAME field; there is no second state machine that
+ * can drift away from the first.
+ *
+ * Lifecycle.  The record is refcounted by HANDLE ENTRIES + EXPORTED FDS.  Before
+ * this rung a handle WAS the syncobj, so destroy ended it; an exported fd breaks
+ * that identity exactly as a dma-buf broke it for a GEM object, so the record
+ * lives until the last of them goes (g_sobjs).  A signal through a handle and a
+ * signal through an fd are the same write to the same field.
+ *
+ * Completion.  A fence retires in client_reap_locked() -- the SAME function
+ * EXEC's submit path calls.  A wait never invents a signal; it observes that
+ * function's outcome.  A pending signal carries the point it will write, so an
+ * EXEC that signals point 5 leaves a wait for point 6 outstanding after it
+ * retires: a wait is satisfied by the point, never by "an EXEC retired".
+ * ---------------------------------------------------------------------- */
 
 static int client_find_sobj(const struct shim_client *c, uint32_t sobj) {
   for (int i = 0; i < c->nsobj; i++)
@@ -3019,9 +3191,29 @@ static int client_find_sobj(const struct shim_client *c, uint32_t sobj) {
   return -1;
 }
 
-/* A syncobj is signalled when the fence it is waiting on has retired.  Called
- * with g_shim_lock held: fence_test is a constant-time read on the mock, so the
- * shim -> mock lock order holds and nothing blocks inside the lock. */
+/* The global record this client's handle names, or 0.  Under g_shim_lock. */
+static struct shim_sobj *client_sobj_obj(const struct shim_client *c, uint32_t handle) {
+  int at = client_find_sobj(c, handle);
+  if (at < 0) return 0;
+  return sobj_lookup(c->sobj_obj[at]);
+}
+
+/* The highest point already SUBMITTED for a syncobj: the signalled point, or a
+ * point a pending fence will write when it retires.  This is what makes "you
+ * are going back in time" detectable at submit time instead of at retire time,
+ * where a lower point would silently be overwritten. */
+static uint64_t sobj_submitted_locked(const struct shim_client *c, uint32_t idx) {
+  uint64_t hi = 0;
+  struct shim_sobj *o = sobj_lookup(idx);
+  if (o) hi = o->point;
+  for (int i = 0; i < c->npend; i++)
+    if (c->pend[i].obj == idx && c->pend[i].point > hi) hi = c->pend[i].point;
+  return hi;
+}
+
+/* A syncobj reaches its point when the fence it is waiting on has retired.
+ * Called with g_shim_lock held: fence_test is a constant-time read on the mock,
+ * so the shim -> mock lock order holds and nothing blocks inside the lock. */
 static void client_reap_locked(struct shim_client *c) {
   for (int i = 0; i < c->npend;) {
     int st = rm()->fence_test(c->pend[i].ch, c->pend[i].fence);
@@ -3031,9 +3223,11 @@ static void client_reap_locked(struct shim_client *c) {
     }
     /* 0 = retired; -EINVAL = that channel is gone, so the fence can never
      * retire.  Either way the entry is finished; dropping it keeps the table
-     * from filling with entries that can never be cleared. */
-    int at = client_find_sobj(c, c->pend[i].sobj);
-    if (at >= 0) c->sobj_sig[at] = 1;
+     * from filling with entries that can never be cleared.  What it SIGNALS is
+     * its own point -- the record may have moved on to a higher one meanwhile
+     * (a later EXEC on the same syncobj), and a point never goes backwards. */
+    struct shim_sobj *o = sobj_lookup(c->pend[i].obj);
+    if (o && c->pend[i].point > o->point) o->point = c->pend[i].point;
     for (int k = i; k + 1 < c->npend; k++) c->pend[k] = c->pend[k + 1];
     c->npend--;
   }
@@ -3045,6 +3239,64 @@ static int drm_user_u32s(struct process *p, uint64_t uptr, uint32_t *out, uint32
   if (vm_user_read(p, uptr, out, (int)(n * (uint32_t)sizeof(uint32_t))) != 0) return -EFAULT;
   return 0;
 }
+
+/* The timeline rows carry a parallel u64[] of points. */
+static int drm_user_u64s(struct process *p, uint64_t uptr, uint64_t *out, uint32_t n) {
+  if (n == 0) return 0;
+  if (uptr == 0) return -EINVAL;
+  if (vm_user_read(p, uptr, out, (int)(n * (uint32_t)sizeof(uint64_t))) != 0) return -EFAULT;
+  return 0;
+}
+
+/* The names a syncobj refusal prints.  COPIED into the caller's buffer rather
+ * than selected as a `const char *`: clang folds a pointer-returning literal
+ * selector into a .rodata table of pointers, and this image is slid by Limine,
+ * so that table is a link-address hazard the AArch64 relocation audit gates on
+ * (tools/kernel_reloc_audit.py).  Bytes need no relocation; a pointer does. */
+static const char k_sync_reasons[][32] = {
+    "ok",
+    "not_a_syncobj",
+    "export_sync_file",
+    "import_sync_file",
+    "bad_flags",
+    "timeline_point_zero",
+    "timeline_point_order",
+    "point_without_sync_file",
+    "no_syncobj_slot",
+    "bad_shape",
+    "wait_flag_unsupported",
+    "not_this_clients_syncobj",
+};
+#define SYNC_NUM_REASONS (int)(sizeof k_sync_reasons / sizeof k_sync_reasons[0])
+
+void nv_shim_sync_refusal_name(int why, char *dst, int cap) {
+  const char *s = "unknown";
+  if (why >= 0 && why < SYNC_NUM_REASONS) s = k_sync_reasons[why];
+  if (cap <= 0) return;
+  int i = 0;
+  while (s[i] && i + 1 < cap) {
+    dst[i] = s[i];
+    i++;
+  }
+  dst[i] = 0;
+}
+
+static void row_sync_why(int why) {
+  char b[NVSHIM_SYNC_REASON_MAX];
+  nv_shim_sync_refusal_name(why, b, (int)sizeof b);
+  row_s(b);
+}
+
+/* One refusal row.  The caller picks the errno; the row always says why. */
+static void sync_refuse(const char *stage, const char *what, uint64_t v, int why) {
+  row_begin(stage, &r_sync);
+  row_s(what);
+  row_hex(v);
+  row_s(" reason=");
+  row_sync_why(why);
+  row_end();
+}
+
 
 static int op_drm_syncobj_create(struct process *p, int fd, uint64_t arg) {
   struct nvshim_drm_syncobj_create sc;
@@ -3059,8 +3311,19 @@ static int op_drm_syncobj_create(struct process *p, int fd, uint64_t arg) {
   }
   if (c->nsobj >= SHIM_MAX_SYNCOBJS) {
     spinlock_release(&g_shim_lock);
+    sync_refuse("drm syncobj refuse", "create handles=", (uint64_t)c->nsobj,
+                NVSHIM_SYNC_NO_SLOT);
     return -ENOSPC;
   }
+  struct shim_sobj *o = sobj_alloc_locked();
+  if (!o) {
+    spinlock_release(&g_shim_lock);
+    sync_refuse("drm syncobj refuse", "create", 0, NVSHIM_SYNC_NO_SLOT);
+    return -ENOSPC;
+  }
+  /* CREATE_SIGNALED is "point 1": the same record a timeline signal at 1 would
+   * leave, which is what makes the two rows one state machine. */
+  o->point = (sc.flags & NVSHIM_DRM_SYNCOBJ_CREATE_SIGNALED) ? 1 : 0;
   uint32_t handle = 0;
   for (uint32_t cand = 1;; cand++) {
     if (client_find_sobj(c, cand) < 0) {
@@ -3069,17 +3332,21 @@ static int op_drm_syncobj_create(struct process *p, int fd, uint64_t arg) {
     }
   }
   c->sobj[c->nsobj] = handle;
-  c->sobj_sig[c->nsobj] = (sc.flags & NVSHIM_DRM_SYNCOBJ_CREATE_SIGNALED) ? 1 : 0;
+  c->sobj_obj[c->nsobj] = (uint8_t)sobj_index(o);
   c->nsobj++;
+  int id = o->id;
+  uint64_t point = o->point;
   spinlock_release(&g_shim_lock);
 
   sc.handle = handle;
   if (vm_kwrite(p, arg, &sc, (int)sizeof sc) != 0) return -EFAULT;
-  row_begin("drm syncobj", &r_drm);
+  row_begin("drm syncobj", &r_sync);
   row_s("create handle=");
   row_say((int)handle);
-  row_s(" signaled=");
-  row_say((sc.flags & NVSHIM_DRM_SYNCOBJ_CREATE_SIGNALED) ? 1 : 0);
+  row_s(" point=");
+  row_hex(point);
+  row_s(" obj=");
+  row_say(id);
   row_end();
   return 0;
 }
@@ -3095,44 +3362,68 @@ static int op_drm_syncobj_destroy(struct process *p, int fd, uint64_t arg) {
     spinlock_release(&g_shim_lock);
     return -EINVAL;
   }
+  uint32_t idx = c->sobj_obj[at];
   for (int i = at; i + 1 < c->nsobj; i++) {
     c->sobj[i] = c->sobj[i + 1];
-    c->sobj_sig[i] = c->sobj_sig[i + 1];
+    c->sobj_obj[i] = c->sobj_obj[i + 1];
   }
   c->nsobj--;
   /* Drop pendings that referred to it: their signal has nowhere to land. */
   for (int i = 0; i < c->npend;) {
-    if (c->pend[i].sobj == sd.handle) {
+    if (c->pend[i].obj == idx) {
       for (int k = i; k + 1 < c->npend; k++) c->pend[k] = c->pend[k + 1];
       c->npend--;
     } else {
       i++;
     }
   }
+  /* The handle entry's reference goes; an exported fd keeps the record (and
+   * with it the point a consumer is waiting on) alive for as long as it is
+   * open.  `last` is reported because it is the point where nothing in the node
+   * names the object any more. */
+  int last = sobj_unref_locked(sobj_lookup(idx));
   spinlock_release(&g_shim_lock);
+
+  row_begin("drm syncobj", &r_sync);
+  row_s("destroy handle=");
+  row_say((int)sd.handle);
+  row_s(" freed=");
+  row_say(last);
+  row_end();
   return 0;
 }
 
-/* Are the named syncobjs signalled?  0 = all (or one, if !all), -ETIME = not
- * yet, -EINVAL = a handle this client does not own. */
-static int drm_sobj_ready(struct process *p, int fd, const uint32_t *hs, uint32_t n,
-                          int all, uint32_t *first_signaled) {
+/* What a wait row is waiting for.  `points[i]` is the point named for handle i;
+ * the binary row fills them all with 1, which is the same comparison. */
+struct sobj_wait {
+  uint32_t handles[SHIM_MAX_SYNCOBJS];
+  uint64_t points[SHIM_MAX_SYNCOBJS];
+  uint32_t n;
+  int all;
+};
+
+/* 0 = satisfied (all, or any if !all), -ETIME = not yet, -EINVAL = a handle this
+ * client does not own, -ENODEV = no client on this fd. */
+static int sobj_wait_ready(struct process *p, int fd, const struct sobj_wait *w,
+                           uint32_t *first_signaled) {
   spinlock_acquire(&g_shim_lock);
   struct shim_client *c = client_find(shim_pid(p), fd);
   if (!c) {
     spinlock_release(&g_shim_lock);
     return -ENODEV;
   }
+  /* The completion path, called here and nowhere else on the wait side: a point
+   * only ever appears because a fence retired in client_reap_locked(). */
   client_reap_locked(c);
   int any = 0, every = 1;
   uint32_t first = 0;
-  for (uint32_t i = 0; i < n; i++) {
-    int at = client_find_sobj(c, hs[i]);
-    if (at < 0) {
+  for (uint32_t i = 0; i < w->n; i++) {
+    struct shim_sobj *o = client_sobj_obj(c, w->handles[i]);
+    if (!o) {
       spinlock_release(&g_shim_lock);
       return -EINVAL;
     }
-    if (c->sobj_sig[at]) {
+    if (o->point >= w->points[i]) {
       if (!any) first = i;
       any = 1;
     } else {
@@ -3141,35 +3432,87 @@ static int drm_sobj_ready(struct process *p, int fd, const uint32_t *hs, uint32_
   }
   if (first_signaled) *first_signaled = first;
   spinlock_release(&g_shim_lock);
-  if (all ? every : any) return 0;
+  if (w->all ? every : any) return 0;
   return -ETIME;
+}
+
+/* The bounded wait both wait rows share.  timeout_nsec is an absolute
+ * CLOCK_MONOTONIC deadline, 0 means poll, and ~0 means "forever" -- which a
+ * kernel that may not park inside a syscall clamps, and says so.  What ends the
+ * wait early is a fence retiring (sobj_wait_ready re-reads the completion path);
+ * time only ends it when nothing retired. */
+static int sobj_wait_poll(struct process *p, int fd, const struct sobj_wait *w,
+                          int rc, int64_t timeout_nsec, uint32_t *first_signaled,
+                          int *clamped_out) {
+  *clamped_out = 0;
+  if (timeout_nsec == 0) return rc; /* poll */
+  uint64_t now_ms = timer_get_ms();
+  uint64_t deadline_ms;
+  if ((uint64_t)timeout_nsec == ~0ull) {
+    deadline_ms = now_ms + SHIM_FENCE_WAIT_MAX_MS;
+    *clamped_out = 1;
+  } else {
+    deadline_ms = (uint64_t)timeout_nsec / 1000000ull;
+    if (deadline_ms > now_ms + SHIM_FENCE_WAIT_MAX_MS) {
+      deadline_ms = now_ms + SHIM_FENCE_WAIT_MAX_MS;
+      *clamped_out = 1;
+    }
+  }
+  int spins = 0;
+  while (rc == -ETIME) {
+    if (spins++ >= SHIM_WAIT_SPINS) break;
+    if (timer_get_ms() >= deadline_ms) break;
+    for (int k = 0; k < 500; k++) shim_cpu_relax();
+    rc = sobj_wait_ready(p, fd, w, first_signaled);
+    if (rc == -EINVAL || rc == -ENODEV) break;
+  }
+  return rc;
+}
+
+/* The flags neither wait row serves: WAIT_FOR_SUBMIT needs a fence registry to
+ * hook, WAIT_AVAILABLE needs "is there a fence yet" apart from "did it
+ * retire", and WAIT_DEADLINE pushes a deadline into the fence.  None of the
+ * three is a poll, so each is refused by name instead of being approximated. */
+static int sobj_wait_flags_refused(uint32_t flags) {
+  return (flags & (NVSHIM_DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT |
+                   NVSHIM_DRM_SYNCOBJ_WAIT_FLAGS_WAIT_AVAILABLE |
+                   NVSHIM_DRM_SYNCOBJ_WAIT_FLAGS_WAIT_DEADLINE)) != 0;
 }
 
 static int op_drm_syncobj_wait(struct process *p, int fd, uint64_t arg) {
   struct nvshim_drm_syncobj_wait w;
   if (vm_user_read(p, arg, &w, (int)sizeof w) != 0) return -EFAULT;
-  if (w.count_handles == 0 || w.count_handles > SHIM_MAX_SYNCOBJS) return -EINVAL;
-  if (w.flags & (NVSHIM_DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT |
-                 NVSHIM_DRM_SYNCOBJ_WAIT_FLAGS_WAIT_AVAILABLE |
-                 NVSHIM_DRM_SYNCOBJ_WAIT_FLAGS_WAIT_DEADLINE)) {
-    row_begin("drm syncobj refused", &r_refuse);
-    row_s("wait flags=");
-    row_hex(w.flags);
-    row_end();
+  if (w.count_handles == 0 || w.count_handles > SHIM_MAX_SYNCOBJS) {
+    sync_refuse("drm syncobj refuse", "wait count=", (uint64_t)w.count_handles,
+                NVSHIM_SYNC_BAD_SHAPE);
+    return -EINVAL;
+  }
+  if (sobj_wait_flags_refused(w.flags)) {
+    sync_refuse("drm syncobj refuse", "wait flags=", (uint64_t)w.flags,
+                NVSHIM_SYNC_WAIT_UNSUPPORTED);
     return -ENOSYS; /* needs fence registration / deadlines, not a poll */
   }
-  if (w.flags & ~NVSHIM_DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL) return -EINVAL;
+  if (w.flags & ~NVSHIM_DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL) {
+    sync_refuse("drm syncobj refuse", "wait flags=", (uint64_t)w.flags,
+                NVSHIM_SYNC_BAD_FLAGS);
+    return -EINVAL;
+  }
 
-  uint32_t handles[SHIM_MAX_SYNCOBJS];
-  int rc = drm_user_u32s(p, w.handles, handles, w.count_handles);
+  struct sobj_wait sw;
+  sw.n = w.count_handles;
+  sw.all = (w.flags & NVSHIM_DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL) ? 1 : 0;
+  int rc = drm_user_u32s(p, w.handles, sw.handles, w.count_handles);
   if (rc != 0) return rc;
+  /* Binary: every syncobj's point 1.  A timeline syncobj that reached point 5
+   * is past 1, so a binary wait on it is satisfied -- the same answer Linux
+   * gives (a non-NULL fence is a signalled one there). */
+  for (uint32_t i = 0; i < w.count_handles; i++) sw.points[i] = 1;
 
-  int all = (w.flags & NVSHIM_DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL) ? 1 : 0;
-  rc = drm_sobj_ready(p, fd, handles, w.count_handles, all, &w.first_signaled);
+  rc = sobj_wait_ready(p, fd, &sw, &w.first_signaled);
   if (rc != -ETIME) {
     if (rc == 0) {
       if (vm_kwrite(p, arg, &w, (int)sizeof w) != 0) return -EFAULT;
-      row_begin("drm syncobj", &r_drm);
+      row_begin("drm syncobj", &r_sync);
       row_s("wait n=");
       row_say((int)w.count_handles);
       row_s(" retired=1");
@@ -3178,40 +3521,11 @@ static int op_drm_syncobj_wait(struct process *p, int fd, uint64_t arg) {
     return rc;
   }
 
-  /* Not signalled yet.  timeout_nsec is an absolute CLOCK_MONOTONIC deadline, 0
-   * means poll, and ~0 means "forever" -- which a kernel that may not park
-   * inside a syscall clamps, and says so. */
-  if (w.timeout_nsec == 0 || w.count_handles == 0) {
-    row_begin("drm syncobj", &r_drm);
-    row_s("wait n=");
-    row_say((int)w.count_handles);
-    row_s(" retired=0 timeout=poll");
-    row_end();
-    return -ETIME;
-  }
-  uint64_t now_ms = timer_get_ms();
-  uint64_t deadline_ms;
   int clamped = 0;
-  if ((uint64_t)w.timeout_nsec == ~0ull) {
-    deadline_ms = now_ms + SHIM_FENCE_WAIT_MAX_MS;
-    clamped = 1;
-  } else {
-    deadline_ms = (uint64_t)w.timeout_nsec / 1000000ull;
-    if (deadline_ms > now_ms + SHIM_FENCE_WAIT_MAX_MS) {
-      deadline_ms = now_ms + SHIM_FENCE_WAIT_MAX_MS;
-      clamped = 1;
-    }
-  }
-  int spins = 0;
-  while (rc == -ETIME) {
-    if (spins++ >= SHIM_WAIT_SPINS) break;
-    if (timer_get_ms() >= deadline_ms) break;
-    for (int k = 0; k < 500; k++) shim_cpu_relax();
-    rc = drm_sobj_ready(p, fd, handles, w.count_handles, all, &w.first_signaled);
-  }
+  rc = sobj_wait_poll(p, fd, &sw, rc, w.timeout_nsec, &w.first_signaled, &clamped);
   if (rc == 0) {
     if (vm_kwrite(p, arg, &w, (int)sizeof w) != 0) return -EFAULT;
-    row_begin("drm syncobj", &r_drm);
+    row_begin("drm syncobj", &r_sync);
     row_s("wait n=");
     row_say((int)w.count_handles);
     row_s(" retired=1 waited=1 clamped=");
@@ -3220,20 +3534,176 @@ static int op_drm_syncobj_wait(struct process *p, int fd, uint64_t arg) {
     return 0;
   }
   if (rc != -ETIME) return rc;
-  row_begin("drm syncobj", &r_drm);
+  row_begin("drm syncobj", &r_sync);
   row_s("wait n=");
   row_say((int)w.count_handles);
-  row_s(" retired=0 timeout=ms clamped=");
+  row_s(" retired=0 timeout=");
+  row_s(w.timeout_nsec == 0 ? "poll" : "ms");
+  row_s(" clamped=");
   row_say(clamped);
   row_end();
   return -ETIME;
 }
 
-/* RESET (flags == 0) and SIGNAL (flags == 1) share drm_syncobj_array. */
+/* ---- timeline rows (WP-SYNC) ------------------------------------------- */
+
+static int op_drm_syncobj_timeline_wait(struct process *p, int fd, uint64_t arg) {
+  struct nvshim_drm_syncobj_timeline_wait w;
+  if (vm_user_read(p, arg, &w, (int)sizeof w) != 0) return -EFAULT;
+  if (w.pad != 0 || w.count_handles == 0 || w.count_handles > SHIM_MAX_SYNCOBJS) {
+    sync_refuse("drm syncobj refuse", "timeline_wait count=",
+                (uint64_t)w.count_handles, NVSHIM_SYNC_BAD_SHAPE);
+    return -EINVAL;
+  }
+  if (sobj_wait_flags_refused(w.flags)) {
+    sync_refuse("drm syncobj refuse", "timeline_wait flags=", (uint64_t)w.flags,
+                NVSHIM_SYNC_WAIT_UNSUPPORTED);
+    return -ENOSYS;
+  }
+  if (w.flags & ~NVSHIM_DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL) {
+    sync_refuse("drm syncobj refuse", "timeline_wait flags=", (uint64_t)w.flags,
+                NVSHIM_SYNC_BAD_FLAGS);
+    return -EINVAL;
+  }
+
+  struct sobj_wait sw;
+  sw.n = w.count_handles;
+  sw.all = (w.flags & NVSHIM_DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL) ? 1 : 0;
+  int rc = drm_user_u32s(p, w.handles, sw.handles, w.count_handles);
+  if (rc != 0) return rc;
+  /* No points array means "point 0 for every handle", which every syncobj is at
+   * or past -- Linux fills zeros there and the wait succeeds immediately. */
+  if (w.points == 0) {
+    for (uint32_t i = 0; i < w.count_handles; i++) sw.points[i] = 0;
+  } else {
+    rc = drm_user_u64s(p, w.points, sw.points, w.count_handles);
+    if (rc != 0) return rc;
+  }
+
+  rc = sobj_wait_ready(p, fd, &sw, &w.first_signaled);
+  if (rc != -ETIME) {
+    if (rc == 0) {
+      if (vm_kwrite(p, arg, &w, (int)sizeof w) != 0) return -EFAULT;
+      row_begin("drm syncobj", &r_sync);
+      row_s("timeline_wait n=");
+      row_say((int)w.count_handles);
+      row_s(" point=");
+      row_hex(sw.points[w.first_signaled < w.count_handles ? w.first_signaled : 0]);
+      row_s(" retired=1");
+      row_end();
+    }
+    return rc;
+  }
+
+  int clamped = 0;
+  rc = sobj_wait_poll(p, fd, &sw, rc, w.timeout_nsec, &w.first_signaled, &clamped);
+  if (rc == 0) {
+    if (vm_kwrite(p, arg, &w, (int)sizeof w) != 0) return -EFAULT;
+    row_begin("drm syncobj", &r_sync);
+    row_s("timeline_wait n=");
+    row_say((int)w.count_handles);
+    row_s(" retired=1 waited=1 clamped=");
+    row_say(clamped);
+    row_end();
+    return 0;
+  }
+  if (rc != -ETIME) return rc;
+  row_begin("drm syncobj", &r_sync);
+  row_s("timeline_wait n=");
+  row_say((int)w.count_handles);
+  row_s(" point=");
+  row_hex(sw.points[0]);
+  row_s(" retired=0 clamped=");
+  row_say(clamped);
+  row_end();
+  return -ETIME;
+}
+
+/* SIGNAL a point on each named syncobj.  Every entry is validated before any is
+ * written, so a batch with one bad point changes nothing. */
+static int op_drm_syncobj_timeline_signal(struct process *p, int fd, uint64_t arg) {
+  struct nvshim_drm_syncobj_timeline_array sa;
+  if (vm_user_read(p, arg, &sa, (int)sizeof sa) != 0) return -EFAULT;
+  if (sa.flags != 0) {
+    sync_refuse("drm syncobj refuse", "timeline_signal flags=", (uint64_t)sa.flags,
+                NVSHIM_SYNC_BAD_FLAGS);
+    return -EINVAL;
+  }
+  if (sa.count_handles == 0 || sa.count_handles > SHIM_MAX_SYNCOBJS) {
+    sync_refuse("drm syncobj refuse", "timeline_signal count=",
+                (uint64_t)sa.count_handles, NVSHIM_SYNC_BAD_SHAPE);
+    return -EINVAL;
+  }
+  uint32_t handles[SHIM_MAX_SYNCOBJS];
+  uint64_t points[SHIM_MAX_SYNCOBJS];
+  int rc = drm_user_u32s(p, sa.handles, handles, sa.count_handles);
+  if (rc != 0) return rc;
+  if (sa.points == 0) {
+    sync_refuse("drm syncobj refuse", "timeline_signal points=", 0,
+                NVSHIM_SYNC_POINT_ZERO);
+    return -EINVAL;
+  }
+  rc = drm_user_u64s(p, sa.points, points, sa.count_handles);
+  if (rc != 0) return rc;
+
+  spinlock_acquire(&g_shim_lock);
+  struct shim_client *c = client_find(shim_pid(p), fd);
+  if (!c) {
+    spinlock_release(&g_shim_lock);
+    return -ENODEV;
+  }
+  for (uint32_t i = 0; i < sa.count_handles; i++) {
+    struct shim_sobj *o = client_sobj_obj(c, handles[i]);
+    if (!o) {
+      spinlock_release(&g_shim_lock);
+      sync_refuse("drm syncobj refuse", "timeline_signal handle=",
+                  (uint64_t)handles[i], NVSHIM_SYNC_NOT_THIS_CLIENTS);
+      return -EINVAL;
+    }
+    if (points[i] == 0) {
+      spinlock_release(&g_shim_lock);
+      sync_refuse("drm syncobj refuse", "timeline_signal handle=",
+                  (uint64_t)handles[i], NVSHIM_SYNC_POINT_ZERO);
+      return -EINVAL;
+    }
+    /* Going back in time: Linux clamps at a WARN_ON.  This node has no WARN to
+     * report and no chain to clamp into one field, so it refuses the point and
+     * names it -- a signal that silently lands on a lower point is a fence the
+     * consumer can never distinguish from the one it is waiting on. */
+    if (points[i] <= sobj_submitted_locked(c, sobj_index(o))) {
+      spinlock_release(&g_shim_lock);
+      sync_refuse("drm syncobj refuse", "timeline_signal point=", points[i],
+                  NVSHIM_SYNC_POINT_ORDER);
+      return -EINVAL;
+    }
+  }
+  uint64_t last = 0;
+  for (uint32_t i = 0; i < sa.count_handles; i++) {
+    struct shim_sobj *o = client_sobj_obj(c, handles[i]);
+    if (o && points[i] > o->point) o->point = points[i];
+    if (points[i] > last) last = points[i];
+  }
+  spinlock_release(&g_shim_lock);
+
+  row_begin("drm syncobj", &r_sync);
+  row_s("timeline_signal n=");
+  row_say((int)sa.count_handles);
+  row_s(" point=");
+  row_hex(last);
+  row_end();
+  return 0;
+}
+
+/* RESET (flags == 0) and SIGNAL (flags == 1) share drm_syncobj_array.  SIGNAL
+ * is the binary form: it is the same field the timeline row writes, at 1. */
 static int op_drm_syncobj_set(struct process *p, int fd, uint64_t arg, int signal) {
   struct nvshim_drm_syncobj_array sa;
   if (vm_user_read(p, arg, &sa, (int)sizeof sa) != 0) return -EFAULT;
-  if (sa.count_handles == 0 || sa.count_handles > SHIM_MAX_SYNCOBJS) return -EINVAL;
+  if (sa.count_handles == 0 || sa.count_handles > SHIM_MAX_SYNCOBJS) {
+    sync_refuse("drm syncobj refuse", "set count=", (uint64_t)sa.count_handles,
+                NVSHIM_SYNC_BAD_SHAPE);
+    return -EINVAL;
+  }
   uint32_t handles[SHIM_MAX_SYNCOBJS];
   int rc = drm_user_u32s(p, sa.handles, handles, sa.count_handles);
   if (rc != 0) return rc;
@@ -3245,14 +3715,180 @@ static int op_drm_syncobj_set(struct process *p, int fd, uint64_t arg, int signa
     return -ENODEV;
   }
   for (uint32_t i = 0; i < sa.count_handles; i++) {
-    int at = client_find_sobj(c, handles[i]);
-    if (at < 0) {
+    struct shim_sobj *o = client_sobj_obj(c, handles[i]);
+    if (!o) {
       spinlock_release(&g_shim_lock);
       return -EINVAL;
     }
-    c->sobj_sig[at] = signal ? 1 : 0;
+  }
+  for (uint32_t i = 0; i < sa.count_handles; i++) {
+    struct shim_sobj *o = client_sobj_obj(c, handles[i]);
+    o->point = signal ? 1 : 0;
   }
   spinlock_release(&g_shim_lock);
+  return 0;
+}
+
+/* ---- syncobj <-> fd (WP-SYNC) ------------------------------------------
+ *
+ * The fd names the SYNCOBJ, not a fence: an ordinary file description whose
+ * payload is the record, refcounted exactly like a dma-buf fd.  FD_TO_HANDLE
+ * therefore installs a second handle on the same object, and a signal through
+ * either name is one write to one point.  What the fd is NOT is a sync_file --
+ * EXPORT_SYNC_FILE / IMPORT_SYNC_FILE ask for a dma_fence as a file, which this
+ * node has no object for, so both are refused by name.
+ * ---------------------------------------------------------------------- */
+
+static int op_drm_syncobj_handle_to_fd(struct process *p, int fd, uint64_t arg) {
+  struct nvshim_drm_syncobj_handle sh;
+  if (vm_user_read(p, arg, &sh, (int)sizeof sh) != 0) return -EFAULT;
+  if (sh.pad != 0) {
+    sync_refuse("drm syncobj refuse", "handle_to_fd pad=", (uint64_t)sh.pad,
+                NVSHIM_SYNC_BAD_SHAPE);
+    return -EINVAL;
+  }
+  if (sh.flags & ~(uint32_t)(NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE |
+                             NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_TIMELINE)) {
+    sync_refuse("drm syncobj refuse", "handle_to_fd flags=", (uint64_t)sh.flags,
+                NVSHIM_SYNC_BAD_FLAGS);
+    return -EINVAL;
+  }
+  if (sh.flags & NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE) {
+    sync_refuse("drm syncobj refuse", "handle_to_fd handle=", (uint64_t)sh.handle,
+                NVSHIM_SYNC_EXPORT_SYNC_FILE);
+    return -ENOSYS;
+  }
+  /* Without EXPORT_SYNC_FILE there is no point to address; drm_syncobj.c makes
+   * the same check on the same field. */
+  if (sh.point != 0) {
+    sync_refuse("drm syncobj refuse", "handle_to_fd point=", sh.point,
+                NVSHIM_SYNC_POINT_WITHOUT_FILE);
+    return -EINVAL;
+  }
+
+  spinlock_acquire(&g_shim_lock);
+  struct shim_client *c = client_find(shim_pid(p), fd);
+  struct shim_sobj *o = c ? client_sobj_obj(c, sh.handle) : 0;
+  if (!o) {
+    spinlock_release(&g_shim_lock);
+    sync_refuse("drm syncobj refuse", "handle_to_fd handle=", (uint64_t)sh.handle,
+                NVSHIM_SYNC_NOT_THIS_CLIENTS);
+    return -EINVAL;
+  }
+  o->refs++; /* the fd's reference, taken before the fd exists */
+  int id = o->id;
+  uint64_t point = o->point;
+  spinlock_release(&g_shim_lock);
+
+  int ufd = file_syncobj_install(p, o, 1 /* O_CLOEXEC, as Linux exports it */);
+  if (ufd < 0) {
+    spinlock_acquire(&g_shim_lock);
+    sobj_unref_locked(o);
+    spinlock_release(&g_shim_lock);
+    row_begin("drm syncobj refuse", &r_sync);
+    row_s("handle_to_fd handle=");
+    row_say((int)sh.handle);
+    row_s(" reason=no_fd_slot rc=");
+    row_say(ufd);
+    row_end();
+    return ufd == -ENFILE ? -ENFILE : -EMFILE;
+  }
+  sh.fd = ufd;
+  if (vm_kwrite(p, arg, &sh, (int)sizeof sh) != 0) {
+    (void)file_close(p, ufd); /* the fd is installed: close(2) semantics */
+    return -EFAULT;
+  }
+  row_begin("drm syncobj", &r_sync);
+  row_s("handle_to_fd handle=");
+  row_say((int)sh.handle);
+  row_s(" fd=");
+  row_say(ufd);
+  row_s(" obj=");
+  row_say(id);
+  row_s(" point=");
+  row_hex(point);
+  row_end();
+  return 0;
+}
+
+static int op_drm_syncobj_fd_to_handle(struct process *p, int fd, uint64_t arg) {
+  struct nvshim_drm_syncobj_handle sh;
+  if (vm_user_read(p, arg, &sh, (int)sizeof sh) != 0) return -EFAULT;
+  if (sh.pad != 0) {
+    sync_refuse("drm syncobj refuse", "fd_to_handle pad=", (uint64_t)sh.pad,
+                NVSHIM_SYNC_BAD_SHAPE);
+    return -EINVAL;
+  }
+  if (sh.flags & ~(uint32_t)(NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE |
+                             NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_TIMELINE)) {
+    sync_refuse("drm syncobj refuse", "fd_to_handle flags=", (uint64_t)sh.flags,
+                NVSHIM_SYNC_BAD_FLAGS);
+    return -EINVAL;
+  }
+  if (sh.flags & NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE) {
+    sync_refuse("drm syncobj refuse", "fd_to_handle fd=", (uint64_t)(int64_t)sh.fd,
+                NVSHIM_SYNC_IMPORT_SYNC_FILE);
+    return -ENOSYS;
+  }
+  if (sh.point != 0) {
+    sync_refuse("drm syncobj refuse", "fd_to_handle point=", sh.point,
+                NVSHIM_SYNC_POINT_WITHOUT_FILE);
+    return -EINVAL;
+  }
+
+  /* Resolving the fd is a read of the file table, not of the shim's; the pointer
+   * is re-checked under g_shim_lock so a concurrent close(2) cannot hand us a
+   * record that has already been freed. */
+  void *obj = file_syncobj_obj(p, sh.fd);
+  if (!obj) {
+    sync_refuse("drm syncobj refuse", "fd_to_handle fd=", (uint64_t)(int64_t)sh.fd,
+                NVSHIM_SYNC_NOT_SYNCOBJ);
+    return -EINVAL;
+  }
+
+  spinlock_acquire(&g_shim_lock);
+  struct shim_client *c = client_find(shim_pid(p), fd);
+  if (!c) {
+    spinlock_release(&g_shim_lock);
+    return -ENODEV;
+  }
+  struct shim_sobj *o = (struct shim_sobj *)obj;
+  if (file_syncobj_obj(p, sh.fd) != obj || !o->used) {
+    spinlock_release(&g_shim_lock);
+    sync_refuse("drm syncobj refuse", "fd_to_handle fd=", (uint64_t)(int64_t)sh.fd,
+                NVSHIM_SYNC_NOT_SYNCOBJ);
+    return -EINVAL;
+  }
+  if (c->nsobj >= SHIM_MAX_SYNCOBJS) {
+    spinlock_release(&g_shim_lock);
+    sync_refuse("drm syncobj refuse", "fd_to_handle handles=", (uint64_t)c->nsobj,
+                NVSHIM_SYNC_NO_SLOT);
+    return -ENOSPC;
+  }
+  uint32_t handle = 0;
+  for (uint32_t cand = 1;; cand++) {
+    if (client_find_sobj(c, cand) < 0) {
+      handle = cand;
+      break;
+    }
+  }
+  o->refs++; /* the new handle entry's reference */
+  c->sobj[c->nsobj] = handle;
+  c->sobj_obj[c->nsobj] = (uint8_t)sobj_index(o);
+  c->nsobj++;
+  int id = o->id;
+  spinlock_release(&g_shim_lock);
+
+  sh.handle = handle;
+  if (vm_kwrite(p, arg, &sh, (int)sizeof sh) != 0) return -EFAULT;
+  row_begin("drm syncobj", &r_sync);
+  row_s("fd_to_handle fd=");
+  row_say(sh.fd);
+  row_s(" handle=");
+  row_say((int)handle);
+  row_s(" obj=");
+  row_say(id);
+  row_end();
   return 0;
 }
 
@@ -3315,11 +3951,25 @@ static int op_drm_exec(struct process *p, int fd, uint64_t arg) {
     if (vm_user_read(p, ex.sig_ptr + (uint64_t)i * sizeof(struct nvshim_drm_sync),
                      &syncs[i], (int)sizeof syncs[i]) != 0)
       return -EFAULT;
+    /* WP-SYNC: a timeline sync is SERVED now.  Its point must be a real point
+     * (a zero is not one) and its flags must be the type and nothing else.  The
+     * row `reason=timeline_syncobj` is therefore gone for the served case and
+     * the malformed ones name themselves below. */
     if ((syncs[i].flags & NVSHIM_DRM_SYNC_TYPE_MASK) == NVSHIM_DRM_SYNC_TIMELINE_SYNCOBJ) {
-      row_begin("drm exec refused", &r_refuse);
-      row_s("reason=timeline_syncobj");
-      row_end();
-      return -ENOSYS; /* binary syncobjs only */
+      if (syncs[i].flags != NVSHIM_DRM_SYNC_TIMELINE_SYNCOBJ) {
+        row_begin("drm exec refused", &r_refuse);
+        row_s("sync flags=");
+        row_hex(syncs[i].flags);
+        row_s(" reason=unknown_sync_type");
+        row_end();
+        return -EINVAL;
+      }
+      if (syncs[i].timeline_value == 0) {
+        sync_refuse("drm exec refused", "timeline_signal handle=",
+                    (uint64_t)syncs[i].handle, NVSHIM_SYNC_POINT_ZERO);
+        return -EINVAL;
+      }
+      continue;
     }
     if ((syncs[i].flags & NVSHIM_DRM_SYNC_TYPE_MASK) != NVSHIM_DRM_SYNC_SYNCOBJ ||
         syncs[i].flags != NVSHIM_DRM_SYNC_SYNCOBJ || syncs[i].timeline_value != 0) {
@@ -3338,13 +3988,38 @@ static int op_drm_exec(struct process *p, int fd, uint64_t arg) {
 
   int pid = shim_pid(p);
   uint32_t ch = ex.channel;
+  /* The point each sig asks for: the timeline point, or 1 for a binary syncobj
+   * (the same field, at the value CREATE_SIGNALED would have set). */
+  uint64_t want[NVSHIM_DRM_MAX_SYNCS];
+  for (uint32_t i = 0; i < ex.sig_count; i++)
+    want[i] = ((syncs[i].flags & NVSHIM_DRM_SYNC_TYPE_MASK) ==
+               NVSHIM_DRM_SYNC_TIMELINE_SYNCOBJ)
+                  ? syncs[i].timeline_value
+                  : 1;
   spinlock_acquire(&g_shim_lock);
   struct shim_client *c = client_find(pid, fd);
   int owned_ch = (c && c->dev_id == dev && client_find_ch(c, ch) >= 0);
-  int sobj_ok = 1;
+  int sobj_ok = 1, order_ok = 1;
+  uint64_t bad_point = 0;
   if (owned_ch) {
-    for (uint32_t i = 0; i < ex.sig_count; i++)
-      if (client_find_sobj(c, syncs[i].handle) < 0) sobj_ok = 0;
+    for (uint32_t i = 0; i < ex.sig_count; i++) {
+      int at = client_find_sobj(c, syncs[i].handle);
+      if (at < 0) {
+        sobj_ok = 0;
+        continue;
+      }
+      /* An out-of-order point is refused BEFORE any push is enqueued: a fence
+       * that lands on an older point is one a consumer cannot tell from the one
+       * it waits on.  Checked against every point already submitted -- the
+       * signalled one and any pending retire. */
+      if (want[i] > 1 || (syncs[i].flags & NVSHIM_DRM_SYNC_TYPE_MASK) ==
+                            NVSHIM_DRM_SYNC_TIMELINE_SYNCOBJ) {
+        if (sobj_submitted_locked(c, c->sobj_obj[at]) >= want[i]) {
+          order_ok = 0;
+          bad_point = want[i];
+        }
+      }
+    }
   }
   spinlock_release(&g_shim_lock);
   if (!owned_ch) {
@@ -3356,6 +4031,11 @@ static int op_drm_exec(struct process *p, int fd, uint64_t arg) {
     return -EINVAL;
   }
   if (!sobj_ok) return -EINVAL;
+  if (!order_ok) {
+    sync_refuse("drm exec refused", "timeline_signal point=", bad_point,
+                NVSHIM_SYNC_POINT_ORDER);
+    return -EINVAL;
+  }
 
   /* WP-F3: READ every push buffer before enqueuing any of them.  A GPU VA is
    * the only name EXEC has for the bytes (there is no user pointer on this
@@ -3423,12 +4103,16 @@ static int op_drm_exec(struct process *p, int fd, uint64_t arg) {
     for (uint32_t i = 0; i < ex.sig_count; i++) {
       int at = client_find_sobj(c, syncs[i].handle);
       if (at < 0) continue;
+      struct shim_sobj *o = sobj_lookup(c->sobj_obj[at]);
+      if (!o) continue;
       if (rm()->fence_test(ch, fence) == 0) {
-        c->sobj_sig[at] = 1; /* retired already: no pending entry needed */
+        /* Retired already: the point is there now, no pending entry needed. */
+        if (want[i] > o->point) o->point = want[i];
       } else if (c->npend < SHIM_MAX_SIGPEND) {
-        c->pend[c->npend].sobj = syncs[i].handle;
+        c->pend[c->npend].obj = (uint8_t)sobj_index(o);
         c->pend[c->npend].ch = ch;
         c->pend[c->npend].fence = fence;
+        c->pend[c->npend].point = want[i];
         c->npend++;
       } else {
         /* Table full: the syncobj would never be signalled, so say so. */
@@ -3959,9 +4643,13 @@ int nv_shim_drm_ioctl(struct process *p, int fd, unsigned long req, uint64_t arg
   case 0x84: return op_drm_gem_info(p, fd, arg);
   case 0xbf: return op_drm_syncobj_create(p, fd, arg);
   case 0xc0: return op_drm_syncobj_destroy(p, fd, arg);
+  case 0xc1: return op_drm_syncobj_handle_to_fd(p, fd, arg);
+  case 0xc2: return op_drm_syncobj_fd_to_handle(p, fd, arg);
   case 0xc3: return op_drm_syncobj_wait(p, fd, arg);
   case 0xc4: return op_drm_syncobj_set(p, fd, arg, 0);
   case 0xc5: return op_drm_syncobj_set(p, fd, arg, 1);
+  case 0xca: return op_drm_syncobj_timeline_wait(p, fd, arg);
+  case 0xcd: return op_drm_syncobj_timeline_signal(p, fd, arg);
   default: return -ENOTTY; /* unreachable: drm_row_size() covered the table */
   }
 }

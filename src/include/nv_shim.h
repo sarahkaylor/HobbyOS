@@ -134,6 +134,9 @@
 #define NVSHIM_FEAT_FENCE    (1u << 5)
 #define NVSHIM_FEAT_RM_MOCK  (1u << 6) /* no engine: fences retire on submit */
 #define NVSHIM_FEAT_PRIME    (1u << 7) /* WP-PRIME: GEM <-> dma-buf fd, both ways */
+#define NVSHIM_FEAT_SYNCOBJ_TIMELINE (1u << 8) /* WP-SYNC: timeline points and
+                                                * syncobj fds, not just the
+                                                * binary signal/wait */
 
 struct nvshim_device {
   uint32_t abi;          /* in: NVSHIM_ABI_VERSION */
@@ -348,6 +351,38 @@ void nv_shim_dmabuf_release(struct process *grp, int fd, void *obj);
 #define NVSHIM_PRIME_REASON_MAX   40
 void nv_shim_prime_refusal_name(int why, char *dst, int cap);
 
+/* WP-SYNC: the syncobj fd.  fs.c installs it (file_syncobj_install, fs.h) and
+ * calls nv_shim_syncobj_release() when the LAST file reference to it closes --
+ * the same machinery a dma-buf fd uses, because the fd names an object rather
+ * than a stream.  `obj` is opaque above this file.
+ *
+ * The object is refcounted by HANDLE ENTRIES + EXPORTED FDS, so it outlives the
+ * client that created it: a compositor can hold the fence after the renderer's
+ * node fd is gone, and a signal through either name is seen through the other.
+ * `grp`/`fd` are only used for the release row (fd < 0 when the fd table
+ * discards a received fd with no process context). */
+void nv_shim_syncobj_release(struct process *grp, int fd, void *obj);
+
+/* Why a syncobj request was refused, as the name the console row carries.
+ * Exported so the tier asserts the NAME, not only the errno.  COPIED into the
+ * caller's buffer, never returned as a pointer: see the PRIME note above (a
+ * pointer-returning literal selector is a .rodata pointer table and trips the
+ * AArch64 relocation audit). */
+#define NVSHIM_SYNC_OK                 0
+#define NVSHIM_SYNC_NOT_SYNCOBJ        1 /* the fd is not a syncobj fd */
+#define NVSHIM_SYNC_EXPORT_SYNC_FILE   2 /* HANDLE_TO_FD asked for a sync_file */
+#define NVSHIM_SYNC_IMPORT_SYNC_FILE   3 /* FD_TO_HANDLE asked to eat a sync_file */
+#define NVSHIM_SYNC_BAD_FLAGS          4 /* an undefined flag bit */
+#define NVSHIM_SYNC_POINT_ZERO         5 /* a timeline point of 0 is not a point */
+#define NVSHIM_SYNC_POINT_ORDER        6 /* not greater than a submitted point */
+#define NVSHIM_SYNC_POINT_WITHOUT_FILE 7 /* point != 0 on the plain fd form */
+#define NVSHIM_SYNC_NO_SLOT            8 /* object table / handle table full */
+#define NVSHIM_SYNC_BAD_SHAPE          9 /* pad != 0, count 0, or a bad width */
+#define NVSHIM_SYNC_WAIT_UNSUPPORTED  10 /* WAIT_FOR_SUBMIT / AVAILABLE / DEADLINE */
+#define NVSHIM_SYNC_NOT_THIS_CLIENTS  11 /* a handle this client does not hold */
+#define NVSHIM_SYNC_REASON_MAX         40
+void nv_shim_sync_refusal_name(int why, char *dst, int cap);
+
 /* Pure helpers, exported for the kernel unit suite. */
 int nv_shim_req_size(unsigned long req);          /* -1 = not a request */
 const char *nv_shim_refusal_name(unsigned long req); /* NULL = not refused */
@@ -395,5 +430,15 @@ uint32_t nv_shim_test_sum(const void *buf, uint32_t len);
  *            exports), -1 when `obj` is not a live buffer. */
 int nv_shim_test_prime_set_dev(void *obj, uint32_t dev);
 int nv_shim_test_prime_refs(void *obj);
+
+/* --- WP-SYNC kernel-tier seams (not ABI) --------------------------------
+ * The syncobj record is opaque to userspace, so these are how the tier holds
+ * the reference count and the signalled point to a value:
+ *   refs:  live references on the syncobj behind an fd (handle entries +
+ *          exported fds), -1 when `obj` is not a live syncobj.
+ *   point: the point the object is signalled at (0 = never; a binary syncobj is
+ *          this same number at 1), -1 when `obj` is not live. */
+int nv_shim_test_syncobj_refs(void *obj);
+uint64_t nv_shim_test_syncobj_point(void *obj);
 
 #endif /* NV_SHIM_H */
