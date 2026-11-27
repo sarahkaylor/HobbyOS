@@ -99,8 +99,9 @@ HS containers present; see §6 for why neither is an R1 candidate.
 
 Method: fetch `src/nvidia/generated/g_bindata_kgspGetBinArchiveBooterLoadUcode_AD102.c`
 per tag, inflate each bindata array (raw deflate, `wbits=-15`), rebuild the nvfw container
-(`bin_hdr | hs_header_v2 | sig_prod | patch_loc | patch_sig | meta | num_sigs | load_hdr |
-image`), hash, then decode the triple with `tools/nv/no-rm/hs_gate.py`.
+(`bin_hdr | hs_header_v2 | sig_prod | patch_loc | patch_sig | meta | num_sigs_off |
+num_sigs | load_hdr | image`), hash, then decode the triple with
+`tools/nv/no-rm/hs_gate.py`.
 
 **The rebuild is validated, not assumed:** rebuilding tag `570.144` reproduces the
 linux-firmware file **byte for byte** — 57 720 B,
@@ -161,8 +162,9 @@ bin_size 0xE500 - data_size 0xE100 = 0x400               -> container parse acce
 len 58488 >= 0x7700 + 0x6000 (55040)                     -> the lane's length gate accepts
 ```
 
-No driver or lane change is needed to stage it; the A12 rig's `NV_BOOTER_FILE=` override
-takes it as-is and its `[NV-SEC2T] S tl` rows will print `u94=`/`intr=`.
+No driver or lane change is needed to stage it; the A12 rig's `NV_BOOTER_FILE=`
+override (branch `nv/wp-r1-rig`, §8) takes it as-is, and `NV_BOOTER_SHA256=` makes
+the lane refuse if the staged file is not this hash.
 
 ---
 
