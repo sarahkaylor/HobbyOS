@@ -1,4 +1,4 @@
-# nv/wp-rpcpub unit gate, 2026-11-27T18:39:21Z
+# nv/wp-rpcpub unit gate (publication + address sweep), 2026-11-27T18:44:53Z
 # cmd: SKIP_KVM=1 TOOLS_SKIP=1 BROWSER_SKIP=1 UNIT_TESTS_TIMEOUT=1800 ./run_unit_tests_intel.sh
     RUNNING KERNEL UNIT TESTS     
 [NV-RPC] unit suite (spec section 7: T-01..T-24, contract T-25/26)

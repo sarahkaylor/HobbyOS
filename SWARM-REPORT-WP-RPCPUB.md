@@ -82,40 +82,31 @@ by reading the page, not by trusting the variable that wrote it.
 
 ## The address rule — what the greps show
 
-Publication call sites (the block, both pages, the mailbox, the radix3 tree,
-the metadata block, the SEC2 mailbox):
-
 ```
 $ grep -nE 'nv_wr32\([^;]*(\bphys\b|_phys)' src/kernel/nv_gsp.c | grep -v phys_to_virt
-1460:  nv_wr32(d, fbase + NV_XFER_EXT_BASE, (uint32_t)(dst_phys >> 8));
-1461:  nv_wr32(d, fbase + NV_XFER_EXT_BASE1, (uint32_t)((dst_phys >> 40) & 0x1FF));
+   (no matches: every address register is programmed with a *_bus value)
 $ grep -nE 'sysmem_addr_[a-z0-9_]+ *= *[^;]*(\.phys|_phys)' src/kernel/nv_gsp.c
-5420:       * boot_bin_offset (meta.sysmem_addr_bootloader = loader.phys + 0x6C,   <- a comment
+   (no matches; the one remaining mention is a comment)
+$ grep -nE '\b(src_phys|dst_phys|meta_phys|img_phys)\b' src/kernel/nv_gsp.c
+   (no matches)
 $ grep -n 'nv_radix3_build(' src/kernel/nv_gsp.c
-5241:    trc = nv_radix3_build(img_bus, elf.fwimage.size, &root, &tpages);
+5262:    trc = nv_radix3_build(img_bus, elf.fwimage.size, &root, &tpages);
 ```
 
-Both hits above are the FWSEC **store** probe (`falcon_dma_store_block`, the
-reverse-direction copy used to read falcon memory back), i.e. the residual
-category below — not the publication path. The mailbox writes are
-`libos_bus`, the SEC2 mailbox is `meta_bus`, and the metadata fields are
-`img_bus`/`loader_bus`/`root_bus`; all six come from an `nv_dma_bus*()` answer.
+`phys_to_virt()` remains everywhere it should: those are CPU accesses to the
+frames, not device addresses. The falcon XFER helpers take
+`falcon_dma_block(…, fwsec_bus|base_bus, …)`, `falcon_dma_store_block(…,
+scratch_bus, …)` and `nv_store_block(…, landing_bus, …)`; a refusal skips the
+DMA (on the SEC2 booter path it falls back to PIO, which needs no address)
+instead of programming `0xFFFF…`.
 
 **Replaced, and noted here because the commit message requires it:**
 `loader.phys + 0x6C` and `img_phys + sig_off` (metadata descriptors), the
 radix3 tree's image address and its own root, `SEC2 MAILBOX0/1 <- meta_phys`,
-and the four `GSP_ARGUMENTS_CACHED`/libos/mailbox addresses.
-
-**Found but NOT replaced (pre-existing, outside this card's path):** the
-FWSEC/DMEM probe machinery still hands `frame_alloc_contig()` physical
-addresses to the falcon XFER registers — `falcon_dma_block(…, src_phys, …)`,
-`falcon_dma_store_block(…, dst_phys, …)`, and the `imem_scratch`/
-`store_scratch` frames threaded through `nv_imem_store_row`,
-`nv_imem_write_probe` and `nv_store_matrix`. Those frames are owned by code
-whose lifetime is per-attempt, not per-boot, so converting them needs the same
-borrowed-run treatment threaded through five helpers; doing it blind on a path
-this host cannot exercise would risk the SEC2 attempt for no publication gain.
-Follow-up card `t_96ac9709` carries it.
+the four `GSP_ARGUMENTS_CACHED`/libos/mailbox addresses, and every falcon XFER
+address register in the FWSEC/DMEM probe machinery. Follow-up card
+`t_96ac9709` was created for that last group before it was folded into this
+branch; it is superseded and carries a comment saying so.
 
 ## What is NOT verified
 

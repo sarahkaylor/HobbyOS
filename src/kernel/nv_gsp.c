@@ -1001,8 +1001,12 @@ static int nv_gsp_load_one(struct nv_dev *d, const char *name, int parse_hs,
  * the transfer received rather than a literal repeated at the call site. */
 static uint32_t g_dma_dst_first, g_dma_dst_last, g_dma_nblk;
 
+/* `src_bus` is the GPU-visible address of the run being read; the callers ask
+ * nv_dma_bus_of_run() for it.  A CPU physical address here would program a
+ * transfer to an address the engine cannot resolve once translation is on --
+ * and would be wrong-by-accident today, which is the harder bug. */
 static int falcon_dma_block(struct nv_dev *d, uint32_t fbase,
-                            uint64_t src_phys, uint32_t src_end, uint32_t dst,
+                            uint64_t src_bus, uint32_t src_end, uint32_t dst,
                             int is_imem, int sec) {
   if (g_dma_nblk == 0) g_dma_dst_first = dst;
   g_dma_dst_last = dst;
@@ -1019,9 +1023,9 @@ static int falcon_dma_block(struct nv_dev *d, uint32_t fbase,
     if (i == 199999) return -110;
   }
   nv_wr32(d, fbase + NV_XFER_EXT_BASE,
-          (uint32_t)(src_phys >> 8));
+          (uint32_t)(src_bus >> 8));
   nv_wr32(d, fbase + NV_XFER_EXT_BASE1,
-          (uint32_t)((src_phys >> 40) & 0x1FF));
+          (uint32_t)((src_bus >> 40) & 0x1FF));
   nv_wr32(d, fbase + NV_XFER_FALCON_ADDR, dst);
   nv_wr32(d, fbase + NV_XFER_EXT_ADDR, src_end);
   /* The command word comes from the one place that encodes it (nv_flcn.c), so
@@ -1450,15 +1454,18 @@ static void nv_imem_read_row(struct nv_dev *d, struct nv_falcon *f, uint32_t off
  * Same four registers as the load, with DIR (0x118 bit 5) set.  Returns 0 when
  * the engine reported the request collected, -ETIMEDOUT otherwise; the caller
  * still compares the buffer, because "collected" is not "copied". */
+/* `dst_bus` is the GPU-visible landing address (nv_dma_bus_of_run() at the
+ * call site); the CPU reaches the same frames through their physical address,
+ * which never enters an address register. */
 static int falcon_dma_store_block(struct nv_dev *d, uint32_t fbase,
-                                  uint64_t dst_phys, uint32_t dst_off,
+                                  uint64_t dst_bus, uint32_t dst_off,
                                   uint32_t src_falcon, int is_imem, int sec) {
   for (int i = 0; i < 200000; i++) {
     if (!(nv_rd32(d, fbase + NV_XFER_CTRL) & XF_FULL)) break;
     if (i == 199999) return -110;
   }
-  nv_wr32(d, fbase + NV_XFER_EXT_BASE, (uint32_t)(dst_phys >> 8));
-  nv_wr32(d, fbase + NV_XFER_EXT_BASE1, (uint32_t)((dst_phys >> 40) & 0x1FF));
+  nv_wr32(d, fbase + NV_XFER_EXT_BASE, (uint32_t)(dst_bus >> 8));
+  nv_wr32(d, fbase + NV_XFER_EXT_BASE1, (uint32_t)((dst_bus >> 40) & 0x1FF));
   nv_wr32(d, fbase + NV_XFER_FALCON_ADDR, src_falcon);
   nv_wr32(d, fbase + NV_XFER_EXT_ADDR, dst_off);
   uint32_t ctrl = nv_flcn_xfer_cmd(NV_FLCN_BLOCK, is_imem, sec);
@@ -1480,7 +1487,10 @@ static void nv_imem_store_row(struct nv_dev *d, uint32_t fbase,
   for (uint32_t i = 0; i < NV_FLCN_BLOCK; i++) bb[i] = 0xA5; /* prefill: an
     * engine that copies nothing leaves this, and "prefill with something whose
     * zero would look like success" is the rule this is applying */
-  int rc = falcon_dma_store_block(d, fbase, scratch_phys, 0, off, 1, 1);
+  uint64_t scratch_bus = nv_dma_bus_of_run(scratch_phys, NV_DMA_PAGE);
+  int rc = scratch_bus == NV_DMA_BUS_INVALID
+               ? -ENOTSUP
+               : falcon_dma_store_block(d, fbase, scratch_bus, 0, off, 1, 1);
   uint32_t ctl = nv_rd32(d, fbase + NV_XFER_CTRL);
   int bad = -1;
   uint32_t got = 0, want = 0;
@@ -1665,8 +1675,12 @@ static uint32_t nv_ld_word(const uint8_t *p) {
  * falcon address to 0x11C, i.e. the hypothesis that the two side registers swap
  * roles with the direction; it is a separate axis from the command word because
  * no encoding of 0x118 can express it. */
+/* `landing` is the CPU's view (phys_to_virt); `landing_bus` is what the engine
+ * is told.  Both describe the same single frame; the call site gets the second
+ * from nv_dma_bus_of_run() so the register never sees a physical address. */
 static void nv_store_block(struct nv_dev *d, uint32_t fbase, uint64_t landing,
-                           uint32_t falcon_off, const uint8_t *want,
+                           uint64_t landing_bus, uint32_t falcon_off,
+                           const uint8_t *want,
                            uint32_t want_len, uint32_t want_off, int is_imem,
                            int sec, int variant, int swap, uint64_t deadline_ns,
                            struct nv_store_res *r) {
@@ -1691,8 +1705,8 @@ static void nv_store_block(struct nv_dev *d, uint32_t fbase, uint64_t landing,
     r->stat_after = nv_rd32(d, fbase + NV_XFER_STATUS);
     return;
   }
-  nv_wr32(d, fbase + NV_XFER_EXT_BASE, (uint32_t)(landing >> 8));
-  nv_wr32(d, fbase + NV_XFER_EXT_BASE1, (uint32_t)((landing >> 40) & 0x1FF));
+  nv_wr32(d, fbase + NV_XFER_EXT_BASE, (uint32_t)(landing_bus >> 8));
+  nv_wr32(d, fbase + NV_XFER_EXT_BASE1, (uint32_t)((landing_bus >> 40) & 0x1FF));
   uint32_t off_11c = nv_flcn_store_off(0, variant);
   nv_wr32(d, fbase + NV_XFER_FALCON_ADDR, swap ? off_11c : falcon_off);
   nv_wr32(d, fbase + NV_XFER_EXT_ADDR, swap ? falcon_off : off_11c);
@@ -1813,6 +1827,12 @@ static int nv_store_matrix(struct nv_dev *d, uint32_t fbase, uint64_t landing,
                            const char *when, const struct nv_store_probe *pr,
                            int nprobe) {
   struct nv_store_res r;
+  uint64_t landing_bus = nv_dma_bus_of_run(landing, NV_DMA_PAGE);
+  if (landing_bus == NV_DMA_BUS_INVALID) {
+    uart_puts("[NV-STORE] skipped: the landing frame has no GPU-visible "
+              "address (nv_dma_bus_of_run refused)\n");
+    return -ENOTSUP;
+  }
   uart_puts("[NV-STORE] ");
   uart_puts(when);
   uart_puts(" prefill=0x");
@@ -1841,9 +1861,9 @@ static int nv_store_matrix(struct nv_dev *d, uint32_t fbase, uint64_t landing,
     uint32_t before = 0;
     (void)nv_pio_rd1_nb(d, fbase, 0, kCtlOff, &before);
     nv_wr32(d, fbase + NV_XFER_EXT_BASE,
-            (uint32_t)((landing + 4096u - NV_FLCN_BLOCK) >> 8));
+            (uint32_t)((landing_bus + 4096u - NV_FLCN_BLOCK) >> 8));
     nv_wr32(d, fbase + NV_XFER_EXT_BASE1,
-            (uint32_t)(((landing + 4096u - NV_FLCN_BLOCK) >> 40) & 0x1FF));
+            (uint32_t)(((landing_bus + 4096u - NV_FLCN_BLOCK) >> 40) & 0x1FF));
     nv_wr32(d, fbase + NV_XFER_FALCON_ADDR, kCtlOff);
     nv_wr32(d, fbase + NV_XFER_EXT_ADDR, 0);
     nv_wr32(d, fbase + NV_XFER_CTRL, ctl_cmd);
@@ -1891,7 +1911,8 @@ static int nv_store_matrix(struct nv_dev *d, uint32_t fbase, uint64_t landing,
     uint32_t slot = (uint32_t)i * NV_FLCN_BLOCK;
     uint32_t img_ref = pr[i].is_imem ? 0u : dmem_off;
     uint32_t img_len_ref = pr[i].is_imem ? dmem_off : dmem_len;
-    nv_store_block(d, fbase, landing + slot, pr[i].falcon_off, img + img_ref,
+    nv_store_block(d, fbase, landing + slot, landing_bus + slot,
+                   pr[i].falcon_off, img + img_ref,
                    img_len_ref, pr[i].falcon_off, pr[i].is_imem, pr[i].sec,
                    pr[i].variant, pr[i].swap, 20000000ULL, &r);
     nv_store_row(d, when, pr[i].variant, pr[i].is_imem, pr[i].sec,
@@ -2016,12 +2037,13 @@ static void nv_verdict_instant(struct nv_dev *d, uint32_t fbase, uint64_t landin
    * swapped, on the block that holds the FRTS command. */
   const int st_var = NV_FLCN_STORE_V_PLAIN;
   int do_store = (store_variant >= 0);
+  uint64_t landing_bus = nv_dma_bus_of_run(landing, NV_DMA_PAGE);
   (void)img_len;
   for (int i = 0; i < 4; i++)
     pio_rc[i] = nv_pio_rd1_nb(d, fbase, 0, pio_addr[i], &pio_val[i]);
-  if (do_store)
-    nv_store_block(d, fbase, landing, st_off, img + dmem_off, dmem_len, st_off,
-                   0, 0, st_var, 1, 2000000ULL, &st_res);
+  if (do_store && landing_bus != NV_DMA_BUS_INVALID)
+    nv_store_block(d, fbase, landing, landing_bus, st_off, img + dmem_off,
+                   dmem_len, st_off, 0, 0, st_var, 1, 2000000ULL, &st_res);
   uart_puts("[NV-SWEEP] at-verdict port:");
   for (int i = 0; i < 4; i++) {
     uint32_t want = 0;
@@ -2338,7 +2360,10 @@ static void nv_imem_write_probe(struct nv_dev *d, struct nv_falcon *f,
   /* The engine's view of the same word. */
   uint8_t *bb = (uint8_t *)phys_to_virt(scratch_phys);
   for (uint32_t i = 0; i < NV_FLCN_BLOCK; i++) bb[i] = 0xA6;
-  int s = falcon_dma_store_block(d, f->base, scratch_phys, 0, off, 1, 1);
+  uint64_t scratch_bus = nv_dma_bus_of_run(scratch_phys, NV_DMA_PAGE);
+  int s = scratch_bus == NV_DMA_BUS_INVALID
+              ? -ENOTSUP
+              : falcon_dma_store_block(d, f->base, scratch_bus, 0, off, 1, 1);
   if (s == 0) {
     eng = (uint32_t)bb[0] | ((uint32_t)bb[1] << 8) | ((uint32_t)bb[2] << 16) |
           ((uint32_t)bb[3] << 24);
@@ -3026,6 +3051,16 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size,
               "0x114, so the IMEM destination cannot be read back even in "
               "principle\n");
   } else {
+    /* The DMA branch's source is the staging run's GPU address, asked for once
+     * and used by every block.  A refusal is -ENOTSUP: programming `phys` here
+     * would tell the engine to read an address the GPU cannot resolve. */
+    uint64_t fwsec_bus = nv_dma_bus_of_run(phys, (uint64_t)pages * FRAME_SIZE);
+    if (fwsec_bus == NV_DMA_BUS_INVALID) {
+      uart_puts("[NV-FWSEC] FAIL nv_dma_bus_of_run refused the staging run: no "
+                "GPU-visible address, so the image is not loaded\n");
+      rc = -ENOTSUP;
+      goto out;
+    }
     /* ---- the ablation (round 2, run r2f) --------------------------------
      *
      * "The status word went to 0 and the core halted" is only evidence that
@@ -3051,7 +3086,7 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size,
     }
     for (uint32_t off = 0; kFwsecLoadImem && off < d->ucode_imem;
          off += NV_FLCN_BLOCK) {
-      rc = falcon_dma_block(d, NV_GSP_U, phys, off, off, 1, 1);
+      rc = falcon_dma_block(d, NV_GSP_U, fwsec_bus, off, off, 1, 1);
       if (rc != 0) goto out;
     }
     /* ---- F1 (PLAN.md §2): did the image land in the GSP's own memory? -----
@@ -3101,7 +3136,7 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size,
     }
   after_f1:
     for (uint32_t off = 0; off < d->ucode_dmem; off += NV_FLCN_BLOCK) {
-      rc = falcon_dma_block(d, NV_GSP_U, phys, d->ucode_imem + off, off, 0, 0);
+      rc = falcon_dma_block(d, NV_GSP_U, fwsec_bus, d->ucode_imem + off, off, 0, 0);
       if (rc != 0) goto out;
     }
     nblk = g_dma_nblk;
@@ -4790,6 +4825,13 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
    * derivation prints the numbers it used.
    */
   uint64_t base = d->booter_phys;
+  /* The engine reads the booter's frames at the GPU's address.  `base` stays
+   * the CPU's way to reach them (nothing here dereferences it; the DMA and PIO
+   * copies take their source from `booter`), and every address register is
+   * programmed with base_bus. */
+  uint64_t base_bus =
+      nv_dma_bus_of_run(base, ((uint64_t)len + NV_DMA_PAGE - 1) &
+                                   ~(NV_DMA_PAGE - 1));
   struct nv_fw_container bc;
   struct nv_fw_hs bhs;
   for (uint32_t i = 0; i < (uint32_t)sizeof bc; i++) ((uint8_t *)&bc)[i] = 0;
@@ -4939,10 +4981,14 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
    * different facts and only one of them is about the booter. */
   int via_pio = 0;
   rc = 0;
-  {
+  if (base_bus == NV_DMA_BUS_INVALID) {
+    uart_puts("[NV-SEC2] DMA not attempted: the booter run has no GPU-visible "
+              "address (nv_dma_bus_of_run refused); PIO carries the image\n");
+    rc = -ENOTSUP;
+  } else {
     uint32_t off = 0;
     for (; off < imem_len; off += 256) {
-      rc = falcon_dma_block(d, NV_FALCON_SEC2_BASE, base, imem_file + off, off,
+      rc = falcon_dma_block(d, NV_FALCON_SEC2_BASE, base_bus, imem_file + off, off,
                             1, 1);
       if (rc != 0) break;
     }
@@ -4966,7 +5012,7 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
   }
   if (rc == 0) {
     for (uint32_t off = 0; off < dmem_len; off += 256) {
-      rc = falcon_dma_block(d, NV_FALCON_SEC2_BASE, base, dmem_file + off, off,
+      rc = falcon_dma_block(d, NV_FALCON_SEC2_BASE, base_bus, dmem_file + off, off,
                             0, 0);
       if (rc != 0) {
         uart_puts("[NV-SEC2] DMEM dma FAILED at off=");
