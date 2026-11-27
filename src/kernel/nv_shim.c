@@ -422,6 +422,14 @@ static int r_drm_refuse = 24;
  * green suite cannot hide them. */
 static int r_syncfile = 48;
 
+/* WP-TRANSFER's own bucket, for the same reason WP-SYNCFILE took one: the
+ * transfer rows are the evidence this card reports (the served leg naming both
+ * handles and BOTH points, and one row per refused shape), and they run after
+ * five syncobj suites have spent most of r_sync.  A green tier with no
+ * `transfer src=` row is exactly the silent-budget failure this project has
+ * paid for twice. */
+static int r_synctransfer = 48;
+
 static void row_end(void) {
   uint32_t cpu = row_cpu();
   if (g_row_n[cpu] <= 0) return;
@@ -1479,6 +1487,11 @@ static const struct drm_row g_drm_rows[] = {
     /* WP-SYNCFAM: QUERY takes drm.h's timeline_array (24), and there `points`
      * is the OUT array -- no new struct, no new number. */
     {0xcb, 24}, /* SYNCOBJ_QUERY               struct ..._timeline_array    */
+    /* WP-TRANSFER: drm.h's struct drm_syncobj_transfer is exactly 32 bytes.
+     * The row was a refusal by NUMBER before, so its width was never checked;
+     * a served row is size-checked, and a wrong width makes every real client
+     * -EINVAL. */
+    {0xcc, 32}, /* SYNCOBJ_TRANSFER            struct ..._transfer          */
     {0xcd, 24}, /* SYNCOBJ_TIMELINE_SIGNAL     struct ..._timeline_array    */
 };
 
@@ -1507,15 +1520,16 @@ static const struct {
     {NVSHIM_DRM_NR_GEM_CPU_FINI, "gem_cpu_fini"},
     /* WP-SYNC: 0xc1 / 0xc2 / 0xca / 0xcd are SERVED now (the row table above),
      * and WP-SYNCFAM added 0xcb (QUERY) to it.  WP-SYNCFILE served the two
-     * sync_file legs of 0xc1/0xc2 (EXPORT_SYNC_FILE / IMPORT_SYNC_FILE).  What
-     * remains of the syncobj surface is named here:
+     * sync_file legs of 0xc1/0xc2 (EXPORT_SYNC_FILE / IMPORT_SYNC_FILE), and
+     * WP-TRANSFER served 0xcc (the timeline handle->handle leg).  What remains
+     * of the syncobj surface is named here:
      *   EVENTFD registers an eventfd to be written when a point signals; the
      *   kernel-side counter writer does not exist (linux_compat_fd.c's l_efd[]
      *   is file-static), so there is nothing to register WITH -- unchanged.
-     *   TRANSFER moves a point between two timelines.  Its handle->handle leg
-     *   needs no sync_file at all (two timelines, no fd), so it is a separate,
-     *   smaller rung -- the next one -- rather than a half-served row here. */
-    {NVSHIM_DRM_NR_SYNCOBJ_TRANSFER, "syncobj_transfer"},
+     * TRANSFER's other two legs are refused by REASON, not by number, because
+     * the row itself answers: the binary form (no TRANSFER_FLAGS_TIMELINE) and
+     * a source that came from IMPORT_SYNC_FILE print their own names from
+     * op_drm_syncobj_transfer -- see docs/nv-shim-transfer.md §2. */
     {NVSHIM_DRM_NR_SYNCOBJ_EVENTFD, "syncobj_eventfd"},
 };
 
@@ -3372,6 +3386,12 @@ static const char k_sync_reasons[][32] = {
     "point_beyond_ledger",
     "not_a_sync_file",
     "point_without_timeline",
+    /* WP-TRANSFER (nv_shim.h orders these 15..19) */
+    "transfer_needs_timeline",
+    "transfer_point_unsubmitted",
+    "transfer_point_not_pending",
+    "transfer_handle_not_held",
+    "transfer_src_sync_file",
 };
 #define SYNC_NUM_REASONS (int)(sizeof k_sync_reasons / sizeof k_sync_reasons[0])
 
@@ -3393,14 +3413,21 @@ static void row_sync_why(int why) {
   row_s(b);
 }
 
-/* One refusal row.  The caller picks the errno; the row always says why. */
-static void sync_refuse(const char *stage, const char *what, uint64_t v, int why) {
-  row_begin(stage, &r_sync);
+/* One refusal row.  The caller picks the errno; the row always says why.
+ * `budget` is the row bucket, so a new rung can spend its OWN budget instead of
+ * the shared r_sync (WP-SYNCFILE and WP-TRANSFER both do). */
+static void sync_refuse_rows(const char *stage, int *budget, const char *what,
+                             uint64_t v, int why) {
+  row_begin(stage, budget);
   row_s(what);
   row_hex(v);
   row_s(" reason=");
   row_sync_why(why);
   row_end();
+}
+
+static void sync_refuse(const char *stage, const char *what, uint64_t v, int why) {
+  sync_refuse_rows(stage, &r_sync, what, v, why);
 }
 
 
@@ -3907,6 +3934,171 @@ static int op_drm_syncobj_query(struct process *p, int fd, uint64_t arg) {
   row_end();
   return 0;
 }
+
+/* ---- TRANSFER (WP-TRANSFER) --------------------------------------------
+ * The last syncobj row a client can reach from this node, and the only one
+ * whose serving needs no sync_file: two timelines, their submitted points, and
+ * nothing else.  drm.h's DRM_IOCTL_SYNCOBJ_TRANSFER (0xcc, 32 bytes) carries
+ * src_handle, dst_handle, src_point, dst_point and one flag.
+ *
+ * WHAT IS SERVED: flags == TRANSFER_FLAGS_TIMELINE, a source point that was
+ *   SUBMITTED to the source timeline, and a destination point above everything
+ *   that timeline has already submitted.  The destination then names the point
+ *   the source submitted, and it reaches it when the FENCE THE SOURCE IS
+ *   WAITING ON retires -- not when this ioctl returns.
+ *
+ * HOW, and why this is not a copy: a record has one point and no chain, so a
+ *   transfer cannot carry a fence object across.  What it CAN carry is the
+ *   identity of the completion event, and that is exactly what the pending
+ *   table holds: (record, channel, fence, point).  So the destination gets its
+ *   OWN pending entry with its own point on the SAME (channel, fence) the
+ *   source submitted.  client_reap_locked() is the one completion path; it
+ *   lands both points in the same pass, which is what makes "the same retire
+ *   satisfies src" a property of the code rather than of the test.  A source
+ *   point that is ALREADY reached (a TIMELINE_SIGNAL, or a retire that happened
+ *   before this call) needs no entry: the destination reaches its point now,
+ *   exactly as Linux's drm_syncobj_add_point of an already-signalled fence.
+ *
+ * WHAT IS REFUSED, each by its own name (nv_shim.h 15..19):
+ *   - no TRANSFER_FLAGS_TIMELINE: Linux's BINARY transfer moves a whole fence
+ *     pointer, and a point-per-record node has none to move;
+ *   - a source point above the source's submitted ledger: there is no fence to
+ *     chain to ("the point is not submitted" in drm_syncobj_find_fence's
+ *     words), so nothing could ever land the destination;
+ *   - a submitted source point with no live pending entry (its channel died):
+ *     same outcome, different cause, so a different name;
+ *   - a handle this client does not hold -- the never-created and the
+ *     destroyed handle are the same absence here (see nv_shim.h 18);
+ *   - a source handle that came from IMPORT_SYNC_FILE: that is the sync_file
+ *     leg of this row, a separate rung (docs/nv-shim-transfer.md §2).
+ * A destination point at or below the destination's submitted ledger is
+ * POINT_ORDER, the same rule TIMELINE_SIGNAL applies to its own point.
+ * ---------------------------------------------------------------------- */
+static int op_drm_syncobj_transfer(struct process *p, int fd, uint64_t arg) {
+  struct nvshim_drm_syncobj_transfer tf;
+  if (vm_user_read(p, arg, &tf, (int)sizeof tf) != 0) return -EFAULT;
+  if (tf.pad != 0) {
+    sync_refuse_rows("drm syncobj refuse", &r_synctransfer, "transfer pad=",
+                     (uint64_t)tf.pad, NVSHIM_SYNC_BAD_SHAPE);
+    return -EINVAL;
+  }
+  if (tf.flags & ~(uint32_t)NVSHIM_DRM_SYNCOBJ_TRANSFER_FLAGS_TIMELINE) {
+    sync_refuse_rows("drm syncobj refuse", &r_synctransfer, "transfer flags=",
+                     (uint64_t)tf.flags, NVSHIM_SYNC_BAD_FLAGS);
+    return -EINVAL;
+  }
+  if (!(tf.flags & NVSHIM_DRM_SYNCOBJ_TRANSFER_FLAGS_TIMELINE)) {
+    sync_refuse_rows("drm syncobj refuse", &r_synctransfer, "transfer flags=",
+                     (uint64_t)tf.flags, NVSHIM_SYNC_TRANSFER_NEEDS_TIMELINE);
+    return -EINVAL;
+  }
+  if (tf.src_point == 0 || tf.dst_point == 0) {
+    sync_refuse_rows("drm syncobj refuse", &r_synctransfer, "transfer point=",
+                     tf.src_point == 0 ? tf.src_point : tf.dst_point,
+                     NVSHIM_SYNC_POINT_ZERO);
+    return -EINVAL;
+  }
+
+  spinlock_acquire(&g_shim_lock);
+  struct shim_client *c = client_find(shim_pid(p), fd);
+  if (!c) {
+    spinlock_release(&g_shim_lock);
+    return -ENODEV;
+  }
+  /* The completion path first, exactly as a wait calls it: a fence that
+   * retired while nobody was looking must be visible to THIS decision, or an
+   * already-reached source point would be chained to an entry that never
+   * lands. */
+  client_reap_locked(c);
+  int sat = client_find_sobj(c, tf.src_handle);
+  int dat = client_find_sobj(c, tf.dst_handle);
+  struct shim_sobj *src = sat >= 0 ? sobj_lookup(c->sobj_obj[sat]) : 0;
+  struct shim_sobj *dst = dat >= 0 ? sobj_lookup(c->sobj_obj[dat]) : 0;
+  if (!src || !dst) {
+    uint64_t which = (uint64_t)(src ? tf.dst_handle : tf.src_handle);
+    spinlock_release(&g_shim_lock);
+    sync_refuse_rows("drm syncobj refuse", &r_synctransfer, "transfer handle=",
+                     which, NVSHIM_SYNC_TRANSFER_HANDLE_NOT_HELD);
+    return -EINVAL;
+  }
+  if (c->sobj_floor[sat] != 0) {
+    spinlock_release(&g_shim_lock);
+    sync_refuse_rows("drm syncobj refuse", &r_synctransfer, "transfer src_handle=",
+                     (uint64_t)tf.src_handle, NVSHIM_SYNC_TRANSFER_SRC_SYNC_FILE);
+    return -EINVAL;
+  }
+  if (tf.src_point > sobj_submitted_locked(src)) {
+    spinlock_release(&g_shim_lock);
+    sync_refuse_rows("drm syncobj refuse", &r_synctransfer, "transfer src_point=",
+                     tf.src_point, NVSHIM_SYNC_TRANSFER_POINT_UNSUBMITTED);
+    return -EINVAL;
+  }
+  if (tf.dst_point <= sobj_submitted_locked(dst)) {
+    spinlock_release(&g_shim_lock);
+    sync_refuse_rows("drm syncobj refuse", &r_synctransfer, "transfer dst_point=",
+                     tf.dst_point, NVSHIM_SYNC_POINT_ORDER);
+    return -EINVAL;
+  }
+  int chain = -1;
+  if (src->point < tf.src_point) {
+    uint32_t sidx = sobj_index(src);
+    for (int i = 0; i < c->npend; i++)
+      if (c->pend[i].obj == (uint8_t)sidx && c->pend[i].point >= tf.src_point) {
+        chain = i;
+        break;
+      }
+    if (chain < 0) {
+      spinlock_release(&g_shim_lock);
+      sync_refuse_rows("drm syncobj refuse", &r_synctransfer, "transfer src_point=",
+                       tf.src_point, NVSHIM_SYNC_TRANSFER_POINT_NOT_PENDING);
+      return -EINVAL;
+    }
+    if (c->npend >= SHIM_MAX_SIGPEND) {
+      spinlock_release(&g_shim_lock);
+      sync_refuse_rows("drm syncobj refuse", &r_synctransfer, "transfer pend=",
+                       (uint64_t)c->npend, NVSHIM_SYNC_NO_SLOT);
+      return -ENOSPC;
+    }
+  }
+  /* Commit.  The destination's ledger records the point as SUBMITTED (it was
+   * handed a fence for it, so QUERY with LAST_SUBMITTED must answer it), and
+   * its reached point moves only when the fence retires. */
+  uint32_t didx = sobj_index(dst);
+  int sid = src->id, did = dst->id;
+  uint64_t src_at = src->point;
+  if (tf.dst_point > dst->submitted) dst->submitted = tf.dst_point;
+  if (chain < 0) {
+    if (tf.dst_point > dst->point) dst->point = tf.dst_point;
+  } else {
+    /* One entry, one (channel, fence), one retire -- the source's own entry is
+     * untouched, so its wait and the destination's wait end together. */
+    c->pend[c->npend].obj = (uint8_t)didx;
+    c->pend[c->npend].ch = c->pend[chain].ch;
+    c->pend[c->npend].fence = c->pend[chain].fence;
+    c->pend[c->npend].point = tf.dst_point;
+    c->npend++;
+  }
+  spinlock_release(&g_shim_lock);
+
+  row_begin("drm syncobj", &r_synctransfer);
+  row_s("transfer src=");
+  row_say((int)tf.src_handle);
+  row_s(" dst=");
+  row_say((int)tf.dst_handle);
+  row_s(" src_point=");
+  row_hex(tf.src_point);
+  row_s(" dst_point=");
+  row_hex(tf.dst_point);
+  row_s(" obj=");
+  row_say(sid);
+  row_s("->");
+  row_say(did);
+  row_s(chain < 0 ? " src_reached=1 src_at=" : " chained=1 src_at=");
+  row_hex(src_at);
+  row_end();
+  return 0;
+}
+
 
 /* RESET (flags == 0) and SIGNAL (flags == 1) share drm_syncobj_array.  SIGNAL
  * is the binary form: it is the same field the timeline row writes, at 1. */
@@ -4972,6 +5164,7 @@ int nv_shim_drm_ioctl(struct process *p, int fd, unsigned long req, uint64_t arg
   case 0xc5: return op_drm_syncobj_set(p, fd, arg, 1);
   case 0xca: return op_drm_syncobj_timeline_wait(p, fd, arg);
   case 0xcb: return op_drm_syncobj_query(p, fd, arg);
+  case 0xcc: return op_drm_syncobj_transfer(p, fd, arg);
   case 0xcd: return op_drm_syncobj_timeline_signal(p, fd, arg);
   default: return -ENOTTY; /* unreachable: drm_row_size() covered the table */
   }

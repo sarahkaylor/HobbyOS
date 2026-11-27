@@ -34,10 +34,9 @@
  *  the probe in this branch uses -- the point is to be reachable by that code,
  *  not by a HobbyOS-shaped imitation of it.
  *
- *  WHAT IS NOT HERE: sync files (a dma_fence as an fd, i.e.
- *  SYNCOBJ_HANDLE_TO_FD with EXPORT_SYNC_FILE), SVM, relocations and the
- *  legacy pushbuf path.  Each is a named refusal (-ENOSYS with a console row),
- *  never a silent no-op: see nv_shim_drm_refusal_name().
+ *  WHAT IS NOT HERE: SVM, relocations and the legacy pushbuf path.  Each is a
+ *  named refusal (-ENOSYS with a console row), never a silent no-op: see
+ *  nv_shim_drm_refusal_name().
  *
  *  WHAT IS HERE SINCE WP-SYNC: the timeline half of syncobj and the syncobj
  *  fd.  SYNCOBJ_TIMELINE_SIGNAL / SYNCOBJ_TIMELINE_WAIT address one 64-bit
@@ -45,10 +44,19 @@
  *  EXEC's `timeline_value` is accepted and signals its point when the fence
  *  retires, and SYNCOBJ_HANDLE_TO_FD returns a real fd whose object IS the
  *  syncobj -- SYNCOBJ_FD_TO_HANDLE from it resolves to the same object, so a
- *  signal through either name is visible through the other.  That fd is not a
- *  sync_file: EXPORT_SYNC_FILE / IMPORT_SYNC_FILE ask for a different object
- *  type and are refused by name.  NVSHIM_DRM_CAP_SYNCOBJ_TIMELINE answers 1
- *  because those rows are served, not because the id exists.
+ *  signal through either name is visible through the other.  NVSHIM_DRM_CAP_
+ *  SYNCOBJ_TIMELINE answers 1 because those rows are served, not because the
+ *  id exists.
+ *
+ *  WHAT IS HERE SINCE WP-SYNCFILE: the sync_file object.  EXPORT_SYNC_FILE
+ *  returns a FILE_TYPE_SYNCFILE fd whose poll(2) answers POLLIN when the point
+ *  it names is reached, and IMPORT_SYNC_FILE turns such an fd back into a
+ *  handle that never answers below that point.
+ *
+ *  WHAT IS HERE SINCE WP-TRANSFER: SYNCOBJ_TRANSFER's timeline handle->handle
+ *  leg -- one submitted point moves from a source timeline to a destination
+ *  timeline, and the destination's WAIT observes the SAME retire the source's
+ *  does.
  *
  *  WHAT IS HERE SINCE WP-PRIME: dma-buf/PRIME -- DRM_IOCTL_PRIME_HANDLE_TO_FD
  *  (nr 0x2d) exports a GEM object as a real fd, DRM_IOCTL_PRIME_FD_TO_HANDLE
@@ -254,6 +262,41 @@ struct nvshim_drm_syncobj_handle {
 #define NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_TIMELINE         (1u << 1)
 #define NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE (1u << 0)
 #define NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_TIMELINE         (1u << 1)
+
+/* ---- TRANSFER (DRM_IOCTL_SYNCOBJ_TRANSFER, nr 0xcc) --------------------
+ *
+ * struct drm_syncobj_transfer, field for field and 32 bytes for size: two
+ * handles, the point the source must reach, the point the destination gets,
+ * and one flag.  drm.h's flag set is exactly one bit:
+ *
+ *   TRANSFER_FLAGS_TIMELINE  both syncobjs are timelines, and the two points
+ *                            are the addresses.  This is the leg this node
+ *                            SERVES: it needs no sync_file at all -- two
+ *                            timelines and their submitted points are enough.
+ *
+ * Without the flag Linux moves the source's whole fence pointer into the
+ * destination (the binary form).  This node has no fence-pointer field to move
+ * -- a record holds one point, not a chain head -- so that form is refused by
+ * name rather than approximated.  So is a source handle that came from
+ * IMPORT_SYNC_FILE: that is the sync_file leg of the same row, and it is a
+ * separate rung (docs/nv-shim-transfer.md §2).
+ *
+ * What a served transfer means here: the destination's point lands when the
+ * FENCE THE SOURCE SUBMITTED retires -- not when the ioctl returns.  Before
+ * that retire a SYNCOBJ_TIMELINE_WAIT on the destination at dst_point is
+ * -ETIME; after it, the same -ETIME-then-0 transition the source's own wait
+ * shows.  One retire, two points.
+ */
+struct nvshim_drm_syncobj_transfer {
+  uint32_t src_handle;
+  uint32_t dst_handle;
+  uint64_t src_point;
+  uint64_t dst_point;
+  uint32_t flags; /* 0 or NVSHIM_DRM_SYNCOBJ_TRANSFER_FLAGS_TIMELINE */
+  uint32_t pad;   /* must be 0 */
+};                /* 32 bytes */
+
+#define NVSHIM_DRM_SYNCOBJ_TRANSFER_FLAGS_TIMELINE (1u << 0)
 
 
 /* ---- DRM_IOCTL_NOUVEAU_GETPARAM --------------------------------------- */
@@ -539,6 +582,14 @@ struct nvshim_drm_exec {
 #define NVSHIM_DRM_IOC_SYNCOBJ_QUERY                                                           \
   NVSHIM_DRM_IOWR(NVSHIM_DRM_NR_SYNCOBJ_QUERY,                                                 \
                   struct nvshim_drm_syncobj_timeline_array)            /* 0xC01864CB */
+/* WP-TRANSFER: TRANSFER is SERVED for the timeline handle->handle leg.  drm.h
+ * encodes DRM_IOWR(0xcc, struct drm_syncobj_transfer) -- 32 bytes, and the
+ * size the kernel validates against.  The previous spelling of this request
+ * was a refusal-only ANY(nr, 32); the encoding is identical (0xC02064CC), so a
+ * probe written against the old macro is a request a real client could send. */
+#define NVSHIM_DRM_IOC_SYNCOBJ_TRANSFER                                                        \
+  NVSHIM_DRM_IOWR(NVSHIM_DRM_NR_SYNCOBJ_TRANSFER,                                              \
+                  struct nvshim_drm_syncobj_transfer)                  /* 0xC02064CC */
 
 /* ---- NVIF (nr 0x47): served since WP-NVIF, and the one row whose encoded
  * size is a BUFFER LENGTH rather than a struct width.  The kernel validates
@@ -576,8 +627,9 @@ struct nvshim_drm_exec {
 #define NVSHIM_DRM_NR_GEM_CPU_FINI        0x83
 /* WP-SYNC: of the seven syncobj rows, 0xc1 / 0xc2 / 0xca / 0xcb / 0xcd are
  * defined here for the contract; 0xc1, 0xc2, 0xca and 0xcd were served by
- * WP-SYNC and WP-SYNCFAM served 0xcb (QUERY), so 0xcc (TRANSFER) and 0xcf
- * (EVENTFD) are the two named refusals left. */
+ * WP-SYNC, WP-SYNCFAM served 0xcb (QUERY), WP-SYNCFILE served the sync_file
+ * legs of 0xc1/0xc2 and WP-TRANSFER served 0xcc (the timeline handle->handle
+ * leg), so 0xcf (EVENTFD) is the one named refusal left. */
 #define NVSHIM_DRM_NR_SYNCOBJ_HANDLE_TO_FD 0xc1
 #define NVSHIM_DRM_NR_SYNCOBJ_FD_TO_HANDLE 0xc2
 #define NVSHIM_DRM_NR_SYNCOBJ_TIMELINE_WAIT 0xca
@@ -605,10 +657,10 @@ struct nvshim_drm_exec {
 #define NVSHIM_DRM_IOC_GEM_CPU_FINI     NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_GEM_CPU_FINI, 4)
 #define NVSHIM_DRM_IOC_GEM_FLINK        NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_GEM_FLINK, 8)
 /* WP-SYNC: 0xc1, 0xc2, 0xca and 0xcd are SERVED now (macros above), and
- * WP-SYNCFAM served 0xcb (QUERY, also above).  The two below are still
- * refusals; their sizes are drm.h's true encoded sizes so a probe built from
- * this header is a request a real client could have sent. */
-#define NVSHIM_DRM_IOC_SYNCOBJ_TRANSFER NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_SYNCOBJ_TRANSFER, 32)
+ * WP-SYNCFAM served 0xcb (QUERY, also above).  WP-TRANSFER served 0xcc for the
+ * timeline handle->handle leg (also above), so EVENTFD is the ONE syncobj row
+ * left in the refusal table; its size is drm.h's true encoded size so a probe
+ * built from this header is a request a real client could have sent. */
 #define NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD  NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_SYNCOBJ_EVENTFD, 24)
 
 /* Limits of the DRM face.  NVSHIM_DRM_VA_MAX is 1 TiB because that is the
