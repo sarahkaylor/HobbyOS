@@ -3392,6 +3392,8 @@ static const char k_sync_reasons[][32] = {
     "transfer_point_not_pending",
     "transfer_handle_not_held",
     "transfer_src_sync_file",
+    /* WP-TRANSFERFILE (nv_shim.h orders this 20) */
+    "transfer_point_below_import",
 };
 #define SYNC_NUM_REASONS (int)(sizeof k_sync_reasons / sizeof k_sync_reasons[0])
 
@@ -3959,7 +3961,7 @@ static int op_drm_syncobj_query(struct process *p, int fd, uint64_t arg) {
  *   before this call) needs no entry: the destination reaches its point now,
  *   exactly as Linux's drm_syncobj_add_point of an already-signalled fence.
  *
- * WHAT IS REFUSED, each by its own name (nv_shim.h 15..19):
+ * WHAT IS REFUSED, each by its own name (nv_shim.h 15..20):
  *   - no TRANSFER_FLAGS_TIMELINE: Linux's BINARY transfer moves a whole fence
  *     pointer, and a point-per-record node has none to move;
  *   - a source point above the source's submitted ledger: there is no fence to
@@ -3969,10 +3971,22 @@ static int op_drm_syncobj_query(struct process *p, int fd, uint64_t arg) {
  *     same outcome, different cause, so a different name;
  *   - a handle this client does not hold -- the never-created and the
  *     destroyed handle are the same absence here (see nv_shim.h 18);
- *   - a source handle that came from IMPORT_SYNC_FILE: that is the sync_file
- *     leg of this row, a separate rung (docs/nv-shim-transfer.md §2).
+ *   - an imported (IMPORT_SYNC_FILE) source asked for a point ABOVE its floor:
+ *     the handle carries exactly one fence, the one at its floor;
+ *   - ... and one asked for a point BELOW that floor: no fence ever existed
+ *     there, so chaining to the floor's entry would move the wrong fence.
  * A destination point at or below the destination's submitted ledger is
  * POINT_ORDER, the same rule TIMELINE_SIGNAL applies to its own point.
+ *
+ * WP-TRANSFERFILE: the sync_file SOURCE leg is served, and only at the floor.
+ *   An imported handle's floor is the point IMPORT_SYNC_FILE installed (the
+ *   exported file's point, or the explicit TIMELINE point).  src_point == floor
+ *   is the whole served form: already reached -> land now (add_point of an
+ *   already-signalled fence); still pending -> the destination gets its own
+ *   entry on that record's LIVE entry for the SAME point, so one retire lands
+ *   both.  Note the pending table is per client: the entry found is this
+ *   client's, which is why the import must be on the same /dev/nvshim
+ *   description that submitted the fence (docs/nv-shim-transferfile.md §4).
  * ---------------------------------------------------------------------- */
 static int op_drm_syncobj_transfer(struct process *p, int fd, uint64_t arg) {
   struct nvshim_drm_syncobj_transfer tf;
@@ -4021,17 +4035,35 @@ static int op_drm_syncobj_transfer(struct process *p, int fd, uint64_t arg) {
                      which, NVSHIM_SYNC_TRANSFER_HANDLE_NOT_HELD);
     return -EINVAL;
   }
-  if (c->sobj_floor[sat] != 0) {
-    spinlock_release(&g_shim_lock);
-    sync_refuse_rows("drm syncobj refuse", &r_synctransfer, "transfer src_handle=",
-                     (uint64_t)tf.src_handle, NVSHIM_SYNC_TRANSFER_SRC_SYNC_FILE);
-    return -EINVAL;
-  }
+  /* WP-TRANSFERFILE: an imported handle names EXACTLY ONE point -- the floor
+   * IMPORT_SYNC_FILE installed (the exported file's point, or the explicit
+   * TIMELINE point).  That is the only fence the handle can carry, so the
+   * served form is src_point == floor.  The ledger check comes first, so
+   * src_point > submitted keeps its own name (16) for every handle; then a
+   * point BELOW the floor is a fence that never existed on this record (20),
+   * and a point ABOVE it -- while still inside the ledger -- is a later fence
+   * the handle does not name (19).  Never a silent clamp: either direction
+   * would move the wrong fence. */
+  uint64_t floor = c->sobj_floor[sat];
   if (tf.src_point > sobj_submitted_locked(src)) {
     spinlock_release(&g_shim_lock);
     sync_refuse_rows("drm syncobj refuse", &r_synctransfer, "transfer src_point=",
                      tf.src_point, NVSHIM_SYNC_TRANSFER_POINT_UNSUBMITTED);
     return -EINVAL;
+  }
+  if (floor != 0) {
+    if (tf.src_point < floor) {
+      spinlock_release(&g_shim_lock);
+      sync_refuse_rows("drm syncobj refuse", &r_synctransfer, "transfer src_point=",
+                       tf.src_point, NVSHIM_SYNC_TRANSFER_POINT_BELOW_IMPORT);
+      return -EINVAL;
+    }
+    if (tf.src_point > floor) {
+      spinlock_release(&g_shim_lock);
+      sync_refuse_rows("drm syncobj refuse", &r_synctransfer, "transfer src_handle=",
+                       (uint64_t)tf.src_handle, NVSHIM_SYNC_TRANSFER_SRC_SYNC_FILE);
+      return -EINVAL;
+    }
   }
   if (tf.dst_point <= sobj_submitted_locked(dst)) {
     spinlock_release(&g_shim_lock);
@@ -4042,11 +4074,17 @@ static int op_drm_syncobj_transfer(struct process *p, int fd, uint64_t arg) {
   int chain = -1;
   if (src->point < tf.src_point) {
     uint32_t sidx = sobj_index(src);
-    for (int i = 0; i < c->npend; i++)
-      if (c->pend[i].obj == (uint8_t)sidx && c->pend[i].point >= tf.src_point) {
+    for (int i = 0; i < c->npend; i++) {
+      if (c->pend[i].obj != (uint8_t)sidx) continue;
+      /* An imported source is served only at its own point, so it chains only
+       * to the entry for THAT point: a later entry would be a different
+       * fence, and reason 17 is the honest answer when this one is gone. */
+      if (floor != 0 ? c->pend[i].point == tf.src_point
+                     : c->pend[i].point >= tf.src_point) {
         chain = i;
         break;
       }
+    }
     if (chain < 0) {
       spinlock_release(&g_shim_lock);
       sync_refuse_rows("drm syncobj refuse", &r_synctransfer, "transfer src_point=",
