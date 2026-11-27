@@ -670,10 +670,18 @@ uint32_t nv_radix3_pages(uint64_t size) {
 }
 
 int nv_radix3_build_into(uint8_t *tree, uint32_t tree_pages, uint64_t tree_phys,
-                         uint64_t image_phys, uint64_t image_size) {
+                         uint64_t tree_bus, uint64_t image_phys,
+                         uint64_t image_bus, uint64_t image_size) {
   if (!tree || image_size == 0) return -EINVAL;
+  /* Both ends of both mappings must be page aligned.  The phys pair is the
+   * CPU-side check (they are what phys_to_virt/frame_free spell); the bus pair
+   * is the one that MATTERS, because those numbers are what the booter walks
+   * with -- and NV_DMA_BUS_INVALID (all bits set) is page-unaligned precisely
+   * so it lands here instead of in a PTE. */
   if ((tree_phys & (NV_RADIX3_PAGE - 1)) ||
-      (image_phys & (NV_RADIX3_PAGE - 1)))
+      (tree_bus & (NV_RADIX3_PAGE - 1)) ||
+      (image_phys & (NV_RADIX3_PAGE - 1)) ||
+      (image_bus & (NV_RADIX3_PAGE - 1)))
     return -EINVAL;
   uint32_t need = nv_radix3_pages(image_size);
   if (need == 0 || tree_pages < need) return -EINVAL;
@@ -692,21 +700,25 @@ int nv_radix3_build_into(uint8_t *tree, uint32_t tree_pages, uint64_t tree_phys,
   uint8_t *lvl2p = lvl1 + (uint64_t)l1 * NV_RADIX3_PAGE;
 
   /* Level 2 first: one PTE per image page, ascending, because the image is a
-   * single contiguous run. */
+   * single contiguous run.  BUS + offset -- the device's arithmetic, not the
+   * CPU's. */
   for (uint64_t i = 0; i < img_pages; i++) {
     uint32_t page = (uint32_t)(i / NV_RADIX3_ENTRIES);
     uint32_t slot = (uint32_t)(i % NV_RADIX3_ENTRIES);
     fw_put64(lvl2p + (uint64_t)page * NV_RADIX3_PAGE + slot * 8,
-             image_phys + i * NV_RADIX3_PAGE);
+             image_bus + i * NV_RADIX3_PAGE);
   }
-  /* Level 1 points at the level-2 pages, level 0 at the level-1 pages. */
+  /* Level 1 points at the level-2 pages, level 0 at the level-1 pages.  These
+   * are the tree's own pages as the DEVICE sees them: tree_bus + page offset.
+   * The pointer arithmetic (`lvl2p - tree`) is a CPU-side offset into the
+   * buffer we are filling; it is never an address by itself. */
   for (uint32_t j = 0; j < l2; j++)
     fw_put64(lvl1 + (uint64_t)(j / NV_RADIX3_ENTRIES) * NV_RADIX3_PAGE +
                  (j % NV_RADIX3_ENTRIES) * 8,
-             (uint64_t)(lvl2p - tree) + tree_phys + (uint64_t)j * NV_RADIX3_PAGE);
+             (uint64_t)(lvl2p - tree) + tree_bus + (uint64_t)j * NV_RADIX3_PAGE);
   for (uint32_t k = 0; k < l1; k++)
     fw_put64(lvl0 + (uint64_t)k * 8,
-             (uint64_t)NV_RADIX3_PAGE + tree_phys + (uint64_t)k * NV_RADIX3_PAGE);
+             (uint64_t)NV_RADIX3_PAGE + tree_bus + (uint64_t)k * NV_RADIX3_PAGE);
   return 0;
 }
 
@@ -728,28 +740,42 @@ void nv_fw_meta_release(uint64_t phys) {
   if (phys) frame_free(phys);
 }
 
-int nv_radix3_build(uint64_t image_phys, uint64_t image_size,
-                    uint64_t *root_phys, uint32_t *tree_pages) {
-  if (!root_phys || !tree_pages) return -EINVAL;
+int nv_radix3_build(uint64_t image_phys, uint64_t image_bus,
+                    uint64_t image_size, struct nv_radix3_tree *out) {
+  if (!out) return -EINVAL;
+  out->map.phys = 0;
+  out->map.bus = 0;
+  out->map.len = 0;
+  out->map.pages = 0;
+  out->root_bus = 0;
   uint32_t need = nv_radix3_pages(image_size);
   if (need == 0) return -EINVAL;
-  uint64_t phys = frame_alloc_contig((int)need);
-  if (!phys) return -ENOMEM;
-  int rc = nv_radix3_build_into((uint8_t *)phys_to_virt(phys), need, phys,
-                                image_phys, image_size);
+  /* The tree is a device-visible structure -- the booter walks it and the
+   * metadata block points at it -- so it is an nv_dma mapping like any other
+   * buffer the GPU reads, not a bare frame run.  That is also where its bus
+   * address comes from: nv_dma_bus() below, never frame_alloc_contig's phys. */
+  int rc = nv_dma_alloc((uint64_t)need * NV_RADIX3_PAGE, &out->map);
+  if (rc != 0) return rc;
+  uint64_t tree_bus = nv_dma_bus(&out->map);
+  if (tree_bus == NV_DMA_BUS_INVALID) {
+    nv_dma_free(&out->map);
+    return -ENOTSUP;
+  }
+  rc = nv_radix3_build_into((uint8_t *)phys_to_virt(out->map.phys), need,
+                            out->map.phys, tree_bus, image_phys, image_bus,
+                            image_size);
   if (rc != 0) {
-    for (uint32_t i = 0; i < need; i++)
-      frame_free(phys + (uint64_t)i * FRAME_SIZE);
+    nv_dma_free(&out->map);
     return rc;
   }
-  *root_phys = phys;
-  *tree_pages = need;
+  out->root_bus = tree_bus;
   return 0;
 }
 
-void nv_radix3_release(uint64_t root_phys, uint32_t tree_pages) {
-  for (uint32_t i = 0; i < tree_pages; i++)
-    frame_free(root_phys + (uint64_t)i * FRAME_SIZE);
+void nv_radix3_release(struct nv_radix3_tree *t) {
+  if (!t) return;
+  nv_dma_free(&t->map);
+  t->root_bus = 0;
 }
 #endif
 
@@ -792,19 +818,24 @@ int nv_fw_load_blob(const char *name, struct nv_fw_blob *out) {
   if (e.file_size > 0x4000000u) return -EINVAL; /* 64 MiB: not a firmware blob */
 
   uint32_t pages = (e.file_size + FRAME_SIZE - 1) / FRAME_SIZE;
-  uint64_t phys = frame_alloc_contig((int)pages);
-  if (!phys) return -ENOMEM;
+  /* One nv_dma mapping for the whole file: the frames the CPU reads through
+   * phys_to_virt() and the bus address the device reads are then the same
+   * object, resolved in one place (nv_dma_bus).  Under translation this
+   * refuses with -ENOTSUP rather than hand back a phys that only looks like an
+   * address. */
+  struct nv_dma_map map;
+  int err2 = nv_dma_alloc((uint64_t)pages * NV_DMA_PAGE, &map);
+  if (err2 != 0) return err2;
 
-  int got = fat16_read_direct_pos(e.start_cluster, e.file_size, phys,
+  int got = fat16_read_direct_pos(e.start_cluster, e.file_size, map.phys,
                                   (int)e.file_size, 0);
   if (got != (int)e.file_size) {
-    for (uint32_t i = 0; i < pages; i++)
-      frame_free(phys + (uint64_t)i * FRAME_SIZE);
+    nv_dma_free(&map);
     return -EIO;
   }
 
-  out->phys = phys;
-  out->buf = (uint8_t *)phys_to_virt(phys);
+  out->map = map;
+  out->buf = (uint8_t *)phys_to_virt(map.phys);
   out->size = e.file_size;
   out->pages = pages;
   return 0;
@@ -821,12 +852,18 @@ int nv_fw_load(const char *name, uint8_t **out, uint32_t *size) {
 }
 
 void nv_fw_release(struct nv_fw_blob *b) {
-  if (!b || !b->phys) return;
-  for (uint32_t i = 0; i < b->pages; i++)
-    frame_free(b->phys + (uint64_t)i * FRAME_SIZE);
-  fw_zero(b, sizeof *b);
+  if (!b || !b->map.phys) return;
+  nv_dma_free(&b->map);
+  b->buf = 0;
+  b->size = 0;
+  b->pages = 0;
 }
 
+/* Release a buffer from nv_fw_load().  That entry keeps no mapping (it returns
+ * only the pointer), so this frees the frames it can name from the virtual
+ * address.  It is deliberately NOT what the boot path uses: freeing a mapping
+ * through this route leaves nv_dma's bookkeeping unrun, so a blob whose bus
+ * address was published must be released with nv_fw_release(). */
 void nv_fw_release_buf(uint8_t *buf, uint32_t size) {
   if (!buf || size == 0) return;
   uint64_t phys = virt_to_phys((void *)buf);

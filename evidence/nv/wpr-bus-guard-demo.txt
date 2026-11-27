@@ -1,0 +1,24 @@
+$ sed -i "s/img_bus + sig_off/rm.map.phys + sig_off/" src/kernel/nv_gsp.c
+$ sed -n 4889p src/kernel/nv_gsp.c   # the mutation in place
+      m.sysmem_addr_signature = sig_off ? (rm.map.phys + sig_off) : 0;
+$ sed -i "s/image_bus + i \* NV_RADIX3_PAGE/image_phys + i * NV_RADIX3_PAGE/" src/kernel/nv_fw.c
+$ sed -n 709p src/kernel/nv_fw.c     # the mutation in place
+             image_phys + i * NV_RADIX3_PAGE);
+$ make wpr_bus_provenance   # expect FAIL
+python3 tools/nv/check_wpr_bus_provenance.py --gate
+nv wpr bus provenance: FAIL (5 violations)
+  src/kernel/nv_gsp.c:4889: m.sysmem_addr_signature = sig_off ? (rm.map.phys + sig_off) : 0; -- a metadata field the BOOTER reads is built from phys; it must be a bus value (nv_dma_bus) plus an offset inside that mapping
+  src/kernel/nv_gsp.c: seam expression not found: 'm.sysmem_addr_signature = sig_off ? (img_bus + sig_off) : 0;' -- the WPR/booter glue must publish the nv_dma_bus() answer; update this guard with the new expression
+  src/kernel/nv_gsp.c:4889: m.sysmem_addr_signature = sig_off ? (rm.map.phys + sig_off) : 0; -- .phys outside the three CPU-side uses; a device-visible address must come from nv_dma_bus()
+  src/kernel/nv_fw.c: nv_radix3_build_into(): fw_put64(... phys ...) -- a tree entry is an address the DEVICE walks; it must be image_bus/tree_bus plus a page offset
+  src/kernel/nv_fw.c: seam expression not found: 'image_bus + i * NV_RADIX3_PAGE' -- the tree must hold bus addresses and the blobs must be nv_dma mappings; update this guard with the new expression
+make: *** [Makefile:4163: wpr_bus_provenance] Error 1
+exit=2
+$ # both files restored
+4872:       * mapping, so the published address is img_bus + sig_off.  Found by name,
+4889:      m.sysmem_addr_signature = sig_off ? (img_bus + sig_off) : 0;
+709:             image_bus + i * NV_RADIX3_PAGE);
+$ make wpr_bus_provenance   # expect ok
+python3 tools/nv/check_wpr_bus_provenance.py --gate
+nv wpr bus provenance: ok -- 3 metadata field(s), 3 tree store(s), 5 device-facing call(s), 6 allowed CPU-side .phys use(s), 0 raw phys
+exit=0

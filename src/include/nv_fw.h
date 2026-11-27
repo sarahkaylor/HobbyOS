@@ -1,6 +1,13 @@
 #ifndef NV_FW_H
 #define NV_FW_H
 
+/* struct nv_dma_map: the blobs this file loads and the radix3 tree it builds
+ * are mappings, not physical addresses.  A device (SEC2, the booter, GSP-RM)
+ * reads them at the `bus` nv_dma_bus() issues, never at `phys`; the physical
+ * address exists here only for phys_to_virt() on the CPU side.  The include is
+ * inside the guard and costs one small header -- nv_dma.h pulls in nothing. */
+#include "nv_dma.h"
+
 /* ============================================================================
  *  nv_fw: the GSP firmware blobs, as bytes.
  *
@@ -262,12 +269,20 @@ int nv_fw_wpr_meta_verified(const struct nv_wpr_meta_in *m);
 
 /* ---- 4b. the radix3 tree that describes the RM image to the booter -----
  *
- * The metadata block carries a SYSTEM PHYSICAL address of a tree root, not of
- * the image (docs/nv-gsp-wpr-contract.md section 4.3).  Three levels of 512
- * 64-bit entries: level 0 points at level-1 pages, level-1 at level-2 pages,
- * and level-2 holds one PTE per 4 KiB image page -- the system physical
- * address, ascending.  Our loader hands back one contiguous run, so the tree is
- * arithmetic: no mapping, no scatter list.
+ * The metadata block carries the BUS address of a tree root, not of the image
+ * (docs/nv-gsp-wpr-contract.md section 4.3).  Three levels of 512 64-bit
+ * entries: level 0 points at level-1 pages, level-1 at level-2 pages, and
+ * level-2 holds one PTE per 4 KiB image page, ascending.  Our loader hands back
+ * one contiguous run, so the tree is arithmetic: no mapping, no scatter list.
+ *
+ * Every address an entry carries is the one the DEVICE walks with -- the bus
+ * address nv_dma_bus() issued for the image mapping (in the PTEs) and for the
+ * tree's own mapping (in the two pointer levels and the root).  `phys` appears
+ * in this API only so a caller cannot lose the CPU-side address it needs for
+ * phys_to_virt(); it is never written into an entry.  While VT-d translation
+ * is off bus == phys and both spellings work -- which is exactly why the
+ * distinction has to live in the values, not in the arithmetic
+ * (src/include/nv_dma.h).
  *
  * Pages needed for the tree itself: 1 level-0 page + L1 level-1 pages + L2
  * level-2 pages, where L2 = ceil(image_pages / 512) and L1 = ceil(L2 / 512).
@@ -282,13 +297,21 @@ int nv_fw_wpr_meta_verified(const struct nv_wpr_meta_in *m);
 uint32_t nv_radix3_pages(uint64_t size);
 
 /* Fill a caller-provided contiguous tree.
- *   tree       base of the tree, `tree_pages` * 4096 bytes, physically
- *              contiguous, `tree_phys` its physical address
- *   image_phys page-aligned physical base of the RM image
+ *   tree        base of the tree, `tree_pages` * 4096 bytes, physically
+ *               contiguous
+ *   tree_phys   that buffer's physical base (CPU side: validation only)
+ *   tree_bus    the same buffer's device-visible base.  This is what the
+ *               pointer entries hold: tree_bus + page offset, never tree_phys.
+ *   image_phys  page-aligned physical base of the RM image (validation only)
+ *   image_bus   page-aligned device-visible base of the RM image; the level-2
+ *               PTEs are image_bus + i * 4096
  * Returns 0, or -EINVAL on a bad argument (sizes that disagree, unaligned
- * addresses, a tree too small for the image). */
+ * phys OR bus, a tree too small for the image).  A caller that has no honest
+ * bus value must not call this: nv_dma_bus() answering NV_DMA_BUS_INVALID is
+ * page-unaligned, so it is refused here rather than written into a PTE. */
 int nv_radix3_build_into(uint8_t *tree, uint32_t tree_pages, uint64_t tree_phys,
-                         uint64_t image_phys, uint64_t image_size);
+                         uint64_t tree_bus, uint64_t image_phys,
+                         uint64_t image_bus, uint64_t image_size);
 
 /* ---- 4c. the VRAM layout the metadata block describes ------------------
  *
@@ -369,13 +392,23 @@ void nv_fw_slide_down(uint8_t *buf, uint32_t buf_len, uint32_t off,
 int nv_fw_meta_alloc(const struct nv_wpr_meta_in *m, uint64_t *phys_out);
 void nv_fw_meta_release(uint64_t phys);
 
-/* Allocate the tree from contiguous frames and fill it.  On success
- * `*root_phys` is the value the metadata block wants, and `*tree_pages` is how
- * many frames to free later.  -ENOMEM when the frame pool cannot supply a
- * contiguous run. */
-int nv_radix3_build(uint64_t image_phys, uint64_t image_size,
-                    uint64_t *root_phys, uint32_t *tree_pages);
-void nv_radix3_release(uint64_t root_phys, uint32_t tree_pages);
+/* The tree a caller gets from the allocating form.  The mapping is the tree's
+ * own frames (nv_dma_alloc, so its size is page-granular and its bus address is
+ * resolved once); the root the metadata block carries is the mapping's BUS
+ * address, kept here so the boot path never has to spell it again. */
+struct nv_radix3_tree {
+  struct nv_dma_map map; /* owns the tree frames: phys CPU-side, bus in the PTEs */
+  uint64_t root_bus;     /* nv_dma_bus(&map): the value the WPR meta carries */
+};
+
+/* Allocate the tree from one contiguous nv_dma run and fill it.  On success
+ * `out->root_bus` is the device-visible address the metadata block wants and
+ * `out->map.pages` is how many frames to free later; -ENOMEM when the frame
+ * pool cannot supply a contiguous run, -ENOTSUP when translation is live (there
+ * is no honest bus address to put in an entry -- src/include/nv_dma.h). */
+int nv_radix3_build(uint64_t image_phys, uint64_t image_bus,
+                    uint64_t image_size, struct nv_radix3_tree *out);
+void nv_radix3_release(struct nv_radix3_tree *t);
 #endif
 
 /* ---- 5. digests and the file loader ----------------------------------- */
@@ -389,14 +422,29 @@ int nv_fw_sha256(const uint8_t *buf, uint32_t len, uint8_t out[32]);
 
 #define NV_FW_PATH_PREFIX "/NVIDIA/GSP/"
 
-/* A loaded blob: page-aligned, physically contiguous frames, so the DMA path
- * can program an address without a scatter list. */
+/* A loaded blob: page-aligned, physically contiguous frames from nv_dma_alloc,
+ * so the DMA path has BOTH addresses it needs and cannot confuse them:
+ *   map.phys  CPU side only -- phys_to_virt() to read/write the bytes
+ *   nv_fw_blob_bus(&blob)  the device-visible base.  Everything an
+ *             SEC2/booter/GSP-RM field publishes is this value plus a
+ *             file/pbuffer OFFSET inside the blob; a raw physical address there
+ *             is the bug nv_dma.h exists to prevent.  There is no stored copy
+ *             of it: one accessor, one source of truth. */
 struct nv_fw_blob {
-  uint8_t *buf;  /* kernel VA (phys_to_virt of phys) */
-  uint64_t phys; /* page-aligned physical base */
-  uint32_t size; /* file bytes in buf */
-  uint32_t pages;
+  uint8_t *buf;          /* kernel VA (phys_to_virt of map.phys) */
+  struct nv_dma_map map; /* owns the frames; the mapping, not an address */
+  uint32_t size;         /* file bytes in buf */
+  uint32_t pages;        /* map.pages (kept for callers that only free) */
 };
+
+/* The device-visible base of a loaded blob.  The accessor exists so a call site
+ * never reaches into the mapping's fields directly -- this call is the one
+ * place the value is allowed to come from (src/include/nv_dma.h).  Returns
+ * NV_DMA_BUS_INVALID when there is no honest answer; a caller must then fail
+ * instead of publishing anything. */
+static inline uint64_t nv_fw_blob_bus(const struct nv_fw_blob *b) {
+  return b ? nv_dma_bus(&b->map) : NV_DMA_BUS_INVALID;
+}
 
 /* Read /NVIDIA/GSP/<name> into contiguous frames.
  *   -EINVAL  null/bad name, or the name does not fit the kernel's path limit
@@ -404,14 +452,17 @@ struct nv_fw_blob {
  *   -EISDIR  it is a directory
  *   -EIO     a short/failed read (the frames are released first)
  *   -ENOMEM  the frame pool cannot supply that many contiguous frames
+ *   -ENOTSUP VT-d translation is live: nv_dma_alloc cannot name a bus address
  * On success `out` owns the frames: release with nv_fw_release(). */
 int nv_fw_load_blob(const char *name, struct nv_fw_blob *out);
 
-/* The convenience form: the same read, reporting only the mapping.  The DMA
- * path should use nv_fw_load_blob() and keep the physical address; this is
- * for the parse-and-verify path, which only needs a pointer.  Release the
- * frames with nv_fw_release_buf(buf, size) -- the page count is derived from
- * `size` exactly as it was derived on the way in. */
+/* The convenience form: the same read, reporting only the mapping.  This is
+ * the parse-and-verify path, which needs a pointer and nothing else -- and it
+ * must NOT be used where a device address is published: it returns a CPU
+ * pointer, so a caller that needs the bus address has to call
+ * nv_fw_load_blob() and keep the mapping.  Release the frames with
+ * nv_fw_release_buf(buf, size) -- the page count is derived from `size`
+ * exactly as it was derived on the way in. */
 int nv_fw_load(const char *name, uint8_t **out, uint32_t *size);
 
 void nv_fw_release(struct nv_fw_blob *b);

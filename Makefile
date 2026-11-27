@@ -4151,6 +4151,19 @@ $(IPC_PROTO_TEST): src/host/ipc_proto_test.c src/kernel/ipc_proto.c src/include/
 obj/host_hb_%.o: src/libc/src/%.c src/libc/include/*.h
 	$(HOST_CC) $(HOST_CFLAGS) -c $< -o $@
 
+# WPR/booter address provenance (docs/nv-wpr-bus-provenance.md).  Every
+# metadata and radix3 address the booter/SEC2/GSP-RM reads must be the
+# nv_dma_bus() answer for the mapping that owns those bytes, never a raw
+# `phys` -- the two are equal only while VT-d translation is off, so a
+# physical field is a silent boot failure on the first translated one.  This is
+# the sibling of check_rpc_bus_provenance.py (the transport half of the same
+# rule); stdlib only, ~0.1 s, so host_tests carries it as a prerequisite.
+WPR_BUS_PROVENANCE ?= $(PYTHON) tools/nv/check_wpr_bus_provenance.py
+wpr_bus_provenance:
+	$(WPR_BUS_PROVENANCE) --gate
+host_tests: wpr_bus_provenance
+.PHONY: wpr_bus_provenance
+
 # icewm.md M2 (lane xlibs-core): inet/netdb, uname vs glibc.
 # Wired into host_tests through a prerequisite-only run target.
 X11_LIBC_TEST = x11_libc_test_host

@@ -22,6 +22,7 @@
 #include "unit_test.h"
 #include "nv_fw.h"
 #include "errno.h"
+#include "kmem.h" /* phys_to_virt: the CPU view of the tree/alloc cases below */
 
 /* ---- byte helpers for building inputs --------------------------------- */
 
@@ -602,45 +603,116 @@ static void test_nv_radix3_pages(void) {
   EXPECT_EQ((int)nv_radix3_pages(0x10000000000ull), 0); /* 1 TiB of pages */
 }
 
-/* A tree that points at the right physical pages, in the right order, with the
- * holes marked absent rather than left as garbage. */
+/* A tree that points at the right pages, in the right order, with the holes
+ * marked absent rather than left as garbage -- and that carries the BUS
+ * addresses, not the physical ones.  Every case below gives the tree and the
+ * image a bus base that is deliberately DIFFERENT from their physical base:
+ * while VT-d translation is off the driver's two values are equal, so a tree
+ * built from phys would pass an identity test here and send the booter to
+ * unmapped addresses on the first translated boot (src/include/nv_dma.h). */
 static void test_nv_radix3_build(void) {
   uart_puts("  Running test_nv_radix3_build...\n");
   tests_run++;
   static uint8_t tree[4 * 4096];
   const uint64_t tree_phys = 0x20000000ULL;
+  const uint64_t tree_bus = 0x40000000ULL; /* device view, on purpose != phys */
   const uint64_t img_phys = 0x30000000ULL;
+  const uint64_t img_bus = 0x50000000ULL;
   const uint64_t img_size = 512ull * 4096; /* exactly one level-2 page */
 
   fill(tree, sizeof tree, 0xEE);
-  ASSERT(nv_radix3_build_into(tree, 4, tree_phys, img_phys, img_size) == 0);
+  ASSERT(nv_radix3_build_into(tree, 4, tree_phys, tree_bus, img_phys, img_bus,
+                              img_size) == 0);
 
   /* Root: one entry, pointing at the level-1 page (the second page). */
-  ASSERT(le64(tree + 0) == tree_phys + 4096);
+  ASSERT(le64(tree + 0) == tree_bus + 4096);
   EXPECT_EQ((int)le64(tree + 8), 0); /* no second level-1 page */
   /* Level 1: one entry, pointing at the level-2 page (the third page). */
-  ASSERT(le64(tree + 4096 + 0) == tree_phys + 8192);
+  ASSERT(le64(tree + 4096 + 0) == tree_bus + 8192);
   EXPECT_EQ((int)le64(tree + 4096 + 8), 0);
-  /* Level 2: 512 PTEs, ascending, contiguous. */
+  /* Level 2: 512 PTEs, ascending, contiguous -- BUS base plus the page offset. */
   for (int i = 0; i < 512; i++)
-    ASSERT(le64(tree + 8192 + i * 8) == img_phys + (uint64_t)i * 4096);
+    ASSERT(le64(tree + 8192 + i * 8) == img_bus + (uint64_t)i * 4096);
+  /* And no entry anywhere is a physical address.  These two are the exact
+   * bytes a phys-built tree produced before this card. */
+  EXPECT_EQ((int)(le64(tree + 0) == tree_phys + 4096), 0);
+  EXPECT_EQ((int)(le64(tree + 8192) == img_phys), 0);
 
   /* A partial last level-2 page leaves the tail zeroed, not stale. */
   fill(tree, sizeof tree, 0xEE);
-  ASSERT(nv_radix3_build_into(tree, 4, tree_phys, img_phys, 4096) == 0);
-  ASSERT(le64(tree + 8192 + 0) == img_phys);
+  ASSERT(nv_radix3_build_into(tree, 4, tree_phys, tree_bus, img_phys, img_bus,
+                              4096) == 0);
+  ASSERT(le64(tree + 8192 + 0) == img_bus);
   EXPECT_EQ((int)le64(tree + 8192 + 8), 0);
   EXPECT_EQ((int)le64(tree + 8192 + 511 * 8), 0);
 
-  /* Refusals: short tree, unaligned addresses, zero size, null. */
-  EXPECT_EQ(nv_radix3_build_into(tree, 2, tree_phys, img_phys, img_size),
+  /* Refusals: short tree, unaligned phys OR bus, zero size, null, and the
+   * poisoned bus value nv_dma_bus() answers when it has nothing honest to
+   * say (all bits set, so page-unaligned by construction). */
+  EXPECT_EQ(nv_radix3_build_into(tree, 2, tree_phys, tree_bus, img_phys,
+                                 img_bus, img_size),
             -EINVAL);
-  EXPECT_EQ(nv_radix3_build_into(tree, 4, tree_phys + 8, img_phys, img_size),
+  EXPECT_EQ(nv_radix3_build_into(tree, 4, tree_phys + 8, tree_bus, img_phys,
+                                 img_bus, img_size),
             -EINVAL);
-  EXPECT_EQ(nv_radix3_build_into(tree, 4, tree_phys, img_phys + 1, img_size),
+  EXPECT_EQ(nv_radix3_build_into(tree, 4, tree_phys, tree_bus + 8, img_phys,
+                                 img_bus, img_size),
             -EINVAL);
-  EXPECT_EQ(nv_radix3_build_into(tree, 4, tree_phys, img_phys, 0), -EINVAL);
-  EXPECT_EQ(nv_radix3_build_into(0, 4, tree_phys, img_phys, img_size), -EINVAL);
+  EXPECT_EQ(nv_radix3_build_into(tree, 4, tree_phys, tree_bus, img_phys + 1,
+                                 img_bus, img_size),
+            -EINVAL);
+  EXPECT_EQ(nv_radix3_build_into(tree, 4, tree_phys, tree_bus, img_phys,
+                                 img_bus + 1, img_size),
+            -EINVAL);
+  EXPECT_EQ(nv_radix3_build_into(tree, 4, tree_phys, tree_bus, img_phys,
+                                 NV_DMA_BUS_INVALID, img_size),
+            -EINVAL);
+  EXPECT_EQ(nv_radix3_build_into(tree, 4, tree_phys, tree_bus, img_phys,
+                                 img_bus, 0),
+            -EINVAL);
+  EXPECT_EQ(nv_radix3_build_into(0, 4, tree_phys, tree_bus, img_phys, img_bus,
+                                 img_size),
+            -EINVAL);
+}
+
+/* The allocating form is the one the boot path calls: the tree is an nv_dma
+ * mapping, its root is nv_dma_bus() of that mapping, and it refuses to build
+ * when no honest bus address exists (translation live). */
+static void test_nv_radix3_build_alloc(void) {
+  uart_puts("  Running test_nv_radix3_build_alloc...\n");
+  tests_run++;
+  struct nv_radix3_tree t;
+  const uint64_t img_phys = 0x30000000ULL;
+  const uint64_t img_bus = 0x50000000ULL; /* on purpose != phys */
+
+  /* A 4096-byte image needs 3 tree pages: root + one level-1 + one level-2. */
+  ASSERT(nv_radix3_build(img_phys, img_bus, 4096, &t) == 0);
+  ASSERT(t.map.pages == 3);
+  ASSERT(t.map.phys != 0);
+  /* The root the metadata block carries is the mapping's bus address. */
+  ASSERT(t.root_bus == nv_dma_bus(&t.map));
+  ASSERT(t.root_bus == t.map.bus);
+  ASSERT(t.root_bus + 0 != 0);
+  /* Walk what was written through the CPU view and check the two levels. */
+  {
+    const uint8_t *buf = (const uint8_t *)phys_to_virt(t.map.phys);
+    ASSERT(le64(buf + 0) == t.root_bus + 4096);
+    ASSERT(le64(buf + 4096 + 0) == t.root_bus + 8192);
+    ASSERT(le64(buf + 8192 + 0) == img_bus);
+    /* Never the physical base: this is the value a booter walks with. */
+    EXPECT_EQ((int)(le64(buf + 8192 + 0) == img_phys), 0);
+  }
+  nv_radix3_release(&t);
+  ASSERT(t.map.phys == 0 && t.map.pages == 0 && t.root_bus == 0);
+
+  /* Refusals: nothing to describe; no output; and translation live -- there is
+   * no bus address to put in an entry, so the build must fail rather than fall
+   * back to phys. */
+  EXPECT_EQ(nv_radix3_build(img_phys, img_bus, 0, &t), -EINVAL);
+  EXPECT_EQ(nv_radix3_build(img_phys, img_bus, 4096, 0), -EINVAL);
+  nv_dma_test_set_translation(1);
+  EXPECT_EQ(nv_radix3_build(img_phys, img_bus, 4096, &t), -ENOTSUP);
+  nv_dma_test_set_translation(-1);
 }
 
 /* The slide that page-aligns .fwimage: overalloc-safe on overlap, and a refusal
@@ -771,6 +843,11 @@ static void test_nv_fw_load_missing(void) {
 
   struct nv_fw_blob b;
   EXPECT_EQ(nv_fw_load_blob("not-present-535.113.01.bin", &b), -ENOENT);
+  /* A failed load leaves no mapping behind: an empty mapping is the state a
+   * caller cannot publish from, and nv_fw_blob_bus() says so. */
+  EXPECT_EQ((int)b.map.pages, 0);
+  EXPECT_EQ((int)(b.map.phys != 0), 0);
+  EXPECT_EQ((int)(nv_fw_blob_bus(&b) == NV_DMA_BUS_INVALID), 1);
   /* Releasing nothing is a no-op, not a fault. */
   nv_fw_release(&b);
   nv_fw_release_buf(0, 0);
@@ -792,6 +869,7 @@ void nv_fw_test_suite(void) {
   test_nv_fw_wpr_meta_verified();
   test_nv_radix3_pages();
   test_nv_radix3_build();
+  test_nv_radix3_build_alloc();
   test_nv_fw_slide_down();
   test_nv_wpr_layout();
   test_nv_fw_sha256_nist();
