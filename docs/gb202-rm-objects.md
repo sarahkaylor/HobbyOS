@@ -16,11 +16,12 @@ VM 300 `stopped`, `pgrep -c qemu-system-x86` = **0** on r1 and on this worker.
 ## 0. The answer, in six lines
 
 1. **Nothing newer than the 620.70.10 set exists.** `620.73.04` is the newest
-   public tag (`open-gpu-kernel-modules`, commit `a4b95f6a2d`). Its GB202 FMC and
-   boot-image bindata are **byte-identical** to `620.70.10`'s: file sha256
-   `f36554a8…` / `1053c2dc…`, decoded FMC image sha256 `55042efa…`, boot image
-   `fc42d268…`. So does `620.70.06`. A boot spent hunting an FMC newer than 620
-   buys nothing.
+   public tag by version (`open-gpu-kernel-modules`, commit `a4b95f6a2d`; its tag
+   commit, 2026-11-18, is even older than `620.70.10`'s 2026-11-23, which does
+   not matter — see the next sentence). Its GB202 FMC and boot-image bindata are
+   **byte-identical** to `620.70.10`'s: file sha256 `f36554a8…` / `1053c2dc…`,
+   decoded FMC image sha256 `55042efa…`, boot image `fc42d268…`. So does
+   `620.70.06`. A boot spent hunting an FMC newer than 620 buys nothing.
 2. **The whole reachable corpus is 11 distinct GB202 FMC images and 11 distinct
    boot images**, across every public tag from `570.86.16` to `620.73.04` (§2).
    Only **three FMC images have ever been on the card**: `570.144` (`e4d17650…`,
