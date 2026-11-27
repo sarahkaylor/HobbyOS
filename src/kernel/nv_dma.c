@@ -260,6 +260,30 @@ uint64_t nv_dma_bus(const struct nv_dma_map *m) {
   return m->bus;
 }
 
+/* The same answer for frames the caller owns (the firmware loader's blobs).
+ * No ownership is transferred, so this returns a value, not a mapping. */
+uint64_t nv_dma_bus_of_run(uint64_t phys, uint64_t len) {
+  if (!phys || !len || (len & (NV_DMA_PAGE - 1)) ||
+      (phys & (NV_DMA_PAGE - 1))) {
+    uart_puts("[NV-DMA] bus-of-run REFUSED shape phys=");
+    uart_print_hex(phys);
+    uart_puts(" len=");
+    uart_print_hex(len);
+    uart_puts("\n");
+    return NV_DMA_BUS_INVALID;
+  }
+  if (!frame_phys_in_pool(phys) ||
+      !frame_phys_in_pool(phys + len - NV_DMA_PAGE)) {
+    uart_puts("[NV-DMA] bus-of-run REFUSED not pool RAM phys=");
+    uart_print_hex(phys);
+    uart_puts("\n");
+    return NV_DMA_BUS_INVALID;
+  }
+  uint64_t bus = 0;
+  if (nv_dma_resolve_bus(phys, &bus) != 0) return NV_DMA_BUS_INVALID;
+  return bus;
+}
+
 int nv_dma_guard(uint64_t phys, uint64_t bus) {
   if ((phys & (NV_DMA_PAGE - 1)) || (bus & (NV_DMA_PAGE - 1))) {
     /* Also the path a poisoned bus address takes: NV_DMA_BUS_INVALID is

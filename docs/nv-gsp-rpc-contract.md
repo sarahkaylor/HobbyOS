@@ -239,6 +239,20 @@ For a first round trip they can be zero-sized; whether the firmware tolerates a
 missing/zero-sized log region is **NOT ESTABLISHED** — it is cheap to provide
 three valid 4 KiB regions and remove the question.
 
+**Implementation (card t_2081ec4f).** §1.5 is built by
+`nv_rpc_args_build()` / read back by `nv_rpc_args_read()`
+(`src/kernel/nv_rpc.c`, offsets in `src/include/nv_rpc.h`); §1.6 by
+`nv_rpc_libos_build()` / `nv_rpc_id8()` in the same file. The boot-path glue
+(`nv_gsp_rpc_publish()`, `src/kernel/nv_gsp.c`) allocates the three pages,
+takes every address from `nv_dma_bus()`, writes MAILBOX1:MAILBOX0, and logs
+one `[NV-ARG]` row per claim plus one `[NV-RPC] stage=publish` summary row
+whose `match=` is an assertion (a wrong published address fails the publish) —
+including the status header re-read afterwards, which must still be zero. The
+three log regions are real 4 KiB pages, so the
+"zero-sized log region" question above is not left open. The argument page's
+own `size` field stays `0xC8`; the RMARGS *region* entry publishes the whole
+4 KiB page, which is also the allocation.
+
 ### 1.7 The doorbell
 
 | property | value | tag |

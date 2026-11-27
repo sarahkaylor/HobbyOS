@@ -1,0 +1,12 @@
+# mutation 1: nv_dma_bus_of_run() laundered phys into a bus address (translation check deleted)
+# expected red: test_nv_dma_bus_of_run_for_borrowed_frames; observed:
+Tests failed!
+    RUNNING KERNEL UNIT TESTS     
+  Running test_nv_dma_bus_of_run_for_borrowed_frames...
+ASSERTION FAILED: nv_dma_bus_of_run(phys, NV_DMA_PAGE) == NV_DMA_BUS_INVALID at src/kernel/nv_dma_test.c:376
+EXPECT_EQ FAILED: nv_dma_alloc(0x81000, &m) == 0 at src/kernel/nv_dma_test.c:302
+EXPECT_EQ FAILED: nv_dma_alloc(0x2000, &a) == 0 at src/kernel/nv_dma_test.c:318
+EXPECT_EQ FAILED: nv_dma_alloc(0x3000, &m) == 0 at src/kernel/nv_dma_test.c:335
+Tests run:    610
+Tests failed: 4
+UNIT TESTS FAILED

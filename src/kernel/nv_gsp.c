@@ -182,6 +182,351 @@ int nv_gsp_rpc_build(struct nv_gsp_rpc *r) {
   return 0;
 }
 
+/* ============================================================================
+ *  The publish side: GSP_ARGUMENTS_CACHED + the libos-args table + MAILBOX0/1
+ *  (docs/nv-gsp-rpc-contract.md 1.5 and 1.6)
+ *
+ *  THE GAP THIS CLOSES.  Building the block is not telling firmware about it.
+ *  RM does not scan memory: it reads a one-page argument structure, finds it
+ *  through a table of named regions whose address the host put in two falcon
+ *  mailbox words, and walks the 129 PTEs from mq.sharedMemPhysAddr.  Without
+ *  this, a running RM reads a zero status header forever -- which is
+ *  indistinguishable, in a log, from RM never having started at all.
+ *
+ *  NO PEER IS NEEDED.  All of it is host-side image construction plus two
+ *  MMIO dwords, so it is checkable on a card where SEC2 has never reached
+ *  INIT_DONE, which is the card we have.
+ * ========================================================================== */
+
+/* The two GSP falcon mailbox words.  Defined here rather than beside the other
+ * GSP registers further down because the publish below is the first user. */
+#define NV_GSP_MAILBOX0 (NV_FALCON_GSP_BASE + 0x040)
+#define NV_GSP_MAILBOX1 (NV_FALCON_GSP_BASE + 0x044)
+
+/* One id8 as its eight characters.  Printed straight out of the re-read page,
+ * so the log shows the bytes the firmware will read rather than the string we
+ * meant to write; a non-printable byte becomes '.', which is visibly not a
+ * region name. */
+static void nv_arg_put_id8(uint64_t id) {
+  char s[9];
+  for (int i = 0; i < 8; i++) {
+    uint8_t c = (uint8_t)((id >> (8 * i)) & 0xFFu);
+    s[i] = (c >= 0x20 && c < 0x7F) ? (char)c : '.';
+  }
+  s[8] = 0;
+  uart_puts(s);
+}
+
+/* The argument page, the libos table, and the three log regions the table
+ * names.  Taken and released together: a table that names regions nobody
+ * allocated would point the firmware at someone else's memory. */
+static int nv_gsp_args_alloc(struct nv_gsp_rpc *r) {
+  int rc = nv_dma_alloc(NV_RPC_GSP_ARGS_PAGE, &r->args);
+  if (rc != 0) {
+    uart_puts("[NV-ARG] stage=alloc FAIL args page rc=");
+    print_int(rc);
+    uart_puts("\n");
+    return rc;
+  }
+  rc = nv_dma_alloc(NV_RPC_GSP_ARGS_PAGE, &r->libos);
+  if (rc != 0) {
+    uart_puts("[NV-ARG] stage=alloc FAIL libos table rc=");
+    print_int(rc);
+    uart_puts("\n");
+    nv_dma_free(&r->args);
+    return rc;
+  }
+  rc = nv_dma_alloc((uint64_t)NV_RPC_LIBOS_LOG_PAGES * NV_DMA_PAGE, &r->logs);
+  if (rc != 0) {
+    uart_puts("[NV-ARG] stage=alloc FAIL log regions rc=");
+    print_int(rc);
+    uart_puts("\n");
+    nv_dma_free(&r->args);
+    nv_dma_free(&r->libos);
+    return rc;
+  }
+  return 0;
+}
+
+int nv_gsp_rpc_publish(struct nv_gsp_rpc *r, struct nv_dev *d) {
+  if (!r || !d) return -EINVAL;
+  if (!r->built) {
+    uart_puts("[NV-ARG] stage=publish FAIL no block: publishing an address "
+              "nothing was built at would name a page table that does not "
+              "exist\n");
+    return -EINVAL;
+  }
+  if (!r->args.phys || !r->libos.phys || !r->logs.phys) {
+    uart_puts("[NV-ARG] stage=publish FAIL no argument pages (nv_dma_alloc "
+              "runs in setup)\n");
+    return -EINVAL;
+  }
+
+  struct nv_rpc_geom g;
+  if (nv_rpc_queue_geom(&g) != 0) return -EINVAL;
+
+  /* THE ADDRESS RULE.  Every address below is an nv_dma_bus() answer, and
+   * `phys` appears only as the CPU's way to reach a page it is writing.  The
+   * page the firmware walks and the page the firmware is told about are then
+   * the same number by construction, not by coincidence. */
+  uint64_t block_bus = nv_dma_bus(&r->block);
+  uint64_t args_bus = nv_dma_bus(&r->args);
+  uint64_t libos_bus = nv_dma_bus(&r->libos);
+  uint64_t logs_bus = nv_dma_bus(&r->logs);
+  if (block_bus == NV_DMA_BUS_INVALID || args_bus == NV_DMA_BUS_INVALID ||
+      libos_bus == NV_DMA_BUS_INVALID || logs_bus == NV_DMA_BUS_INVALID) {
+    uart_puts("[NV-ARG] stage=publish FAIL nv_dma_bus refused one of the four "
+              "mappings: no bus address exists, so no page is written and no "
+              "mailbox is programmed\n");
+    return -ENOTSUP;
+  }
+  if (block_bus != r->q.bus) {
+    /* The PTEs were built from q.bus.  Publishing a different number would
+     * tell firmware to walk a table that is not this block's. */
+    uart_puts("[NV-ARG] stage=publish FAIL block bus=");
+    uart_print_hex(block_bus);
+    uart_puts(" q.bus=");
+    uart_print_hex(r->q.bus);
+    uart_puts(": the published address is not the one the PTEs were built "
+              "from\n");
+    return -EIO;
+  }
+
+  /* ---- 1. GSP_ARGUMENTS_CACHED ---------------------------------------- */
+  uint8_t *args = (uint8_t *)phys_to_virt(r->args.phys);
+  int rc = nv_rpc_args_build(args, &g, block_bus);
+  if (rc != 0) {
+    uart_puts("[NV-ARG] stage=args FAIL nv_rpc_args_build rc=");
+    print_int(rc);
+    uart_puts("\n");
+    return rc;
+  }
+
+  /* The row is built from the page's OWN bytes (nv_rpc_args_read) and from the
+   * block's OWN PTE[0], not from the variables that wrote them: a writer that
+   * stored the wrong thing still returns 0. */
+  struct nv_rpc_rmargs a;
+  if (nv_rpc_args_read(args, &a) != 0) return -EIO;
+  const uint8_t *block = (const uint8_t *)phys_to_virt(r->block.phys);
+  uint64_t pte0 = glue_ld64(block);
+  int field = nv_rpc_args_crosscheck(&g, block_bus, &a);
+
+  uart_puts("[NV-ARG] stage=args bus=");
+  uart_print_hex(args_bus);
+  uart_puts(" phys=");
+  uart_print_hex(r->args.phys);
+  uart_puts(" magic=");
+  uart_print_hex(a.magic);
+  uart_puts(" size=");
+  uart_print_hex(a.size);
+  uart_puts("\n");
+
+  uart_puts("[NV-ARG] stage=args mq sharedMemPhysAddr=");
+  uart_print_hex(a.shared_mem_phys);
+  uart_puts(" pte0=");
+  uart_print_hex(pte0);
+  uart_puts(" equal=");
+  print_int(a.shared_mem_phys == pte0 ? 1 : 0);
+  uart_puts("\n");
+
+  uart_puts("[NV-ARG] stage=args mq cmd=");
+  uart_print_hex(a.cmd_queue_off);
+  uart_puts(" stat=");
+  uart_print_hex(a.stat_queue_off);
+  uart_puts(" hdr=");
+  uart_print_hex(a.elem_hdr_size);
+  uart_puts(" min=");
+  uart_print_hex(a.elem_size_min);
+  uart_puts(" max=");
+  uart_print_hex(a.elem_size_max);
+  uart_puts(" halign=");
+  uart_print_hex(a.header_align);
+  uart_puts(" ealign=");
+  uart_print_hex(a.elem_align);
+  uart_puts(" pte_count=");
+  print_int((int)a.pte_count);
+  uart_puts("\n");
+
+  uart_puts("[NV-ARG] stage=args crosscheck=");
+  uart_puts(field == NV_RPC_ARG_OK
+                ? "OK (the page in memory describes the block this boot "
+                  "built)\n"
+                : nv_rpc_arg_field_name((enum nv_rpc_arg_field)field));
+  if (field != NV_RPC_ARG_OK) {
+    uart_puts(" FAIL: the argument page and the transport disagree\n");
+    return -EIO;
+  }
+
+  /* ---- 2. the libos-args table ---------------------------------------- */
+  /* Every field is set: these are the four regions the reference driver
+   * publishes, in the reference order (contract 1.6).  The three log regions
+   * are real 4 KiB pages because the contract leaves "zero-sized log region"
+   * NOT ESTABLISHED and three pages is cheap; RMARGS is the argument page,
+   * and its size is the whole page so the firmware can read the 0xC8 struct
+   * starting at pa without a size it would have to trust. */
+  struct nv_rpc_libos_region e[NV_RPC_LIBOS_MAX];
+  const char *ids[NV_RPC_LIBOS_MAX] = {"LOGINIT", "LOGINTR", "LOGRM",
+                                       "RMARGS"};
+  for (int i = 0; i < (int)NV_RPC_LIBOS_MAX; i++) {
+    e[i].id = ids[i];
+    e[i].id8 = 0; /* build() packs `id` */
+    e[i].kind = NV_RPC_LIBOS_KIND_CONTIG;
+    e[i].loc = NV_RPC_LIBOS_LOC_SYSMEM;
+    if (i < (int)NV_RPC_LIBOS_LOG_PAGES) {
+      e[i].pa = logs_bus + (uint64_t)i * NV_DMA_PAGE;
+      e[i].size = NV_DMA_PAGE;
+    } else {
+      e[i].pa = args_bus;
+      e[i].size = NV_RPC_GSP_ARGS_PAGE;
+    }
+  }
+
+  uint8_t *libos = (uint8_t *)phys_to_virt(r->libos.phys);
+  rc = nv_rpc_libos_build(libos, e, NV_RPC_LIBOS_MAX);
+  if (rc != 0) {
+    uart_puts("[NV-ARG] stage=libos FAIL nv_rpc_libos_build rc=");
+    print_int(rc);
+    uart_puts("\n");
+    return rc;
+  }
+
+  uart_puts("[NV-ARG] stage=libos bus=");
+  uart_print_hex(libos_bus);
+  uart_puts(" phys=");
+  uart_print_hex(r->libos.phys);
+  uart_puts(" entries=");
+  print_int((int)NV_RPC_LIBOS_MAX);
+  uart_puts("\n");
+  for (uint32_t i = 0; i < NV_RPC_LIBOS_MAX; i++) {
+    struct nv_rpc_libos_region b;
+    if (nv_rpc_libos_read(libos, i, &b) != 0) return -EIO;
+    uart_puts("[NV-ARG] stage=libos[");
+    print_int((int)i);
+    uart_puts("] id=");
+    nv_arg_put_id8(b.id8);
+    uart_puts(" pa=");
+    uart_print_hex(b.pa);
+    uart_puts(" size=");
+    uart_print_hex(b.size);
+    uart_puts(" kind=");
+    print_int((int)b.kind);
+    uart_puts(" loc=");
+    print_int((int)b.loc);
+    uart_puts("\n");
+  }
+
+  /* The fourth entry is the whole point of the page: it must name the argument
+   * page's bus address, read back out of the table. */
+  struct nv_rpc_libos_region rargs;
+  if (nv_rpc_libos_read(libos, NV_RPC_LIBOS_MAX - 1u, &rargs) != 0) return -EIO;
+  if (rargs.id8 != nv_rpc_id8("RMARGS") || rargs.pa != args_bus) {
+    uart_puts("[NV-ARG] stage=libos FAIL RMARGS id=");
+    nv_arg_put_id8(rargs.id8);
+    uart_puts(" pa=");
+    uart_print_hex(rargs.pa);
+    uart_puts(" expected pa=");
+    uart_print_hex(args_bus);
+    uart_puts("\n");
+    return -EIO;
+  }
+
+  /* ---- 3. MAILBOX0/1 name the table ----------------------------------- *
+   * ORDERING.  0x110040 is FWSEC's error channel earlier in the boot
+   * (docs/nv-devinit-contract.md section 3): this publish must be the last
+   * writer of it in a boot.  Stage 8 runs after every SEC2/FWSEC attempt and
+   * nothing runs after it here; a later stage that needs FWSEC again must
+   * re-zero the word first.
+   *
+   * The readback is logged and NOT gated on.  The contract's MEASURED rows show
+   * 0x00000000 in both reference dumps (pre- and post-init), so "the firmware
+   * took my arguments" cannot be read out of these two words.  What this card
+   * measures instead: after the write they read back exactly what was written
+   * (arga: 0x20956B000).  That says the MMIO write landed -- a state fact about
+   * a card whose falcon page is not fenced -- and says nothing about firmware.
+   * Nothing may gate on either reading. */
+  nv_wr32(d, NV_GSP_MAILBOX0, (uint32_t)(libos_bus & 0xFFFFFFFFu));
+  nv_wr32(d, NV_GSP_MAILBOX1, (uint32_t)(libos_bus >> 32));
+  uint32_t mb0 = nv_rd32(d, NV_GSP_MAILBOX0);
+  uint32_t mb1 = nv_rd32(d, NV_GSP_MAILBOX1);
+  uart_puts("[NV-ARG] stage=mailbox0 bus=");
+  uart_print_hex(libos_bus);
+  uart_puts(" lo=");
+  uart_print_hex((uint64_t)(libos_bus & 0xFFFFFFFFu));
+  uart_puts(" hi=");
+  uart_print_hex(libos_bus >> 32);
+  uart_puts(" readback=");
+  uart_print_hex(((uint64_t)mb1 << 32) | mb0);
+  uart_puts(" (a state fact, not a firmware ack: nothing gates on it)\n");
+
+  /* ---- 3b. the [NV-RPC] publication row -------------------------------- *
+   * The observable this card is judged on: the block base as nv_dma_bus()
+   * answered it, the page count, and the address the peer will actually use.
+   * `programmed` and `args` are READ BACK OUT OF THE PAGES' OWN BYTES (the
+   * RMARGS mq.sharedMemPhysAddr and the libos table's RMARGS entry), not out
+   * of the variables that wrote them: a writer that stored the wrong number
+   * still returns 0, and only the bytes can disagree with the accessor.
+   *
+   * `match` is an assertion, not a report: a wrong address prints this row and
+   * then fails the publish, so a green boot log cannot coexist with a block
+   * nobody can walk. */
+  uint64_t programmed_block = a.shared_mem_phys;
+  uint64_t programmed_args = rargs.pa;
+  int match = (programmed_block == block_bus) &&
+              (programmed_args == args_bus) &&
+              (r->block.pages == NV_RPC_PTE_COUNT);
+  uart_puts("[NV-RPC] stage=publish base=");
+  uart_print_hex(block_bus);
+  uart_puts(" pages=");
+  print_int((int)r->block.pages);
+  uart_puts(" programmed=");
+  uart_print_hex(programmed_block);
+  uart_puts(" args=");
+  uart_print_hex(programmed_args);
+  uart_puts(" libos=");
+  uart_print_hex(libos_bus);
+  uart_puts(" mailbox_read=");
+  uart_print_hex(((uint64_t)mb1 << 32) | mb0);
+  uart_puts(" match=");
+  print_int(match);
+  uart_puts("\n");
+  if (!match) {
+    uart_puts("[NV-RPC] stage=publish FAIL the address the peer would walk is "
+              "not the nv_dma_bus() answer: the block is not published\n");
+    return -EIO;
+  }
+
+  /* ---- 4. the status header, still the peer's -------------------------- *
+   * Publishing must not counterfeit RM's first write.  Eight words at
+   * block + stat_off are what nv_rpc_link_validate() reads, so those eight are
+   * what this row prints -- from the block's bytes, after everything above. */
+  uint32_t sw[8];
+  int zeros = 0;
+  for (int i = 0; i < 8; i++) {
+    sw[i] = glue_ld32(block + g.stat_off + (uint32_t)i * 4u);
+    if (sw[i] == 0) zeros++;
+  }
+  uart_puts("[NV-ARG] stage=status bus=");
+  uart_print_hex(block_bus);
+  uart_puts(" off=");
+  uart_print_hex(g.stat_off);
+  uart_puts(" zero=");
+  print_int(zeros);
+  uart_puts("/8");
+  for (int i = 0; i < 8; i++) {
+    uart_puts(" w");
+    print_int(i);
+    uart_puts("=");
+    uart_print_hex(sw[i]);
+  }
+  uart_puts(zeros == 8 ? " (publishing did not counterfeit the peer's first "
+                         "write)\n"
+                       : " (NONZERO: the peer wrote it, or we did -- that "
+                         "difference matters)\n");
+
+  r->published = 1;
+  return 0;
+}
+
 int nv_gsp_rpc_setup(struct nv_gsp_rpc *r, uint8_t *rx_stage) {
   if (!r || !rx_stage) return -EINVAL;
 
@@ -189,9 +534,22 @@ int nv_gsp_rpc_setup(struct nv_gsp_rpc *r, uint8_t *rx_stage) {
   r->block.bus = 0;
   r->block.len = 0;
   r->block.pages = 0;
+  r->args.phys = 0;
+  r->args.bus = 0;
+  r->args.len = 0;
+  r->args.pages = 0;
+  r->libos.phys = 0;
+  r->libos.bus = 0;
+  r->libos.len = 0;
+  r->libos.pages = 0;
+  r->logs.phys = 0;
+  r->logs.bus = 0;
+  r->logs.len = 0;
+  r->logs.pages = 0;
   r->sends = 0;
   r->doorbells = 0;
   r->built = 0;
+  r->published = 0;
   r->rx_stage = rx_stage; /* before build: queue_init copies it */
 
   int rc = nv_dma_alloc(NV_RPC_BLOCK_SIZE, &r->block);
@@ -211,17 +569,33 @@ int nv_gsp_rpc_setup(struct nv_gsp_rpc *r, uint8_t *rx_stage) {
     nv_dma_free(&r->block);
     return rc;
   }
+
+  /* The publish side has to exist before stage 8 can tell anyone about the
+   * block.  Its failure is setup's failure for the same reason: a transport
+   * nobody can be told about is 129 frames doing nothing. */
+  rc = nv_gsp_args_alloc(r);
+  if (rc != 0) {
+    nv_dma_free(&r->block);
+    r->built = 0;
+    r->q.block = 0;
+    r->q.bus = 0;
+    return rc;
+  }
   return 0;
 }
 
 void nv_gsp_rpc_teardown(struct nv_gsp_rpc *r) {
   if (!r) return;
   nv_dma_free(&r->block);
+  nv_dma_free(&r->args);
+  nv_dma_free(&r->libos);
+  nv_dma_free(&r->logs);
   r->q.block = 0;
   r->q.bus = 0;
   r->q.linked = 0;
   r->q.swapped = 0;
   r->built = 0;
+  r->published = 0;
 }
 
 int nv_gsp_rpc_notify(struct nv_gsp_rpc *r, const uint8_t *stage,
@@ -295,6 +669,19 @@ int nv_gsp_rpc_stage8_into(struct nv_gsp_rpc *r, struct nv_dev *d) {
   struct nv_rpc_hw hw;
   nv_rpc_hw_dev(d, &hw);
 
+  /* Publish BEFORE looking for the peer.  The order is the contract's: the
+   * firmware is told where the block is before anybody checks whether it has
+   * arrived, and the check itself (the status header) is untouched by the
+   * publish -- so a zero header after this point still means "RM has not
+   * started", not "we scribbled on it".  No peer is needed: this is image
+   * construction plus two mailbox dwords. */
+  int prc = nv_gsp_rpc_publish(r, d);
+  if (prc != 0) {
+    uart_puts("[NV-ARG] stage=publish result=");
+    print_int(prc);
+    uart_puts(" (the firmware cannot be told where the block is)\n");
+  }
+
   enum nv_rpc_link_field bad = NV_RPC_LINK_OK;
   int lrc = nv_rpc_link_apply(&r->q, &bad);
   uart_puts("[NV-RPC] stage=link ");
@@ -317,7 +704,10 @@ int nv_gsp_rpc_stage8_into(struct nv_gsp_rpc *r, struct nv_dev *d) {
     uart_puts(" (header written but unusable; waiting will not fix it)\n");
   }
   nv_rpc_dump("link", &r->q);
-  return lrc;
+  /* A publish that failed is the more fundamental error: the firmware was
+   * never told where the block is, so the link's -EAGAIN cannot become 0 on
+   * this boot however long anyone waits. */
+  return prc != 0 ? prc : lrc;
 }
 
 int nv_gsp_rpc_stage8(struct nv_dev *d) {
@@ -351,10 +741,10 @@ int nv_gsp_rpc_stage8(struct nv_dev *d) {
 #define NV_PFB_MOVES_C 0x1FA82C
 #define NV_PFB_MOVES_D 0x1FA830
 
-/* GSP-specific words inside the falcon window (BAR0 0x110000 + offset). */
+/* GSP-specific words inside the falcon window (BAR0 0x110000 + offset).
+ * NV_GSP_MAILBOX0/1 are defined beside nv_gsp_rpc_publish(), their first
+ * user, so the publish does not depend on this block's position. */
 #define NV_GSP_ENGINE_RESET (NV_FALCON_GSP_BASE + 0x3C0)
-#define NV_GSP_MAILBOX0 (NV_FALCON_GSP_BASE + 0x040)
-#define NV_GSP_MAILBOX1 (NV_FALCON_GSP_BASE + 0x044)
 /* Was written down as a BAR0 word at 0x001668 -- wrong: 0x001668 reads the
  * unreadable-register answer in every state.  The live word is falcon-relative,
  * 0x111668 = BCR_CTRL, and 0x111 = VALID | RISCV | BRFETCH, i.e. "run the
@@ -611,8 +1001,12 @@ static int nv_gsp_load_one(struct nv_dev *d, const char *name, int parse_hs,
  * the transfer received rather than a literal repeated at the call site. */
 static uint32_t g_dma_dst_first, g_dma_dst_last, g_dma_nblk;
 
+/* `src_bus` is the GPU-visible address of the run being read; the callers ask
+ * nv_dma_bus_of_run() for it.  A CPU physical address here would program a
+ * transfer to an address the engine cannot resolve once translation is on --
+ * and would be wrong-by-accident today, which is the harder bug. */
 static int falcon_dma_block(struct nv_dev *d, uint32_t fbase,
-                            uint64_t src_phys, uint32_t src_end, uint32_t dst,
+                            uint64_t src_bus, uint32_t src_end, uint32_t dst,
                             int is_imem, int sec) {
   if (g_dma_nblk == 0) g_dma_dst_first = dst;
   g_dma_dst_last = dst;
@@ -629,9 +1023,9 @@ static int falcon_dma_block(struct nv_dev *d, uint32_t fbase,
     if (i == 199999) return -110;
   }
   nv_wr32(d, fbase + NV_XFER_EXT_BASE,
-          (uint32_t)(src_phys >> 8));
+          (uint32_t)(src_bus >> 8));
   nv_wr32(d, fbase + NV_XFER_EXT_BASE1,
-          (uint32_t)((src_phys >> 40) & 0x1FF));
+          (uint32_t)((src_bus >> 40) & 0x1FF));
   nv_wr32(d, fbase + NV_XFER_FALCON_ADDR, dst);
   nv_wr32(d, fbase + NV_XFER_EXT_ADDR, src_end);
   /* The command word comes from the one place that encodes it (nv_flcn.c), so
@@ -1060,15 +1454,18 @@ static void nv_imem_read_row(struct nv_dev *d, struct nv_falcon *f, uint32_t off
  * Same four registers as the load, with DIR (0x118 bit 5) set.  Returns 0 when
  * the engine reported the request collected, -ETIMEDOUT otherwise; the caller
  * still compares the buffer, because "collected" is not "copied". */
+/* `dst_bus` is the GPU-visible landing address (nv_dma_bus_of_run() at the
+ * call site); the CPU reaches the same frames through their physical address,
+ * which never enters an address register. */
 static int falcon_dma_store_block(struct nv_dev *d, uint32_t fbase,
-                                  uint64_t dst_phys, uint32_t dst_off,
+                                  uint64_t dst_bus, uint32_t dst_off,
                                   uint32_t src_falcon, int is_imem, int sec) {
   for (int i = 0; i < 200000; i++) {
     if (!(nv_rd32(d, fbase + NV_XFER_CTRL) & XF_FULL)) break;
     if (i == 199999) return -110;
   }
-  nv_wr32(d, fbase + NV_XFER_EXT_BASE, (uint32_t)(dst_phys >> 8));
-  nv_wr32(d, fbase + NV_XFER_EXT_BASE1, (uint32_t)((dst_phys >> 40) & 0x1FF));
+  nv_wr32(d, fbase + NV_XFER_EXT_BASE, (uint32_t)(dst_bus >> 8));
+  nv_wr32(d, fbase + NV_XFER_EXT_BASE1, (uint32_t)((dst_bus >> 40) & 0x1FF));
   nv_wr32(d, fbase + NV_XFER_FALCON_ADDR, src_falcon);
   nv_wr32(d, fbase + NV_XFER_EXT_ADDR, dst_off);
   uint32_t ctrl = nv_flcn_xfer_cmd(NV_FLCN_BLOCK, is_imem, sec);
@@ -1090,7 +1487,10 @@ static void nv_imem_store_row(struct nv_dev *d, uint32_t fbase,
   for (uint32_t i = 0; i < NV_FLCN_BLOCK; i++) bb[i] = 0xA5; /* prefill: an
     * engine that copies nothing leaves this, and "prefill with something whose
     * zero would look like success" is the rule this is applying */
-  int rc = falcon_dma_store_block(d, fbase, scratch_phys, 0, off, 1, 1);
+  uint64_t scratch_bus = nv_dma_bus_of_run(scratch_phys, NV_DMA_PAGE);
+  int rc = scratch_bus == NV_DMA_BUS_INVALID
+               ? -ENOTSUP
+               : falcon_dma_store_block(d, fbase, scratch_bus, 0, off, 1, 1);
   uint32_t ctl = nv_rd32(d, fbase + NV_XFER_CTRL);
   int bad = -1;
   uint32_t got = 0, want = 0;
@@ -1275,8 +1675,12 @@ static uint32_t nv_ld_word(const uint8_t *p) {
  * falcon address to 0x11C, i.e. the hypothesis that the two side registers swap
  * roles with the direction; it is a separate axis from the command word because
  * no encoding of 0x118 can express it. */
+/* `landing` is the CPU's view (phys_to_virt); `landing_bus` is what the engine
+ * is told.  Both describe the same single frame; the call site gets the second
+ * from nv_dma_bus_of_run() so the register never sees a physical address. */
 static void nv_store_block(struct nv_dev *d, uint32_t fbase, uint64_t landing,
-                           uint32_t falcon_off, const uint8_t *want,
+                           uint64_t landing_bus, uint32_t falcon_off,
+                           const uint8_t *want,
                            uint32_t want_len, uint32_t want_off, int is_imem,
                            int sec, int variant, int swap, uint64_t deadline_ns,
                            struct nv_store_res *r) {
@@ -1301,8 +1705,8 @@ static void nv_store_block(struct nv_dev *d, uint32_t fbase, uint64_t landing,
     r->stat_after = nv_rd32(d, fbase + NV_XFER_STATUS);
     return;
   }
-  nv_wr32(d, fbase + NV_XFER_EXT_BASE, (uint32_t)(landing >> 8));
-  nv_wr32(d, fbase + NV_XFER_EXT_BASE1, (uint32_t)((landing >> 40) & 0x1FF));
+  nv_wr32(d, fbase + NV_XFER_EXT_BASE, (uint32_t)(landing_bus >> 8));
+  nv_wr32(d, fbase + NV_XFER_EXT_BASE1, (uint32_t)((landing_bus >> 40) & 0x1FF));
   uint32_t off_11c = nv_flcn_store_off(0, variant);
   nv_wr32(d, fbase + NV_XFER_FALCON_ADDR, swap ? off_11c : falcon_off);
   nv_wr32(d, fbase + NV_XFER_EXT_ADDR, swap ? falcon_off : off_11c);
@@ -1423,6 +1827,12 @@ static int nv_store_matrix(struct nv_dev *d, uint32_t fbase, uint64_t landing,
                            const char *when, const struct nv_store_probe *pr,
                            int nprobe) {
   struct nv_store_res r;
+  uint64_t landing_bus = nv_dma_bus_of_run(landing, NV_DMA_PAGE);
+  if (landing_bus == NV_DMA_BUS_INVALID) {
+    uart_puts("[NV-STORE] skipped: the landing frame has no GPU-visible "
+              "address (nv_dma_bus_of_run refused)\n");
+    return -ENOTSUP;
+  }
   uart_puts("[NV-STORE] ");
   uart_puts(when);
   uart_puts(" prefill=0x");
@@ -1451,9 +1861,9 @@ static int nv_store_matrix(struct nv_dev *d, uint32_t fbase, uint64_t landing,
     uint32_t before = 0;
     (void)nv_pio_rd1_nb(d, fbase, 0, kCtlOff, &before);
     nv_wr32(d, fbase + NV_XFER_EXT_BASE,
-            (uint32_t)((landing + 4096u - NV_FLCN_BLOCK) >> 8));
+            (uint32_t)((landing_bus + 4096u - NV_FLCN_BLOCK) >> 8));
     nv_wr32(d, fbase + NV_XFER_EXT_BASE1,
-            (uint32_t)(((landing + 4096u - NV_FLCN_BLOCK) >> 40) & 0x1FF));
+            (uint32_t)(((landing_bus + 4096u - NV_FLCN_BLOCK) >> 40) & 0x1FF));
     nv_wr32(d, fbase + NV_XFER_FALCON_ADDR, kCtlOff);
     nv_wr32(d, fbase + NV_XFER_EXT_ADDR, 0);
     nv_wr32(d, fbase + NV_XFER_CTRL, ctl_cmd);
@@ -1501,7 +1911,8 @@ static int nv_store_matrix(struct nv_dev *d, uint32_t fbase, uint64_t landing,
     uint32_t slot = (uint32_t)i * NV_FLCN_BLOCK;
     uint32_t img_ref = pr[i].is_imem ? 0u : dmem_off;
     uint32_t img_len_ref = pr[i].is_imem ? dmem_off : dmem_len;
-    nv_store_block(d, fbase, landing + slot, pr[i].falcon_off, img + img_ref,
+    nv_store_block(d, fbase, landing + slot, landing_bus + slot,
+                   pr[i].falcon_off, img + img_ref,
                    img_len_ref, pr[i].falcon_off, pr[i].is_imem, pr[i].sec,
                    pr[i].variant, pr[i].swap, 20000000ULL, &r);
     nv_store_row(d, when, pr[i].variant, pr[i].is_imem, pr[i].sec,
@@ -1626,12 +2037,13 @@ static void nv_verdict_instant(struct nv_dev *d, uint32_t fbase, uint64_t landin
    * swapped, on the block that holds the FRTS command. */
   const int st_var = NV_FLCN_STORE_V_PLAIN;
   int do_store = (store_variant >= 0);
+  uint64_t landing_bus = nv_dma_bus_of_run(landing, NV_DMA_PAGE);
   (void)img_len;
   for (int i = 0; i < 4; i++)
     pio_rc[i] = nv_pio_rd1_nb(d, fbase, 0, pio_addr[i], &pio_val[i]);
-  if (do_store)
-    nv_store_block(d, fbase, landing, st_off, img + dmem_off, dmem_len, st_off,
-                   0, 0, st_var, 1, 2000000ULL, &st_res);
+  if (do_store && landing_bus != NV_DMA_BUS_INVALID)
+    nv_store_block(d, fbase, landing, landing_bus, st_off, img + dmem_off,
+                   dmem_len, st_off, 0, 0, st_var, 1, 2000000ULL, &st_res);
   uart_puts("[NV-SWEEP] at-verdict port:");
   for (int i = 0; i < 4; i++) {
     uint32_t want = 0;
@@ -1948,7 +2360,10 @@ static void nv_imem_write_probe(struct nv_dev *d, struct nv_falcon *f,
   /* The engine's view of the same word. */
   uint8_t *bb = (uint8_t *)phys_to_virt(scratch_phys);
   for (uint32_t i = 0; i < NV_FLCN_BLOCK; i++) bb[i] = 0xA6;
-  int s = falcon_dma_store_block(d, f->base, scratch_phys, 0, off, 1, 1);
+  uint64_t scratch_bus = nv_dma_bus_of_run(scratch_phys, NV_DMA_PAGE);
+  int s = scratch_bus == NV_DMA_BUS_INVALID
+              ? -ENOTSUP
+              : falcon_dma_store_block(d, f->base, scratch_bus, 0, off, 1, 1);
   if (s == 0) {
     eng = (uint32_t)bb[0] | ((uint32_t)bb[1] << 8) | ((uint32_t)bb[2] << 16) |
           ((uint32_t)bb[3] << 24);
@@ -2636,6 +3051,16 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size,
               "0x114, so the IMEM destination cannot be read back even in "
               "principle\n");
   } else {
+    /* The DMA branch's source is the staging run's GPU address, asked for once
+     * and used by every block.  A refusal is -ENOTSUP: programming `phys` here
+     * would tell the engine to read an address the GPU cannot resolve. */
+    uint64_t fwsec_bus = nv_dma_bus_of_run(phys, (uint64_t)pages * FRAME_SIZE);
+    if (fwsec_bus == NV_DMA_BUS_INVALID) {
+      uart_puts("[NV-FWSEC] FAIL nv_dma_bus_of_run refused the staging run: no "
+                "GPU-visible address, so the image is not loaded\n");
+      rc = -ENOTSUP;
+      goto out;
+    }
     /* ---- the ablation (round 2, run r2f) --------------------------------
      *
      * "The status word went to 0 and the core halted" is only evidence that
@@ -2661,7 +3086,7 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size,
     }
     for (uint32_t off = 0; kFwsecLoadImem && off < d->ucode_imem;
          off += NV_FLCN_BLOCK) {
-      rc = falcon_dma_block(d, NV_GSP_U, phys, off, off, 1, 1);
+      rc = falcon_dma_block(d, NV_GSP_U, fwsec_bus, off, off, 1, 1);
       if (rc != 0) goto out;
     }
     /* ---- F1 (PLAN.md §2): did the image land in the GSP's own memory? -----
@@ -2711,7 +3136,8 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size,
     }
   after_f1:
     for (uint32_t off = 0; off < d->ucode_dmem; off += NV_FLCN_BLOCK) {
-      rc = falcon_dma_block(d, NV_GSP_U, phys, d->ucode_imem + off, off, 0, 0);
+      rc = falcon_dma_block(d, NV_GSP_U, fwsec_bus, d->ucode_imem + off, off, 0,
+                            0);
       if (rc != 0) goto out;
     }
     nblk = g_dma_nblk;
@@ -3463,7 +3889,8 @@ out:
 
 /* `force` = run the attempt even when the SEC2 window refuses to be read. */
 int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
-                                uint32_t len, uint64_t meta_phys, int force);
+                                uint32_t len, const struct nv_dma_map *meta_map,
+                                int force);
 
 static uint64_t nv_meta_get64(const uint8_t *p) {
   uint64_t v = 0;
@@ -3486,8 +3913,8 @@ static void nv_meta_put64(uint8_t *p, uint64_t v) {
 }
 
 int nv_gsp_sec2_start_booter(struct nv_dev *d, const uint8_t *booter,
-                             uint32_t len, uint64_t meta_phys) {
-  return nv_gsp_sec2_start_booter_ex(d, booter, len, meta_phys, 0);
+                             uint32_t len, const struct nv_dma_map *meta_map) {
+  return nv_gsp_sec2_start_booter_ex(d, booter, len, meta_map, 0);
 }
 
 /* ---- the booter's VRAM receipt, before and after the attempt ------------
@@ -3790,7 +4217,9 @@ struct sec2_img {
   uint32_t patch_off; /* DMEM-image offset the signature goes to */
   uint32_t bootvec;
   uint32_t ucode_id;
-  uint64_t meta_phys;
+  uint64_t meta_bus;  /* the metadata page AS THE DEVICE SEES IT: this is the
+                       * value the SEC2 mailbox gets, and it comes from
+                       * nv_dma_bus() at the call site -- never `phys` */
   uint8_t *meta;      /* host virtual; the verified word lives inside */
 };
 
@@ -3961,8 +4390,8 @@ static int sec2_attempt(struct nv_dev *d, const struct sec2_img *im,
    * argument, and the word it overwrites with its return code (0 = success).
    * That makes the argument its own sentinel: a mailbox still holding the
    * address is "no code written", which is a different fact from "code 0". */
-  nv_wr32(d, NV_FALCON_SEC2_BASE + 0x040, (uint32_t)im->meta_phys);
-  nv_wr32(d, NV_FALCON_SEC2_BASE + 0x044, (uint32_t)(im->meta_phys >> 32));
+  nv_wr32(d, NV_FALCON_SEC2_BASE + 0x040, (uint32_t)im->meta_bus);
+  nv_wr32(d, NV_FALCON_SEC2_BASE + 0x044, (uint32_t)(im->meta_bus >> 32));
 
   /* ---- START -> STOPPED: the measurement r5h's PC series could not make ----
    *
@@ -4159,7 +4588,7 @@ static int sec2_attempt(struct nv_dev *d, const struct sec2_img *im,
               "and WPR2 is built)\n");
   } else if (v == 0x5EC2A0A0ULL) {
     uart_puts(" verdict=NOTHING-WRITTEN");
-    if (mb0 == (uint32_t)im->meta_phys)
+    if (mb0 == (uint32_t)im->meta_bus)
       uart_puts(" (the mailbox still holds the argument: the booter wrote no "
                 "return code either, which is what a boot ROM rejection looks "
                 "like from this side)\n");
@@ -4260,11 +4689,22 @@ static void sec2_dmem_diff(struct nv_dev *d, const struct sec2_img *im,
  * pre-filled with a sentinel before the start and logged after: a value that
  * came back is evidence, a value nobody wrote is not. */
 int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
-                                uint32_t len, uint64_t meta_phys, int force) {
+                                uint32_t len, const struct nv_dma_map *meta_map,
+                                int force) {
   if (!d || !booter || len < 0x7700 + 0x6000) return -EINVAL;
-  if (meta_phys == 0) return -EINVAL;
+  if (!meta_map) return -EINVAL;
 
-  uint8_t *meta = (uint8_t *)phys_to_virt(meta_phys);
+  /* Two addresses, one page, and the difference between them is the whole
+   * point: the CPU touches the page through meta_map->phys, the SEC2 mailbox
+   * must be given the bus address, and only nv_dma_bus() may answer that. */
+  uint64_t meta_bus = nv_dma_bus(meta_map);
+  if (meta_bus == NV_DMA_BUS_INVALID) {
+    uart_puts("[NV-SEC2] FAIL nv_dma_bus refused the metadata page phys=");
+    uart_print_hex(meta_map->phys);
+    uart_puts(": no bus address exists, so the booter is not started\n");
+    return -ENOTSUP;
+  }
+  uint8_t *meta = (uint8_t *)phys_to_virt(meta_map->phys);
   uint64_t ver_before = meta ? nv_meta_get64(meta + NV_WPR_OFF_VERIFIED) : 0;
 
   int rc = sec2_unfence(d);
@@ -4386,6 +4826,13 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
    * derivation prints the numbers it used.
    */
   uint64_t base = d->booter_phys;
+  /* The engine reads the booter's frames at the GPU's address.  `base` stays
+   * the CPU's way to reach them (nothing here dereferences it; the DMA and PIO
+   * copies take their source from `booter`), and every address register is
+   * programmed with base_bus. */
+  uint64_t base_bus =
+      nv_dma_bus_of_run(base, ((uint64_t)len + NV_DMA_PAGE - 1) &
+                                   ~(NV_DMA_PAGE - 1));
   struct nv_fw_container bc;
   struct nv_fw_hs bhs;
   for (uint32_t i = 0; i < (uint32_t)sizeof bc; i++) ((uint8_t *)&bc)[i] = 0;
@@ -4535,11 +4982,15 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
    * different facts and only one of them is about the booter. */
   int via_pio = 0;
   rc = 0;
-  {
+  if (base_bus == NV_DMA_BUS_INVALID) {
+    uart_puts("[NV-SEC2] DMA not attempted: the booter run has no GPU-visible "
+              "address (nv_dma_bus_of_run refused); PIO carries the image\n");
+    rc = -ENOTSUP;
+  } else {
     uint32_t off = 0;
     for (; off < imem_len; off += 256) {
-      rc = falcon_dma_block(d, NV_FALCON_SEC2_BASE, base, imem_file + off, off,
-                            1, 1);
+      rc = falcon_dma_block(d, NV_FALCON_SEC2_BASE, base_bus, imem_file + off,
+                            off, 1, 1);
       if (rc != 0) break;
     }
     if (rc != 0) {
@@ -4562,8 +5013,8 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
   }
   if (rc == 0) {
     for (uint32_t off = 0; off < dmem_len; off += 256) {
-      rc = falcon_dma_block(d, NV_FALCON_SEC2_BASE, base, dmem_file + off, off,
-                            0, 0);
+      rc = falcon_dma_block(d, NV_FALCON_SEC2_BASE, base_bus, dmem_file + off,
+                            off, 0, 0);
       if (rc != 0) {
         uart_puts("[NV-SEC2] DMEM dma FAILED at off=");
         uart_print_hex(off);
@@ -4616,7 +5067,7 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
   sim.patch_off = patch_off;
   sim.bootvec = bootvec;
   sim.ucode_id = ucode_id;
-  sim.meta_phys = meta_phys;
+  sim.meta_bus = meta_bus;
   sim.meta = meta;
 
   int verified = sec2_attempt(d, &sim, sig_idx, "A");
@@ -4774,7 +5225,28 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
     uart_puts(" inside its own frames (no second 38 MB buffer)\n");
     nv_fw_slide_down(rm.buf, rm.size, elf.fwimage.off, elf.fwimage.size);
   }
-  uint64_t img_phys = rm.phys;
+  /* Descriptor addresses.  The radix3 tree, the metadata block and the
+   * bootloader's data pointer are all read by the booter as DMA sources, so
+   * they must be the GPU's addresses -- contract 6 row 15 is the failure this
+   * prevents ("works bare metal, hangs under any IOMMU").  nv_dma_bus_of_run()
+   * is the accessor for frames the firmware loader already owns; a refusal
+   * means no tree and no metadata block are published, and the row says so
+   * rather than handing the booter a CPU address that happens to work today. */
+  uint64_t img_bus =
+      nv_dma_bus_of_run(rm.phys, (uint64_t)rm.pages * NV_DMA_PAGE);
+  uint64_t loader_bus = NV_DMA_BUS_INVALID;
+  if (ldr_rc == 0)
+    loader_bus =
+        nv_dma_bus_of_run(loader.phys, (uint64_t)loader.pages * NV_DMA_PAGE);
+  if (img_bus == NV_DMA_BUS_INVALID ||
+      (ldr_rc == 0 && loader_bus == NV_DMA_BUS_INVALID)) {
+    uart_puts("\n[NV-GSP] bus FAIL img=");
+    uart_print_hex(img_bus);
+    uart_puts(" loader=");
+    uart_print_hex(loader_bus);
+    uart_puts(": a descriptor address has no GPU-visible answer, so neither the "
+              "radix3 tree nor the metadata block is published\n");
+  }
   /* ---- stage 4: assemble the metadata block -----------------------------
    * Pure memory work again: compute the VRAM layout, fill the 256-byte block,
    * encode it, and decode it back as a self-check.  Nothing is written to the
@@ -4812,30 +5284,38 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
 
   uint64_t root = 0;
   uint32_t tpages = 0;
-  int trc = nv_radix3_build(img_phys, elf.fwimage.size, &root, &tpages);
+  int trc = -ENOTSUP;
+  if (img_bus != NV_DMA_BUS_INVALID)
+    trc = nv_radix3_build(img_bus, elf.fwimage.size, &root, &tpages);
+  else
+    uart_puts("\n[NV-GSP] radix3 NOT BUILT: no GPU-visible image address\n");
   uart_puts("\n[NV-GSP] radix3 ");
   if (trc != 0) {
     uart_puts("build FAILED rc=");
     print_int(trc);
     uart_puts(trc == -ENOMEM ? " (no contiguous run for the tree)\n" : "\n");
   } else {
-    uart_puts("root=");
-    uart_print_hex(root);
+    /* The tree's own frames are a descriptor too: the metadata block hands the
+     * booter this address, so it comes from the accessor like every other. */
+    uint64_t root_bus =
+        nv_dma_bus_of_run(root, (uint64_t)tpages * NV_DMA_PAGE);
+    uart_puts("root_bus=");
+    uart_print_hex(root_bus);
     uart_puts(" pages=");
     print_int((int)tpages);
     uart_puts(" maps ");
     print_int((int)((elf.fwimage.size + NV_RADIX3_PAGE - 1) / NV_RADIX3_PAGE));
     uart_puts(" image pages at ");
-    uart_print_hex(img_phys);
+    uart_print_hex(img_bus);
     uart_puts(" (stage 3)\n");
     if (lrc2 == 0) {
       struct nv_wpr_meta_in m, back;
       for (uint32_t i = 0; i < (uint32_t)sizeof m; i++)
         ((uint8_t *)&m)[i] = 0;
-      m.sysmem_addr_radix3_elf = root;
+      m.sysmem_addr_radix3_elf = root_bus;
       m.size_radix3_elf = elf.fwimage.size;
       /* The bootloader's data region: 0x8000 bytes at file offset 0x6C. */
-      m.sysmem_addr_bootloader = loader.phys + 0x6C;
+      m.sysmem_addr_bootloader = loader_bus + 0x6C;
       m.size_bootloader = 0x8000;
       m.bootloader_code_offset = 0x4800;
       m.bootloader_data_offset = 0x800;
@@ -4857,7 +5337,7 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
         }
         if (sig_off) break;
       }
-      m.sysmem_addr_signature = sig_off ? (img_phys + sig_off) : 0;
+      m.sysmem_addr_signature = sig_off ? (img_bus + sig_off) : 0;
       m.size_signature = sig_size;
       uart_puts("[NV-GSP] meta sig ");
       uart_puts(sig_off ? "ad10x at " : "NOT FOUND (authentication will fail) ");
@@ -4978,7 +5458,7 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
       uint64_t wpmeta_off = lay.wpr_start ? lay.wpr_start : 0x5F8700000ULL;
       (void)nv_booter_vram_prefill(d, &bv, boot_off, wpmeta_off);
       int src2 = nv_gsp_sec2_start_booter_ex(d, booter.buf, booter.size,
-                                             meta_bus, 1);
+                                             &d->gsp_meta, 1);
       uart_puts("[NV-GSP] stage5 result=");
       print_int(src2);
       uart_puts(src2 == 0 ? " (booter returned success)\n"
