@@ -3136,7 +3136,8 @@ int nv_gsp_fwsec_launch(struct nv_dev *d, uint32_t frts_off, uint32_t frts_size,
     }
   after_f1:
     for (uint32_t off = 0; off < d->ucode_dmem; off += NV_FLCN_BLOCK) {
-      rc = falcon_dma_block(d, NV_GSP_U, fwsec_bus, d->ucode_imem + off, off, 0, 0);
+      rc = falcon_dma_block(d, NV_GSP_U, fwsec_bus, d->ucode_imem + off, off, 0,
+                            0);
       if (rc != 0) goto out;
     }
     nblk = g_dma_nblk;
@@ -4988,8 +4989,8 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
   } else {
     uint32_t off = 0;
     for (; off < imem_len; off += 256) {
-      rc = falcon_dma_block(d, NV_FALCON_SEC2_BASE, base_bus, imem_file + off, off,
-                            1, 1);
+      rc = falcon_dma_block(d, NV_FALCON_SEC2_BASE, base_bus, imem_file + off,
+                            off, 1, 1);
       if (rc != 0) break;
     }
     if (rc != 0) {
@@ -5012,8 +5013,8 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
   }
   if (rc == 0) {
     for (uint32_t off = 0; off < dmem_len; off += 256) {
-      rc = falcon_dma_block(d, NV_FALCON_SEC2_BASE, base_bus, dmem_file + off, off,
-                            0, 0);
+      rc = falcon_dma_block(d, NV_FALCON_SEC2_BASE, base_bus, dmem_file + off,
+                            off, 0, 0);
       if (rc != 0) {
         uart_puts("[NV-SEC2] DMEM dma FAILED at off=");
         uart_print_hex(off);
@@ -5231,7 +5232,8 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
    * is the accessor for frames the firmware loader already owns; a refusal
    * means no tree and no metadata block are published, and the row says so
    * rather than handing the booter a CPU address that happens to work today. */
-  uint64_t img_bus = nv_dma_bus_of_run(rm.phys, (uint64_t)rm.pages * NV_DMA_PAGE);
+  uint64_t img_bus =
+      nv_dma_bus_of_run(rm.phys, (uint64_t)rm.pages * NV_DMA_PAGE);
   uint64_t loader_bus = NV_DMA_BUS_INVALID;
   if (ldr_rc == 0)
     loader_bus =
