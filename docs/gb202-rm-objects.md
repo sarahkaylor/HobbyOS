@@ -547,7 +547,7 @@ bootimg bytes=290816[NV-FSPCOT]  file=BOOT615.BIN d0=0x000000001156E500 d1=0x000
 ```
 
 and the terminal state is already there at the first sample and never moves
-(`rm63b`, identical in `rm63` except for the §8 fields added in `rm63b`):
+(`rm63b`; `rm63` is identical — the CMS2 window exists only in `rm63b`):
 
 ```
 [NV-FSPCOT] rm tl t_ms=150 hwcfg2=0x000000008187A7F7 m0=0x0000000000000824 m1=0x0000000000000000 os=0x0000000000000000 rm=0x0000000000000000 rvctl=0x00000000BADF5620 gmb0=0x0000000000000000 s2_0=0x000000000000009F s2_1=0x0000000000000000 s2_2=0x0000000000000000 s2_3=0x000000000000000A mb1=0x0000000000000000 mb2=0x0000000000000000 mb3=0x0000000000000000 i2cs=0x00000000000000FF wpr2_lo=0x000000007FFFFE00 wpr2_hi=0x0000000000000000 fmcerr=0x0000000012000824
@@ -584,7 +584,8 @@ the 570 FMC arms it, runs (the ACR reads nothing — `rm59b`), and then aborts w
 
 ### 11.4 The §8 instrument, closed — and negative (`rm63b`)
 
-The readbacks §8 named were added before `rm63b` and are in every sample above:
+The readbacks §8 named were added before `rm63` (so both boots carry them) and
+are in every sample above:
 `NV_PFSP_FALCON_COMMON_SCRATCH_GROUP_2(0..3)` (`0x8F0320+4i`),
 `NV_PGSP_MAILBOX(1..3)` (`0x110808/80C/810`; GB100 `__SIZE_1` = 4, so `gmb0` at
 `0x804` was the only word this kernel had read), plus the FSP boot-complete gate
