@@ -1,11 +1,11 @@
 # GB202 (RTX 5090 `41:00.0`, VM 313) — every FMC / boot-image / ACR blob reachable, and the two abort points
 
 Card `t_a769beaa`, reopened by the owner on 2026-11-27 (**R4**, `docs/nv-plan.md`
-§2.13.1). The reopening's first step is a **zero-boot survey**; this run spent
-**0 boots**. Every row measured on hardware below is quoted from a log written
-before this run and is labelled with its boot; every row this run produced is a
-**static** fact about a file (size, sha256, a decoded header), with its source
-named.
+§2.13.1). The reopening's first step was a **zero-boot survey** (§1–§10); the
+round after it spent **2 boots** on the one variable that survey named (§11:
+`615.78.08`, then the same state with the FSP's CMS2 window added). Every
+hardware row is quoted from a log and labelled with its boot; every static fact
+names its source.
 
 **Part discipline.** Every hardware row is **GB202, `41:00.0`, VM 313**. No AD102
 number is used as a GB202 number. Closing state of this run: VM 313 `stopped`,
@@ -29,19 +29,22 @@ VM 300 `stopped`, `pgrep -c qemu-system-x86` = **0** on r1 and on this worker.
    `620.70.10` (`55042efa…`, 0x824).
 3. **The abort point follows the FMC image, not the artifact set.** With a
    byte-identical COT, descriptor and boot image, the 570 FMC ends `0x0B` and the
-   620 FMC ends `0x824` at 150 ms (§5). The boot image, the signature/ELF and the
-   ACR cannot move either code; the only host-substitutable input that changes
-   the code is the FMC itself.
+   620 FMC ends `0x824` at 150 ms (§5); **the 615.78.08 FMC, with its own boot
+   image, also ends `0x824` at 150 ms** (§11) — so `0x824` belongs to the 287 KiB
+   FMC class, not to 620. The boot image, the signature/ELF and the ACR cannot
+   move either code; the only host-substitutable input that changes the code is
+   the FMC itself.
 4. **There is no GB202 ACR blob to enumerate.** No `BooterLoadUcode`,
    `BooterUnloadUcode` or `Sec2Bl` for GB100/GB202 exists in **any** of the 15
    tags' generated trees, in linux-firmware, or in either `.run`; GB202 exposes
    no SEC2 window (`0x840000` = `0xBADF4100` 7/7, measured `t_67f09feb`), and its
    FSP is started by BootFSM out of chip reset and **cannot be staged**.
-5. **One boot is left that answers a question the corpus has not:** the
+5. **The one boot that was left has been spent, and it answered:** the
    `615.78.08` FMC (`5b74fefd…`) with its own boot image (`37159b4b…`), on the
-   COT that yields `0x0B`. It is the immediate predecessor of the 620 branch and
-   the cleanest single bracket for where `0x824` was introduced. One boot, one
-   variable (§6, §7).
+   COT that yields `0x0B`, ends **`0x824` / `0x14DC = 0x12000824` at 150 ms**
+   (§11) — identical to the 620 pair. `0x824` is therefore not a 620 regression;
+   it is the 287 KiB FMC class's entry-path abort. The next one-field boot is
+   named in §11.6.
 6. **The comparison that decides whether the FMC or our host structures is the
    wall needs NVIDIA's own path on this part**: VM 301 (Ubuntu 24.04) with
    **`nvidia-open-580.178.04`** — the closed module refuses a GB202 (measured,
@@ -449,10 +452,17 @@ FMC). This survey adds:
 | **`0x14DC`** is readable from a 570 FMC | 0 in all 8 `t_0936a17f` boots; the formatted-error reader/format is 610+/620 |
 | a **cross-generation FMC pair** is invalid by geometry | the FMC header `+0x0C` matches the boot desc's code size for every class (§2.4); 570 FMC + 580 boot is code-size-compatible (`0x25800`) |
 | the **ACR writes/copies anything** into FB | `rm43`/`rm59b` census: `other=0 meta=0 gfw=0`; 256-byte stride over the WPR2 band, `nz_head=0 nz_all=0` |
+| "**`0x824` is 620-specific**" | `rm63`/`rm63b`: 615.78.08 + its own boot image, `cot_error=0`, `m0=0x824`, `0x14DC=0x12000824` at 150 ms (§11.3) |
+| the **615 boot image** can move `0x824` | the 615 FMC with the 615 image == the 620 FMC with the 620 image == `0x824`; the boot image is not the variable in either |
+| the FSP's **SCRATCH_GROUP_2 / PGSP_MAILBOX(1..3) / CMS2 log** names the `0x824` | `rm63b`: scratch frozen at `0x9F,0,0,0xA`; `PGSP_MAILBOX(1..3)=0`; CMS2 window 48/48 identical pre/post, no text (§11.4) |
 
-**Not** ruled out: the **580 FMC on the corrected COT**; the **610/615 generation
-boundary**; and the **meaning of `0x0B`** (not in `flcnretval.h`, not an FSP
-`kern_fsp_retval.h` code, and the producing FMC is encrypted).
+**Not** ruled out: the **580 FMC on the corrected COT** (215,624 B,
+`c62856e9…`, code `0xF200`); the **590/595/610 generation boundary**; the two
+`WprMeta` fields where our meta differs from the vendor's 615 stock
+(`frtsSize = 0` vs `0x100000`, `nonWprHeapSize = 0x230000` vs `0x300000`, §11.5);
+and the **meaning of `0x0B`** (not in `flcnretval.h`, not an FSP
+`kern_fsp_retval.h` code, and the producing FMC is encrypted). `0x824`'s meaning
+is likewise not in the public map; §11.5 places it in the `WprMeta`-parser block.
 
 ---
 
@@ -486,6 +496,160 @@ BLB.BIN     200,812  d40b48e431d1707dc77af360…  (570.144 bootloader, nvfw cont
 BOOT620.BIN 290,816  fc42d2683f131df161c3afb1…  (620.70.10 boot image)
 ```
 
-**No boot was spent. Nothing on r1 was started, bound, or installed.** Closing
-state: VM 313 `stopped`, VM 300 `stopped`, `pgrep -c qemu-system-x86` = 0 on r1
-and on this worker.
+**No boot was spent by the survey pass. Nothing on r1 was started, bound, or
+installed by it.** Closing state then: VM 313 `stopped`, VM 300 `stopped`,
+`pgrep -c qemu-system-x86` = 0 on r1 and on this worker.
+
+---
+
+## 11. The 615.78.08 boot — the one variable, measured (2 boots, 2026-11-27)
+
+This is the boot §7.1 named, run after the review that asked for it. Part in every
+row: **GB202, `41:00.0`, VM 313**. Harness `tools/nv/gb202fsp-boot.sh`, one boot
+per named hypothesis, `STOP_AFTER_VERDICT=1`, `STOP_PATTERN='^\[NV-FSPRM\] verdict='`.
+Two boots were spent: **`rm63`** (the named one-variable boot) and **`rm63b`**
+(the same state, plus the FSP's own CMS2 window — hypothesis H2 in §11.4).
+
+### 11.1 What was staged, and what did not move
+
+Both artifacts were decoded from the **`615.78.08`** tag's generated bindata
+(`GspRmFmcGfwProdSigned_GB202`, `GspRmBoot_GB202`) by the survey's own decoder —
+the same sources the §2 corpus table came from, not a re-download of anything new.
+
+| staged file | bytes | sha256 | geometry |
+|---|---|---|---|
+| `/NVIDIA/GSP/FMC615.BIN` | 287,884 | `ae4e70559f14d9becf7f0c4014a990d0873d174f3af0cc4913484e2cfb3238d5` | container: hash@0x150 == SHA-384(image) ✔, pkey@0x1E0 = `048bf118bbeb9c0f…`, image 287,304 = `5b74fefd…` |
+| `/NVIDIA/GSP/BOOT615.BIN` | 290,816 | `37159b4b7ce28066bbf83d11d50abff8e26722eb6bc2825290c14944a7c6aef0` | desc v6: manifest 0/0xA00, data 0xA00/0xE800, code 0xF200/0x37000 |
+
+`FMC615.BIN` was built from the bindata's four blocks with the same
+`mkfmc.py` shape the 620 container used (hash 48 / signature 96 / publickey 97 /
+image at 0x244), and the container's hash section **equals `SHA-384(image)`** —
+checked, not assumed. FMC image `+0x0C` = `0x37000`, the boot desc's
+`monitorCodeSize` = `0x37000` (§2.4's pairing rule holds).
+
+Nothing else moved. The COT, the WPR descriptor, the boot args page, the GSP-RM
+image (63,541,248 B), the signature (4,096 B), the FRTS sysmem buffer and the
+vendor heap pair (`0x8700000` / `0x230000`) are byte-identical to the state that
+yields `0x0B` (mode 58/59), and the COT keeps `frtsVidmemOffset = 0x4000000`,
+`frtsVidmemSize = 0x100000`, `meta.frts_size = 0`.
+
+### 11.2 The rows
+
+The block was consumed by the FSP — the COT round trip is clean:
+
+```
+[NV-FSPRM] start gsp=rm mode=63[NV-FSPCOT]  files=/NVIDIA/GSP/{FMC.BIN,BOOTIMG.BIN,GSPRM.BIN,GSPRM.SIG} (mode 63: FMC615.BIN,BOOT615.BIN)
+fmc image bytes=287304 fmc img_d0=0x0000000000480403 img_d1=0x0000000000046200
+bootimg bytes=290816[NV-FSPCOT]  file=BOOT615.BIN d0=0x000000001156E500 d1=0x000000003996718D d2=0x0000000045AF2B00 d3=0x00000000C74FBC4D code_off=0x000000000000F200 data_off=0x0000000000000A00
+[NV-FSPCOT] cot class=1[NV-FSPCOT] cot cmd_nvdm=20[NV-FSPCOT] cot errorCode=0
+[NV-FSPCOT] cot answer errorCode=0 (FSP_OK)
+[NV-FSPCOT] fmcerr post-cot reg=0x14dc=0x0000000012000824 alias_0x4dc=0x00000000BADF5040 variant=0x0000000000000001 partition=0x0000000000000001 err=0x0000000000000824 info=0x0000000000000000
+```
+
+and the terminal state is already there at the first sample and never moves
+(`rm63b`, identical in `rm63` except for the §8 fields added in `rm63b`):
+
+```
+[NV-FSPCOT] rm tl t_ms=150 hwcfg2=0x000000008187A7F7 m0=0x0000000000000824 m1=0x0000000000000000 os=0x0000000000000000 rm=0x0000000000000000 rvctl=0x00000000BADF5620 gmb0=0x0000000000000000 s2_0=0x000000000000009F s2_1=0x0000000000000000 s2_2=0x0000000000000000 s2_3=0x000000000000000A mb1=0x0000000000000000 mb2=0x0000000000000000 mb3=0x0000000000000000 i2cs=0x00000000000000FF wpr2_lo=0x000000007FFFFE00 wpr2_hi=0x0000000000000000 fmcerr=0x0000000012000824
+[NV-FSPRM] verdict=fmc-or-rm-window-open mode=63 cot_error=0 lock_released=1 statq_written=0 linked=0 initdone=0 hwcfg2_last=0x000000008187A7F7 m0_last=0x0000000000000824 m1_last=0x0000000000000000 os_last=0x0000000000000000 rm_last=0x0000000000000000 fmcerr_last=0x0000000012000824 radix3=1
+[NV-FSPCOT] gsp-shape post off=0x0000000000110040 v=0x0000000000000824
+[NV-FSPCOT] wprm-after verified=0x0000000000000000 wpr_start=0x0000000000000000 wpr_end=0x0000000000000000 heap_off=0x0000000000000000 heap_size=0x0000000008700000 nonwpr_off=0x0000000000000000 image_off=0x0000000000000000 bootbin_off=0x0000000000000000 frts_off=0x0000000000000000 frts_size=0x0000000000000000
+[NV-FSPCOT] wprm-after untouched=yes (no field the ACR owns was written)
+```
+
+All eleven samples (`t_ms` 150, 250, 400, 600, 1000, 3000, 6000, 10000, 15000,
+21000, 27000) and the two extra ones (40000, 55000) carry the same
+`m0=0x824`, `fmcerr=0x12000824`, `wpr2_lo=0x7FFFFE00`, `wpr2_hi=0` — the verdict
+row is not a last sample, the state is constant for 55 s.
+
+### 11.3 What this settles
+
+`0x824` is **not 620-specific**. The immediate predecessor of the 620 branch, run
+with **its own** boot image and a COT the FSP accepts (`errorCode=0`), emits the
+identical `0x14DC = 0x12000824` (variant 1, partition 1, err `0x824`, info 0) and
+dies before `t=150 ms`.
+
+The measured corpus now has two families, and the boundary is a property of the
+FMC image, not of the boot image, the COT, or the host structures:
+
+| FMC class | boots | `MAILBOX0` | WPR2 at 150 ms | status queue |
+|---|---|---|---|---|
+| 570.144, 199,240 B | 19+ | `0x0B`, 0.2–28 s | **up** (`0x07E61200/0x07F1EE00` at 27 s, `rm41`) then torn down | never written |
+| 615.78.08, 287,304 B | `rm63`, `rm63b` | **`0x824`** at 150 ms | **already down** (`0x7FFFFE00/0`) | never written |
+| 620.70.10, 287,304 B | `fh620`, `fh60b`, `fh62` | **`0x824`** at 150 ms | already down | never written |
+
+So the 287 KiB FMCs do not reach the state where the FSP arms WPR2 at all, while
+the 570 FMC arms it, runs (the ACR reads nothing — `rm59b`), and then aborts with
+`0x0B`. The wall is on the newer FMC's *entry* path.
+
+### 11.4 The §8 instrument, closed — and negative (`rm63b`)
+
+The readbacks §8 named were added before `rm63b` and are in every sample above:
+`NV_PFSP_FALCON_COMMON_SCRATCH_GROUP_2(0..3)` (`0x8F0320+4i`),
+`NV_PGSP_MAILBOX(1..3)` (`0x110808/80C/810`; GB100 `__SIZE_1` = 4, so `gmb0` at
+`0x804` was the only word this kernel had read), plus the FSP boot-complete gate
+`NV_THERM_I2CS_SCRATCH` (`0xAD00BC`) — eight words where the kernel had read one.
+
+* The FSP scratch is **frozen** at its boot-time values — `0x9F, 0, 0, 0xA` — the
+  same four words `t_67f09feb` measured at +2 ms and the same the `[NV-PFSP]`
+  probe prints before any COT. Neither the COT nor the `0x824` moves them.
+* `i2cs = 0xFF` (FSP_BOOT_COMPLETE.SUCCESS) throughout; `PGSP_MAILBOX(1..3) = 0`.
+* **H2: the FSP's CMS2 log.** The vendor's own `kfspDumpDebugState_GB100` reads
+  it through `NV_POOBHUB_RCV_INDIRECT_CMS2_MEM_RD_ADDR` (`0x8AA374`) /
+  `…_RD_DATA` (`0x8AA378`), words `0x50…0x7F`. Read pre-COT and again after 55 s:
+  **48/48 dwords identical**, and the whole window only ever contains
+  `{0, 0x7, 0xA, 0x65, 0x9F, 0xFF, 0x140000}` — a repeated 7-word status record
+  (the same `0x9F`/`0xA` the scratch holds), **no text, and no new record for the
+  abort**. The FSP does not write this failure anywhere the host can read.
+
+(The CMS2 rows are printed with the `[NV-FSPCOT]` prefix repeated inside the row
+because the helper prints one prefix per call; cosmetic, and the 48 values were
+parsed and compared programmatically, not by eye.)
+
+### 11.5 What `0x824` is, and is not
+
+* **Not an FSP RPC error.** `kern_fsp_retval.h` (620.73.04) defines exactly
+  `FSP_OK 0x00`, `FSP_ERR_IFS_ERR_INVALID_STATE 0x9E`, `…FILE_NOT_FOUND 0x9F`,
+  `…NOT_SUPPORTED 0xA0`, `…INVALID_DATA 0xA1`, `…INVALID_KNOB_ID 0x1E3`.
+  `0x824` is outside that set; `kfspErrorCode2NvStatusMap_GH100` would map it to
+  `NV_ERR_GENERIC`. It is an FMC/ACR-side code reported in the *formatted*
+  register (variant 1); the same value also lands in `MAILBOX0` (`0x824`), which
+  the vendor calls an "effectively 8-bit" channel for older FMCs.
+* **Not in the public map.** The GB202 reverse-engineering corpus
+  (`shuttie/bf16-unlock-blackwell-research`, `specs/08_errors-and-logging.md`)
+  maps seventeen boot codes — `0x827` (`WprMeta.magic`), `0x828` (`revision`),
+  `0x82e` (`sizeOfBootloader` alignment), `0x836` (256 MiB bootloader),
+  `0x83d/0x83e/0x841/0x885/0xa97/0xaaa/0xa0f/0xaff`, and the FSP responses
+  `0xd6/0xd9/0x33/0x377/0x1db` — and **does not contain `0x824`**. Its numeric
+  neighbours place it in the `WprMeta`-parser block, immediately before `magic`.
+* **Our `WprMeta` differs from the vendor's 615 stock in two fields** (same
+  corpus, GB202 PRO, 615.71.09, `specs/01_boot-chain.md#wprmeta`):
+  `frtsSize` **0x100000** there vs **0** here, and `nonWprHeapSize` **0x300000**
+  there vs **0x230000** here. `gspFwHeapSize` matches (`0x8700000`);
+  `fbSize = 0` is documented as ignored on the 615 class (an `0xffffffff` value
+  still boots), and `sizeOfBootloader = 0x47000`, `bootloader{Code,Data,Manifest}`
+  `0xf200/0xa00/0`, `sizeOfSignature = 0x1000` all match our staged pair.
+
+### 11.6 The named next boot (not spent here)
+
+**Mode 63 + `WprMeta.frtsSize = 0x100000`** — one field, the vendor's own 615
+stock value, the 615 pair and the COT unchanged. `rm57` proved this field inert
+*with the 570 FMC*; that boot cannot answer it for a 287 KiB FMC, which is the
+only class that emits `0x824`. A move in `MAILBOX0`/`0x14DC` names the wall as a
+`WprMeta` check the newer FMC added; if it is inert, the next one-field candidate
+is `nonWprHeapSize = 0x300000`, then the **580.65.06** pair (`2fe1c6c2…`,
+217,088 B, code `0xF200`) brackets where the `0x0B`→`0x824` transition enters the
+corpus, and the last in-band namer is the FSP's DMEM log over the MCTP
+download-log RPC (`_kfspGatherDmemLog_GB100`), which needs that packet protocol
+implemented — not a COT field.
+
+The VM 301 / `nvidia-open-580.178.04` control still needs coordinator sign-off
+(§7.2) and was not run.
+
+### 11.7 Acceptance
+
+**Unmet, and no mock or shim value is used or claimed.** No channel handle, no VA
+space, no engine class object, no VA→VRAM binding: `statq_written=0 linked=0
+initdone=0` in both boots, and the status queue's producer header is 0 at every
+sample (`[NV-RPC] peer … (header still zero)`). The part is GB202, `41:00.0`, VM
+313 in every row.
