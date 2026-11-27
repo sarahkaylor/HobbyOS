@@ -38,25 +38,28 @@ Sum of GPUs on r1: 1× AD102 (the driver target, VM 300 owns `01:00.0`), 2× GB2
 |---|---|---|
 | L1 | HobbyOS owns the card, verifies NVIDIA's firmware, and builds every structure GSP-RM will consume | **done, measured** |
 | L2 (vendor-firmware part, GB202 only) | NVIDIA's own FSP reports SUCCESS at its published gate, authenticates our COT, and runs NVIDIA's FMC | **measured on GB202, narrowly stated (§2.12)** |
-| L2 (the rest) | our code on SEC2 → booter runs → GSP-RM reports `INIT_DONE` → status queue published | **not met on either part; declared final 2026-11-26 (§2.13).** AD102: SEC2's boot ROM rejects every reachable vendor booter (`0x840094=0x002B0009`). GB202: ACR ends at `MAILBOX0=0x0B` (570 FMC, 19 boots) / `0x824` (620 pair) |
+| L2 (the rest) | our code on SEC2 → booter runs → GSP-RM reports `INIT_DONE` → status queue published | **not met on either part.** Measured 2026-11-24/26: AD102's boot ROM rejects every reachable vendor booter (`0x840094=0x002B0009`); GB202's ACR ends at `MAILBOX0=0x0B` (570 FMC, 19 boots) / `0x824` (620 pair). Declared final 2026-11-26 and **reversed by the owner 2026-11-27 (§2.13.1)** — live again, not met |
 | L3 | A kernel submit reaches the 3-D engine and a clear reads back | not started — parked with L2 (§2.13); nearest measured row is N3v `[VIRGL3D] match=4096/4096`, kernel **virgl**, not `nv` |
 | L4 | nvk enumerates AD102; `vkcube` draws and presents | not started — parked; measured substitute N6v `vkcube` draws+presents `renderer=venus` |
 | L5 | RimWorld / Cyberpunk render at 720p ≥30 fps | **partially met on the platform, not met natively (§2.13)**: RimWorld 51.02 fps median `renderer=virgl`; Cyberpunk 29.19 avg / 29.66 median / 18.18 1 %-low `renderer=venus` |
 
 L1 stands on its own: a from-scratch driver that identifies the part, brings up
 the register window, reads 38 MB of vendor firmware from disk and proves it
-byte-for-byte, and lays out VRAM the way the vendor booter expects. L2 is the wall,
-and it is now a **declared ceiling**, not an open question.
+byte-for-byte, and lays out VRAM the way the vendor booter expects. L2 is the wall:
+it was declared a ceiling on 2026-11-26 and the owner reversed that on 2026-11-27
+(§2.13.1), so it is an open question again — **and still not met.**
 
-The L2 question was asked to exhaustion and answered twice: the time box of §2.10
+The L2 question has been asked to exhaustion three times: the time box of §2.10
 closed negative (§2.11), the fallback was measured to relocate the wall rather than
-bypass it (§2.11), the same question asked of GB202 closed negative at the ACR
-(§2.12), and on 2026-11-26 the owner declared the ceiling final (§2.13). **The
-native ladder above L2 is parked behind the two blocked `kind=capability` walls, with
-a written revive condition (§2.13, R1–R4); do not reopen it to re-derive a wall.**
-What keeps running is the platform work — the shim/PRIME rows, the present path, the
-in-tree nvk build, the games harness and both soak tiers — and every games number
-stays labelled with the renderer that produced it.
+bypass it (§2.11), and the same question asked of GB202 closed negative at the ACR
+(§2.12). On 2026-11-26 the owner declared the ceiling final and on 2026-11-27
+reversed that declaration (§2.13, §2.13.1, revive condition **R4**). The reversal is
+a decision about effort, not evidence: **no row in §2.10–§2.12 stopped being true**,
+and the reopening starts from a candidate survey with a zero-boot brief rather than
+another run at a measured invariant. The platform work — the shim/PRIME rows, the
+present path, the in-tree nvk build, the games harness and both soak tiers — is
+independent of this and keeps running throughout, and every games number stays
+labelled with the renderer that produced it.
 
 ---
 
@@ -590,7 +593,7 @@ identity or address, the boot image's container form vs. the 620 generation, the
 band census, a second COT as a sweep, or any 6xx-FMC-with-570-inputs variant. Each of
 those has a row that rules it out in `docs/gb202-rm-parked.md` §5.
 
-### 2.13 The native ceiling is declared final, and the ladder is re-pointed (decision, 2026-11-26)
+### 2.13 The native ceiling is declared final, and the ladder is re-pointed (decision, 2026-11-26; **reversed 2026-11-27 — §2.13.1**)
 
 The owner chose **option 2 of §2.11 — accept the ceiling honestly** — on 2026-11-26,
 after option 1 (ask GB202) came back negative (§2.12) and with option 3 (research
@@ -653,7 +656,7 @@ at 720p, and that is all it has. N9 is therefore **partially met on the fallback
   (`statq_written=1 linked=1 initdone=1`).
 - **R3 — a different part arrives** whose SEC2 accepts vendor-signed code and whose
   firmware the host can reach.
-- **R4 — the owner reverses this decision.**
+- **R4 — the owner reverses this decision.** **Exercised 2026-11-27 — see §2.13.1.**
 
 **When a revive condition fires, mint successors — do not reopen the nine.** Their
 acceptance names the part they were written for, so reopening them produces
@@ -664,6 +667,48 @@ renderer is not acceptance.**
 **What does not stop.** The shim/PRIME rows (`t_78fce566`), the present path, the
 in-tree nvk build, the games harness and both nightly soak tiers are independent of
 this ceiling and keep running.
+
+### 2.13.1 The owner reversed the ceiling — the ladder is live again (2026-11-27)
+
+The owner exercised **R4** on 2026-11-27. Effective immediately:
+
+- **The two wall cards are reopened** — `t_9bf9bc0c` (AD102 RPC link) and
+  `t_a769beaa` (GB202 RM objects) — and the nine rungs downstream of them become
+  live again instead of parked. Nothing is deleted: the park notes and the fallback
+  mapping stay on the cards as the prior they were written to be.
+- **No measurement is withdrawn, and nothing may be quoted as met.** Every row in
+  §2.10–§2.12 still says what it said: AD102's boot ROM rejects a GA102-signed
+  container *at* the signature (`0x00250009`) and an AD102-signed booter *after* it
+  (`0x002B0009`); GB202's ACR ends at `0x0B` (570 FMC, 19 boots) and `0x824` (620
+  pair); no host-supplied input moved either. The reversal withdraws the *decision to
+  stop*, not the evidence — L2-rest is **live and unmet**.
+- **What is genuinely new on 2026-11-27**, which is why R4 is not a rerun of §2.10:
+  the coordinator now has **root on r1**, the hypervisor that holds all three cards
+  (4090 `01:00`, 5090s `41:00`/`82:00`). Two measurements came with it — a
+  passed-through 4090 binds NVIDIA's proprietary `580.178.04` inside a guest and
+  enumerates as a Vulkan device (`deviceName = NVIDIA GeForce RTX 4090`,
+  `apiVersion 1.4.312`), while a **5090 refuses the closed module** and requires
+  `nvidia-open` (`docs/nv-r1-host-renderer.md` §1.1). Neither moves a wall by itself;
+  both widen what can be inspected and compared from a host this lane could not read
+  four days ago.
+- **The first step of each reopening is a survey, not a boot.** Both wall cards carry
+  a **zero-boot brief**: enumerate every booter/FMC/ACR blob now reachable across the
+  four hosts — *including vendor driver packages newer than the 535/550/570/620 sets
+  already spent* — decode each candidate's signing identity statically with
+  `tools/nv/no-rm/hs_gate.py`, and deliver a ranked candidate table with the boot each
+  survivor would cost. A boot is authorised only when a candidate's static identity
+  says it *could* pass R1, or when a specific GB202 change that moves `0x824`/`0x0B`
+  is named for R2. Boots spent on a candidate that cannot pass are the one cost this
+  ladder keeps paying and must stop paying.
+- **Budget and stop.** Each reopening keeps §2.10's shape: a review point and a hard
+  stop, counted in **boots** (the harness cycles a GPU VM in ~6.5 min), plus the
+  standard rule that a boot which merely lasts longer is not evidence.
+- **What stays closed**: N1n is measured (11 GPC / 64 TPC, `src=register`) and N3n
+  closed in class (`docs/nv-games-ladder.md` §2.1). The reversal reopens the walls,
+  not the gates that already answered.
+- **The platform track is unaffected** and remains what can be demonstrated: every
+  games number keeps its `renderer=` label, and the Cyberpunk row is still the
+  platform's, not the driver's.
 
 ## 3. Work packages (parallel, each with a gate)
 
@@ -699,16 +744,18 @@ stuck.
 | N8 | Cyberpunk via vkd3d+nvk | P9 script end to end | **benchmark run on HobbyOS (2026-11-24)**: 29.19 avg / 29.7 median / 18.2 1%-low at 720p, Custom preset, scaling off — on **Venus** (platform), not the nv driver; host native control 139.41 avg. The nv driver cannot run it: no 3D engine. **Native row parked 2026-11-26** |
 | N9 | "reasonable performance" | 720p ≥30 fps incl. present | **partially met on the fallback, not met natively (§2.13)**: RimWorld **51.02 fps median `renderer=virgl`** clears ≥30; Cyberpunk **29.19 avg / 29.66 median / 18.18 1 %-low `renderer=venus`** clears it on avg and median and misses on the 1 %-low. No native fps row exists |
 
-**With §2.13 landed, this ladder's native column is parked, not abandoned.** Its gates
-are left exactly as written so that a revival (R1–R4 in §2.13) measures the same thing
-it would have measured today; what changed is the claim, not the definitions. The
-previously named critical path N3→N6 (≈ 20–37 weeks) is **not** the live path: nothing
-above N2 can be worked on either part, and the platform rows — N0's 1080p present gate,
-N1v/N6v/N8v — are what the project can demonstrate. Two facts that keep it honest:
-both titles' non-graphics stacks already work on HobbyOS (audio via virtio-snd/ALSA;
-Cyberpunk played 10.5 min and reloaded), and Venus and the native driver are mutually
-exclusive on this card — Venus needs the GPU on the host, `nv` needs it in the guest,
-and r1 has one of each part.
+**Reversal note (2026-11-27).** The owner reversed §2.13 (§2.13.1, R4), so the native
+column above is live again rather than parked. Two things do not change with the
+reversal: every row still reads **not met**, and the row-level priors in §2.1 (AD102
+`0x002B0009`, GB202 `0x0B`/`0x824`, N3n closed in class) are unchanged — the ladder
+resumes from a candidate survey, not from a fresh boot. The gates are deliberately left
+exactly as written so the revival measures what it would have measured; the previously
+named critical path N3→N6 (≈ 20–37 weeks) becomes live only once a peer exists. The
+platform rows — N0's 1080p present gate, N1v/N6v/N8v — remain what the project can
+demonstrate, and both titles' non-graphics stacks already work on HobbyOS (audio via
+virtio-snd/ALSA; Cyberpunk played 10.5 min and reloaded). Venus and the native driver
+stay mutually exclusive on this card: Venus needs the GPU on the host, `nv` needs it in
+the guest, and r1 has one of each part.
 
 ---
 
