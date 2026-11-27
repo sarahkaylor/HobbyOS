@@ -59,6 +59,39 @@ So the install is not "one driver": the same host also needs `libgl1`, `libegl1`
 VM 301 is the useful precedent here: **580.178.04 already drives a passed-through NVIDIA
 card on this host today — inside a guest.** See §7.
 
+### 1.1 MEASURED 2026-11-27: the 4090 binds, the 5090 refuses the closed module
+
+Both cards were put through the same guest image (VM 301, Ubuntu 24.04, DKMS
+`580.178.04`, `nvidia.ko.zst` from `/lib/modules/6.8.0-147-generic/updates/dkms/`),
+one at a time, with `qm set 301 --hostpci0 0000:<bdf>,pcie=1`:
+
+| card | BDF | guest `lspci` | result |
+|---|---|---|---|
+| RTX 4090, AD102 `10de:2684` | `01:00` | `01:00.0 VGA … 10de:2684` | **works** — `nvidia-smi`: `NVIDIA GeForce RTX 4090, 580.178.04, 24564 MiB, 95.02.18.40.4C`; `vulkaninfo --summary`: `deviceName = NVIDIA GeForce RTX 4090`, `apiVersion = 1.4.312`, `driverVersion = 580.178.4.0`, `driverName = NVIDIA` |
+| RTX 5090, GB202 `10de:2b85` | `82:00` | `01:00.0 VGA … 10de:2b85`, `Region 1: … [size=32G]` | **refused by the driver, not by the passthrough** — `nvidia-smi`: `No devices were found`; `dmesg`: `NVRM: The NVIDIA GPU 0000:01:00.0 (PCI ID: 10de:2b85) installed in this system requires use of the NVIDIA open kernel modules.` then `NVRM: GPU 0000:01:00.0: RmInitAdapter failed! (0x22:0x56:897)` |
+
+**Consequence for §2 below, and for any GB202 guest or host plan:** the *closed*
+(proprietary) kernel module refuses a Blackwell part by design — the passthrough,
+the BAR window and the VFIO binding are all fine, and the failure is the module
+flavour. §2's "Version: 580.178.04" stays right about the **userland and RM image**
+(it is the package whose GB202-signed RM image this project measured), but on a
+5090 the kernel side must be **`nvidia-open-580.178.04`**, not the proprietary
+`nvidia.ko`. The r1 host-renderer plan therefore has to be re-versioned per part,
+and a GB202 benchmark guest built on the closed module would fail exactly this way.
+
+State left behind: VM 301 returned to **no `hostpci0`**, every VM stopped, 0
+`qemu-system-x86_64`, both 5090s back on `vfio-pci`. Nothing was installed or
+persisted on the host or the guest.
+
+**What this does and does not settle for the Cyberpunk row.** The 4090 half of
+"a Vulkan device with NVIDIA's driver exists on r1" is now measured inside a guest.
+The benchmark itself still cannot run: no guest on r1 has Proton or the game, and
+none of the three candidate data paths is open — VM 117's Windows volume is
+**BitLocker** (`partx` on `vm-117-disk-3` shows `BitLocker GAMING C:`, so it cannot
+be inspected without the recovery key), `strix` (192.168.0.123) is reachable by ping
+from r1 but not by key and exports only `rimworld-*` trees plus `/srv/nfs/export`
+(no `cp-game`), and the NAS copy is `0770 sarah:sarah` behind NFS root squash.
+
 ## 2. The driver, if it were ever approved
 
 **Version: 580.178.04.** Three reasons, in order of weight:
