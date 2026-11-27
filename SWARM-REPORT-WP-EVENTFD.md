@@ -64,8 +64,9 @@ the shim's registration and retire hook — nothing vendor-supplied:
 | `src/kernel/nv_shim_drm_test.c` | +283/−20 | layout pins, the four stale refusal expectations, and the new `test_nvshim_drm_syncobj_eventfd` |
 | `docs/nv-shim-eventfd.md` | +289/−0 | the rung's doc |
 
-Source+tests: 7 files, **+839/−68**. With the doc: 8 files, **+1128/−68**; with
-this report, 9 files **+1326/−68** (`git diff --stat bc857a3f HEAD` at handoff).
+Source+tests: 7 files, **+839/−68**. With the doc: 8 files, **+1128/−68**.
+This report adds its own size on top; `git diff --stat bc857a3f HEAD` is the
+authoritative total for the branch.
 
 ## 2. The acceptance, measured
 
