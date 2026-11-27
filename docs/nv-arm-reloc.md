@@ -131,7 +131,7 @@ marked where it matters. Words = 8-byte pointer words needing relocation.
 | 13 / 13 | `cons_dtags` | `kconsole.c:302` | `const struct cons_dtag[]` — `{const char *tag; const char *rest; uint32_t cls;}`; 10 tags + 3 `rest` strings | yes when `CP_DIAG=` is set |
 | 12 / 12 | `do_hw_params.nm` | `linux_snd.c:984` | `static const char *nm[12]` inside the function | no — `/dev/snd` is x86-only today |
 | 12 / 12 | `g_nvif_engines` | `nv_shim.c:2759` | `const struct nvif_class_row[]` — `{int32 oclass; char name[24]; const char *engine; const char *alloc;}` (2 pointer words per row) | **yes** — the NVIF class/GRAPH_UNITS rows `nvk` reads (§7.1: this one was caught by the gate when `nv/wp-units` merged) |
-| 10 / 10 | `arg_names` | `nv_rpc.c:108` | `const char *const[]` | **yes** — GSP-RPC argument validation |
+| 12 / 12 | `arg_names` | `nv_rpc.c:108` | `const char *const[]` | **yes** — GSP-RPC argument validation |
 | 9 / 9 | `cons_dnames` | `kconsole.c:314` | `const char *const[]` | yes when `CP_DIAG=` is set |
 | 9 / 9 | `vm_pw_name` | `vm.c:1749` | `const char *const[]` | **yes** — page-walk `[MR]` rows |
 | 8 / 8 | `el_compat_83` | `elf_loader.c:149` | `const struct {const char *name; const char *staged;}[]` | **yes** — 8.3 compat lookups |
@@ -144,9 +144,17 @@ marked where it matters. Words = 8-byte pointer words needing relocation.
 | 3 / — | `g_reloc_names` | `reloc_test.c:58` | same | yes, by the test |
 | (5 / 5) | `.got` | linker-generated | 5 slots (signal/epoll hooks) | yes — **not gated** (§3) |
 
-Totals (MEASURED): unit `424 + 5 .got = 429`; desktop and test
-`418 + 5 = 423`. Both match `.rela.dyn`'s entry count exactly, which is the
+Totals (MEASURED): unit `426 + 5 .got = 431`; desktop and test
+`420 + 5 = 425`. Both match `.rela.dyn`'s entry count exactly, which is the
 cross-check that the inventory is the whole population and not a sample.
+
+The last growth was deliberate: `nv/wp-rpcpub` (folded 2026-11-27) added the
+`magic` and `size` argument fields to `nv_rpc.c`'s table, so `arg_names` went
+10 → 12 words in every mode (unit 424 → 426, desktop/test 418 → 420 tables'
+worth, `.rela.dyn` 429 → 431 / 423 → 425). The baseline was regenerated from
+each mode's linked image with `--update-baseline` (that lane's gate ran the
+intel tier only, so the AArch64 link was the first place it surfaced). The
+transcript in §3 predates this and still shows the 429/423 totals.
 
 Three corrections to round 3's notes, all from this audit: `nv_rpc.c` is **not**
 empty on AArch64 (36 words in three tables, and they were returning link
