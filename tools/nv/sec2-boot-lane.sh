@@ -8,6 +8,11 @@
 # config (`Host r1`, key ~/.ssh/id_r1) instead of sarah's mac_to_r1 key.
 #
 # Usage: tools/nv/sec2-boot-lane.sh <count> <tag>      (tag becomes t10a, ...)
+#   NV_BOOTER_FILE=<path>    exact booter container to stage (default: first
+#                            third_party/nvfw/ad102/gsp/booter_load-*.bin)
+#   NV_BOOTER_SHA256=<hex>   pin that container; a mismatch aborts before the
+#                            image is uploaded or a VM is touched
+#   count=0 runs the staging preflight and starts no VM.
 # =============================================================================
 set -u
 
@@ -23,10 +28,26 @@ say() { echo "[sec2-lane] $*"; }
 
 [ -f disk.img ] || { echo "no disk.img: build it first" >&2; exit 1; }
 
+# ---- which booter, and is it the one we meant? ------------------------------
+# The boot is the expensive unit, and the default (the first globbed
+# booter_load-*.bin) is not necessarily the image under test.  Print the row
+# before anything is staged, and refuse on a pinned-hash mismatch *before* the
+# upload: otherwise a stale file reads as a negative result for the candidate.
+BOOTER=${NV_BOOTER_FILE:-$(ls third_party/nvfw/ad102/gsp/booter_load-*.bin 2>/dev/null | head -1)}
+[ -n "$BOOTER" ] && [ -f "$BOOTER" ] || {
+  say "FATAL: no booter to stage (NV_BOOTER_FILE='${NV_BOOTER_FILE:-}')"; exit 1; }
+BOOTER_SHA=$(sha256sum "$BOOTER" | cut -c1-64)
+say "booter staged: path=$BOOTER sha256=$BOOTER_SHA size=$(stat -c %s "$BOOTER")"
+if [ -n "${NV_BOOTER_SHA256:-}" ] && [ "$BOOTER_SHA" != "$NV_BOOTER_SHA256" ]; then
+  say "FATAL: booter sha256 $BOOTER_SHA != NV_BOOTER_SHA256 $NV_BOOTER_SHA256" \
+      "-- refusing to spend a boot on the wrong image"
+  exit 1
+fi
+
 mmd -i disk.img ::/NVIDIA 2>/dev/null || true
 mmd -i disk.img ::/NVIDIA/GSP 2>/dev/null || true
 stage() { [ -f "$1" ] || return 0; mcopy -o -i disk.img "$1" "::/NVIDIA/GSP/$2" || exit 1; }
-stage "${NV_BOOTER_FILE:-$(ls third_party/nvfw/ad102/gsp/booter_load-*.bin 2>/dev/null | head -1)}" BOOTER.BIN
+stage "$BOOTER" BOOTER.BIN
 stage "$(ls third_party/nvfw/ad102/gsp/bootloader-*.bin 2>/dev/null | head -1)" LOADER.BIN
 stage "$(ls third_party/nvfw/ga102/gsp/gsp-*.bin 2>/dev/null | head -1)" GSPRM.BIN
 stage "$(ls third_party/nvfw/ad102/gsp/booter_unload-*.bin 2>/dev/null | head -1)" UNLOAD.BIN
