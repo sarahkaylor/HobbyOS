@@ -1,7 +1,7 @@
 # SWARM-REPORT-WP-SYNCFILE — a sync_file is a real fd (t_1f7624e8)
 
 Lane: `nv-card`. Card: `t_1f7624e8`. Base `nv/integ-swarm`: `974519ed` (the
-WP-SYNCFAM fold). Branch: `nv/wp-syncfile`. Code commit: `__CODE_COMMIT__`.
+WP-SYNCFAM fold). Branch: `nv/wp-syncfile`. Code commit: `0ee91bd8`.
 No GPU boot, no VM boot, no `docs/nv-plan.md` edit.
 
 ## 1. What landed
