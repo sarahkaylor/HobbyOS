@@ -181,8 +181,10 @@ the lane refuse if the staged file is not this hash.
    Decision table from `docs/nv-no-rm-path.md` §6: `0x002B0009` → close R1 for this
    generation; anything else with `INTR` not `EXIT` → the next card; `0x0` + metadata
    `verified` written → SEC2 authenticated the image, and the round-trip half then needs
-   the transport tree `nv/wp-rpc-final` (`c58b1295`) merged into this rig — a pass here
-   is the SEC2 word, not the round trip.
+   the transport tree `nv/wp-rpc-final` (`c58b1295`) merged into this rig (§8 names
+   both conflicted files; branch `nv/wp-r1-merged` carries both halves, so one boot
+   answers both) — a pass here
+   is the SEC2 word first, and the round trip only if the peer then answers.
 2. **`07450877` — AD102 `booter_unload` 42 872 B (all ten tags that carry `ec5bcd11`).**
    1 boot, *after* #1 and only as a second signature-generation sample: the unload path is
    a teardown image, and the 535-generation unload already returned `0x002B0009`. It
@@ -286,8 +288,8 @@ python3 tools/nv/no-rm/hs_gate.py rebuilt-load-620.73.04.bin   # IDENTITY-COMPAT
 ```
 
 **The next boot, in two steps — preflight first, then the one boot.** Build
-`disk.img` from this branch first (the lane stages into it, it does not build),
-then:
+`disk.img` from branch **`nv/wp-r1-merged`** — the rig plus the transport, in one
+tree (the merge is described at the end of this section) — then:
 
 ```
 export NV_BOOTER_FILE=$PWD/rebuilt-load-620.73.04.bin
@@ -296,11 +298,25 @@ tools/nv/sec2-boot-lane.sh 0 r1pre     # stages, asserts, touches no VM
 tools/nv/sec2-boot-lane.sh 1 r1new     # the one authorized boot (~6.5 min)
 ```
 
-Scope of that boot: it answers **R1 (the SEC2 word)**. The transport rows come
-from `nv/wp-rpc-final` (`c58b1295`), which is not in this rig; a pass here means
-SEC2 authenticated the image, and the round-trip half is then that tree merged in
-(15 conflict hunks in `src/kernel/nv_gsp.c` between the two SEC2 lineages — a merge,
-not a cherry-pick) plus a second boot.
+Scope of that boot: it answers **R1 (the SEC2 word)** and, because the transport
+rides in the same tree, the round-trip rows too if SEC2 authenticates the image.
+The merge is `nv/wp-rpc-final` (`c58b1295`) into `nv/wp-r1-rig` (`5b64dc0d`) and
+it conflicts in **two files**, both of which have to be resolved on the rig's
+side:
+
+- **`src/kernel/nv_gsp.c` — 15 content hunks.** Every one is the rig's copy of
+  the SEC2 code superseding an older copy of the same functions (`sec2_arm`
+  grew the `struct sec2_auth` argument and a tag, `sec2_reset_fixup_variant`
+  gained `break_sig`/`facts`, and the auth-bisect compare and the
+  `SEC2_IMEM_OSCODE` switch exist only on the rig side). The transport's own
+  additions — publish, the pre-boot 72/73, stage 8/9 and their call sites in
+  `nv_gsp_boot` — merge cleanly and are not in any hunk.
+- **`tools/nv/sec2-boot-lane.sh` — a 2-hunk add/add.** This one is material:
+  `c58b1295`'s lane predates `NV_BOOTER_FILE`/`NV_BOOTER_SHA256`, so a merge
+  resolved toward the transport side would compile the rig's kernel and then
+  stage the **first globbed booter — `booter_load-535.113.01.bin`, the measured
+  control** — and the boot would read `0x002B0009` for `ec5bcd11` without ever
+  staging it. Take the rig's lane.
 
 Artifacts beside this file: `r1-fw-inventory.tsv`, `sweep-load.tsv`,
 `sweep-unload.tsv`, `hs_gate-all.txt`, `tags.txt`,
@@ -319,4 +335,8 @@ print `num_sig=848` for every booter. That dword is an **offset** (0x350); the
 count lives at that offset (value 2; `sig_prod_size 0x300 / 2 = 0x180` per slot).
 The label is fixed in this branch's `tools/nv/no-rm/hs_gate.py` (`num_sigs_off=0x350
 num_sigs=2`) and the verdict is unchanged — it always came from `patch_meta`, which
-is why every row above stands.
+is why every row above stands. The copy of `hs_gate.py` beside this file **is that
+fixed tool** (sha256 `8df90328…`) and `hs_gate-all.txt` was regenerated with it: the
+five rows read `num_sigs_off=0x350 num_sigs=2`, the verdicts are the same five
+`IDENTITY-COMPATIBLE`, and the pre-fix file's trailing `FileNotFoundError` (a sixth,
+absent input) is gone.
