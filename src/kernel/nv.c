@@ -246,6 +246,121 @@ int nv_timer_probe(struct nv_dev *d, uint32_t *hz_out) {
 
 /* ---- stage FLCN -------------------------------------------------------- */
 
+const char *nv_falcon_state_name(uint32_t state) {
+  switch (state) {
+  case NV_FALCON_ST_PRESENT: return "present";
+  case NV_FALCON_ST_CTL_FENCED: return "ctl-fenced";
+  case NV_FALCON_ST_FENCED: return "fenced";
+  case NV_FALCON_ST_BLOCK_SENTINEL: return "block-sentinel";
+  case NV_FALCON_ST_UNREADABLE: return "unreadable";
+  case NV_FALCON_ST_ABSENT: return "absent";
+  default: return "not-a-falcon";
+  }
+}
+
+/* How a window answered, from the three words every probe reads.  The order of
+ * the tests is the order of the facts:
+ *   - all ones              -> absent (nothing answers)
+ *   - 0xBADF4100 everywhere -> the part does not decode this address
+ *   - a version 3..6        -> decodes: present when the CONTROL word is
+ *                              readable, ctl-fenced when it is not
+ *   - 0xBADF5620            -> fenced: a real engine, not initialised yet
+ *   - any other 0xBADF      -> unreadable (exists or not, not ours to read)
+ *   - decodes to something else -> a falcon layout nv_regs.h does not describe */
+static uint32_t nv_falcon_classify(uint32_t caps, uint32_t caps2,
+                                   uint32_t ctl) {
+  int ver = (int)NV_FALCON_CAPS2_VERSION(caps2);
+  int decodes = !nv_is_badf(caps) && !nv_is_badf(caps2) && ver >= 3 && ver <= 6;
+  if (caps == 0xffffffffu && caps2 == 0xffffffffu && ctl == 0xffffffffu)
+    return NV_FALCON_ST_ABSENT;
+  if (nv_is_block_sentinel(caps) && nv_is_block_sentinel(caps2) &&
+      nv_is_block_sentinel(ctl))
+    return NV_FALCON_ST_BLOCK_SENTINEL;
+  if (decodes)
+    return (nv_is_badf(ctl) || ctl == 0xffffffffu) ? NV_FALCON_ST_CTL_FENCED
+                                                   : NV_FALCON_ST_PRESENT;
+  if (nv_is_fenced(caps) || nv_is_fenced(caps2) || nv_is_fenced(ctl))
+    return NV_FALCON_ST_FENCED;
+  if (nv_is_badf(caps) || nv_is_badf(caps2) || nv_is_badf(ctl))
+    return NV_FALCON_ST_UNREADABLE;
+  return NV_FALCON_ST_UNKNOWN;
+}
+
+/* GB202's PFSP at 0x8F0000: read-only, twelve words.
+ *
+ * NVIDIA's own GB202 headers name this block PFSP (dev_fsp_pri.h) and publish
+ * its scratch groups (dev_fsp_addendum.h: SCRATCH_GROUP_2 = 0x320,
+ * GROUP_3 = 0x330, NV_GFW_FSP_UCODE_VERSION = GROUP_3(1)).  It is the part's
+ * SEC2-class boot processor: the object NVIDIA's FSP code hands the GSP-FMC and
+ * the boot args to.  The pre-OS chain starts it, which is why the version word
+ * is already published on a cold boot -- nothing in this driver writes it, and
+ * nothing here writes anything: the whole probe is MMIO reads.
+ *
+ * Two facts this row keeps apart, because they are different kinds of fact:
+ *   - the version word proves the FSP was BOOTED (sticky; it survives a halt)
+ *   - ctl/pc read the fence word 0xBADF5620 on this part, which a non-privileged
+ *     host gets from an HS falcon, so "still running" is not decided here. */
+int nv_pfsp_probe(struct nv_dev *d) {
+  if (!d) return -EINVAL;
+  const uint32_t base = NV_FALCON_FSP_BASE;
+  d->pfsp_base = base;
+  d->pfsp_caps = nv_rd32(d, base + NV_FALCON_UC_CAPS);
+  d->pfsp_caps2 = nv_rd32(d, base + NV_FALCON_UC_CAPS2);
+  d->pfsp_ctl = nv_rd32(d, base + NV_FALCON_UC_CTRL);
+  d->pfsp_busy = nv_rd32(d, base + NV_FALCON_STATUS_BUSY);
+  for (int i = 0; i < 4; i++)
+    d->pfsp_scratch_g2[i] =
+        nv_rd32(d, base + NV_PFSP_SCRATCH_GROUP_2 + 4u * (uint32_t)i);
+  for (int i = 0; i < 4; i++)
+    d->pfsp_scratch_g3[i] =
+        nv_rd32(d, base + NV_PFSP_SCRATCH_GROUP_3 + 4u * (uint32_t)i);
+  d->pfsp_ucode = NV_PFSP_UCODE_VERSION(d->pfsp_scratch_g3[1]);
+  d->pfsp_state =
+      nv_falcon_classify(d->pfsp_caps, d->pfsp_caps2, d->pfsp_ctl);
+
+  uart_puts("[NV-PFSP] base=");
+  uart_print_hex(base);
+  uart_puts(" ver=");
+  print_int((int)NV_FALCON_CAPS2_VERSION(d->pfsp_caps2));
+  uart_puts(" state=");
+  uart_puts(nv_falcon_state_name(d->pfsp_state));
+  uart_puts(" caps=");
+  uart_print_hex(d->pfsp_caps);
+  uart_puts(" caps2=");
+  uart_print_hex(d->pfsp_caps2);
+  uart_puts(" ctl=");
+  uart_print_hex(d->pfsp_ctl);
+  uart_puts(" busy=");
+  uart_print_hex(d->pfsp_busy);
+  /* The ucode version is only a version if the block decoded.  Printing 4.76
+   * for a block that answered a sentinel would be an invented measurement.
+   * ctl-fenced counts as decoded: the FSP's own ucode published the version and
+   * the window's caps read, while its control word is fenced to this host. */
+  if (d->pfsp_state == NV_FALCON_ST_PRESENT ||
+      d->pfsp_state == NV_FALCON_ST_CTL_FENCED) {
+    uart_puts(" ucode=");
+    uart_print_hex(d->pfsp_ucode);
+    uart_puts(" version=");
+    print_int((int)NV_PFSP_UCODE_MAJOR(d->pfsp_ucode));
+    uart_puts(".");
+    print_int((int)NV_PFSP_UCODE_MINOR(d->pfsp_ucode));
+  } else {
+    uart_puts(" ucode=na version=na");
+  }
+  uart_puts(" g2=");
+  for (int i = 0; i < 4; i++) {
+    if (i) uart_puts(",");
+    uart_print_hex(d->pfsp_scratch_g2[i]);
+  }
+  uart_puts(" g3=");
+  for (int i = 0; i < 4; i++) {
+    if (i) uart_puts(",");
+    uart_print_hex(d->pfsp_scratch_g3[i]);
+  }
+  uart_puts("\n");
+  return 0;
+}
+
 static int nv_falcon_probe_one(struct nv_dev *d, int idx, uint32_t base,
                                const char *name) {
   struct nv_falcon *f = &d->falcon[idx];
@@ -300,6 +415,10 @@ int nv_falcon_probe_all(struct nv_dev *d) {
   n += nv_falcon_probe_one(d, NV_FALCON_IDX_PMU, NV_FALCON_PMU_BASE, "pmu") == 0;
   n += nv_falcon_probe_one(d, NV_FALCON_IDX_GSP, NV_FALCON_GSP_BASE, "gsp") == 0;
   n += nv_falcon_probe_one(d, NV_FALCON_IDX_SEC2, NV_FALCON_SEC2_BASE, "sec2") == 0;
+  /* The PFSP is probed whatever the three above said, and its result never
+   * enters falcon_mask: it is the boot processor of this part, already started
+   * by the pre-OS chain, and this driver has no write path to it. */
+  (void)nv_pfsp_probe(d);
   if (n == 0) return -ENODEV;
   d->state = NV_STATE_FALCON;
   return 0;
@@ -324,6 +443,21 @@ int nv_bringup(struct nv_dev *d) {
   }
   if ((rc = nv_falcon_probe_all(d)) != 0) {
     d->failed_stage = NV_STATE_FALCON;
+    /* GB202 (measured 2026-11-24/25): all three falcon windows answer the
+     * block sentinel 0xBADF4100 at boot -- the addresses are not decoded on
+     * this part -- so no falcon in this array is "present" and bring-up cannot
+     * continue.  The PFSP at 0x8F0000 decoded and is already running (its row
+     * above carries the version), but it is not in this array and has no write
+     * path, so it does not make the stage succeed: what this driver would need
+     * next is the RM's message protocol, not a start bit.
+     * The stages below only READ -- WPR2/MOVES in PFB, the VBIOS, and the
+     * firmware files -- so on a part whose falcon visibility differs they are
+     * the only rows that say what state it is in.  Report the stage as failed
+     * and still print them. */
+    if (d->hardware) (void)nv_fsp_channel_probe(d);
+    if (d->hardware) (void)nv_fsp_cot_probe(d);
+    (void)nv_gsp_probe(d);
+    if (d->hardware) (void)nv_gsp_firmware_check(d);
     return rc;
   }
   /* Is the GR window addressable at all, and does it carry a topology?  Both
@@ -333,6 +467,8 @@ int nv_bringup(struct nv_dev *d) {
   /* The firmware stage only ever *observes* here: WPR2, mailbox pair, RISC-V
    * status.  It cannot fail the bring-up -- a card with firmware already
    * running is a fact to report, not an error. */
+  if (d->hardware) (void)nv_fsp_channel_probe(d);
+  if (d->hardware) (void)nv_fsp_cot_probe(d);
   (void)nv_gsp_probe(d);
   /* Firmware from disk: proves the file path, the container parse and the
    * pinned digest on real hardware, with no register writes at all. */

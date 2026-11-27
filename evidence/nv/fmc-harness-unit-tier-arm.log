@@ -1,0 +1,2462 @@
+Building unit test image (ARCH=arm)...
+Refreshing disk image...
+Running unit tests...
+Tests passed!
+ld.lld -T linker.ld -pie -z notext --no-dynamic-linker -o hobbyos.elf obj/arm/boot.o obj/arm/fpu.o obj/arm/setjmp.o obj/arm/abi_t2_test.o obj/arm/acpi.o obj/arm/audio_stub.o obj/arm/blk_cache.o obj/arm/blk_cache_press_test.o obj/arm/blk_cache_test.o obj/arm/dhcp.o obj/arm/elf_image.o obj/arm/elf_loader.o obj/arm/elf_loader_test.o obj/arm/evdev.o obj/arm/evdev_test.o obj/arm/ext2.o obj/arm/ext2_compat.o obj/arm/ext2_obj.o obj/arm/ext2_vfs.o obj/arm/fat16.o obj/arm/fat16_test.o obj/arm/fb_ioctl.o obj/arm/fb_ioctl_test.o obj/arm/fb_mmap.o obj/arm/fb_mmap_test.o obj/arm/file_obj.o obj/arm/fpu_user.o obj/arm/frame.o obj/arm/frame_test.o obj/arm/fs.o obj/arm/fs_test.o obj/arm/gpu_abi.o obj/arm/gpu_abi_m2_test.o obj/arm/input_node.o obj/arm/input_node_test.o obj/arm/iommu_vtd.o obj/arm/ipc_proto.o obj/arm/irq_table.o obj/arm/kconsole.o obj/arm/linux_compat.o obj/arm/linux_compat_away.o obj/arm/linux_compat_cons.o obj/arm/linux_compat_fd.o obj/arm/linux_compat_mem.o obj/arm/linux_compat_misc.o obj/arm/linux_compat_netlink.o obj/arm/linux_compat_ntsync.o obj/arm/linux_compat_pi_test.o obj/arm/linux_compat_proc.o obj/arm/linux_compat_shm.o obj/arm/linux_compat_thr.o obj/arm/linux_compat_timers.o obj/arm/linux_exec.o obj/arm/linux_snd.o obj/arm/linux_snd_params.o obj/arm/linux_uname.o obj/arm/lock_order.o obj/arm/locks_test.o obj/arm/lockscale.o obj/arm/main.o obj/arm/math_test.o obj/arm/mmu_test.o obj/arm/net.o obj/arm/net_rdma.o obj/arm/net_rdma_test.o obj/arm/net_test.o obj/arm/nfs.o obj/arm/nfs_proto.o obj/arm/nfs_test.o obj/arm/nv.o obj/arm/nv_dma.o obj/arm/nv_dma_test.o obj/arm/nv_engine.o obj/arm/nv_falcon.o obj/arm/nv_flcn.o obj/arm/nv_flcn_test.o obj/arm/nv_fsp.o obj/arm/nv_fsp_cot.o obj/arm/nv_fw.o obj/arm/nv_fw_test.o obj/arm/nv_gsp.o obj/arm/nv_gsp_glue_test.o obj/arm/nv_pci.o obj/arm/nv_rm_mock.o obj/arm/nv_rpc.o obj/arm/nv_rpc_test.o obj/arm/nv_shim.o obj/arm/nv_shim_drm_test.o obj/arm/nv_shim_test.o obj/arm/nv_test.o obj/arm/nv_vram.o obj/arm/pci.o obj/arm/pci_test.o obj/arm/pipe.o obj/arm/pipe_test.o obj/arm/process.o obj/arm/process_test.o obj/arm/program_loader.o obj/arm/program_loader_test.o obj/arm/reloc_test.o obj/arm/rw_watch.o obj/arm/sha384.o obj/arm/ssp.o obj/arm/ssp_report.o obj/arm/test_fw_cfg.o obj/arm/test_smp.o obj/arm/time.o obj/arm/time_test.o obj/arm/timer_test.o obj/arm/tmpfs.o obj/arm/tmpfs_compat.o obj/arm/trap_test.o obj/arm/unit_test.o obj/arm/unix.o obj/arm/unix_test.o obj/arm/vdisplay.o obj/arm/vdisplay_test.o obj/arm/vfs.o obj/arm/vfs_bind.o obj/arm/vfs_compat.o obj/arm/vfs_lock.o obj/arm/virtio_blk.o obj/arm/virtio_blk_test.o obj/arm/virtio_gpu.o obj/arm/virtio_gpu_3d.o obj/arm/virtio_gpu_test.o obj/arm/virtio_gpu_x64.o obj/arm/virtio_input.o obj/arm/virtio_input_test.o obj/arm/virtio_net.o obj/arm/virtio_net_test.o obj/arm/virtio_snd.o obj/arm/vm.o obj/arm/vm_pfstat.o obj/arm/vm_test.o obj/arm/cpu.o obj/arm/gic.o obj/arm/locks.o obj/arm/mmu.o obj/arm/reloc.o obj/arm/rtc.o obj/arm/smp.o obj/arm/timer.o obj/arm/trap.o obj/arm/uart.o
+python3 tools/kernel_reloc_audit.py --gate --baseline tools/reloc_tables_baseline.json --mode unit_tests \
+     hobbyos.elf
+# hobbyos.elf
+# kernel link range [0x40080000, 0x417B63DC)   .rela.dyn=431 entries (present)
+# pointer words baked into static data (need relocating): 431
+#   applied at boot (R_AARCH64_RELATIVE, addend in image): 431
+#   NOTHING WILL APPLY THEM (left at their link address):     0
+# folded-table inventory: 21 table(s) / 426 word(s), plus 5 linker-generated .got slot(s)
+hobbyos.elf: reloc gate OK -- 431 kernel pointer word(s), every one applied at boot
+hobbyos.elf: folded-table inventory matches -- 21 table(s) / 426 word(s) as audited [MODE=unit_tests]
+[browser] third_party/webkit-hobbyos/cache/browser-arm.bin.xz (cache) -> obj/arm/browser.bin
+[tools] no LLVM dist staging; TOOLS_SKIP=1 - /TOOLS will lack the LLVM toolchain
+# Startup disk: 1 GiB by default (user-requested floor; FAT16 tops out near
+# 2 GiB).  DISK_MB allows a bigger image without editing this recipe -- the
+# RimWorld staging script needs ~1.5 GiB because the game is 806 MB of
+# apparent size.  mkfs.fat auto-picks the cluster size (32 KiB @ 1 GiB);
+# the kernel fat16.c layout math is BPB data-driven
+# (bpb_sectors_per_cluster), so no driver change is needed for a larger
+# disk.  Stay at or below ~1.5 GiB: past that mkfs.fat has to leave 32 KiB
+# clusters to stay inside FAT16's 65524-cluster limit, which the guest's
+# FAT driver does not describe.
+dd if=/dev/zero of=disk.img bs=1M count=1024
+1024+0 records in
+1024+0 records out
+1073741824 bytes (1.1 GB, 1.0 GiB) copied, 0.306889 s, 3.5 GB/s
+mkfs.fat -F 16 disk.img
+mkfs.fat 4.2 (2021-01-31)
+mmd -i disk.img ::/EFI
+mmd -i disk.img ::/EFI/BOOT
+mmd -i disk.img ::/boot
+mmd -i disk.img ::/home
+# CA roots for the browser's TLS stack (libcurl/mbedTLS): the driver pins
+# /CERTS/CA.PEM (WebKit/WebProcess/hobbyos/WK5WindowDriver.cpp).  Without
+# this every https:// navigation fails at certificate verification and the
+# user sees the previous page with no explanation.
+mmd -i disk.img ::/CERTS
+mcopy -i disk.img certs/cacert.pem ::/CERTS/CA.PEM
+mmd -i disk.img ::/nfs
+mmd -i disk.img ::/mnt
+mmd -i disk.img ::/TESTDIR
+mmd -i disk.img ::/tmp
+# GB-059: the S2 launcher scans /GAMES for titles (.BIN native ports and
+# extension-less/.elf compat ELFs) — games_scan.c / desktop.c:915.  The
+# directory must exist on the image or the scan is a documented no-op and
+# no compat title can ever be launched by name.  Stage one of each kind
+# here so "both a native port and a compat title through the one rig" is
+# measurable from a shipped image rather than a hand-staged copy (which
+# `make run` would wipe).
+mmd -i disk.img ::/GAMES
+mcopy -i disk.img obj/arm/xnibbler.bin ::/GAMES/XNIBBLER.BIN
+mcopy -i disk.img obj/sdl_test_app_pie ::/GAMES/SDLTEST.ELF
+# Selfhost W2 (mtools port): the in-OS acceptance invokes the ported
+# build-tools at their frozen /TOOLS/ paths (Makefile.hobbyos sketch).
+mmd -i disk.img ::/TOOLS
+# L3 (selfhost W-A): VFAT long-name build-payload fixture dirs (mtools-written).
+mmd -i disk.img ::/src
+mmd -i disk.img ::/src/kernel
+mmd -i disk.img ::/src/user_include
+mmd -i disk.img ::/src/user_include/graphics
+mmd -i disk.img ::/third_party
+mmd -i disk.img ::/third_party/libcxx-21.1.8
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx
+mmd -i disk.img ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include
+mcopy -i disk.img tests/fixtures/E2E.TXT ::/E2E.TXT
+mcopy -i disk.img tests/fixtures/DRAGME.TXT ::/DRAGME.TXT
+mcopy -i disk.img bootloader/BOOTX64.EFI ::/EFI/BOOT/BOOTX64.EFI
+mcopy -i disk.img bootloader/BOOTAA64.EFI ::/EFI/BOOT/BOOTAA64.EFI
+# [inos-build-kernel] canonical ARM boot config from the repo file
+# (single source of truth; also what --src staging copies to
+# /SRC/limine.conf and what SRC.TAR carries).  Two entries: the boot
+# kernel + the previous one, which /BUILD_KERNEL.SH's install step
+# keeps at /boot/hobbyos.old.
+mcopy -i disk.img bootloader/limine-arm.conf ::/boot/limine.conf
+llvm-objcopy -O binary hobbyos.elf hobbyos.bin
+mcopy -i disk.img hobbyos.bin ::/boot/hobbyos.bin
+mcopy -i disk.img obj/arm/memtest.bin ::/MEMTEST.BIN
+mcopy -i disk.img obj/arm/fileio_test.bin ::/FILEIO.BIN
+mcopy -i disk.img obj/arm/console.bin ::/CONSOLE.BIN
+mcopy -i disk.img obj/arm/fork_test.bin ::/FORKTEST.BIN
+mcopy -i disk.img obj/arm/heap_test.bin ::/HEAPTEST.BIN
+mcopy -i disk.img obj/arm/spawntest.bin ::/SPAWN.BIN
+mcopy -i disk.img obj/arm/graphics.bin ::/GRAPHICS.BIN
+mcopy -i disk.img obj/arm/wsurf_test.bin ::/WSRF_T.BIN
+mcopy -i disk.img obj/arm/smp_test.bin ::/SMPTEST.BIN
+mcopy -i disk.img obj/arm/pipetest.bin ::/PIPETEST.BIN
+mcopy -i disk.img obj/arm/nettest.bin ::/NETTEST.BIN
+mcopy -i disk.img obj/arm/timeout.bin ::/TIMEOUT.BIN
+mcopy -i disk.img obj/arm/nfstest.bin ::/NFSTEST.BIN
+mcopy -i disk.img obj/arm/desktop.bin ::/DESKTOP.BIN
+browser: obj/arm/browser.bin (resolved by the browser-staged completeness rule; installed as ::/BROWSER.BIN)
+mcopy -i disk.img obj/arm/editor.bin ::/EDITOR.BIN
+mcopy -i disk.img obj/arm/EDITOR_T.BIN ::/EDITOR_T.BIN
+mcopy -i disk.img obj/arm/APPS_T.BIN ::/APPS_T.BIN
+mcopy -i disk.img obj/arm/FILEDIAL.BIN ::/FILEDIAL.BIN
+mcopy -i disk.img obj/arm/DIALOG_T.BIN ::/DIALOG_T.BIN
+mcopy -i disk.img obj/arm/PONG_T.BIN ::/PONG_T.BIN
+mcopy -i disk.img obj/arm/stress.bin ::/STRESS.BIN
+mcopy -i disk.img obj/arm/fpu_test.bin ::/FPU_T.BIN
+mcopy -i disk.img obj/arm/gfxbench.bin ::/GFXBENCH.BIN
+mcopy -i disk.img obj/arm/math_test.bin ::/MATH_T.BIN
+mcopy -i disk.img obj/arm/errtest.bin ::/ERRTEST.BIN
+mcopy -i disk.img obj/arm/SOCK2TST.BIN ::/SOCK2TST.BIN
+mcopy -i disk.img obj/arm/POLLTST.BIN ::/POLLTST.BIN
+mcopy -i disk.img obj/arm/POLLBRK.BIN ::/POLLBRK.BIN
+mcopy -i disk.img obj/arm/BLKTEST.BIN ::/BLKTEST.BIN
+mcopy -i disk.img obj/arm/RANDTST.BIN ::/RANDTST.BIN
+mcopy -i disk.img obj/arm/dns_test.bin ::/DNSTST.BIN
+mcopy -i disk.img obj/arm/netfix.bin ::/NETFIX.BIN
+mcopy -i disk.img obj/arm/cxx_smoke.bin ::/CXXSMOKE.BIN
+mcopy -i disk.img obj/arm/thrd_test.bin ::/THRD_T.BIN
+mcopy -i disk.img obj/arm/tls_test.bin ::/TLS_T.BIN
+mcopy -i disk.img obj/arm/WK1C_T.BIN ::/WK1C_T.BIN
+mcopy -i disk.img obj/arm/cxx_t.bin ::/CXX_T.BIN
+mcopy -i disk.img obj/arm/rtti_t.bin ::/RTTI_T.BIN
+mcopy -i disk.img obj/arm/ipc_test.bin ::/IPC_T.BIN
+mcopy -i disk.img obj/arm/mmtest.bin ::/MMTEST.BIN
+mcopy -i disk.img obj/arm/sqltest.bin ::/SQLTEST.BIN
+mcopy -i disk.img obj/arm/torture_test.bin ::/TORTURE.BIN
+mcopy -i disk.img obj/arm/big.bin ::/BIG.BIN
+mcopy -i disk.img obj/arm/hello.bin ::/HELLO.BIN
+mcopy -i disk.img obj/arm/selfhost.bin ::/SELFHOST.BIN
+mcopy -i disk.img obj/arm/sh.bin ::/SH.BIN
+mcopy -i disk.img obj/arm/ls.bin ::/LS.BIN
+mcopy -i disk.img obj/arm/cat.bin ::/CAT.BIN
+mcopy -i disk.img obj/arm/grep.bin ::/GREP.BIN
+mcopy -i disk.img obj/arm/less.bin ::/LESS.BIN
+mcopy -i disk.img obj/arm/tail.bin ::/TAIL.BIN
+mcopy -i disk.img obj/arm/head.bin ::/HEAD.BIN
+mcopy -i disk.img obj/arm/shtest.bin ::/SHTEST.BIN
+mcopy -i disk.img obj/arm/ps.bin ::/PS.BIN
+mcopy -i disk.img obj/arm/free.bin ::/FREE.BIN
+mcopy -i disk.img obj/arm/uptime.bin ::/UPTIME.BIN
+mcopy -i disk.img obj/arm/kill.bin ::/KILL.BIN
+mcopy -i disk.img obj/arm/basename.bin ::/BASENAME.BIN
+mcopy -i disk.img obj/arm/dirname.bin ::/DIRNAME.BIN
+mcopy -i disk.img obj/arm/seq.bin ::/SEQ.BIN
+mcopy -i disk.img obj/arm/expr.bin ::/EXPR.BIN
+mcopy -i disk.img obj/arm/testgnu.bin ::/TEST.BIN
+mcopy -i disk.img obj/arm/cp.bin ::/CP.BIN
+mcopy -i disk.img obj/arm/rm.bin ::/RM.BIN
+mcopy -i disk.img obj/arm/mv.bin ::/MV.BIN
+mcopy -i disk.img obj/arm/touch.bin ::/TOUCH.BIN
+mcopy -i disk.img obj/arm/wc.bin ::/WC.BIN
+mcopy -i disk.img obj/arm/sed.bin ::/SED.BIN
+mcopy -i disk.img obj/arm/make.bin ::/MAKE.BIN
+mcopy -i disk.img obj/arm/hedgnu.bin ::/HEDGNU.BIN
+mcopy -i disk.img obj/arm/tailgnu.bin ::/TAILGN.BIN
+mcopy -i disk.img obj/arm/cut.bin ::/CUT.BIN
+mcopy -i disk.img obj/arm/tr.bin ::/TR.BIN
+mcopy -i disk.img obj/arm/paste.bin ::/PASTE.BIN
+mcopy -i disk.img obj/arm/fold.bin ::/FOLD.BIN
+mcopy -i disk.img obj/arm/nl.bin ::/NL.BIN
+mcopy -i disk.img obj/arm/comm.bin ::/COMM.BIN
+mcopy -i disk.img obj/arm/tsort.bin ::/TSORT.BIN
+mcopy -i disk.img obj/arm/expand.bin ::/EXPAND.BIN
+mcopy -i disk.img obj/arm/unexpand.bin ::/UNEXPAND.BIN
+mcopy -i disk.img obj/arm/cksum.bin ::/CKSUM.BIN
+mcopy -i disk.img obj/arm/md5sum.bin ::/MD5SUM.BIN
+mcopy -i disk.img obj/arm/proc_child.bin ::/PROCCHLD.BIN
+mcopy -i disk.img obj/arm/spawnex_child.bin ::/SPAWNEX.BIN
+mcopy -i disk.img obj/arm/sig_test.bin ::/SIG_T.BIN
+mcopy -i disk.img obj/arm/head_test.bin ::/HEDTEST.BIN
+mcopy -i disk.img obj/arm/tail_test.bin ::/TAILTEST.BIN
+mcopy -i disk.img obj/arm/proc_test.bin ::/PROCTEST.BIN
+mcopy -i disk.img obj/arm/wc_test.bin ::/WCTEST.BIN
+mcopy -i disk.img obj/arm/cut_test.bin ::/CUTTEST.BIN
+mcopy -i disk.img obj/arm/tr_test.bin ::/TRTEST.BIN
+mcopy -i disk.img obj/arm/paste_test.bin ::/PASTE_T.BIN
+mcopy -i disk.img obj/arm/fold_test.bin ::/FOLDTEST.BIN
+mcopy -i disk.img obj/arm/nl_test.bin ::/NLTEST.BIN
+mcopy -i disk.img obj/arm/comm_test.bin ::/COMMTEST.BIN
+mcopy -i disk.img obj/arm/tsort_test.bin ::/TSORT_T.BIN
+mcopy -i disk.img obj/arm/expand_test.bin ::/EXPAND_T.BIN
+mcopy -i disk.img obj/arm/unexpand_test.bin ::/UNEXPAND_T.BIN
+mcopy -i disk.img obj/arm/fatbig_test.bin ::/FATBIG_T.BIN
+mcopy -i disk.img obj/arm/stage4k_test.bin ::/STAGE4K_T.BIN
+# L3 (selfhost W-A): VFAT long-name build-payload fixtures.  Content
+# markers must stay in sync with src/user/lfn_test.c.
+mcopy -i disk.img tests/fixtures/lfn/program_loader.c ::/src/kernel/program_loader.c
+mcopy -i disk.img tests/fixtures/lfn/window.h ::/src/user_include/graphics/window.h
+mcopy -i disk.img tests/fixtures/lfn/llvm-project-21.1.8.src-EXAMPLE.c ::/src/llvm-project-21.1.8.src-EXAMPLE.c
+mcopy -i disk.img tests/fixtures/lfn/upper_bound.h ::/third_party/libcxx-21.1.8/src/llvm-project-21.1.8.src/libcxx/include/upper_bound.h
+mcopy -i disk.img tests/fixtures/lfn/longfilename.txt ::/longfilename.txt
+mcopy -i disk.img tests/fixtures/lfn/longfilename2.txt ::/longfilename2.txt
+mcopy -i disk.img tests/fixtures/lfn/longfil~1.txt ::/longfil~1.txt
+mcopy -i disk.img obj/arm/lfn_test.bin ::/LFN_T.BIN
+mcopy -i disk.img obj/arm/cksum_test.bin ::/CKSUM_T.BIN
+mcopy -i disk.img obj/arm/md5sum_test.bin ::/MD5SUM_T.BIN
+mcopy -i disk.img obj/arm/tac.bin ::/TAC.BIN
+mcopy -i disk.img obj/arm/tac_test.bin ::/TACTEST.BIN
+mcopy -i disk.img obj/arm/cmp.bin ::/CMP.BIN
+mcopy -i disk.img obj/arm/cmp_test.bin ::/CMPTEST.BIN
+mcopy -i disk.img obj/arm/regex_test.bin ::/REGTEST.BIN
+mcopy -i disk.img obj/arm/sed_test.bin ::/SEDTEST.BIN
+mcopy -i disk.img obj/arm/grep_test.bin ::/GREPTEST.BIN
+mcopy -i disk.img obj/arm/subprobe.bin ::/SUBPRB.BIN
+mcopy -i disk.img obj/arm/pipeprobe.bin ::/PIPEPRB.BIN
+mcopy -i disk.img obj/arm/lseek_test.bin ::/LKSTEST.BIN
+mcopy -i disk.img obj/arm/sort.bin ::/SORT.BIN
+mcopy -i disk.img obj/arm/uniq.bin ::/UNIQ.BIN
+mcopy -i disk.img obj/arm/ping.bin ::/PING.BIN
+mcopy -i disk.img obj/arm/nc.bin ::/NC.BIN
+mcopy -i disk.img obj/arm/ifconfig.bin ::/IFCONFIG.BIN
+mcopy -i disk.img obj/arm/shtest2.bin ::/SHTEST2.BIN
+mcopy -i disk.img obj/arm/mkdir.bin ::/MKDIR.BIN
+mcopy -i disk.img obj/arm/shtest3.bin ::/SHTEST3.BIN
+mcopy -i disk.img obj/arm/pong.bin ::/PONG.BIN
+mcopy -i disk.img obj/arm/fbprobe.bin ::/FBPROBE.BIN
+mcopy -i disk.img obj/arm/millipede.bin ::/MILLIPED.BIN
+mcopy -i disk.img obj/arm/doom.bin ::/DOOM.BIN
+mcopy -i disk.img obj/arm/dooml.bin ::/DOOML.BIN
+[disk] note: no Linux-ELF Doom (make doom_elf_build) — the Doom menu entry falls back to DOOM.BIN
+[disk] IWAD doom1.wad -> ::/DOOM1.WAD
+mcopy -i disk.img obj/arm/stardust.bin ::/STARDUST.BIN
+mcopy -i disk.img obj/arm/files.bin ::/FILES.BIN
+mcopy -i disk.img obj/arm/calc.bin ::/CALC.BIN
+mcopy -i disk.img obj/arm/xcalc.bin ::/XCALC.BIN
+mcopy -i disk.img obj/arm/antfarm.bin ::/ANTFARM.BIN
+mcopy -i disk.img obj/arm/xeyes.bin ::/XEYES.BIN
+mcopy -i disk.img obj/arm/xnibbler.bin ::/XNIBBLER.BIN
+mcopy -i disk.img obj/arm/clock.bin ::/CLOCK.BIN
+mcopy -i disk.img obj/arm/sysmon.bin ::/SYSMON.BIN
+mcopy -i disk.img obj/arm/hex.bin ::/HEX.BIN
+mcopy -i disk.img obj/arm/tasks.bin ::/TASKS.BIN
+mcopy -i disk.img obj/arm/find.bin ::/FIND.BIN
+mcopy -i disk.img obj/arm/diff.bin ::/DIFF.BIN
+mcopy -i disk.img obj/arm/notes.bin ::/NOTES.BIN
+mcopy -i disk.img obj/arm/unit.bin ::/UNIT.BIN
+mcopy -i disk.img obj/arm/nano.bin ::/NANO.BIN
+mcopy -i disk.img obj/arm/xcrypt.bin ::/XCRYPT.BIN
+mcopy -i disk.img obj/arm/nes.bin ::/NES.BIN
+# Selfhost W2 (mtools port): in-OS /TOOLS copies of the ported
+# build-tools (8.3 names, the frozen F1 layout).
+mcopy -i disk.img obj/arm/mcopy.bin ::/TOOLS/MCOPY.BIN
+mcopy -i disk.img obj/arm/mdel.bin ::/TOOLS/MDEL.BIN
+mcopy -i disk.img obj/arm/mmd.bin ::/TOOLS/MMD.BIN
+# Selfhost W2 (mkfs port): in-OS MKFSFAT (F1 layout).
+mcopy -i disk.img obj/arm/mkfsfat.bin ::/MKFSFAT.BIN
+# Selfhost W3 (tools): the in-OS toolchain on the startup image (frozen
+# F1 layout, selfhost.md §7.3).  tools/selfhost-stage.sh --tools stages
+# CLANG.BIN/LLD.BIN/LLVMAR.BIN/OBJCOPY.BIN from the wave-2 LLVM
+# distribution staging (obj/selfhost/dist-staging, or the persistent
+# third_party/llvm-21.1.8/dist-staging copy that survives `make clean`),
+# the ported build tools (MAKE/MCOPY/MDEL/MMD/MKFSFAT), and the RESDIR
+# header tree under /TOOLS — staged FAITHFULLY with long names (F8
+# decision, see docs/selfhost/llvm-bootstrap.md §6.2).  Soft dependency:
+# an absent dist-staging warns + skips, so trees without the LLVM
+# install still build a bootable image (build_kernel.sh then refuses
+# with instructions).  Override with STAGE_TOOLS=0 to skip.
+tools/selfhost-stage.sh --tools disk.img
+selfhost-stage: staging in-OS toolchain to ::/TOOLS (F1 layout)
+selfhost-stage: WARNING: /TOOLS toolchain not staged: LLVM distribution staging missing at obj/selfhost/dist-staging (build it per docs/selfhost/llvm-bootstrap.md §6 — install-distribution, or restore the persistent copy at third_party/llvm-21.1.8/dist-staging — see docs/selfhost/inos-build-kernel.md and .gitignore)
+selfhost-stage: WARNING: clang resource dir missing at obj/selfhost/dist-staging/usr/local/lib/clang/21/include — /TOOLS/RESDIR not staged (stage the LLVM distribution first)
+selfhost-stage: staged 8 files, 1445656 bytes into ::/TOOLS
+  --- ::/TOOLS (mdir) ---
+RM       BIN     47864 2026-11-27  21:57 
+TAR      BIN    147592 2026-11-27  21:57 
+       10 files           1 445 656 bytes
+                        903 004 160 bytes free
+
+  --- ::/TOOLS/RESDIR/include count ---
+mdir: File "::/TOOLS/RESDIR/include" not found
+selfhost-stage: done
+# Selfhost W4 (src): the in-OS build-required source subset on the
+# startup image (frozen F2 /SRC flavor): kernel+user sources, headers,
+# Makefile.hobbyos, limine/EFI assets, the carried build products, and
+# the SELFHOST.RUN/SELFHOST.SH stage scripts.  tools/selfhost-stage.sh
+# --src; disable together with the tools step via STAGE_TOOLS=0.
+tools/selfhost-stage.sh --src disk.img
+selfhost-stage: STAGE_LIBCXX=0 — skipping C++ libcxx include subset
+selfhost-stage: staging BUILD-REQUIRED source subset to ::/SRC
+
+selfhost-stage: staged BUILD-REQUIRED subset into disk.img
+  payload: 402 files, 10215015 bytes
+  --- ::/SRC (mdir) ---
+        3 files             315 392 bytes
+
+Total files listed:
+      482 files          10 215 084 bytes
+                        888 143 872 bytes free
+
+selfhost-stage: done
+# [inos-build-kernel] the source tarball + the in-OS build script:
+# SRC.TAR (ustar, assembled by tools/selfhost-src-tar.sh from the real
+# tree) lands at ::/SRC.TAR; build_kernel.sh at ::/BUILD_KERNEL.SH.
+# In-OS: `SH.BIN /BUILD_KERNEL.SH` extracts the tar and builds the
+# kernel from it (Makefile.hobbyos `all`) + assembles OUT.IMG.
+tools/selfhost-src-tar.sh obj/selfhost/SRC.TAR
+selfhost-src-tar: assembling obj/selfhost/SRC.TAR
+selfhost-src-tar: done — obj/selfhost/SRC.TAR
+  entries: 2256 (files+dirs), size: 37427200 bytes
+  spot-checked members: src/kernel/main.c Makefile.hobbyos linker.ld limine.conf build_kernel.sh
+mcopy -i disk.img obj/selfhost/SRC.TAR ::/SRC.TAR
+mcopy -i disk.img src/user/selfhost/build_kernel.sh ::/BUILD_KERNEL.SH
+mcopy -i disk.img obj/arm/monitor.bin ::/MONITOR.BIN
+mcopy -i disk.img obj/arm/monitort.bin ::/MONITORT.BIN
+mcopy -i disk.img obj/arm/icusmk.bin ::/ICUSMK.BIN
+echo "HobbyOS Terminal Test File" > SHTEST.TXT
+echo "This is line number two." >> SHTEST.TXT
+echo "Line three is right here." >> SHTEST.TXT
+echo "Fourth line has some interesting keywords like hello world." >> SHTEST.TXT
+echo "Line five is the last line of this small test document." >> SHTEST.TXT
+touch TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT
+echo "orange" > SORT.TXT
+echo "apple" >> SORT.TXT
+echo "orange" >> SORT.TXT
+mcopy -i disk.img SHTEST.TXT ::/SHTEST.TXT
+mcopy -i disk.img SHTEST.TXT ::/home/SHTEST.TXT
+mcopy -i disk.img TEST1.TXT ::/TEST1.TXT
+mcopy -i disk.img TEST2.TXT ::/TEST2.TXT
+mcopy -i disk.img TEST3.TXT ::/TEST3.TXT
+mcopy -i disk.img TEST4.TXT ::/TEST4.TXT
+mcopy -i disk.img SORT.TXT ::/SORT.TXT
+# GB-067 fixture: 4096 bytes, byte[i] = i % 251 (the pattern STAGE4K_T.BIN
+# byte-compares).  Staged HERE, by the host, because the DoD under test is
+# "a host-staged 4 KiB file reads back byte-exact in the guest" -- if the
+# guest wrote it, the test would be exercising the writer.  Until this
+# landed the fixture came from a hand-run `T3_STAGE` probe, so every CI
+# wave failed `[STAGE4K] FAIL open /STAGE4K.BIN` while passing locally
+# for whoever remembered to stage it.
+perl -e 'print chr($_ % 251) for (0..4095)' > STAGE4K.BIN
+mcopy -i disk.img STAGE4K.BIN ::/STAGE4K.BIN
+# Dynamic linking (docs/shared-libs.md §5): the interpreter, the shared
+# libc, and the pilot program.  All three are 8.3 names on the FAT root.
+mcopy -i disk.img obj/arm/LDHOBBY.SO ::/LDHOBBY.SO
+mcopy -i disk.img obj/arm/libc.so ::/LIBC.SO
+mcopy -i disk.img obj/arm/HDYN.BIN ::/HDYN.BIN
+mcopy -i disk.img obj/arm/LSDYN.BIN ::/LSDYN.BIN
+mcopy -i disk.img obj/arm/CATDYN.BIN ::/CATDYN.BIN
+# Dynamic conversion (docs/shared-libs.md §10): each converted program
+# replaces its static build under the same 8.3 name, so every existing
+# launcher (shell, desktop, wave) exercises the DSO version.
+rm -f SHTEST.TXT TEST1.TXT TEST2.TXT TEST3.TXT TEST4.TXT SORT.TXT STAGE4K.BIN
+qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 8 -m 16384M -accel tcg,thread=multi -bios /home/nvcard/.local/share/AAVMF/AAVMF_CODE.fd -display gtk -serial stdio -drive if=none,file=disk.img,format=raw,id=hd0 -device virtio-blk-device,drive=hd0 -device virtio-gpu-device -device virtio-keyboard-device -device virtio-tablet-device -netdev user,id=net0 -device virtio-net-device,netdev=net0,mac=52:54:00:12:34:56 -semihosting -action shutdown=poweroff -display none
+UEFI firmware (version 2025.11-3ubuntu7.3 built at 15:40:26 on Sep 23 2026)
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001HBdsDxe: loading Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+BdsDxe: starting Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-4D82-B29A-23FE0E23D1E2,003E000A00000000)
+[001;001H[001;001H[001;001Hl[001;002Hi[001;003Hn[001;004Hu[001;005Hx[001;006H:[001;007H [001;008HL[001;009Ho[001;010Ha[001;011Hd[001;012Hi[001;013Hn[001;014Hg[001;015H [001;016Hk[001;017He[001;018Hr[001;019Hn[001;020He[001;021Hl[001;022H [001;023H`[001;024Hb[001;025Ho[001;026Ho[001;027Ht[001;028H([001;029H)[001;030H:[001;031H/[001;032Hb[001;033Ho[001;034Ho[001;035Ht[001;036H/[001;037Hh[001;038Ho[001;039Hb[001;040Hb[001;041Hy[001;042Ho[001;043Hs[001;044H.[001;045Hb[001;046Hi[001;047Hn[001;048H`[001;049H.[001;050H.[001;051H.[001;052H[001;001H[002;001H[CONS] line-atomic console: diag=off (build default)
+[RELOC] entries=0x00000000000001AF applied=0x00000000000001AF slide=0x00000003FA200000 outside=0x0000000000000000 status=0x0000000000000000 ok
+Booting AArch64 OS...
+MMU Initialized: Page Tables setup securely.
+[GPUDIAG] gpu wait > 5 ms: ack=3 used=4 (park off)
+[GPU] virtio-gpu mmio irq=78
+VirtIO GPU successfully initialized.
+VirtIO Input devices successfully initialized.
+[FRAME] ram ext0=1
+[FRAME] frames=1900544 total_mib=7424 ext0=0x0x0000000070000000-0x0x0000000240000000 reserved=0
+VirtIO Block successfully initialized.
+[FAT16] FAT resident in RAM
+FAT-16 filesystem successfully initialized.
+virtio-net MAC: 0x0000000000000052:0x0000000000000054:0x0000000000000000:0x0000000000000012:0x0000000000000034:0x0000000000000056
+VirtIO Network successfully initialized.
+
+--- Parallel Program Loading ---
+Mode: UNIT_TEST - Running Kernel Unit Tests...
+
+==================================
+    RUNNING KERNEL UNIT TESTS     
+==================================
+  Running test_reloc_folded_rodata...
+  Running test_reloc_real_table...
+  Running test_reloc_pass_stats...
+frame_test_suite:
+  Running test_frame_counts...
+  Running test_frame_alloc_free_delta...
+[FRAME-DFREE] n=0x0000000000000001 phys=0x0000000070000000 caller=0x000000043a2c46b4
+  Running test_frame_reuse...
+  Running test_frame_warm_lifo...
+  [warm] f=0x0000000070000000 g=0x0000000070000000
+  Running test_frame_alloc_zeroed...
+  Running test_frame_block_layer...
+  Running test_frame_exhaustion_path...
+  Running test_frame_image_reserved...
+  [imgrsv] iters=928 high=0x000000023F100000 last=0x0000000070000000 inside=0 wrapped=1
+  Running test_frame_pool_is_ram_only...
+fat16_test_suite:
+  Running test_fat16_no_device_io_under_fat_lock...
+/IOSCOPE.BIN
+/IOSCOPE.BIN
+  Running test_fat16_open_excl...
+/SECEXCL.TXT
+/SECEXCL.TXT
+/SECEXCL.TXT
+  Running test_fat16_mkdir_dup_atomic...
+  Running test_fat16_sync_clobber_guard...
+/SECSYN.TXT
+/SECSYN.TXT
+  Running test_fat16_partial_sector_no_holes...
+/SECHOLE.TXT
+/SECHOLE.TXT
+  Running test_fat16_append_two_handles...
+/APPEND2.TXT
+/APPEND2.TXT
+/APPEND2.TXT
+/APPEND2.TXT
+/APPEND2.TXT
+/APPEND2.TXT
+  Running test_fat16_open_existing...
+/TEST.TXT
+  Running test_fat16_open_nonexistent...
+/NOSUCHDIR/MISSING.TXT
+  Running test_fat16_created_entry_has_attr...
+/ATTR_CHECK.TXT
+/ATTR_CHECK.TXT
+  Running test_fat16_read_file...
+/TEST.TXT
+  Running test_fat16_move_across_dirs...
+/MOVE.TXT
+/MOVE.TXT new=/MOVEDIR/MOVE.TXT
+/MOVEDIR/MOVE.TXT new=/MOVEDIR/RENAMED.TXT
+/CLOB1.TXT
+/MOVEDIR/CLOB2.TXT
+/CLOB1.TXT new=/MOVEDIR/CLOB2.TXT
+/SAME1.TXT
+/SAME2.TXT
+/SAME1.TXT new=/SAME2.TXT
+/TRUNC.TXT
+/TRUNC.TXT
+/TRUNC.TXT
+/MOVESUB new=/MOVEDIR2/MOVESUB
+/MOVEDIR2/MOVESUB/INNER.TXT
+/MOVEDIR2 new=/MOVEDIR2/MOVESUB/MOVEDIR2
+/NO-SUCH-FILE.TXT new=/X.TXT
+/CLOB1.TXT new=/NO-SUCH-DIR/X.TXT
+  Running test_fat16_lfn_names...
+/UNEXPAND_T.BIN
+/LONG_FILENAME_TEST.TXT
+/LONG_FILENAME_TEST.TXT
+/ABCDEFGH.TXT
+/ABCDEFGH_LONG.TXT
+  Running test_fat16_large_create_write...
+/BIG1M.BIN
+/BIG1M.BIN
+  Running test_fat16_large_lfn_create_write...
+/BIG_LONGFILE_1MB.BIN
+/BIG_LONGFILE_1MB.BIN
+  Running test_fat16_lfn_case_and_alias...
+/Mixed_Case_LongName.TXT
+  Running test_fat16_lfn_collision_unique...
+/COLLIDE_SAME_ALIAS_A.TXT
+/COLLIDE_SAME_ALIAS_B.TXT
+/COLLIDE_SAME_ALIAS_A.TXT
+/COLLIDE_SAME_ALIAS_B.TXT
+  Running test_fat16_lfn_read_dir_listing...
+/LISTING_LONG_NAME.TXT
+  Running test_fat16_lfn_mkdir_long...
+/LFN_MKDIR_LONG_NAME/INNER.BIN
+  Running test_fat16_lfn_rename_long...
+/LFN_RENAME_SRC_NAME.TXT
+/LFN_RENAME_SRC_NAME.TXT new=/LFN_RENAME_DST_NAME.TXT
+/LFN_RENAME_DST_NAME.TXT
+/LFN_RENAME_DST_NAME.TXT new=/LFN_RENAME_THIRD_NAME.TXT
+  Running test_fat16_rename_fontconfig_cache...
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ba
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ba new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ca
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ca new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8da
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8da new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ea
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ea new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8fa
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8fa new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ga
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ga new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ha
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ha new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ia
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ia new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ja
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ja new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ka
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ka new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8la
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8la new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ma
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ma new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8na
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8na new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8oa
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8oa new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8pa
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8pa new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8qa
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8qa new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ra
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ra new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8sa
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8sa new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ta
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ta new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ua
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ua new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8va
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8va new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8wa
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8wa new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8xa
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8xa new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ya
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ya new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8za
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8za new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ab
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ab new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8bb
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8bb new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8cb
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8cb new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8db
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8db new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8eb
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8eb new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8fb
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8fb new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8gb
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8gb new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8hb
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8hb new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ib
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ib new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8jb
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8jb new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8kb
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8kb new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8lb
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8lb new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8mb
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8mb new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8nb
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8nb new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ob
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ob new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8pb
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8pb new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8qb
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8qb new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8rb
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8rb new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8sb
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8sb new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8tb
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8tb new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ub
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ub new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8vb
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8vb new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8wb
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8wb new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8xb
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8xb new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8yb
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8yb new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8zb
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8zb new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ac
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ac new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8bc
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8bc new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8cc
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8cc new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8dc
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8dc new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ec
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ec new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8fc
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8fc new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8gc
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8gc new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8hc
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8hc new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ic
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ic new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8jc
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8jc new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8kc
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8kc new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8lc
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8lc new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8mc
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8mc new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8nc
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8nc new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8oc
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8oc new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8pc
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8pc new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8qc
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8qc new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8rc
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8rc new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8sc
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8sc new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8tc
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8tc new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8uc
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8uc new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8vc
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8vc new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8wc
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8wc new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8xc
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8xc new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8yc
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8yc new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8zc
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8zc new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ad
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ad new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8bd
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8bd new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8cd
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8cd new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8dd
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8dd new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ed
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ed new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8fd
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8fd new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8gd
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8gd new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8hd
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8hd new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8id
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8id new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8jd
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8jd new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8kd
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8kd new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ld
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ld new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8md
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8md new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8nd
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8nd new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8od
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8od new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8pd
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8pd new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8qd
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8qd new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8rd
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8rd new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8sd
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8sd new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8td
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8td new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ud
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ud new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8vd
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8vd new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8wd
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8wd new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8xd
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8xd new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8yd
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8yd new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8zd
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8zd new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ae
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ae new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8be
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8be new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ce
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ce new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8de
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8de new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ee
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ee new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8fe
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8fe new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ge
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ge new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8he
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8he new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ie
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ie new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8je
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8je new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ke
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ke new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8le
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8le new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8me
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8me new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ne
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8ne new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8oe
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8oe new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8pe
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8pe new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8qe
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.TMP-aAz8qe new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12.NEW new=/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+/FCREN/d129258b8fb6c48f6c0317f05e005000-x86_64.cache-12
+  Running test_fat16_clang_temp_rename_no_twins...
+/WB9OBJ/CPU.O
+/WB9OBJ/CPU-C0FFEE.O.TMP
+/WB9OBJ/CPU-C0FFEE.O.TMP new=/WB9OBJ/CPU.O
+/WB9OBJ/NFS_TEST-C0FFEE.O.TMP
+/WB9OBJ/NFS_TEST-C0FFEE.O.TMP new=/WB9OBJ/NFS_TEST.O
+/WB9OBJ/NFS.O
+/WB9OBJ/NFS-C0FFEE.O.TMP
+/WB9OBJ/NFS-C0FFEE.O.TMP new=/WB9OBJ/NFS.O
+/WB9OBJ/MAIN-C0FFEE.O.TMP
+/WB9OBJ/MAIN-C0FFEE.O.TMP new=/WB9OBJ/MAIN.O
+/WB9OBJ/FS.O
+/WB9OBJ/FS-C0FFEE.O.TMP
+/WB9OBJ/FS-C0FFEE.O.TMP new=/WB9OBJ/FS.O
+/WB9OBJ/NET-C0FFEE.O.TMP
+/WB9OBJ/NET-C0FFEE.O.TMP new=/WB9OBJ/NET.O
+/WB9OBJ/VFS.O
+/WB9OBJ/VFS-C0FFEE.O.TMP
+/WB9OBJ/VFS-C0FFEE.O.TMP new=/WB9OBJ/VFS.O
+/WB9OBJ/DHCP-C0FFEE.O.TMP
+/WB9OBJ/DHCP-C0FFEE.O.TMP new=/WB9OBJ/DHCP.O
+/WB9OBJ/FRAME.O
+/WB9OBJ/FRAME-C0FFEE.O.TMP
+/WB9OBJ/FRAME-C0FFEE.O.TMP new=/WB9OBJ/FRAME.O
+/WB9OBJ/PIPE-C0FFEE.O.TMP
+/WB9OBJ/PIPE-C0FFEE.O.TMP new=/WB9OBJ/PIPE.O
+/WB9OBJ/LOCKS.O
+/WB9OBJ/LOCKS-C0FFEE.O.TMP
+/WB9OBJ/LOCKS-C0FFEE.O.TMP new=/WB9OBJ/LOCKS.O
+/WB9OBJ/MMU-C0FFEE.O.TMP
+/WB9OBJ/MMU-C0FFEE.O.TMP new=/WB9OBJ/MMU.O
+/WB9OBJ/RTC.O
+/WB9OBJ/RTC-C0FFEE.O.TMP
+/WB9OBJ/RTC-C0FFEE.O.TMP new=/WB9OBJ/RTC.O
+/WB9OBJ/SMP-C0FFEE.O.TMP
+/WB9OBJ/SMP-C0FFEE.O.TMP new=/WB9OBJ/SMP.O
+/WB9OBJ/TIMER.O
+/WB9OBJ/TIMER-C0FFEE.O.TMP
+/WB9OBJ/TIMER-C0FFEE.O.TMP new=/WB9OBJ/TIMER.O
+/WB9OBJ/TRAP-C0FFEE.O.TMP
+/WB9OBJ/TRAP-C0FFEE.O.TMP new=/WB9OBJ/TRAP.O
+/WB9OBJ/UART.O
+/WB9OBJ/UART-C0FFEE.O.TMP
+/WB9OBJ/UART-C0FFEE.O.TMP new=/WB9OBJ/UART.O
+/WB9OBJ/GIC-C0FFEE.O.TMP
+/WB9OBJ/GIC-C0FFEE.O.TMP new=/WB9OBJ/GIC.O
+/WB9OBJ/BOOT.O
+/WB9OBJ/BOOT-C0FFEE.O.TMP
+/WB9OBJ/BOOT-C0FFEE.O.TMP new=/WB9OBJ/BOOT.O
+/WB9OBJ/FPU-C0FFEE.O.TMP
+/WB9OBJ/FPU-C0FFEE.O.TMP new=/WB9OBJ/FPU.O
+/WB9OBJ/SETJMP.O
+/WB9OBJ/SETJMP-C0FFEE.O.TMP
+/WB9OBJ/SETJMP-C0FFEE.O.TMP new=/WB9OBJ/SETJMP.O
+/WB9OBJ/TIME-C0FFEE.O.TMP
+/WB9OBJ/TIME-C0FFEE.O.TMP new=/WB9OBJ/TIME.O
+/WB9OBJ/VIRTIO_B.O
+/WB9OBJ/VIRTIO_B-C0FFEE.O.TMP
+/WB9OBJ/VIRTIO_B-C0FFEE.O.TMP new=/WB9OBJ/VIRTIO_B.O
+/WB9OBJ/VIRTIO_G-C0FFEE.O.TMP
+/WB9OBJ/VIRTIO_G-C0FFEE.O.TMP new=/WB9OBJ/VIRTIO_G.O
+/WB9OBJ/VIRTIO_N.O
+/WB9OBJ/VIRTIO_N-C0FFEE.O.TMP
+/WB9OBJ/VIRTIO_N-C0FFEE.O.TMP new=/WB9OBJ/VIRTIO_N.O
+/WB9OBJ/VM-C0FFEE.O.TMP
+/WB9OBJ/VM-C0FFEE.O.TMP new=/WB9OBJ/VM.O
+/WB9OBJ/FS_TEST.O
+/WB9OBJ/FS_TEST-C0FFEE.O.TMP
+/WB9OBJ/FS_TEST-C0FFEE.O.TMP new=/WB9OBJ/FS_TEST.O
+/WB9OBJ/MMU_TEST-C0FFEE.O.TMP
+/WB9OBJ/MMU_TEST-C0FFEE.O.TMP new=/WB9OBJ/MMU_TEST.O
+/WB9OBJ/NET_TEST.O
+/WB9OBJ/NET_TEST-C0FFEE.O.TMP
+/WB9OBJ/NET_TEST-C0FFEE.O.TMP new=/WB9OBJ/NET_TEST.O
+/WB9OBJ/TEST_SMP-C0FFEE.O.TMP
+/WB9OBJ/TEST_SMP-C0FFEE.O.TMP new=/WB9OBJ/TEST_SMP.O
+/WB9OBJ/VM_TEST.O
+/WB9OBJ/VM_TEST-C0FFEE.O.TMP
+/WB9OBJ/VM_TEST-C0FFEE.O.TMP new=/WB9OBJ/VM_TEST.O
+/WB9OBJ/FAT16_TE-C0FFEE.O.TMP
+/WB9OBJ/FAT16_TE-C0FFEE.O.TMP new=/WB9OBJ/FAT16_TE.O
+/WB9OBJ/PIPE_TES.O
+/WB9OBJ/PIPE_TES-C0FFEE.O.TMP
+/WB9OBJ/PIPE_TES-C0FFEE.O.TMP new=/WB9OBJ/PIPE_TES.O
+/WB9OBJ/TIME_TES-C0FFEE.O.TMP
+/WB9OBJ/TIME_TES-C0FFEE.O.TMP new=/WB9OBJ/TIME_TES.O
+/WB9OBJ/UNIX_TES.O
+/WB9OBJ/UNIX_TES-C0FFEE.O.TMP
+/WB9OBJ/UNIX_TES-C0FFEE.O.TMP new=/WB9OBJ/UNIX_TES.O
+/WB9OBJ/IOMMU_VT-C0FFEE.O.TMP
+/WB9OBJ/IOMMU_VT-C0FFEE.O.TMP new=/WB9OBJ/IOMMU_VT.O
+/WB9OBJ/NFS_PROT.O
+/WB9OBJ/NFS_PROT-C0FFEE.O.TMP
+/WB9OBJ/NFS_PROT-C0FFEE.O.TMP new=/WB9OBJ/NFS_PROT.O
+/WB9OBJ/IPC_PROT-C0FFEE.O.TMP
+/WB9OBJ/IPC_PROT-C0FFEE.O.TMP new=/WB9OBJ/IPC_PROT.O
+/WB9OBJ/MATH_TES.O
+/WB9OBJ/MATH_TES-C0FFEE.O.TMP
+/WB9OBJ/MATH_TES-C0FFEE.O.TMP new=/WB9OBJ/MATH_TES.O
+/WB9OBJ/TRAP_TES-C0FFEE.O.TMP
+/WB9OBJ/TRAP_TES-C0FFEE.O.TMP new=/WB9OBJ/TRAP_TES.O
+/WB9OBJ/UNIT_TES.O
+/WB9OBJ/UNIT_TES-C0FFEE.O.TMP
+/WB9OBJ/UNIT_TES-C0FFEE.O.TMP new=/WB9OBJ/UNIT_TES.O
+/WB9OBJ/TIMER_TE-C0FFEE.O.TMP
+/WB9OBJ/TIMER_TE-C0FFEE.O.TMP new=/WB9OBJ/TIMER_TE.O
+/WB9OBJ/LOCKS_TE.O
+/WB9OBJ/LOCKS_TE-C0FFEE.O.TMP
+/WB9OBJ/LOCKS_TE-C0FFEE.O.TMP new=/WB9OBJ/LOCKS_TE.O
+/WB9OBJ/FRAME_TE-C0FFEE.O.TMP
+/WB9OBJ/FRAME_TE-C0FFEE.O.TMP new=/WB9OBJ/FRAME_TE.O
+/WB9OBJ/TEST_FW_.O
+/WB9OBJ/TEST_FW_-C0FFEE.O.TMP
+/WB9OBJ/TEST_FW_-C0FFEE.O.TMP new=/WB9OBJ/TEST_FW_.O
+/WB9OBJ/PROCESS_-C0FFEE.O.TMP
+/WB9OBJ/PROCESS_-C0FFEE.O.TMP new=/WB9OBJ/PROCESS_.O
+/WB9OBJ/PROGRAM_.O
+/WB9OBJ/PROGRAM_-C0FFEE.O.TMP
+/WB9OBJ/PROGRAM_-C0FFEE.O.TMP new=/WB9OBJ/PROGRAM_.O
+/WB9OBJ/CPU.O
+/WB9OBJ/NFS_TEST.O
+/WB9OBJ/NFS.O
+/WB9OBJ/MAIN.O
+/WB9OBJ/FS.O
+/WB9OBJ/NET.O
+/WB9OBJ/VFS.O
+/WB9OBJ/DHCP.O
+/WB9OBJ/FRAME.O
+/WB9OBJ/PIPE.O
+/WB9OBJ/LOCKS.O
+/WB9OBJ/MMU.O
+/WB9OBJ/RTC.O
+/WB9OBJ/SMP.O
+/WB9OBJ/TIMER.O
+/WB9OBJ/TRAP.O
+/WB9OBJ/UART.O
+/WB9OBJ/GIC.O
+/WB9OBJ/BOOT.O
+/WB9OBJ/FPU.O
+/WB9OBJ/SETJMP.O
+/WB9OBJ/TIME.O
+/WB9OBJ/VIRTIO_B.O
+/WB9OBJ/VIRTIO_G.O
+/WB9OBJ/VIRTIO_N.O
+/WB9OBJ/VM.O
+/WB9OBJ/FS_TEST.O
+/WB9OBJ/MMU_TEST.O
+/WB9OBJ/NET_TEST.O
+/WB9OBJ/TEST_SMP.O
+/WB9OBJ/VM_TEST.O
+/WB9OBJ/FAT16_TE.O
+/WB9OBJ/PIPE_TES.O
+/WB9OBJ/TIME_TES.O
+/WB9OBJ/UNIX_TES.O
+/WB9OBJ/IOMMU_VT.O
+/WB9OBJ/NFS_PROT.O
+/WB9OBJ/IPC_PROT.O
+/WB9OBJ/MATH_TES.O
+/WB9OBJ/TRAP_TES.O
+/WB9OBJ/UNIT_TES.O
+/WB9OBJ/TIMER_TE.O
+/WB9OBJ/LOCKS_TE.O
+/WB9OBJ/FRAME_TE.O
+/WB9OBJ/TEST_FW_.O
+/WB9OBJ/PROCESS_.O
+/WB9OBJ/PROGRAM_.O
+[W9] obj CPU.O
+[W9] obj NFS.O
+[W9] obj MAIN.O
+[W9] obj FS.O
+[W9] obj NFS_TEST.O
+[W9] obj VFS.O
+[W9] obj DHCP.O
+[W9] obj FRAME.O
+[W9] obj NET.O
+[W9] obj LOCKS.O
+[W9] obj MMU.O
+[W9] obj RTC.O
+[W9] obj PIPE.O
+[W9] obj TIMER.O
+[W9] obj UART.O
+[W9] obj GIC.O
+[W9] obj BOOT.O
+[W9] obj SMP.O
+[W9] obj TRAP.O
+[W9] obj SETJMP.O
+[W9] obj TIME.O
+[W9] obj VIRTIO_B.O
+[W9] obj FPU.O
+[W9] obj VIRTIO_N.O
+[W9] obj VM.O
+[W9] obj FS_TEST.O
+[W9] obj VIRTIO_G.O
+[W9] obj NET_TEST.O
+[W9] obj TEST_SMP.O
+[W9] obj VM_TEST.O
+[W9] obj MMU_TEST.O
+[W9] obj PIPE_TES.O
+[W9] obj TIME_TES.O
+[W9] obj UNIX_TES.O
+[W9] obj FAT16_TE.O
+[W9] obj NFS_PROT.O
+[W9] obj IPC_PROT.O
+[W9] obj MATH_TES.O
+[W9] obj IOMMU_VT.O
+[W9] obj UNIT_TES.O
+[W9] obj TIMER_TE.O
+[W9] obj LOCKS_TE.O
+[W9] obj TRAP_TES.O
+[W9] obj TEST_FW_.O
+[W9] obj PROCESS_.O
+[W9] obj PROGRAM_.O
+[W9] obj FRAME_TE.O
+  Running test_fat16_83_alias_collision_lookup...
+/WB9C/ABCDEFGH.O
+/WB9C/ABCDEFGH_MORE.O
+/WB9C/ABCDEFGH.O
+/WB9C/ABCDEFGH_MORE.O
+  Running test_fat16_lfn_checksum_reject...
+/LF_CSUM_TARGET.TXT
+  Running test_fat16_lfn_truncated_run...
+/LF_TRUNC_TARGET.TXT
+  Running test_fat16_rmdir_semantics...
+/RMDIR2/JUNK.TXT
+/RMDIRFILE.TXT
+  Running test_fat16_ftruncate_extend_then_write...
+/W3F16.IMG
+/W3F16.IMG
+  Running test_fat16_read_dir_multiple...
+/W3RDDIR/AAA.TXT
+/W3RDDIR/BBB.BIN
+/W3RDDIR/LONG_FILENAME_IN_DIR.TXT
+/W3RDDIR/SUBDIR
+[fat16_read_dir] attr not directory
+  Running test_fat16_alloc_hint_chain...
+/W4HINT.IMG
+/W4HINT.IMG
+  Running test_fat16_rtc_create_stamp...
+/W10T1.TXT
+  Running test_fat16_rtc_write_updates_mtime...
+/W10T2.TXT
+/W10T2.TXT
+  Running test_fat16_rtc_stat_readback...
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=1 block_idx=0
+Inside process_create: clearing memory at 0x0000000070000000
+Inside process_create: kmemset done.
+/W10T3.TXT
+/W10T3.TXT
+[KERNEL] Process 1:  exited (signal 9).
+[EXITPC] pid=1 last_user_pc=0x0 code=0x9 killed
+  Running test_fat16_rtc_mkdir_stamp...
+locks_test_suite:
+  Running test_spinlock_init...
+  Running test_lock_order_debug...
+LOCK-ORDER VIOLATION: holding test_fine acquiring test_coarse [cpu 0 depth 1]
+LOCK-ORDER VIOLATION: holding test_coarse acquiring test_same [cpu 0 depth 1]
+  Running test_spinlock_acquire_release...
+  Running test_plain_lock_does_not_mask_interrupts...
+  Running test_audit_counts_irqsave_on_process_lock...
+[LOCKERR] site=IRQSAVE-ON-PROCESS-LOCK lock=test_proc addr=0x43B975A2C pc=0x43A314A3C cpu=0
+  Running test_ylock_does_not_mask_interrupts_and_excludes...
+  Running test_ylock_dead_owner_is_reclaimed...
+[YLOCK-STEAL] site=test_ylock_dead lock=test_ylock_dead addr=0x43B975A78 pc=0x2 cpu=0
+  Running test_ylock_live_owner_is_never_reclaimed...
+[YLOCK-STEAL] site=test_ylock_live lock=test_ylock_live addr=0x43B975ABC pc=0x2 cpu=0
+pipe_test_suite:
+  Running test_pipe_alloc...
+  Running test_pipe_read_write...
+  Running test_pipe_reopen_and_close...
+  Running test_pipe_available...
+unix_test_suite:
+  Running test_unix_pair_alloc_close...
+  Running test_unix_stream_basic...
+  Running test_unix_stream_eof_epipe...
+  Running test_unix_msg_framing...
+  Running test_unix_park_marks...
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=2 block_idx=0
+Inside process_create: clearing memory at 0x0000000070000000
+Inside process_create: kmemset done.
+[KERNEL] Process 2:  exited (signal 9).
+[EXITPC] pid=2 last_user_pc=0x0 code=0x9 killed
+  Running test_ipc_poll_map_table...
+  Running test_ipc_cmsg_codec...
+  Running test_file_poll_engine...
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=3 block_idx=0
+Inside process_create: clearing memory at 0x0000000070000000
+Inside process_create: kmemset done.
+[KERNEL] Process 3:  exited (signal 9).
+[EXITPC] pid=3 last_user_pc=0x0 code=0x9 killed
+  Running test_unix_fd_message_machine...
+Inside process_create: acquiring lock...
+Inside process_create: lock released. pid=4 block_idx=0
+Inside process_create: clearing memory at 0x0000000070000000
+Inside process_create: kmemset done.
+[KERNEL] Process 4:  exited (signal 9).
+[EXITPC] pid=4 last_user_pc=0x0 code=0x9 killed
+  Running test_fd_cloexec_flags...
+[KERNEL] Process 5:  exited (signal 9).
+[EXITPC] pid=5 last_user_pc=0x0 code=0x9 killed
+  Running test_unix_named_roundtrip...
+[KERNEL] Process 6:  exited (signal 9).
+[EXITPC] pid=6 last_user_pc=0x0 code=0x9 killed
+  Running test_unix_named_errors...
+[KERNEL] Process 7:  exited (signal 9).
+[EXITPC] pid=7 last_user_pc=0x0 code=0x9 killed
+  Running test_unix_named_backlog_park...
+[KERNEL] Process 8:  exited (signal 9).
+[EXITPC] pid=8 last_user_pc=0x0 code=0x9 killed
+  Running test_unix_named_many_clients...
+[KERNEL] Process 9:  exited (signal 9).
+[EXITPC] pid=9 last_user_pc=0x0 code=0x9 killed
+fs_test_suite:
+  Running test_fs_table_growth...
+[KERNEL] Process 10:  exited (signal 9).
+[EXITPC] pid=10 last_user_pc=0x0 code=0x9 killed
+  Running test_fs_file_open_close...
+/TEST.TXT
+[KERNEL] Process 11:  exited (signal 9).
+[EXITPC] pid=11 last_user_pc=0x0 code=0x9 killed
+  Running test_file_slot_sentinel...
+/TEST.TXT
+[KERNEL] Process 12:  exited (signal 9).
+[EXITPC] pid=12 last_user_pc=0x0 code=0x9 killed
+  Running test_file_close_idempotent...
+[KERNEL] Process 13:  exited (signal 9).
+[EXITPC] pid=13 last_user_pc=0x0 code=0x9 killed
+  Running test_fs_record_locks...
+/TEST.TXT
+/TEST.TXT
+[KERNEL] Process 14:  exited (signal 9).
+[EXITPC] pid=14 last_user_pc=0x0 code=0x9 killed
+[KERNEL] Process 15:  exited (signal 9).
+[EXITPC] pid=15 last_user_pc=0x0 code=0x9 killed
+  Running test_fs_ftruncate...
+/P6TR.TMP
+[KERNEL] Process 16:  exited (signal 9).
+[EXITPC] pid=16 last_user_pc=0x0 code=0x9 killed
+  Running test_fs_ftruncate_extend_then_write...
+/W3FTX.IMG
+/W3FTX.IMG
+/W3FTX.IMG
+[KERNEL] Process 17:  exited (signal 9).
+[EXITPC] pid=17 last_user_pc=0x0 code=0x9 killed
+  Running test_fs_devnull_devurandom...
+  Running test_fs_console_write_user_guards...
+mmu_test_suite:
+  Running test_mmu_make_user_block_desc...
+  Running test_mmu_switch_user_mapping...
+  Running test_mmu_map_user_framebuffer...
+vm_test_suite:
+  Running test_vm_as_lifecycle...
+[GB124-AS] collision pid=60 state=0 thread=0 tgid=60 td=0 as=0x0 epoch=1 name=-
+[AS-TD] tgid=60 nr=0 res=0
+[AS-TD] tgid=60 nr=0 res=0
+  Running test_vm_as_orphan_reclaim...
+[AS-TD] tgid=60 nr=0 res=0
+[GB124-AS] reclaimed orphan pid=60 orig_tgid=60 epoch=5
+[AS-TD] tgid=60 nr=0 res=0
+  Running test_vm_region_list...
+[AS-TD] tgid=60 nr=0 res=0
+  Running test_vm_map_grow_commit...
+[AS-TD] tgid=60 nr=0 res=0
+  Running test_vm_windows_distinct...
+  Running test_vm_hole_find...
+  Running test_vm_demand_fault...
+[VMRT] pid=0 va=0x0x1080000000 leaf=0x6000008287AC47 present=1 prev=-1 prot=3 kind=3 w=0
+[VMRT] pid=0 va=0x0x1080000000 leaf=0x6000008287AC47 present=1 prev=1 prot=3 kind=3 w=0
+[VMRT] pid=0 va=0x0x1080000000 leaf=0x6000008287AC47 present=1 prev=2 prot=3 kind=3 w=0
+[VMRT] pid=0 va=0x0x1080000000 leaf=0x6000008287AC47 present=1 prev=3 prot=3 kind=3 w=0
+[VMRT] pid=0 va=0x0x1080000000 leaf=0x6000008287AC47 present=1 prev=4 prot=3 kind=3 w=0
+[VMK] retry-budget pid=0 va=0x0x1080000000 n=4 leaf=0x6000008287AC47 base=0x0x1080000000 prot=3 kind=3
+[VMRT] pid=0 va=0x0x1080001000 leaf=0x6000008287DC47 present=1 prev=-1 prot=3 kind=3 w=0
+[VMRT] pid=0 va=0x0x1080001000 leaf=0x6000008287DC47 present=1 prev=1 prot=3 kind=3 w=0
+  Running test_v2_image_first_page...
+/BIG.BIN
+  Running test_v2_image_prefetch...
+/BIG.BIN
+  Running test_vm_walk_dead_as_safe...
+  Running test_vm_mmap_family...
+  Running test_vm_shared_objects...
+  Running test_vm_as_clone_fork...
+[ASCLONE] begin srcnr=2 srcres=2 dstnr=0 free=1892341
+  Running test_vm_teardown_leak_cycles...
+  Running test_vm_memfd_private_cow...
+[COW] va=0x0000001080000000 r.base=0x0000001080000000+0x0000000000004000 prot=3 flags=2 kind=7 ooff=0x0000000000000000 leaf=0x0000000082750000 obj=0x0000000082750000 src=pagecache
+  Running test_vm_big_object_cost...
+  [VMCOST] 200 MiB object: frame array=101 frames, data=51200 frames, mapping overhead (page tables + region array)=101 frames
+  [VMCOST] 4 GiB (VM_OBJ_MAX_BYTES) object: frame array=2049 contiguous frames
+  Running test_vm_user_read...
+  Running test_vm_kwrite...
+  Running test_vm_file_map_shared_frames...
+/VMOBJ1.DAT
+/VMOBJ1.DAT
+/VMOBJ1.DAT
+/VMOBJ1.DAT
+[PIN] off=0x0000000000000000 size=0x0000000000001388
+[POK] off=0x0000000000000000 n=full
+  [VM-FILE] as1 leaf=0x000000008E9BC000 as2 leaf=0x000000008E9BC000 object page0=0x000000008E9BC000
+[COW] va=0x0000001080000000 r.base=0x0000001080000000+0x0000000000002000 prot=3 flags=2 kind=7 ooff=0x0000000000000000 leaf=0x000000008E9BC000 obj=0x000000008E9BC000 src=pagecache
+  Running test_vm_file_map_tail_wx...
+/VMOBJ1.DAT
+/VMOBJ1.DAT
+/VMOBJ1.DAT
+[PIN] off=0x0000000000001000 size=0x0000000000001388
+[POK] off=0x0000000000001000 n=short
+[MPROT] a=0x1080001000 len=0x1000 prot=3 rc=0 r=0x1080001000+0x1000 rprot=3
+[COW] va=0x0000001080001000 r.base=0x0000001080001000+0x0000000000001000 prot=3 flags=2 kind=7 ooff=0x0000000000001000 leaf=0x000000008E9B9000 obj=0x000000008E9B9000 src=pagecache
+[MPROT] a=0x1080000000 len=0x1000 prot=3 rc=0 r=0x1080000000+0x2000 rprot=3
+[PIN] off=0x0000000000000000 size=0x0000000000001388
+[POK] off=0x0000000000000000 n=full
+[MPROT] a=0x1080000000 len=0x2000 prot=1 rc=0 r=0x1080000000+0x2000 rprot=1
+  Running test_vm_file_map_accounting...
+/VMOBJ1.DAT
+/VMOBJ1.DAT
+/VMOBJ1.DAT
+[PIN] off=0x0000000000000000 size=0x0000000000001388
+[POK] off=0x0000000000000000 n=full
+[PIN] off=0x0000000000001000 size=0x0000000000001388
+[POK] off=0x0000000000001000 n=short
+  Running test_vm_file_map_fork...
+/VMOBJ1.DAT
+/VMOBJ1.DAT
+/VMOBJ1.DAT
+[PIN] off=0x0000000000000000 size=0x0000000000001388
+[POK] off=0x0000000000000000 n=full
+[COW] va=0x0000001080000000 r.base=0x0000001080000000+0x0000000000002000 prot=3 flags=2 kind=7 ooff=0x0000000000000000 leaf=0x000000008E9BF000 obj=0x000000008E9BF000 src=pagecache
+[PIN] off=0x0000000000001000 size=0x0000000000001388
+[POK] off=0x0000000000001000 n=short
+[COW] va=0x0000001080001000 r.base=0x0000001080000000+0x0000000000002000 prot=3 flags=2 kind=7 ooff=0x0000000000000000 leaf=0x000000008E9BB000 obj=0x000000008E9BB000 src=pagecache
+  Running test_vm_file_cow_private_leaf...
+/VMOBJ1.DAT
+/VMOBJ1.DAT
+/VMOBJ1.DAT
+[PIN] off=0x0000000000000000 size=0x0000000000001388
+[POK] off=0x0000000000000000 n=full
+[COW] va=0x0000001080000000 r.base=0x0000001080000000+0x0000000000002000 prot=3 flags=2 kind=7 ooff=0x0000000000000000 leaf=0x000000008E9BF000 obj=0x000000008E9BF000 src=pagecache
+[COW] va=0x0000001080000000 r.base=0x0000001080000000+0x0000000000002000 prot=3 flags=2 kind=7 ooff=0x0000000000000000 leaf=0x000000008E9BC000 obj=0x000000008E9BF000 src=private
+[COW] va=0x0000001080000000 r.base=0x0000001080000000+0x0000000000002000 prot=3 flags=2 kind=7 ooff=0x0000000000000000 leaf=0x000000008E9B8000 obj=0x000000008E9BF000 src=private
+[COW] va=0x0000001080000000 r.base=0x0000001080000000+0x0000000000002000 prot=3 flags=2 kind=7 ooff=0x0000000000000000 leaf=0x000000008E9BC000 obj=0x000000008E9BF000 src=private
+[COW] va=0x0000001080000000 r.base=0x0000001080000000+0x0000000000002000 prot=3 flags=2 kind=7 ooff=0x0000000000000000 leaf=0x000000008E9B8000 obj=0x000000008E9BF000 src=private
+[COW] va=0x0000001080000000 r.base=0x0000001080000000+0x0000000000002000 prot=3 flags=2 kind=7 ooff=0x0000000000000000 leaf=0x000000008E9BC000 obj=0x000000008E9BF000 src=private
+[COW] va=0x0000001080000000 r.base=0x0000001080000000+0x0000000000002000 prot=3 flags=2 kind=7 ooff=0x0000000000000000 leaf=0x000000008E9B8000 obj=0x000000008E9BF000 src=private
+[COW] va=0x0000001080000000 r.base=0x0000001080000000+0x0000000000002000 prot=3 flags=2 kind=7 ooff=0x0000000000000000 leaf=0x000000008E9BC000 obj=0x000000008E9BF000 src=private
+[COW] va=0x0000001080000000 r.base=0x0000001080000000+0x0000000000002000 prot=3 flags=2 kind=7 ooff=0x0000000000000000 leaf=0x000000008E9B8000 obj=0x000000008E9BF000 src=private
+[COW] va=0x0000001080000000 r.base=0x0000001080000000+0x0000000000002000 prot=3 flags=2 kind=7 ooff=0x0000000000000000 leaf=0x000000008E9BC000 obj=0x000000008E9BF000 src=private
+  [VM-FILE] cow_private_leaf objects c0=0 now=0 frames free0=1892352 now=1892352
+  Running test_vm_exec_page_eio...
+/VMOBJ1.DAT
+/VMOBJ1.DAT
+/VMOBJ1.DAT
+[PIN] off=0x0000000000000000 size=0x0000000000001388
+[POK] off=0x0000000000000000 n=short
+[ZPFILL] short read off=0x0 n=64 want=4096 size=5000 chain=14758 -> not published (never map a zero page as file data)
+[PIN] off=0x0000000000000000 size=0x0000000000001388
+[POK] off=0x0000000000000000 n=full
+[TXT] PROBE off=0x0x0 size=5000 chain=14758 spc=32 data=576 lba=0x0x736C0 len=4096 | cache found=0 fstate=0 valid=0x0x0 c_nz=0 c_sum=0x0x0 | raw rc=0 r_nz=0 r_sum=0x0x0 | dropped=8 refill n=4096 f_nz=0 f_sum=0x0x0
+[TXT] ZERO off=0x0 reads=3 n0=4096 -> not published
+[PBI] verify off=0x0x0 probe_buf=0x0x8E9B8000 src=0x0x8E9B8000 dst=0x0x8E9BE000 frame=584120/584126 ver_nz=4080 ver_sum=0x0x7F800 src_nz=4080 dst_nz=4080 dst_sum=0x0x7F800 same=1 buf=1 off=1 ver=1 pub=1
+[PFE] rip=0x0000001080000000 page=0x0000001080000000 base=0x0000001080000000+0x0000000000002000 prot=5 kind=7 flags=2 ooff=0x0000000000000000 obj=0x000000043B3B22D8 objsz=0x0000000000001388 present=0
+[TXT] PROBE off=0x0x0 size=5000 chain=14758 spc=32 data=576 lba=0x0x736C0 len=4096 | cache found=0 fstate=0 valid=0x0x0 c_nz=0 c_sum=0x0x0 | raw rc=0 r_nz=0 r_sum=0x0x0 | dropped=8 refill n=4096 f_nz=0 f_sum=0x0x0
+[TXT] ZERO off=0x0 reads=3 n0=4096 -> not published
+[PFE] rip=0x0000001080000000 page=0x0000001080000000 base=0x0000001080000000+0x0000000000002000 prot=5 kind=7 flags=2 ooff=0x0000000000000000 obj=0x000000043B3B22D8 objsz=0x0000000000001388 present=0
+[PBI] verify off=0x0x0 probe_buf=0x0x8E9B7000 src=0x0x8E9B7000 dst=0x0x8E9BE000 frame=584119/584126 ver_nz=4080 ver_sum=0x0x7F800 src_nz=4080 dst_nz=4080 dst_sum=0x0x7F800 same=1 buf=1 off=1 ver=1 pub=1
+/VMOBJ1.DAT
+[PIN] off=0x0000000000000000 size=0x0000000000001388
+[POK] off=0x0000000000000000 n=full
+[PBI] verify off=0x0x0 probe_buf=0x0x8E9BD000 src=0x0x8E9BD000 dst=0x0x8E9B5000 frame=584125/584117 ver_nz=4080 ver_sum=0x0x7F800 src_nz=4080 dst_nz=4080 dst_sum=0x0x7F800 same=1 buf=1 off=1 ver=1 pub=1
+  [VM-FILE] exec_eio p2 b=0x0000001080000000 leaf=0x000000008E9B5000 objfr=0x000000008E9B9000 private
+  [VM-FILE] exec_eio objects c0=0 now=0 frames free0=1892352 now=1892352
+  Running test_vm_exec_page_nomem...
+/VMOBJ1.DAT
+/VMOBJ1.DAT
+/VMOBJ1.DAT
+[PFE] rip=0x0000001080000000 page=0x0000001080000000 base=0x0000001080000000+0x0000000000002000 prot=5 kind=7 flags=2 ooff=0x0000000000000000 obj=0x000000043B3B22D8 objsz=0x0000000000001388 present=0
+[PAGEIN-NOMEM] n=1 pid=-1 va=0x1080000000 region=0x1080000000+0x2000 prot=5 src=fat via=fault unparked=0 cache_dropped=0 rounds=2 free=0 -> ENOMEM (no frame: out of memory, NOT an I/O error; mapping not marked)
+[PAGEIN-NOMEM] n=2 pid=-1 va=0x1080000000 region=0x1080000000+0x2000 prot=5 src=fat via=touch unparked=0 cache_dropped=0 rounds=2 free=0 -> ENOMEM (no frame: out of memory, NOT an I/O error; mapping not marked)
+  [PAGEIN] exhausted held=1892349 free_at=0 fault=3 why=NOMEM ioerr=0 touch=-2 reclaim_fault=-1 reclaim_bad=-1
+[PFE] rip=0x0000001080000000 page=0x0000001080000000 base=0x0000001080000000+0x0000000000002000 prot=5 kind=7 flags=2 ooff=0x0000000000000000 obj=0x000000043B3B22D8 objsz=0x0000000000001388 present=0
+[PIN] off=0x0000000000000000 size=0x0000000000001388
+[POK] off=0x0000000000000000 n=full
+[PBI] verify off=0x0x0 probe_buf=0x0x8E9BE000 src=0x0x8E9BE000 dst=0x0x8E9B8000 frame=584126/584120 ver_nz=4080 ver_sum=0x0x7F800 src_nz=4080 dst_nz=4080 dst_sum=0x0x7F800 same=1 buf=1 off=1 ver=1 pub=1
+[PFE] rip=0x0000001080000000 page=0x0000001080000000 base=0x0000001080000000+0x0000000000002000 prot=5 kind=7 flags=2 ooff=0x0000000000000000 obj=0x000000043B3B22D8 objsz=0x0000000000001388 present=0
+[TXT] PROBE off=0x0x0 size=5000 chain=14759 spc=32 data=576 lba=0x0x736E0 len=4096 | cache found=0 fstate=0 valid=0x0x0 c_nz=0 c_sum=0x0x0 | raw rc=0 r_nz=0 r_sum=0x0x0 | dropped=8 refill n=4096 f_nz=0 f_sum=0x0x0
+[TXT] ZERO off=0x0 reads=3 n0=4096 -> not published
+  [PAGEIN] memory back fault=0 bad=0; real read error fault=2 ioerr=1
+  Running test_vm_img_page_eio...
+/BIG.BIN
+[TXT] IMG SUM pos=0x1000 got=0x76EFDDC5 want=0x106D33C5 raw n=4096 sum=0x0x76EFDDC5 -> not published
+  [VM-FILE] img_eio frames free0=1892352 now=1892352
+  Running test_vm_jit_arena...
+[JITA] claim base=0x1080000000 size=0x40000000 anchor=0x1080000000 gap=0x80000000
+[JITV] pid=0 n=0 hint=0x0 base=0x1080000000 len=0x10000 d=0x80000000 src=arena
+[JITS] n=1 first=0x1080000000 last=0x1080000000 span=0x0 span_mb=0
+[JITV] pid=0 n=1 hint=0x0 base=0x1080010000 len=0x10000 d=0x80010000 src=arena
+[JITV] pid=0 n=2 hint=0x0 base=0x1080020000 len=0x10000 d=0x80020000 src=arena
+[JITV] pid=0 n=3 hint=0x0 base=0x1080030000 len=0x10000 d=0x80030000 src=arena
+[JITV] pid=0 n=4 hint=0x0 base=0x1080040000 len=0x10000 d=0x80040000 src=arena
+[JITV] pid=0 n=5 hint=0x0 base=0x1080050000 len=0x10000 d=0x80050000 src=arena
+[JITV] pid=0 n=6 hint=0x0 base=0x1080060000 len=0x10000 d=0x80060000 src=arena
+[JITV] pid=0 n=7 hint=0x0 base=0x1080070000 len=0x10000 d=0x80070000 src=arena
+[JITS] n=8 first=0x1080000000 last=0x1080070000 span=0x70000 span_mb=0
+[JITV] pid=0 n=8 hint=0x0 base=0x1080080000 len=0x10000 d=0x80080000 src=arena
+[JITV] pid=0 n=9 hint=0x0 base=0x1080090000 len=0x10000 d=0x80090000 src=arena
+[JITV] pid=0 n=10 hint=0x0 base=0x10800A0000 len=0x10000 d=0x800A0000 src=arena
+[JITV] pid=0 n=11 hint=0x0 base=0x10800B0000 len=0x10000 d=0x800B0000 src=arena
+[JITV] pid=0 n=12 hint=0x0 base=0x10800B0000 len=0x10000 d=0x800B0000 src=arena
+[JITV] pid=0 n=13 hint=0x0 base=0x10800C0000 len=0x3FF40000 d=0x800C0000 src=arena
+[JITA] full: arena exhausted, exec mappings fall back to first-fit (bump=0x10C0000000 end=0x10C0000000)
+[JITV] pid=0 n=14 hint=0x0 base=0x10C0003000 len=0x10000 d=0xC0003000 src=fit
+  Running test_vm_jit_arena_gap_end...
+[JITA] claim base=0x1080010000 size=0xFFF8000 anchor=0x1080008000 gap=0x10000000
+[JITV] pid=0 n=15 hint=0x0 base=0x1080010000 len=0x10000 d=0x80010000 src=arena
+[JITS] n=16 first=0x1080000000 last=0x1080010000 span=0x10000 span_mb=0
+  Running test_vm_alloc_hole_atomic...
+  Running test_vm_dso_bases_distinct...
+/VMOBJ1.DAT
+/VMOBJ1.DAT
+/VMOBJ1.DAT
+[PIN] off=0x0000000000000000 size=0x0000000000001388
+[POK] off=0x0000000000000000 n=full
+  Running test_fs_dso_identity_pair...
+/VMSOID1.DAT
+/VMSOID2.DAT
+/VMSOID1.DAT
+/VMSOID2.DAT
+  [FS-ID] 0x0000000000000101:0x00000000000022F3 0x0000000000000101:0x00000000000022F4
+  Running test_vm_map_fb_frame...
+process_test_suite:
+  Running test_process_init_and_create...
+  Running test_pid_slot_invariant...
+  Running test_process_set_entry...
+  Running test_process_num_cpus...
+  [process] reported CPUs=8
+  Running test_process_thread_group...
+  Running test_process_thread_validation...
+  Running test_process_thread_slot_reclaim...
+[KERNEL] process_create: no free process slots! zomb0 exited
+  Running test_loader_fail_fast_full_table...
+[WAVE-TRY] NOPE.BIN
+Loading program for scheduler (v2 AS): NOPE.BIN
+[GB095-FD] NOPE.BIN stderr_fd=-1 pipeinstall=0 fd2=0xFFFFFFFFFFFFFFFF
+/NOPE.BIN
+[ARRIVED] NOPE.BIN rc<0
+  Running test_lostwake_stale_claim_reclaim...
+  Running test_lostwake_as_live_blocks_reclaim...
+  Running test_halted_claimer_is_not_live_work...
+  Running test_process_futex_machine...
+  Running test_process_set_tls...
+  Running test_p5_sigaction_storage...
+  Running test_p5_kill_semantics...
+[SIGIN] miss tid=999999 sig=15 st=-1 gen=0 -> ESRCH
+[KERNEL] Process 23:  exited (signal 15).
+[EXITPC] pid=23 last_user_pc=0x0 code=0xF killed
+  Running test_p5_compat_signal_range...
+[SGS] pid=24 sig=30 st=1 susp=0 inh=0 pend=0x20000000 dir=0x0 mask=0x0
+[SGS] pid=24 sig=24 st=1 susp=0 inh=0 pend=0x20800000 dir=0x0 mask=0x0
+  Running test_p5_directed_signal_owner...
+[SGS] pid=1 sig=30 st=5 susp=0 inh=0 pend=0x20000000 dir=0x20000000 mask=0x0
+[SGS] pid=26 sig=30 st=1 susp=0 inh=0 pend=0x20000000 dir=0x20000000 mask=0x0
+[SGS] pid=26 sig=30 st=1 susp=0 inh=0 pend=0x20000000 dir=0x20000000 mask=0x0
+[SGS] pid=19 sig=30 st=5 susp=0 inh=0 pend=0x20000000 dir=0x20000000 mask=0x0
+[SGS] pid=20 sig=30 st=5 susp=0 inh=0 pend=0x20000000 dir=0x20000000 mask=0x0
+[SIGIN] miss tid=20 sig=30 st=9 gen=0 -> ESRCH
+  Running test_p5_sigpipe_semantics...
+[KERNEL] Process 27:  exited (signal 13).
+[EXITPC] pid=27 last_user_pc=0x0 code=0xD killed
+  Running test_fault_kill_status_nonzero...
+[KERNEL] Process 28:  exited (signal 11).
+[EXITPC] pid=28 last_user_pc=0x0 code=0xB killed
+  Running test_p5_env_readback...
+  Running test_p5_reap_delivery_on_kill...
+[KERNEL] Process 32:  exited (signal 15).
+[EXITPC] pid=32 last_user_pc=0x0 code=0xF killed
+  Running test_p5_waitpid_validation...
+[WAITPID] ECHILD caller=33  want=-1 children=0 (further ECHILD diagnostics for this process are suppressed)
+  Running test_p5_wait4_rusage...
+  Running test_w2_argv_envelope...
+  Running test_p5_exec_env_and_apply...
+/TEST.TXT
+/TEST.TXT
+program_loader_test_suite:
+  Running test_load_and_run_missing_file...
+[WAVE-TRY] MISSING.BIN
+Loading program for scheduler (v2 AS): MISSING.BIN
+/MISSING.BIN
+[ARRIVED] MISSING.BIN rc<0
+  Running test_load_and_run_success...
+[WAVE-TRY] CONSOLE.BIN
+Loading program for scheduler (v2 AS): CONSOLE.BIN
+/CONSOLE.BIN
+v2 loader: image mapped (lazy), bytes=48152 pages=12 first=in elap=3ms
+v2 loader: PID=40 entry=0x1000000000 sp=0x1800000000 resident=1 tables=3 abi=0x0 native=0 interp=0x0
+[ARRIVED] CONSOLE.BIN rc>0
+[KERNEL] Process 40: CONSOLE.BIN exited (signal 9).
+[EXITPC] pid=40 last_user_pc=0x0 code=0x9 killed
+trap_test_suite:
+  Running test_trap_unknown_syscall...
+Unknown System Call Invoked!
+  Running test_trap_sys_get_cpuid...
+  Running test_u_strcpy_atomic...
+  Running test_ssp_guard_seeded...
+  Running test_kernel_stack_guard...
+virtio_blk_test_suite:
+  Running test_virtio_blk_read...
+blk_cache_test_suite:
+  Running test_blk_cache_read_fill_then_hit...
+  Running test_blk_cache_multi_sector_run...
+  Running test_blk_cache_invalidate_refill...
+  Running test_blk_cache_evict_reclaims_frames...
+  Running test_blk_cache_write_coherence...
+/BLKCACHE.TXT
+/BLKCACHE.TXT
+/BLKCACHE.TXT
+/BLKCACHE.TXT
+  Running test_vm_poisoned_cache_page...
+/VMOBJ1.DAT
+/VMOBJ1.DAT
+/VMOBJ1.DAT
+[PIN] off=0x0000000000000000 size=0x0000000000001388
+[POK] off=0x0000000000000000 n=full
+[TXT] PROBE off=0x0x0 size=5000 chain=14764 spc=32 data=576 lba=0x0x73780 len=4096 | cache found=1 fstate=0 valid=0x0xFF c_nz=0 c_sum=0x0x0 | raw rc=0 r_nz=4080 r_sum=0x0x7F800 | dropped=8 refill n=4096 f_nz=4080 f_sum=0x0x7F800
+[PBI] probeget off=0x0x0 probe_buf=0x0x8ED8A000 src=0x0x8ED8A000 dst=0x0x8ED8E000 frame=585098/585102 ver_nz=4080 ver_sum=0x0x7F800 src_nz=4080 dst_nz=4080 dst_sum=0x0x7F800 same=1 buf=1 off=1 ver=1 pub=1
+[TXT] PROBEGET off=0x0 -> the probe's own cache-bypassed read (second read agreed or was the zero replay); cache frame was POISONED, published the device's bytes (identity asserted)
+  [VM-FILE] poisoned_cache frames free0=1881082 now=1881082
+  Running test_vm_publish_identity...
+/VMOBJ1.DAT
+/VMOBJ1.DAT
+[TXT] PROBE off=0x0x0 size=5000 chain=14765 spc=32 data=576 lba=0x0x737A0 len=4096 | cache found=0 fstate=0 valid=0x0x0 c_nz=0 c_sum=0x0x0 | raw rc=0 r_nz=4080 r_sum=0x0x7F800 | dropped=8 refill n=4096 f_nz=4080 f_sum=0x0x7F800
+/VMOBJ1.DAT
+[PIN] off=0x0000000000000000 size=0x0000000000001388
+[POK] off=0x0000000000000000 n=full
+[TXT] PROBE off=0x0x0 size=5000 chain=14765 spc=32 data=576 lba=0x0x737A0 len=4096 | cache found=1 fstate=0 valid=0x0xFF c_nz=0 c_sum=0x0x0 | raw rc=0 r_nz=4080 r_sum=0x0x7F800 | dropped=8 refill n=4096 f_nz=4080 f_sum=0x0x7F800
+[PBF] probeget off=0x0x0 probe_buf=0x0x8ED8A000 src=0x0x8ED8A000 dst=0x0x8ED8B000 frame=585098/585099 ver_nz=4080 ver_sum=0x0x7F800 src_nz=4080 dst_nz=3825 dst_sum=0x0x77880 same=0 buf=1 off=1 ver=1 pub=0
+[TXT] ZERO off=0x0 -> the DEVICE holds this page: cache frame was POISONED (aborted transfer), dropped and published the device's bytes
+/VMOBJ1.DAT
+[PIN] off=0x0000000000000000 size=0x0000000000001388
+[POK] off=0x0000000000000000 n=full
+[TXT] PROBE off=0x0x0 size=5000 chain=14765 spc=32 data=576 lba=0x0x737A0 len=4096 | cache found=1 fstate=0 valid=0x0xFF c_nz=0 c_sum=0x0x0 | raw rc=0 r_nz=4080 r_sum=0x0x7F800 | dropped=8 refill n=4096 f_nz=4080 f_sum=0x0x7F800
+[PBI] probeget off=0x0x0 probe_buf=0x0x8ED88000 src=0x0x8ED88000 dst=0x0x8ED8E000 frame=585096/585102 ver_nz=4080 ver_sum=0x0x7F800 src_nz=4080 dst_nz=4080 dst_sum=0x0x7F800 same=1 buf=1 off=1 ver=1 pub=1
+[TXT] PROBEGET off=0x0 -> the probe's own cache-bypassed read (second read agreed or was the zero replay); cache frame was POISONED, published the device's bytes (identity asserted)
+  [VM-PBI] checks=7 fails=1 frames free0=1881082 now=1881082
+blk_cache_press_suite:
+  Running test_blkc_oracle_matrix...
+  Running test_blkc_accounting...
+  Running test_blkc_write_coherence...
+/BLCK1.TXT
+/BLCK1.TXT
+/BLCK1.TXT
+/BLCK1.TXT
+  Running test_blkc_eviction...
+  Running test_blkc_pressure...
+  Running test_blkc_reclaim_helpers...
+  Running test_blkc_boundaries...
+  Running test_blkc_contract_read0...
+virtio_gpu_test_suite:
+  Running test_virtio_gpu_get_framebuffer...
+  Running test_virtio_gpu_flush_args_ok...
+  Running test_gpu_abi_req_size...
+  Running test_gpu_abi_ioctl_routing...
+  Running test_gpu_abi_pages_for...
+  Running test_gpu_abi_res_ok...
+  Running test_gpu_abi_submit_flags...
+  Running test_gpu_abi_transfer_ok...
+  Running test_virtio_gpu_rect_clamp...
+  Running test_virtio_gpu_rect_transfer_offset...
+  Running test_virtio_gpu_flush_rects_empty...
+    rect-flush no-op paths survived
+gpu_abi_m2_test_suite:
+  Running test_gpu_m2_layout...
+  Running test_gpu_m2_req_size...
+  Running test_gpu_m2_ctx2_ok...
+  Running test_gpu_m2_blob_ok...
+  Running test_gpu_m2_submit2_ok...
+  Running test_gpu_m2_cache_and_deadline...
+  Running test_gpu_m2_scanout...
+  Running test_nvshim_layout...
+  Running test_nvshim_refusals...
+[NVSHIM] refuse grobj_alloc errno=ENOSYS
+[NVSHIM] refuse notifier_obj errno=ENOSYS
+[NVSHIM] refuse nvif errno=ENOSYS
+[NVSHIM] refuse svm errno=ENOSYS
+[NVSHIM] refuse gem_pushbuf errno=ENOSYS
+[NVSHIM] refuse setparam errno=ENOSYS
+  Running test_nvshim_probe...
+[NVSHIM] device dev=1 chipset=0x192 pci=0x2684 mock=1 feats=0x1ff
+[NVSHIM] getparam refused param=14 reason=mock_has_no_card
+[NV-DMA] map phys=0x000000008EF46000 bus=0x000000008EF46000 pages=16 identity=1
+[NVSHIM] alloc handle=1 bus=0x8ef46000 size=0x10000 domain=0x2
+[NV-DMA] map phys=0x000000008EF56000 bus=0x000000008EF56000 pages=1 identity=1
+[NVSHIM] alloc handle=2 bus=0x8ef56000 size=0x1000 domain=0x4
+[NVSHIM] vm vm=1 size=0x100000000
+[NVSHIM] bind op=0 va=0x10000000 range=0x10000 handle=1
+[NVSHIM] vm_bind refused rm=-22
+[NVSHIM] channel ch=1 engine=1 pushbuf=0x8ef46000
+[NVSHIM] submit ch=1 len=64 fence=0x1
+[NVSHIM] fence ch=1 fence=0x1 retired=0 timeout=poll
+[NVSHIM] fence ch=1 fence=0x1 retired=0 timeout=ms clamped=0
+[NVSHIM] submit ch=1 len=64 fence=0x2
+[NVSHIM] fence ch=1 fence=0x1 retired=1
+[NVSHIM] fence ch=1 fence=0x2 retired=1
+[NVSHIM] bind op=1 va=0x10000000 range=0x10000 handle=0
+[NVSHIM] vm_bind refused rm=-22
+[NV-DMA] unmap phys=0x000000008EF56000 pages=1
+[NV-DMA] unmap phys=0x000000008EF46000 pages=16
+[NVSHIM] device_free dev=1
+[NVSHIM] device dev=1 chipset=0x192 pci=0x2684 mock=1 feats=0x1ff
+[NV-DMA] map phys=0x000000008EF46000 bus=0x000000008EF46000 pages=1 identity=1
+[NVSHIM] alloc handle=1 bus=0x8ef46000 size=0x1000 domain=0x2
+  [NVSHIM] probe device+vm+channel+submit+fence: PASS
+[NV-DMA] unmap phys=0x000000008EF46000 pages=1
+[KERNEL] Process 42:  exited (signal 9).
+[EXITPC] pid=42 last_user_pc=0x0 code=0x9 killed
+  Running test_nvshim_ownership...
+[NVSHIM] device dev=1 chipset=0x192 pci=0x2684 mock=1 feats=0x1ff
+[NV-DMA] map phys=0x000000008EF46000 bus=0x000000008EF46000 pages=16 identity=1
+[NVSHIM] alloc handle=1 bus=0x8ef46000 size=0x10000 domain=0x2
+[NVSHIM] vm vm=1 size=0x40000000
+[NVSHIM] channel ch=1 engine=1 pushbuf=0x8ef46000
+[NVSHIM] device dev=1 chipset=0x192 pci=0x2684 mock=1 feats=0x1ff
+[NV-DMA] unmap phys=0x000000008EF46000 pages=16
+[KERNEL] Process 43:  exited (signal 9).
+[EXITPC] pid=43 last_user_pc=0x0 code=0x9 killed
+  Running test_nvshim_limits...
+[NVSHIM] device dev=1 chipset=0x192 pci=0x2684 mock=1 feats=0x1ff
+[NV-DMA] map phys=0x000000008EF46000 bus=0x000000008EF46000 pages=16 identity=1
+[NVSHIM] alloc handle=1 bus=0x8ef46000 size=0x10000 domain=0x2
+[NVSHIM] vm vm=1 size=0x40000000
+[NVSHIM] bind op=0 va=0x1000 range=0x1000 handle=1
+[NVSHIM] bind op=0 va=0x3ffff000 range=0x1000 handle=1
+[NVSHIM] channel ch=1 engine=1 pushbuf=0x8ef46000
+[NVSHIM] submit ch=1 len=4 fence=0x1
+[NVSHIM] channel ch=2 engine=1 pushbuf=0x8ef46000
+[NV-DMA] unmap phys=0x000000008EF46000 pages=16
+[KERNEL] Process 44:  exited (signal 9).
+[EXITPC] pid=44 last_user_pc=0x0 code=0x9 killed
+  Running test_nvshim_drm_layout...
+  Running test_nvshim_drm_refusals...
+[NVSHIM] drm refuse setparam errno=ENOSYS
+[NVSHIM] drm refuse grobj_alloc errno=ENOSYS
+[NVSHIM] drm refuse notifier_obj errno=ENOSYS
+[NVSHIM] drm refuse gpuobj_free errno=ENOSYS
+[NVSHIM] drm refuse svm_init errno=ENOSYS
+[NVSHIM] drm refuse svm_bind errno=ENOSYS
+[NVSHIM] drm refuse get_zcull_info errno=ENOSYS
+[NVSHIM] drm refuse gem_pushbuf errno=ENOSYS
+[NVSHIM] drm refuse gem_cpu_prep errno=ENOSYS
+[NVSHIM] drm refuse gem_cpu_fini errno=ENOSYS
+[NVSHIM] drm refuse gem_flink errno=ENOSYS
+  Running test_nvshim_drm_probe...
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm getparam param=11 value=0x192
+[NVSHIM] drm getparam param=4 value=0x2684
+[NVSHIM] drm getparam param=3 value=0x10de
+[NVSHIM] drm getparam param=17 value=0x40
+[NVSHIM] drm getparam param=8 value=0x100000000
+[NVSHIM] drm getparam refused param=14 reason=mock_has_no_card
+[NVSHIM] drm refuse size nr=80 want=16 got=8
+[NVSHIM] drm refuse size nr=80 want=16 got=24
+[NVSHIM] drm vm vm=1 umd_end=0x8000000000 total=0x10000000000
+[NV-DMA] map phys=0x000000008EF46000 bus=0x000000008EF46000 pages=16 identity=1
+[NVSHIM] drm gem_new handle=1 size=0x10000 offset=0x8ef46000 domain=0x2 map=0x0
+[NVSHIM] drm gem_info handle=1 offset=0x8ef46000 size=0x10000 map=0x0
+[NVSHIM] drm bind vm=1 ops=2 first_addr=0x10000 first_range=0x10000
+[NVSHIM] drm bind vm=1 ops=1 first_addr=0x20000 first_range=0x1000
+[NV-DMA] map phys=0x000000008EF56000 bus=0x000000008EF56000 pages=16 identity=1
+[NVSHIM] drm channel ch=1 pushbuf=0x8ef56000 size=0x10000
+[NVSHIM] drm syncobj create handle=1 point=0x0 obj=1
+[NVSHIM] drm syncobj create handle=2 point=0x0 obj=2
+[NVSHIM] drm exec ch=1 pushes=1 sigs=1 bytes=64 stream=0xdfde6ac5 fence=0x1
+[NVSHIM] drm syncobj wait n=1 retired=0 timeout=poll clamped=0
+[NVSHIM] drm syncobj wait n=1 retired=0 timeout=ms clamped=0
+[NVSHIM] drm exec ch=1 pushes=1 sigs=0 bytes=64 stream=0xdfde6ac5 fence=0x2
+[NVSHIM] drm syncobj wait n=1 retired=1
+[NVSHIM] drm syncobj wait n=1 retired=0 timeout=poll clamped=0
+[NVSHIM] drm syncobj wait n=1 retired=1
+[NVSHIM] drm syncobj wait n=1 retired=0 timeout=poll clamped=0
+[NVSHIM] drm syncobj destroy handle=2 freed=1
+[NV-DMA] unmap phys=0x000000008EF56000 pages=16
+[NVSHIM] drm channel_free ch=1
+[NV-DMA] unmap phys=0x000000008EF46000 pages=16
+[NVSHIM] drm gem_close handle=1 freed=1 refs=0
+  [NVSHIM] drm probe version+cap+getparam+gem+vm+bind+channel+exec+syncobj: PASS
+[KERNEL] Process 45:  exited (signal 9).
+[EXITPC] pid=45 last_user_pc=0x0 code=0x9 killed
+  Running test_nvshim_drm_ownership...
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm getparam param=11 value=0x192
+[NVSHIM] drm vm vm=1 umd_end=0x8000000000 total=0x10000000000
+[NV-DMA] map phys=0x000000008EF46000 bus=0x000000008EF46000 pages=16 identity=1
+[NVSHIM] drm gem_new handle=1 size=0x10000 offset=0x8ef46000 domain=0x2 map=0x0
+[NVSHIM] drm bind vm=1 ops=1 first_addr=0x10000 first_range=0x10000
+[NV-DMA] map phys=0x000000008EF56000 bus=0x000000008EF56000 pages=16 identity=1
+[NVSHIM] drm channel ch=1 pushbuf=0x8ef56000 size=0x10000
+[NVSHIM] drm syncobj create handle=1 point=0x0 obj=3
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm getparam param=11 value=0x192
+[NV-DMA] unmap phys=0x000000008EF56000 pages=16
+[NV-DMA] unmap phys=0x000000008EF46000 pages=16
+[KERNEL] Process 46:  exited (signal 9).
+[EXITPC] pid=46 last_user_pc=0x0 code=0x9 killed
+  Running test_nvshim_drm_limits...
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NV-DMA] map phys=0x000000008EF46000 bus=0x000000008EF46000 pages=1 identity=1
+[NVSHIM] drm gem_new handle=1 size=0x1000 offset=0x8ef46000 domain=0x2 map=0x0
+[NV-DMA] map phys=0x000000008EF47000 bus=0x000000008EF47000 pages=1 identity=1
+[NVSHIM] drm gem_new handle=2 size=0x1000 offset=0x8ef47000 domain=0x1 map=0x0
+[NV-DMA] map phys=0x000000008EF48000 bus=0x000000008EF48000 pages=1 identity=1
+[NVSHIM] drm gem_new handle=3 size=0x1000 offset=0x8ef48000 domain=0x4 map=0x0
+[NV-DMA] unmap phys=0x000000008EF48000 pages=1
+[NV-DMA] unmap phys=0x000000008EF47000 pages=1
+[NV-DMA] unmap phys=0x000000008EF46000 pages=1
+[KERNEL] Process 47:  exited (signal 9).
+[EXITPC] pid=47 last_user_pc=0x0 code=0x9 killed
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm vm vm=1 umd_end=0x8000000000 total=0x10000000000
+[NV-DMA] map phys=0x000000008EF46000 bus=0x000000008EF46000 pages=16 identity=1
+[NVSHIM] drm channel ch=1 pushbuf=0x8ef46000 size=0x10000
+[NVSHIM] drm syncobj create handle=1 point=0x1 obj=4
+[NVSHIM] drm syncobj refuse wait count=0x0 reason=bad_shape
+[NVSHIM] drm syncobj wait n=1 retired=1
+[NVSHIM] drm syncobj refuse wait flags=0x4 reason=wait_flag_unsupported
+[NVSHIM] drm syncobj refuse wait flags=0x80 reason=bad_flags
+[NV-DMA] unmap phys=0x000000008EF46000 pages=16
+[KERNEL] Process 48:  exited (signal 9).
+[EXITPC] pid=48 last_user_pc=0x0 code=0x9 killed
+  Running test_nvshim_drm_cpu_map...
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm vm vm=1 umd_end=0x8000000000 total=0x10000000000
+[NV-DMA] map phys=0x000000008EF46000 bus=0x000000008EF46000 pages=2 identity=1
+[NVSHIM] drm gem_new handle=1 size=0x2000 offset=0x8ef46000 domain=0x9 map=0x1000
+[NVSHIM] drm gem_info handle=1 offset=0x8ef46000 size=0x2000 map=0x1000
+[NVSHIM] drm bind vm=1 ops=1 first_addr=0x10000 first_range=0x2000
+[NV-DMA] map phys=0x000000008EF48000 bus=0x000000008EF48000 pages=16 identity=1
+[NVSHIM] drm channel ch=1 pushbuf=0x8ef48000 size=0x10000
+[NVSHIM] drm mmap handle=1 va=0x1080004000 len=0x2000 phys=0x8ef46000 domain=0x9
+[NVSHIM] drm exec ch=1 pushes=1 sigs=0 bytes=64 stream=0x6957b385 fence=0x1
+[NVSHIM] drm exec ch=1 pushes=1 sigs=0 bytes=64 stream=0x392d7385 fence=0x2
+[NVSHIM] drm mmap handle=1 va=0x1080006000 len=0x1000 phys=0x8ef46000 domain=0x9
+[NV-DMA] unmap phys=0x000000008EF48000 pages=16
+[NVSHIM] drm channel_free ch=1
+[NV-DMA] unmap phys=0x000000008EF46000 pages=2
+[NVSHIM] drm gem_close handle=1 freed=1 refs=0
+  [NVSHIM] cpu-mapped BO: fault+write+kernel-view+exec digest: PASS
+[KERNEL] Process 49:  exited (signal 9).
+[EXITPC] pid=49 last_user_pc=0x0 code=0x9 killed
+  Running test_nvshim_drm_cpu_map_refusals...
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm vm vm=1 umd_end=0x8000000000 total=0x10000000000
+[NV-DMA] map phys=0x000000008EF46000 bus=0x000000008EF46000 pages=1 identity=1
+[NVSHIM] drm gem_new handle=1 size=0x1000 offset=0x8ef46000 domain=0x29 map=0x1000
+[NV-DMA] map phys=0x000000008EF47000 bus=0x000000008EF47000 pages=1 identity=1
+[NVSHIM] drm gem_new handle=2 size=0x1000 offset=0x8ef47000 domain=0x19 map=0x2000
+[NV-DMA] map phys=0x000000008EF48000 bus=0x000000008EF48000 pages=1 identity=1
+[NVSHIM] drm gem_new handle=3 size=0x1000 offset=0x8ef48000 domain=0x2 map=0x0
+[NVSHIM] drm mmap refused off=0x0 reason=no_such_object
+[NVSHIM] drm mmap refused off=0x2001 reason=no_such_object
+[NVSHIM] drm mmap refused flags=0x2 reason=needs_shared
+[NVSHIM] drm mmap refused prot=0x0 reason=protection
+[NVSHIM] drm mmap refused prot=0x7 reason=protection
+[NVSHIM] drm mmap refused handle=2 len=0x2000 size=0x1000 reason=beyond_object
+[NVSHIM] drm mmap refused handle=3 domain=0x2 reason=domain_never_offered_a_cpu_mapping
+[NVSHIM] drm mmap refused handle=779 reason=not_this_clients_object
+[NVSHIM] drm mmap handle=2 va=0x1080004000 len=0x1000 phys=0x8ef47000 domain=0x19
+[NV-DMA] unmap phys=0x000000008EF47000 pages=1
+[NVSHIM] drm gem_close handle=2 freed=1 refs=0
+[NV-DMA] unmap phys=0x000000008EF46000 pages=1
+[NVSHIM] drm gem_close handle=1 freed=1 refs=0
+[NV-DMA] unmap phys=0x000000008EF48000 pages=1
+[NVSHIM] drm gem_close handle=3 freed=1 refs=0
+[KERNEL] Process 50:  exited (signal 9).
+[EXITPC] pid=50 last_user_pc=0x0 code=0x9 killed
+  Running test_nvshim_drm_prime_export...
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm vm vm=1 umd_end=0x8000000000 total=0x10000000000
+[NV-DMA] map phys=0x000000008EF46000 bus=0x000000008EF46000 pages=2 identity=1
+[NVSHIM] drm gem_new handle=1 size=0x2000 offset=0x8ef46000 domain=0x9 map=0x1000
+[NVSHIM] prime export handle=1 fd=4 size=0x2000 domain=0x9 buf=1
+[NVSHIM] drm mmap handle=1 va=0x1080004000 len=0x2000 phys=0x8ef46000 domain=0x9
+[NVSHIM] prime mmap fd=4 buf=1 handle=1 va=0x1080006000 phys=0x8ef46000
+[NVSHIM] prime export handle=1 fd=5 size=0x2000 domain=0x9 buf=2
+[NVSHIM] prime release buf=2 fd=5 last=0
+[NVSHIM] prime release buf=1 fd=4 last=0
+[NV-DMA] unmap phys=0x000000008EF46000 pages=2
+[NVSHIM] drm gem_close handle=1 freed=1 refs=0
+[KERNEL] Process 51:  exited (signal 9).
+[EXITPC] pid=51 last_user_pc=0x0 code=0x9 killed
+  Running test_nvshim_drm_prime_import...
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm vm vm=1 umd_end=0x8000000000 total=0x10000000000
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm vm vm=2 umd_end=0x8000000000 total=0x10000000000
+[NV-DMA] map phys=0x000000008EF4A000 bus=0x000000008EF4A000 pages=2 identity=1
+[NVSHIM] drm gem_new handle=1 size=0x2000 offset=0x8ef4a000 domain=0x9 map=0x1000
+[NVSHIM] prime export handle=1 fd=4 size=0x2000 domain=0x9 buf=3
+[NVSHIM] prime import buf=3 fd=4 handle=1 size=0x2000
+[NVSHIM] drm gem_info handle=1 offset=0x8ef4a000 size=0x2000 map=0x1000
+[NVSHIM] prime mmap fd=4 buf=3 handle=1 va=0x1080006000 phys=0x8ef4a000
+[NVSHIM] prime import buf=3 fd=4 handle=1 size=0x2000
+[NVSHIM] prime mmap fd=4 buf=3 handle=1 va=0x1080004000 phys=0x8ef4a000
+[NVSHIM] drm gem_close handle=1 kept refs=1 reason=prime_fd_open
+[NVSHIM] drm gem_close handle=1 kept refs=1 reason=prime_fd_open
+[NVSHIM] drm gem_close handle=1 kept refs=1 reason=prime_fd_open
+[NV-DMA] unmap phys=0x000000008EF4A000 pages=2
+[NVSHIM] prime release buf=3 fd=4 last=1
+[NV-DMA] map phys=0x000000008EF4A000 bus=0x000000008EF4A000 pages=1 identity=1
+[NVSHIM] drm gem_new handle=2 size=0x1000 offset=0x8ef4a000 domain=0x9 map=0x2000
+[NVSHIM] prime export handle=2 fd=4 size=0x1000 domain=0x9 buf=4
+[NVSHIM] prime mmap fd=4 buf=4 handle=2 va=0x1080004000 phys=0x8ef4a000
+[NVSHIM] prime release buf=4 fd=4 last=0
+[NV-DMA] unmap phys=0x000000008EF4A000 pages=1
+[NVSHIM] drm gem_close handle=2 freed=1 refs=0
+[NV-DMA] map phys=0x000000008EF4A000 bus=0x000000008EF4A000 pages=1 identity=1
+[NVSHIM] drm gem_new handle=3 size=0x1000 offset=0x8ef4a000 domain=0x9 map=0x3000
+[NVSHIM] prime export handle=3 fd=4 size=0x1000 domain=0x9 buf=5
+[NV-DMA] unmap phys=0x000000008EF4A000 pages=1
+[NVSHIM] prime release buf=5 fd=4 last=1
+[KERNEL] Process 53:  exited (signal 9).
+[EXITPC] pid=53 last_user_pc=0x0 code=0x9 killed
+[KERNEL] Process 52:  exited (signal 9).
+[EXITPC] pid=52 last_user_pc=0x0 code=0x9 killed
+  Running test_nvshim_drm_prime_refusals...
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm vm vm=1 umd_end=0x8000000000 total=0x10000000000
+[NV-DMA] map phys=0x000000008EF48000 bus=0x000000008EF48000 pages=1 identity=1
+[NVSHIM] drm gem_new handle=1 size=0x1000 offset=0x8ef48000 domain=0x29 map=0x1000
+[NVSHIM] prime refuse dir=export handle=1 reason=no_share
+[NV-DMA] unmap phys=0x000000008EF48000 pages=1
+[NVSHIM] drm gem_close handle=1 freed=1 refs=0
+[NV-DMA] map phys=0x000000008EF48000 bus=0x000000008EF48000 pages=1 identity=1
+[NVSHIM] drm gem_new handle=2 size=0x1000 offset=0x8ef48000 domain=0x2 map=0x0
+[NVSHIM] prime export handle=2 fd=4 size=0x1000 domain=0x2 buf=6
+[NVSHIM] prime mmap refused fd=4 buf=6 domain=0x2 reason=domain_never_offered_a_cpu_mapping
+[NVSHIM] prime mmap refused fd=4 off=0x1000 reason=offset_must_be_zero
+[NVSHIM] prime import buf=6 fd=4 handle=2 size=0x1000
+[NVSHIM] drm gem_close handle=2 kept refs=1 reason=prime_fd_open
+[NVSHIM] prime release buf=6 fd=4 last=0
+[NV-DMA] unmap phys=0x000000008EF48000 pages=1
+[NVSHIM] drm gem_close handle=2 freed=1 refs=0
+[NV-DMA] map phys=0x000000008EF48000 bus=0x000000008EF48000 pages=1 identity=1
+[NVSHIM] drm gem_new handle=3 size=0x1000 offset=0x8ef48000 domain=0x9 map=0x3000
+[NVSHIM] prime refuse dir=export handle=3 reason=flags flags=0x80
+[NVSHIM] prime refuse dir=export handle=780 reason=not_this_clients_object
+[NVSHIM] drm gem_close handle=3 kept refs=1 reason=prime_fd_open
+[NV-DMA] unmap phys=0x000000008EF48000 pages=1
+[NVSHIM] drm gem_close handle=3 freed=1 refs=0
+[NVSHIM] drm refuse gem_flink errno=ENOSYS
+[NVSHIM] drm refuse gem_pushbuf errno=ENOSYS
+[NVSHIM] drm refuse setparam errno=ENOSYS
+[NVSHIM] drm refuse size nr=45 want=12 got=16
+[KERNEL] Process 54:  exited (signal 9).
+[EXITPC] pid=54 last_user_pc=0x0 code=0x9 killed
+  Running test_nvshim_drm_syncobj_timeline...
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm vm vm=1 umd_end=0x8000000000 total=0x10000000000
+[NV-DMA] map phys=0x000000008EF48000 bus=0x000000008EF48000 pages=16 identity=1
+[NVSHIM] drm gem_new handle=1 size=0x10000 offset=0x8ef48000 domain=0x9 map=0x1000
+[NVSHIM] drm bind vm=1 ops=1 first_addr=0x10000 first_range=0x10000
+[NV-DMA] map phys=0x000000008EF58000 bus=0x000000008EF58000 pages=16 identity=1
+[NVSHIM] drm channel ch=1 pushbuf=0x8ef58000 size=0x10000
+[NVSHIM] drm syncobj create handle=1 point=0x0 obj=5
+[NVSHIM] drm syncobj timeline_signal n=1 point=0x5
+[NVSHIM] drm syncobj timeline_wait n=1 point=0x5 retired=1
+[NVSHIM] drm syncobj timeline_wait n=1 point=0x4 retired=1
+[NVSHIM] drm syncobj timeline_wait n=1 point=0x1 retired=1
+[NVSHIM] drm syncobj timeline_wait n=1 point=0x6 retired=0 clamped=0
+[NVSHIM] drm syncobj timeline_wait n=1 point=0x6 retired=0 clamped=0
+[NVSHIM] drm syncobj wait n=1 retired=1
+[NVSHIM] drm syncobj create handle=2 point=0x0 obj=6
+[NVSHIM] drm exec ch=1 pushes=1 sigs=1 bytes=64 stream=0xdfde6ac5 fence=0x1
+[NVSHIM] drm syncobj timeline_wait n=1 point=0xb retired=0 clamped=0
+[NVSHIM] drm syncobj timeline_wait n=1 point=0xb retired=0 clamped=0
+[NVSHIM] drm syncobj timeline_wait n=1 point=0x1 retired=0 clamped=0
+[NVSHIM] drm exec ch=1 pushes=1 sigs=0 bytes=64 stream=0xdfde6ac5 fence=0x2
+[NVSHIM] drm syncobj timeline_wait n=1 point=0xb retired=1
+[NVSHIM] drm syncobj timeline_wait n=1 point=0xc retired=0 clamped=0
+[NVSHIM] drm syncobj wait n=1 retired=1
+[NVSHIM] drm exec ch=1 pushes=1 sigs=1 bytes=64 stream=0xdfde6ac5 fence=0x3
+[NVSHIM] drm syncobj timeline_wait n=1 point=0xc retired=1
+[NVSHIM] drm exec refused timeline_signal handle=0x2 reason=timeline_point_zero
+[NVSHIM] drm exec refused timeline_signal point=0xc reason=timeline_point_order
+[NVSHIM] drm exec refused timeline_signal point=0x5 reason=timeline_point_order
+[NVSHIM] drm syncobj timeline_wait n=1 point=0xc retired=1
+[NVSHIM] drm syncobj timeline_signal n=1 point=0x6
+[NVSHIM] drm syncobj refuse timeline_signal point=0x6 reason=timeline_point_order
+[NVSHIM] drm syncobj refuse timeline_signal point=0x5 reason=timeline_point_order
+[NVSHIM] drm syncobj refuse timeline_signal handle=0x1 reason=timeline_point_zero
+[NVSHIM] drm syncobj timeline_signal n=1 point=0x7
+[NVSHIM] drm syncobj timeline_wait n=1 point=0x7 retired=1
+[NVSHIM] drm syncobj timeline_wait n=2 point=0x7 retired=1
+[NVSHIM] drm syncobj timeline_wait n=2 point=0x7 retired=0 clamped=0
+[NVSHIM] drm syncobj timeline_wait n=2 point=0x7 retired=1
+  [NVSHIM] syncobj timeline: signal/wait both directions, EXEC point on retire, refused shapes: PASS
+[NVSHIM] drm syncobj destroy handle=1 freed=1
+[NVSHIM] drm syncobj destroy handle=2 freed=1
+[NV-DMA] unmap phys=0x000000008EF58000 pages=16
+[NVSHIM] drm channel_free ch=1
+[NV-DMA] unmap phys=0x000000008EF48000 pages=16
+[NVSHIM] drm gem_close handle=1 freed=1 refs=0
+[KERNEL] Process 55:  exited (signal 9).
+[EXITPC] pid=55 last_user_pc=0x0 code=0x9 killed
+  Running test_nvshim_drm_syncobj_fd...
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm getparam param=11 value=0x192
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm getparam param=11 value=0x192
+[NVSHIM] drm syncobj create handle=1 point=0x0 obj=7
+[NVSHIM] drm syncobj handle_to_fd handle=1 fd=4 obj=7 point=0x0
+[NVSHIM] drm syncobj fd_to_handle fd=4 handle=2 obj=7
+[NVSHIM] drm syncobj timeline_signal n=1 point=0x7
+[NVSHIM] drm syncobj timeline_wait n=1 point=0x7 retired=1
+[NVSHIM] drm syncobj timeline_signal n=1 point=0x8
+[NVSHIM] drm syncobj timeline_wait n=1 point=0x8 retired=1
+[NVSHIM] drm syncobj fd_to_handle fd=4 handle=1 obj=7
+[NVSHIM] drm syncobj timeline_signal n=1 point=0xc
+[NVSHIM] drm syncobj timeline_wait n=1 point=0xc retired=1
+[NVSHIM] drm syncobj destroy handle=1 freed=0
+[NVSHIM] drm syncobj destroy handle=2 freed=0
+[NVSHIM] drm syncobj destroy handle=1 freed=0
+[NVSHIM] syncobj release obj=7 fd=4 point=0xc refs=0 freed=1
+[NVSHIM] drm syncobj create handle=1 point=0x1 obj=8
+[NVSHIM] drm syncobj handle_to_fd handle=1 fd=4 obj=8 point=0x1
+[NVSHIM] syncobj release obj=8 fd=4 point=0x1 refs=0 freed=1
+[KERNEL] Process 57:  exited (signal 9).
+[EXITPC] pid=57 last_user_pc=0x0 code=0x9 killed
+[KERNEL] Process 56:  exited (signal 9).
+[EXITPC] pid=56 last_user_pc=0x0 code=0x9 killed
+  Running test_nvshim_drm_syncobj_refusals...
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm getparam param=11 value=0x192
+[NVSHIM] drm syncobj create handle=1 point=0x0 obj=9
+[NVSHIM] drm syncobj handle_to_fd sync_file=1 handle=1 fd=4 obj=9 point=0x1 reached=0x0
+[NVSHIM] drm syncobj fd_to_handle sync_file=1 fd=4 handle=2 obj=9 point=0x1
+[NVSHIM] drm syncobj destroy handle=2 freed=0
+[NVSHIM] drm syncobj refuse fd_to_handle fd=0x3 reason=not_a_sync_file
+[NVSHIM] syncfile release obj=9 fd=4 point=0x1 reached=0x0 refs=1 freed=0
+[NVSHIM] drm syncobj refuse handle_to_fd point=0x5 reason=point_without_timeline
+[NVSHIM] drm syncobj refuse handle_to_fd point=0x0 reason=timeline_point_zero
+[NVSHIM] drm syncobj refuse handle_to_fd flags=0x80 reason=bad_flags
+[NVSHIM] drm syncobj refuse handle_to_fd point=0x5 reason=point_without_sync_file
+[NVSHIM] drm syncobj refuse handle_to_fd handle=0x385 reason=not_this_clients_syncobj
+[NVSHIM] drm syncobj refuse handle_to_fd pad=0x1 reason=bad_shape
+[NVSHIM] drm syncobj handle_to_fd handle=1 fd=4 obj=9 point=0x0
+[NVSHIM] drm syncobj refuse fd_to_handle fd=0x4 reason=not_a_sync_file
+[NVSHIM] drm syncobj refuse fd_to_handle flags=0x80 reason=bad_flags
+[NVSHIM] drm syncobj refuse fd_to_handle point=0x3 reason=point_without_sync_file
+[NVSHIM] drm syncobj refuse fd_to_handle pad=0x1 reason=bad_shape
+[NVSHIM] drm syncobj fd_to_handle fd=4 handle=2 obj=9
+[NVSHIM] drm syncobj destroy handle=2 freed=0
+[NVSHIM] syncobj release obj=9 fd=4 point=0x0 refs=1 freed=0
+[NVSHIM] drm syncobj refuse fd_to_handle fd=0x3 reason=not_a_syncobj
+[NVSHIM] drm syncobj refuse fd_to_handle fd=0x384 reason=not_a_syncobj
+[NVSHIM] drm syncobj refuse timeline_signal count=0x0 reason=bad_shape
+[NVSHIM] drm syncobj refuse timeline_signal flags=0x1 reason=bad_flags
+[NVSHIM] drm syncobj refuse timeline_signal points=0x0 reason=timeline_point_zero
+[NVSHIM] drm syncobj refuse timeline_signal handle=0x1 reason=timeline_point_zero
+[NVSHIM] drm syncobj refuse timeline_signal handle=0x2bd reason=not_this_clients_syncobj
+[NVSHIM] drm syncobj refuse timeline_wait count=0x0 reason=bad_shape
+[NVSHIM] drm syncobj refuse timeline_wait flags=0x2 reason=wait_flag_unsupported
+[NVSHIM] drm syncobj refuse timeline_wait flags=0x8 reason=wait_flag_unsupported
+[NVSHIM] drm syncobj refuse timeline_wait flags=0x80 reason=bad_flags
+[NVSHIM] drm syncobj refuse timeline_wait count=0x1 reason=bad_shape
+[NVSHIM] drm syncobj refuse eventfd flags=0x10 reason=bad_flags
+[NVSHIM] drm syncobj destroy handle=1 freed=1
+[KERNEL] Process 58:  exited (signal 9).
+[EXITPC] pid=58 last_user_pc=0x0 code=0x9 killed
+  Running test_nvshim_drm_syncobj_query...
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm vm vm=1 umd_end=0x8000000000 total=0x10000000000
+[NV-DMA] map phys=0x000000008EF58000 bus=0x000000008EF58000 pages=16 identity=1
+[NVSHIM] drm gem_new handle=1 size=0x10000 offset=0x8ef58000 domain=0x9 map=0x1000
+[NVSHIM] drm bind vm=1 ops=1 first_addr=0x10000 first_range=0x10000
+[NV-DMA] map phys=0x000000008EF68000 bus=0x000000008EF68000 pages=16 identity=1
+[NVSHIM] drm channel ch=1 pushbuf=0x8ef68000 size=0x10000
+[NVSHIM] drm syncobj create handle=1 point=0x0 obj=10
+[NVSHIM] drm syncobj query n=1 point=0x0 last_submitted=1
+[NVSHIM] drm syncobj query n=1 point=0x0 last_submitted=0
+[NVSHIM] drm syncobj timeline_signal n=1 point=0x5
+[NVSHIM] drm syncobj query n=1 point=0x5 last_submitted=1
+[NVSHIM] drm syncobj query n=1 point=0x5 last_submitted=0
+[NVSHIM] drm exec ch=1 pushes=1 sigs=1 bytes=64 stream=0xdfde6ac5 fence=0x1
+[NVSHIM] drm syncobj query n=1 point=0xb last_submitted=1
+[NVSHIM] drm syncobj query n=1 point=0x5 last_submitted=0
+[NVSHIM] drm exec ch=1 pushes=1 sigs=0 bytes=64 stream=0xdfde6ac5 fence=0x2
+[NVSHIM] drm syncobj query n=1 point=0xb last_submitted=1
+[NVSHIM] drm syncobj query n=1 point=0xb last_submitted=0
+[NVSHIM] drm exec ch=1 pushes=1 sigs=1 bytes=64 stream=0xdfde6ac5 fence=0x3
+[NVSHIM] drm exec ch=1 pushes=1 sigs=0 bytes=64 stream=0xdfde6ac5 fence=0x4
+[NVSHIM] drm syncobj query n=1 point=0xc last_submitted=1
+[NVSHIM] drm syncobj create handle=2 point=0x0 obj=11
+[NVSHIM] drm syncobj query n=2 point=0xc last_submitted=1
+[NVSHIM] drm syncobj destroy handle=2 freed=1
+[NVSHIM] drm syncobj refuse query handle=0x385 reason=not_this_clients_syncobj
+[NVSHIM] drm syncobj create handle=2 point=0x1 obj=12
+[NVSHIM] drm syncobj refuse query handle=0x2 reason=point_beyond_ledger
+[NVSHIM] drm syncobj query n=1 point=0x1 last_submitted=0
+[NVSHIM] drm syncobj destroy handle=2 freed=1
+[NVSHIM] drm syncobj create handle=2 point=0x0 obj=13
+[NVSHIM] drm syncobj refuse query handle=0x2 reason=point_beyond_ledger
+[NVSHIM] drm syncobj query n=1 point=0x0 last_submitted=1
+[NVSHIM] drm syncobj query n=1 point=0x0 last_submitted=0
+[NVSHIM] drm syncobj destroy handle=2 freed=1
+[NVSHIM] drm syncobj refuse query flags=0x80 reason=bad_flags
+[NVSHIM] drm syncobj refuse query count=0x0 reason=bad_shape
+[NVSHIM] drm syncobj refuse query points=0x0 reason=bad_shape
+  [NVSHIM] syncobj query: submitted vs signalled, pre/post submit, held fence, refusals by name: PASS
+[NVSHIM] drm syncobj destroy handle=1 freed=1
+[NV-DMA] unmap phys=0x000000008EF68000 pages=16
+[NVSHIM] drm channel_free ch=1
+[NV-DMA] unmap phys=0x000000008EF58000 pages=16
+[NVSHIM] drm gem_close handle=1 freed=1 refs=0
+[KERNEL] Process 59:  exited (signal 9).
+[EXITPC] pid=59 last_user_pc=0x0 code=0x9 killed
+  Running test_nvshim_drm_syncfile...
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm getparam param=11 value=0x192
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm getparam param=11 value=0x192
+[NVSHIM] drm vm vm=1 umd_end=0x8000000000 total=0x10000000000
+[NV-DMA] map phys=0x000000008EF68000 bus=0x000000008EF68000 pages=16 identity=1
+[NVSHIM] drm gem_new handle=1 size=0x10000 offset=0x8ef68000 domain=0x9 map=0x1000
+[NVSHIM] drm bind vm=1 ops=1 first_addr=0x10000 first_range=0x10000
+[NV-DMA] map phys=0x000000008EF78000 bus=0x000000008EF78000 pages=16 identity=1
+[NVSHIM] drm channel ch=1 pushbuf=0x8ef78000 size=0x10000
+[NVSHIM] drm syncobj create handle=1 point=0x0 obj=14
+[NVSHIM] drm syncobj handle_to_fd handle=1 fd=4 obj=14 point=0x0
+[NVSHIM] drm syncobj handle_to_fd sync_file=1 handle=1 fd=5 obj=14 point=0x1 reached=0x0
+[NVSHIM] drm exec ch=1 pushes=1 sigs=1 bytes=64 stream=0xdfde6ac5 fence=0x1
+[NVSHIM] drm syncobj wait n=1 retired=0 timeout=poll clamped=0
+[NVSHIM] drm exec ch=1 pushes=1 sigs=0 bytes=64 stream=0xdfde6ac5 fence=0x2
+  [NVSHIM] syncfile binary: file_poll 0/revents 0 while the fence was held, 1/POLLIN after the kick retired it
+[NVSHIM] drm syncobj wait n=1 retired=1
+[NVSHIM] drm syncobj create handle=2 point=0x0 obj=15
+[NVSHIM] drm syncobj handle_to_fd handle=2 fd=6 obj=15 point=0x0
+[NVSHIM] drm syncobj handle_to_fd sync_file=1 handle=2 fd=7 obj=15 point=0x7 reached=0x0
+[NVSHIM] drm syncobj fd_to_handle sync_file=1 fd=7 handle=3 obj=15 point=0x7
+[NVSHIM] drm syncobj wait n=1 retired=0 timeout=poll clamped=0
+[NVSHIM] drm syncobj fd_to_handle sync_file=1 fd=7 handle=4 obj=15 point=0x7
+[NVSHIM] drm exec ch=1 pushes=1 sigs=1 bytes=64 stream=0xdfde6ac5 fence=0x3
+[NVSHIM] drm exec ch=1 pushes=1 sigs=0 bytes=64 stream=0xdfde6ac5 fence=0x4
+  [NVSHIM] syncfile timeline@7: file_poll 0/revents 0 before the kick, 1/POLLIN after; imported SYNCOBJ_WAIT -ETIME -> 0 on the same retire
+[NVSHIM] drm syncobj fd_to_handle sync_file=1 fd=4 handle=1 obj=15 point=0x7
+[NVSHIM] drm syncobj refuse eventfd flags=0x1 reason=bad_flags
+[NVSHIM] syncfile release obj=14 fd=5 point=0x1 reached=0x1 refs=0 freed=1
+[NVSHIM] syncfile release obj=15 fd=7 point=0x7 reached=0x7 refs=0 freed=1
+  [NVSHIM] syncfile refs: dup/fork/SCM_RIGHTS kept ONE description and ONE record reference; the last close freed each record once: PASS
+[NV-DMA] unmap phys=0x000000008EF78000 pages=16
+[NVSHIM] drm channel_free ch=1
+[NV-DMA] unmap phys=0x000000008EF68000 pages=16
+[NVSHIM] drm gem_close handle=1 freed=1 refs=0
+[KERNEL] Process 61:  exited (signal 9).
+[EXITPC] pid=61 last_user_pc=0x0 code=0x9 killed
+[KERNEL] Process 60:  exited (signal 9).
+[EXITPC] pid=60 last_user_pc=0x0 code=0x9 killed
+  Running test_nvshim_drm_syncobj_transfer...
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm getparam param=11 value=0x192
+[NVSHIM] drm vm vm=1 umd_end=0x8000000000 total=0x10000000000
+[NV-DMA] map phys=0x000000008EF80000 bus=0x000000008EF80000 pages=16 identity=1
+[NVSHIM] drm gem_new handle=1 size=0x10000 offset=0x8ef80000 domain=0x9 map=0x1000
+[NVSHIM] drm bind vm=1 ops=1 first_addr=0x10000 first_range=0x10000
+[NV-DMA] map phys=0x000000008EF90000 bus=0x000000008EF90000 pages=16 identity=1
+[NVSHIM] drm channel ch=1 pushbuf=0x8ef90000 size=0x10000
+[NVSHIM] drm exec ch=1 pushes=1 sigs=1 bytes=64 stream=0xdfde6ac5 fence=0x1
+[NVSHIM] drm syncobj transfer src=1 dst=2 src_point=0x9 dst_point=0x9 obj=16->17 chained=1 src_at=0x0
+[NVSHIM] drm exec ch=1 pushes=1 sigs=0 bytes=64 stream=0xdfde6ac5 fence=0x2
+  [NVSHIM] transfer: dst wait -ETIME while the source fence was held, 0 after the SAME kick that satisfied src; query reports the transferred point
+[NVSHIM] drm syncobj transfer src=1 dst=2 src_point=0xc dst_point=0xc obj=16->17 src_reached=1 src_at=0xc
+[NV-DMA] unmap phys=0x000000008EF90000 pages=16
+[NVSHIM] drm channel_free ch=1
+[NV-DMA] unmap phys=0x000000008EF80000 pages=16
+[NVSHIM] drm gem_close handle=1 freed=1 refs=0
+[KERNEL] Process 62:  exited (signal 9).
+[EXITPC] pid=62 last_user_pc=0x0 code=0x9 killed
+  Running test_nvshim_drm_syncobj_transfer_syncfile...
+[NVSHIM] drm device dev=1 chipset=0x192 mock=1
+[NVSHIM] drm getparam param=11 value=0x192
+[NV-DMA] map phys=0x000000008EF80000 bus=0x000000008EF80000 pages=16 identity=1
+[NV-DMA] map phys=0x000000008EF90000 bus=0x000000008EF90000 pages=16 identity=1
+[NVSHIM] drm syncobj handle_to_fd sync_file=1 handle=1 fd=4 obj=18 point=0x9 reached=0x0
+[NVSHIM] drm syncobj fd_to_handle sync_file=1 fd=4 handle=3 obj=18 point=0x9
+[NVSHIM] drm syncobj transfer src=3 dst=2 src_point=0x9 dst_point=0x9 obj=18->19 chained=1 src_at=0x0
+[NVSHIM] drm syncobj transfer src=3 dst=4 src_point=0x9 dst_point=0xd obj=18->20 src_reached=1 src_at=0x9
+  [NVSHIM] transfer from a sync_file: dst wait -ETIME while the file's fence was held, 0 on the SAME retire; a reached floor lands at once
+[NVSHIM] drm syncobj handle_to_fd sync_file=1 handle=4 fd=5 obj=21 point=0xc reached=0xc
+[NVSHIM] drm syncobj fd_to_handle sync_file=1 fd=5 handle=6 obj=21 point=0xc
+[NVSHIM] drm syncobj transfer src=6 dst=5 src_point=0xc dst_point=0xc obj=21->22 src_reached=1 src_at=0xc
+[NVSHIM] syncfile release obj=18 fd=4 point=0x9 reached=0x9 refs=2 freed=0
+[NVSHIM] syncfile release obj=21 fd=5 point=0xc reached=0xc refs=2 freed=0
+[NV-DMA] unmap phys=0x000000008EF90000 pages=16
+[NV-DMA] unmap phys=0x000000008EF80000 pages=16
+[KERNEL] Process 63:  exited (signal 9).
+[EXITPC] pid=63 last_user_pc=0x0 code=0x9 killed
+  Running test_nvshim_drm_syncobj_transfer_refusals...
+[NVSHIM] drm syncobj refuse transfer flags=0x0 reason=transfer_needs_timeline
+[NVSHIM] drm syncobj refuse transfer flags=0x81 reason=bad_flags
+[NVSHIM] drm syncobj refuse transfer flags=0x80000001 reason=bad_flags
+[NVSHIM] drm syncobj refuse transfer src_point=0x1 reason=transfer_point_unsubmitted
+[NVSHIM] drm syncobj refuse transfer src_point=0x5 reason=transfer_point_unsubmitted
+[NVSHIM] drm syncobj transfer src=1 dst=2 src_point=0x4 dst_point=0x4 obj=23->24 src_reached=1 src_at=0x4
+[NVSHIM] drm syncobj refuse transfer handle=0x3f0 reason=transfer_handle_not_held
+[NVSHIM] drm syncobj refuse transfer handle=0x4 reason=transfer_handle_not_held
+[NVSHIM] drm syncobj refuse transfer handle=0x4 reason=transfer_handle_not_held
+[NVSHIM] drm syncobj refuse transfer point=0x0 reason=timeline_point_zero
+[NVSHIM] drm syncobj refuse transfer point=0x0 reason=timeline_point_zero
+[NVSHIM] drm syncobj refuse transfer dst_point=0x4 reason=timeline_point_order
+[NVSHIM] drm syncobj refuse transfer dst_point=0x3 reason=timeline_point_order
+[NVSHIM] drm syncobj handle_to_fd sync_file=1 handle=4 fd=4 obj=27 point=0x2 reached=0x4
+[NVSHIM] drm syncobj fd_to_handle sync_file=1 fd=4 handle=5 obj=27 point=0x2
+[NVSHIM] drm syncobj refuse transfer src_point=0x1 reason=transfer_point_below_import
+[NVSHIM] drm syncobj refuse transfer src_handle=0x5 reason=transfer_src_sync_file
+[NVSHIM] drm syncobj refuse transfer src_point=0x5 reason=transfer_point_unsubmitted
+[NVSHIM] syncfile release obj=27 fd=4 point=0x2 reached=0x4 refs=2 freed=0
+[NV-DMA] map phys=0x000000008EF80000 bus=0x000000008EF80000 pages=16 identity=1
+[NV-DMA] map phys=0x000000008EF90000 bus=0x000000008EF90000 pages=16 identity=1
+[NVSHIM] drm syncobj handle_to_fd sync_file=1 handle=4 fd=5 obj=28 point=0x7 reached=0x0
+[NVSHIM] drm syncobj refuse transfer src_point=0x7 reason=transfer_point_not_pending
+[NVSHIM] drm syncobj fd_to_handle sync_file=1 fd=5 handle=5 obj=28 point=0x7
+[NVSHIM] drm syncobj refuse transfer src_point=0x7 reason=transfer_point_not_pending
+[NVSHIM] syncfile release obj=28 fd=5 point=0x7 reached=0x0 refs=0 freed=1
+[NV-DMA] unmap phys=0x000000008EF90000 pages=16
+[NV-DMA] unmap phys=0x000000008EF80000 pages=16
+  [NVSHIM] transfer refusals: binary form, unknown flag, unsubmitted point, destroyed handle, zero point, dst point order, sync_file source below/above its floor -- all named
+[KERNEL] Process 64:  exited (signal 9).
+[EXITPC] pid=64 last_user_pc=0x0 code=0x9 killed
+  Running test_nvshim_drm_syncobj_eventfd...
+[NV-DMA] map phys=0x000000008EF80000 bus=0x000000008EF80000 pages=16 identity=1
+[NV-DMA] map phys=0x000000008EF90000 bus=0x000000008EF90000 pages=16 identity=1
+[NVSHIM] drm syncobj eventfd reg handle=1 obj=29 point=0x4 slot=0 gen=1 regs=1
+[NVSHIM] drm syncobj refuse eventfd dup point=0x4 reason=eventfd_registered
+[NVSHIM] drm syncobj refuse eventfd fd=0x3 reason=not_an_eventfd
+[NVSHIM] drm syncobj refuse eventfd fd=0xffffffffffffffff reason=not_an_eventfd
+[NVSHIM] drm syncobj refuse eventfd flags=0x1 reason=bad_flags
+[NVSHIM] drm syncobj refuse eventfd point=0x68 reason=point_beyond_ledger
+[NVSHIM] drm syncobj refuse eventfd handle=0x1f5 reason=not_this_clients_syncobj
+[NVSHIM] drm syncobj eventfd signal slot=0 gen=1 point=0x4 handle=1 n=1
+  [NVSHIM] eventfd: read -EAGAIN before the retire, 8 bytes == 1 after the SAME unsigned EXEC, -EAGAIN on the second read; poll 0 -> POLLIN
+[NVSHIM] drm syncobj eventfd reg handle=1 obj=29 point=0x9 slot=1 gen=2 regs=1
+[NVSHIM] drm syncobj refuse eventfd slot=0x1 reason=eventfd_closed
+  [NVSHIM] eventfd closed: the retire wrote NOTHING -- an eventfd reusing the registered slot still reads -EAGAIN; row reason=eventfd_closed
+[NVSHIM] drm syncobj eventfd reg=now handle=2 point=0x1 slot=2 gen=4 n=1
+[NVSHIM] drm syncobj eventfd reg handle=3 obj=31 point=0x7 slot=3 gen=5 regs=1
+[NVSHIM] drm syncobj eventfd signal slot=3 gen=5 point=0x7 handle=3 n=1
+  [NVSHIM] eventfd binary form: CREATE_SIGNALED signals inside the registration; a pending head fence (7) is waited for, not the landed 3
+[NV-DMA] unmap phys=0x000000008EF90000 pages=16
+[NV-DMA] unmap phys=0x000000008EF80000 pages=16
+[KERNEL] Process 65:  exited (signal 9).
+[EXITPC] pid=65 last_user_pc=0x0 code=0x9 killed
+  Running test_nvshim_nvif_layout...
+  Running test_nvshim_nvif_device...
+[NVSHIM] nvif new class=0x80 cookie=0x1000 dev=1 served=device
+[NVSHIM] nvif new class=0x80 refused reason=cookie_exists
+[NVSHIM] nvif new class=0x80 cookie=0x1008 dev=1 served=device
+[NVSHIM] nvif info chip=AD102 chipset=0x192 fam=0xe ram=0x100000000
+[NVSHIM] nvif mthd refused reason=version
+[NVSHIM] nvif mthd refused reason=size
+[NVSHIM] nvif mthd refused reason=size
+[NVSHIM] nvif mthd refused method=1 name=device_time need=ptimer
+[NVSHIM] nvif mthd refused method=2 name=gcx_ready need=gsp_rm
+[NVSHIM] nvif mthd refused method=9 reason=no_such_method
+[NVSHIM] nvif mthd refused reason=object
+[NVSHIM] nvif new refused reason=device_shape
+[NVSHIM] nvif new refused reason=device_shape
+[NVSHIM] nvif new refused reason=cookie
+[NVSHIM] nvif new refused reason=channel
+[NVSHIM] nvif refused reason=version
+[NVSHIM] nvif refused reason=route
+[NVSHIM] nvif refused type=9 reason=no_such_type
+[NVSHIM] nvif refused reason=size
+[NVSHIM] nvif del refused reason=size
+[NVSHIM] nvif del object=0x1000 found=1
+[NVSHIM] nvif mthd refused reason=object
+[NVSHIM] nvif del object=0x1000 found=0
+[KERNEL] Process 66:  exited (signal 9).
+[EXITPC] pid=66 last_user_pc=0x0 code=0x9 killed
+  Running test_nvshim_nvif_sclass...
+[NVSHIM] nvif sclass refused reason=channel
+[NVSHIM] nvif sclass refused reason=route
+[NV-DMA] map phys=0x000000008EF80000 bus=0x000000008EF80000 pages=16 identity=1
+[NVSHIM] nvif sclass ch=1 count=6 first=0x902d 3d=0xc797
+[NVSHIM] nvif sclass ch=1 count=6 first=0x902d 3d=0xc797
+[NVSHIM] nvif sclass refused reason=size
+[NVSHIM] nvif sclass refused reason=count
+[NVSHIM] nvif sclass ch=1 count=6 first=0x902d 3d=0xc797
+[NVSHIM] nvif sclass refused reason=channel
+[NV-DMA] unmap phys=0x000000008EF80000 pages=16
+[NVSHIM] nvif sclass refused reason=channel
+[KERNEL] Process 67:  exited (signal 9).
+[EXITPC] pid=67 last_user_pc=0x0 code=0x9 killed
+  Running test_nvshim_nvif_engine...
+[NV-DMA] map phys=0x000000008EF80000 bus=0x000000008EF80000 pages=16 identity=1
+[NVSHIM] nvif new class=0x80 cookie=0x5000 dev=1 served=device
+[NVSHIM] nvif new refused class=0x902d name=fermi_twod_a need=gsp_rm missing=rm_chan_object alloc=rm_alloc engine=eng2d
+[NVSHIM] nvif new refused class=0xa140 name=kepler_inline_m2mf need=gsp_rm missing=rm_chan_object alloc=rm_alloc engine=m2mf
+[NVSHIM] nvif new refused class=0xc797 name=ampere_b_gr need=gsp_rm missing=rm_chan_object alloc=rm_alloc engine=eng3d
+[NVSHIM] nvif new refused class=0xc7c0 name=ampere_compute_b need=gsp_rm missing=rm_chan_object alloc=rm_alloc engine=compute
+[NVSHIM] nvif new refused class=0xc6b5 name=ampere_dma_copy_a need=gsp_rm missing=rm_chan_object alloc=ce_alloc engine=copy0
+[NVSHIM] nvif new refused class=0xc7b5 name=ampere_dma_copy_b need=gsp_rm missing=rm_chan_object alloc=ce_alloc engine=copy1
+[NVSHIM] nvif new refused class=0x1234 reason=no_such_class
+[NVSHIM] nvif new refused class=0x80 reason=no_such_class
+[NVSHIM] nvif del object=0x6002 found=0
+[NVSHIM] nvif map refused need=gsp_rm
+[NV-DMA] unmap phys=0x000000008EF80000 pages=16
+[KERNEL] Process 68:  exited (signal 9).
+[EXITPC] pid=68 last_user_pc=0x0 code=0x9 killed
+  Running test_nvshim_getparam_graph_units...
+[KERNEL] Process 69:  exited (signal 9).
+[EXITPC] pid=69 last_user_pc=0x0 code=0x9 killed
+[NVSHIM] drm getparam refused param=13 reason=mock_has_no_topo
+[NVSHIM] drm getparam refused param=14 reason=mock_has_no_card
+[KERNEL] Process 70:  exited (signal 9).
+[EXITPC] pid=70 last_user_pc=0x0 code=0x9 killed
+virtio_input_test_suite:
+  Running test_virtio_input_get_events...
+fb_ioctl_test_suite:
+  Running test_fb_var_fill...
+  Running test_fb_fix_fill...
+  Running test_fb_ioctl_dispatch...
+vdisplay_test_suite:
+  Running test_vdisp_alloc_free...
+  Running test_vdisp_ring...
+  Running test_vdisp_damage...
+  Running test_vdisp_pace...
+evdev_test_suite:
+  Running test_evdev_kbd_a...
+  Running test_evdev_mouse_overflow_drop...
+  Running test_evdev_mouse_clamp...
+  Running test_evdev_wheel_vmmouse...
+input_node_test_suite:
+  Running test_input_fill_event...
+  Running test_input_ioctl_version...
+  Running test_input_ioctl_abs...
+  Running test_input_ioctl_unknown...
+fb_mmap_test_suite:
+  Running test_smem_len...
+  Running test_translate_valid...
+  Running test_translate_invalid...
+  Running test_blank_ioctl...
+  Running test_route...
+  Running test_map_len...
+abi_t2_test_suite:
+  Running test_fb_pixel_pack...
+  Running test_fb_pixel_geometry...
+  Running test_joystick_buttons...
+  Running test_joystick_axes...
+  Running test_uname_identity...
+Running virtio_net tests...
+Running net stack tests...
+  Running test_net_socket_fd_table...
+/TEST.TXT
+[KERNEL] Process 71:  exited (signal 9).
+[EXITPC] pid=71 last_user_pc=0x0 code=0x9 killed
+  Running test_net_connect_state...
+[KERNEL] Process 72:  exited (signal 9).
+[EXITPC] pid=72 last_user_pc=0x0 code=0x9 killed
+  Running test_net_select_engine...
+[KERNEL] Process 73:  exited (signal 9).
+[EXITPC] pid=73 last_user_pc=0x0 code=0x9 killed
+  Running test_net_getrandom...
+  Running test_net_ether_padding...
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+[KERNEL] Process 74:  exited (signal 9).
+[EXITPC] pid=74 last_user_pc=0x0 code=0x9 killed
+  Running test_net_ipv4_reassembly...
+Network configured: IP 10.0.2.15 mask=0x0000000000FFFFFF gw=0x000000000202000A
+net_rdma_test_suite (arch-independent subset):
+  Running test_rdma_crc32_golden...
+    PASS
+[NV-DMA] unit suite (bus address != phys is a first-class value)
+  Running test_nv_dma_alloc_identity_bus...
+[NV-DMA] map phys=0x0000000092F88000 bus=0x0000000092F88000 pages=33 identity=1
+[NV-DMA] unmap phys=0x0000000092F88000 pages=33
+  Running test_nv_dma_alloc_zeroes_frames...
+[NV-DMA] map phys=0x0000000092F88000 bus=0x0000000092F88000 pages=4 identity=1
+[NV-DMA] unmap phys=0x0000000092F88000 pages=4
+[NV-DMA] map phys=0x0000000092F88000 bus=0x0000000092F88000 pages=4 identity=1
+[NV-DMA] unmap phys=0x0000000092F88000 pages=4
+  Running test_nv_dma_alloc_rejects_bad_len...
+[NV-DMA] alloc FAIL len not page-aligned: 0x0000000000000000
+[NV-DMA] alloc FAIL len not page-aligned: 0x0000000000001001
+[NV-DMA] alloc FAIL len not page-aligned: 0x0000000000000FFF
+  Running test_nv_dma_alloc_refuses_under_translation...
+[NV-DMA] alloc FAIL translation-on: refusing -ENOTSUP
+[NV-DMA] map phys=0x0000000092F88000 bus=0x0000000092F88000 pages=1 identity=1
+[NV-DMA] unmap phys=0x0000000092F88000 pages=1
+  Running test_nv_dma_translation_seam...
+  Running test_nv_dma_guard_identity_off...
+[NV-DMA] guard FAIL bus!=phys, phys=0x0000000020000000 bus=0x0000000020001000
+[NV-DMA] guard FAIL bus!=phys, phys=0x0000000020001000 bus=0x0000000020000000
+[NV-DMA] guard FAIL unaligned phys=0x0000000020000800 bus=0x0000000020000800
+[NV-DMA] guard FAIL unaligned phys=0x0000000020000000 bus=0xFFFFFFFFFFFFFFFF
+  Running test_nv_dma_guard_translation_rejects_nonidentity...
+[NV-DMA] guard FAIL translation-on, phys=0x0000000020000000 bus=0x0000000020001000
+[NV-DMA] guard FAIL translation-on, phys=0x00000005F8700000 bus=0x00000005FE400000
+  Running test_nv_dma_guard_translation_rejects_identity_too...
+[NV-DMA] guard FAIL translation-on, phys=0x0000000020000000 bus=0x0000000020000000
+  Running test_nv_dma_bus_never_returns_phys_under_translation...
+[NV-DMA] bus REFUSED under translation, phys=0x0000000021000000
+[NV-DMA] bus REFUSED under translation, phys=0x0000000021000000
+  Running test_nv_dma_bus_rejects_nonidentity_map...
+[NV-DMA] bus REFUSED non-identity, bus=0x0000000031000000 phys=0x0000000021000000
+  Running test_nv_dma_bus_of_run_for_borrowed_frames...
+[NV-DMA] bus-of-run REFUSED shape phys=0x0000000000000000 len=0x0000000000001000
+[NV-DMA] bus-of-run REFUSED shape phys=0x0000000092F88000 len=0x0000000000000000
+[NV-DMA] bus-of-run REFUSED shape phys=0x0000000092F88000 len=0x0000000000001001
+[NV-DMA] bus-of-run REFUSED shape phys=0x0000000092F88001 len=0x0000000000001000
+[NV-DMA] resolve FAIL translation-on: no IOVA allocator
+  Running test_nv_dma_129_page_block...
+[NV-DMA] map phys=0x0000000092F88000 bus=0x0000000092F88000 pages=129 identity=1
+[NV-DMA] unmap phys=0x0000000092F88000 pages=129
+  Running test_nv_dma_two_maps_do_not_overlap...
+[NV-DMA] map phys=0x0000000093000000 bus=0x0000000093000000 pages=2 identity=1
+[NV-DMA] map phys=0x0000000093002000 bus=0x0000000093002000 pages=2 identity=1
+[NV-DMA] unmap phys=0x0000000093002000 pages=2
+[NV-DMA] unmap phys=0x0000000093000000 pages=2
+  Running test_nv_dma_free_is_idempotent...
+[NV-DMA] map phys=0x0000000093000000 bus=0x0000000093000000 pages=3 identity=1
+[NV-DMA] unmap phys=0x0000000093000000 pages=3
+nfs_test_suite:
+  Running test_xdr_roundtrip...
+  Running test_xdr_bounds...
+  Running test_rpc_build_call...
+  Running test_rpc_parse_reply...
+  Running test_parse_attrs_and_handles...
+  Running test_parse_replies...
+  Running test_parse_readdirplus...
+  Running test_vfs_path_cleaning...
+  Running test_vfs_bind...
+  Running test_vfs_mount_validation...
+[NFS] mount: bad source (want A.B.C.D:/export)
+  Running test_vfs_fat_dispatch...
+timer_test_suite:
+  Running test_timer_reload...
+smp_test_suite:
+  Running test_get_cpuid...
+time_test_suite:
+  Running test_epoch_zero...
+  Running test_known_dates...
+  Running test_make_epoch_roundtrip...
+  Running test_leap_years...
+  Running test_days_from_civil...
+  Running test_fat16_stats...
+  [stats] total=1023MB free=805MB
+  Running test_rtc_read...
+  [rtc] epoch=1795816758 -> 2026-11-27 21:59:18
+  Running math_test_suite (integer-only transcendental dispatch)...
+  MATH classes: PASS
+  MATH trig-specials: PASS
+  MATH atan-specials: PASS
+  MATH log-specials: PASS
+  MATH asin-specials: PASS
+  MATH float-specials: PASS
+  MATH modf-specials: PASS
+  MATH isint-odd: PASS
+  MATH pow-specials: PASS
+  MATH atan2-specials: PASS
+
+--- ELF loader (lane B: arch-neutral mapper, PT_INTERP, startup block) ---
+  machine=183
+  Running test_elf_interp_predicate...
+  Running test_elf_parse_matrix...
+  Running test_elf_plan...
+  Running test_elf_map_static_native...
+  Running test_elf_map_compat_unchanged...
+  Running test_elf_map_interp...
+  Running test_elf_map_compat_interp...
+  Running test_elf_interp_second_slot...
+  Running test_elf_refusals...
+elf loader: PT_INTERP present: dynamic binary
+elf loader: PT_INTERP present: dynamic binary (interpreter '/lib/ld-musl-x86_64.so.1' is not the native /LDHOBBY.SO)
+elf loader: e_machine is not this build's architecture
+elf loader: ET_EXEC linked below the user window; a -static-pie build is required (docs/elf-loader.md §1)
+elf loader: image needs its interpreter image
+  Running test_elf_fs_end_to_end...
+/ELFDYN.BIN
+/ELFDYN.BIN
+/ELDFLAT.BIN
+/ELDFLAT.BIN
+elf loader: interpreter '/LDHOBBY.SO' not found on the FAT16 root
+elf loader: PT_INTERP present: dynamic binary
+/LDHOBBY.SO
+/LDHOBBY.SO
+  Running test_elf_dispatch_track...
+/ELFDYN.BIN
+/ELFDYN.BIN
+/ELDSTAT.BIN
+/ELDSTAT.BIN
+/ELDFOR.BIN
+/ELDFOR.BIN
+/LDHOBBY.SO
+/LDHOBBY.SO
+[WAVE-TRY] ELFDYN.BIN
+Loading program for scheduler (v2 AS): ELFDYN.BIN
+/ELFDYN.BIN
+elf loader: PT_INTERP mapped: interp_base=0x1008000000 exe_base=0x1000000000 exe_entry=0x1000000200 start=0x1008000200
+v2 loader: PID=75 entry=0x1008000200 sp=0x1800000000 resident=5 tables=5 abi=0x0 native=1 interp=0x1008000000
+[ARRIVED] ELFDYN.BIN rc>0
+[KERNEL] Process 75: ELFDYN.BIN exited (signal 9).
+[EXITPC] pid=75 last_user_pc=0x0 code=0x9 killed
+[WAVE-TRY] ELDFOR.BIN
+Loading program for scheduler (v2 AS): ELDFOR.BIN
+/ELDFOR.BIN
+elf loader: PT_INTERP present: dynamic binary (interpreter '/lib/ld-musl-x86_64.so.1' is not the native /LDHOBBY.SO)
+v2 loader: ELF load refused rc=-8 size=5120 file=ELDFOR.BIN
+[ARRIVED] ELDFOR.BIN rc<0
+[WAVE-TRY] ELDSTAT.BIN
+Loading program for scheduler (v2 AS): ELDSTAT.BIN
+/ELDSTAT.BIN
+v2 loader: PID=77 entry=0x1000000200 sp=0x1800000000 resident=3 tables=4 abi=0x0 native=1 interp=0x0
+[ARRIVED] ELDSTAT.BIN rc>0
+[KERNEL] Process 77: ELDSTAT.BIN exited (signal 9).
+[EXITPC] pid=77 last_user_pc=0x0 code=0x9 killed
+
+[LOCKHEALTH] blockhold=0 selflock=0 classerr=0 irqsave_proc=0 irqoff_max_us=23862 irqoff_total_us=4462471 reg_used=531 reg_dropped=0
+[LOCKHEALTH-IRQOFF] cpu=0 max_us=23862 total_us=4462471 worst_lock=vm_lock pc=0x43A3DFEEC
+==================================
+Tests run:    486
+Tests failed: 0
+UNIT TESTS PASSED
+==================================

@@ -61,6 +61,37 @@ struct nv_falcon {
   const char *name;
 };
 
+/* How a falcon window answered, which is NOT a boolean.  The four 0xBADF_xxxx
+ * words this family returns are four different facts (docs/nv-gb202-bringup.md
+ * 4.3 measured on GB202):
+ *
+ *   PRESENT         UC_CAPS2 decodes to a falcon version 3..6 AND the control
+ *                   word is readable: a real engine this driver could start.
+ *   CTL_FENCED      the window decodes (identity and version are known) but its
+ *                   control word answers 0xBADF5620 or all ones: an HS falcon
+ *                   read by a non-privileged host, or one a reset fenced.  GB202
+ *                   PFSP is this: version 4.76 published in scratch, ctl fenced.
+ *   FENCED          answered 0xBADF5620 without decoding: a real engine, never
+ *                   initialised -- "do not touch it yet".
+ *   BLOCK_SENTINEL  answered 0xBADF4100 at every probed word: the part does not
+ *                   decode this address, so there is no engine here at all.
+ *   UNREADABLE      answered the generic 0xBADF5040: exists or not, this host
+ *                   may not read it.  Never a reason to fail a probe.
+ *   ABSENT          all ones: nothing answers.
+ *   UNKNOWN         decodes, but to a version nv_regs.h does not describe.
+ *
+ * Used by the PFSP probe (nv_pfsp_probe) and its log row. */
+enum nv_falcon_state {
+  NV_FALCON_ST_ABSENT = 0,
+  NV_FALCON_ST_PRESENT = 1,
+  NV_FALCON_ST_FENCED = 2,
+  NV_FALCON_ST_BLOCK_SENTINEL = 3,
+  NV_FALCON_ST_UNREADABLE = 4,
+  NV_FALCON_ST_UNKNOWN = 5,
+  NV_FALCON_ST_CTL_FENCED = 6,
+};
+const char *nv_falcon_state_name(uint32_t state);
+
 /* ---- GR-engine reachability + topology (nv_engine.c) --------------------
  *
  * Answers the two questions a no-RM path starts from (docs/nv-no-rm-path.md,
@@ -135,6 +166,16 @@ struct nv_dev {
   struct nv_falcon falcon[3]; /* PMU, GSP, SEC2 */
   uint32_t falcon_mask;       /* bit per present falcon */
   struct nv_eng_report eng;   /* read-only GR-window probe (nv_engine.c) */
+
+  /* GB202 PFSP (0x8F0000): read-only observations from nv_pfsp_probe().  The
+   * block is started by the pre-OS chain, so the ucode version word is already
+   * published on a cold boot; pfsp_base is 0 until the probe runs. */
+  uint32_t pfsp_base;
+  uint32_t pfsp_caps, pfsp_caps2, pfsp_ctl, pfsp_busy;
+  uint32_t pfsp_scratch_g2[4];
+  uint32_t pfsp_scratch_g3[4];
+  uint32_t pfsp_ucode;  /* SCRATCH_GROUP_3(1): NV_PFSP_UCODE_VERSION */
+  uint32_t pfsp_state;  /* enum nv_falcon_state */
 
   struct nv_mmio_ops ops;
   void *ops_ctx;
@@ -225,6 +266,38 @@ int nv_gsp_fwsec_reset(struct nv_dev *d);
 /* Read + parse + hash the staged firmware.  Pure file I/O, zero MMIO writes, so
  * it is safe to run on every boot. */
 int nv_gsp_firmware_check(struct nv_dev *d);
+
+/* Read-only PFSP probe (GB202's 0x8F0000): caps/caps2/ctl/busy plus the two
+ * GB202 scratch groups, and the ucode version the FSP's own ucode published
+ * into SCRATCH_GROUP_3(1).  Prints one [NV-PFSP] row.  Never writes, never
+ * starts anything: the PFSP is not in `falcon[]`, so no NV_IOC_* can reach it. */
+int nv_pfsp_probe(struct nv_dev *d);
+
+/* Is GB202's already-running FSP reachable from the host?  The vendor driver's
+ * transport is EMEM channel 0 through the PFSP's own MMIO registers
+ * (NV_PFSP_EMEMC/EMEMD/QUEUE_HEAD/TAIL/MSGQ_HEAD/TAIL, nv_fsp.c).  This probe
+ * measures that block: write sentinels per register, the EMEM port's own
+ * autoincrement counter, and one vendor caps-query packet whose answer -- if
+ * any -- can only come from the SP moving MSGQ_HEAD/MSGQ_TAIL itself.  Gated on
+ * /FSPCH.CFG so an ordinary boot writes nothing. */
+int nv_fsp_channel_probe(struct nv_dev *d);
+
+/* The vendor's next command over that channel: NVDM_PAYLOAD_COT (type 0x14)
+ * with the signed GSP-FMC -- image, hash384, signature and public key from the
+ * staged FMC container -- plus a 1 MiB sysmem FRTS and a GSP_FMC_BOOT_PARAMS
+ * page, and then the GSP core's own window sampled before and after
+ * (nv_fsp_cot.c).  Gated on /COT.CFG.  Modes 58/63/64/65/66 are the rm-boot
+ * harness; see docs/gb202-rm-objects.md. */
+int nv_fsp_cot_probe(struct nv_dev *d);
+
+/* Pure pieces of that probe (unit tier): the write-sentinel verdict, the EMEM
+ * autoincrement decode, and the caps-query packet's three dwords. */
+int nv_fsp_wr_verdict(uint32_t orig, uint32_t sent, uint32_t rb);
+const char *nv_fsp_wr_verdict_name(int v);
+uint32_t nv_fsp_ememc_offset(uint32_t ememc);
+uint32_t nv_fsp_ememc_val(uint32_t offs, int aincw, int aincr);
+void nv_fsp_caps_packet(uint32_t out[3]);
+uint32_t nv_fsp_packet_tail(uint32_t dwords);
 
 /* Falcon engine helpers (nv_falcon.c). */
 int nv_falcon_dmem_write(struct nv_dev *d, const struct nv_falcon *f,
