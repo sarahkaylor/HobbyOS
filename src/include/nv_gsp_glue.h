@@ -132,6 +132,26 @@ int nv_gsp_rpc_stage8(struct nv_dev *d);
  * re-implementing it.  nv_gsp_rpc_stage8() is this, with the singleton. */
 int nv_gsp_rpc_stage8_into(struct nv_gsp_rpc *r, struct nv_dev *d);
 
+/* The first round trip, with the peer-header/own-pointer discrimination of
+ * nv_rpc_harness.c: one message (function `fn`, `payload_len` bytes) and one
+ * answer, both waits bounded by `timeout_us` each.  Rows go to the serial log
+ * through the uart sink, one line each, in the grammar of
+ * docs/nv-rpc-roundtrip.md -- the hardware card quotes them verbatim.
+ *
+ * This is the entry the card calls after the block is published.  It is a
+ * thin adapter on purpose: all the discrimination lives in the pure harness,
+ * which the unit tier runs against synthetic queues (T-27..T-31).
+ *
+ *   -EINVAL   NULL, an unpublished/unbuilt transport, or a payload over one
+ *             slot (NV_RPC_RT_PAYLOAD_MAX).
+ *   -ETIMEDOUT the peer never published its header, or never answered.
+ *   -EIO      the peer's window intersects our own store, the answer did not
+ *             verify, or the peer's header did not move.
+ * The verdict is also written into the log: [NV-RPC] stage=roundtrip. */
+int nv_gsp_rpc_roundtrip(struct nv_gsp_rpc *r, struct nv_dev *d, uint32_t fn,
+                         const void *payload, uint32_t payload_len,
+                         uint32_t timeout_us);
+
 /* The singleton state, for a reader (the log rows and the unit tier are the
  * only readers).  One card, one GSP: the driver is a singleton by design. */
 const struct nv_gsp_rpc *nv_gsp_rpc_state(void);

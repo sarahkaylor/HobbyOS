@@ -64,6 +64,7 @@ void run_all_unit_tests(void) {
   nv_test_suite(); /* nv: NVIDIA driver core + falcon, against a fake MMIO */
   nv_fw_test_suite(); /* nv_fw: firmware container/HS/ELF/WPR/SHA-256 parsers */
   nv_rpc_test_suite(); /* nv_rpc: GSP-RPC transport (docs/nv-rpc-implementation-spec.md) */
+  nv_rpc_harness_test_suite(); /* the round-trip harness (docs/nv-rpc-roundtrip.md) */
   nv_flcn_test_suite(); /* nv_flcn: XFER command, signature index, FRTS patch */
   /* WP-G: the stage-8 seam -- nv_dma -> nv_rpc in the GSP boot path.  Under
    * __x86_64__ because the glue it tests (nv_gsp.c) is driver-lane code that

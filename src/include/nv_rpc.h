@@ -474,6 +474,30 @@ struct nv_rpc_queue {
   uint32_t rx_events, rx_unknown, rx_continuations, rx_stale;
   uint32_t dispatch_log[8];  /* last functions dispatched, oldest first */
   uint32_t dispatch_log_n;
+
+  /* ---- write journal: what THIS side stored into the block ---------------
+   *
+   * The round-trip harness must compare two reads of the PEER's header, never
+   * a peer read against our write pointer, and it must be able to say the
+   * address it read is not one we wrote.  Geometry alone cannot say that (a
+   * store that lands at the wrong offset is exactly the bug the discrimination
+   * is for), so every store this side makes into the block records its range
+   * here and nv_rpc_journal_overlap() answers the question from the record.
+   *
+   * The ring is 32 entries and one message records at most 16 slot writes plus
+   * one writePtr store; nv_rpc_journal_reset() marks the start of a "run", so
+   * the harness's question is always about the run it began.  Entries dropped
+   * out of the ring are counted, never silently forgotten.
+   *
+   * nv_rpc_block_build() is NOT journalled: it writes the whole block by
+   * definition (including the status header, zeroed on purpose), it runs before
+   * any queue exists, and a run starts after the build. */
+#define NV_RPC_WRITE_JOURNAL 32u
+  uint32_t jrn_off[NV_RPC_WRITE_JOURNAL]; /* block-relative start */
+  uint32_t jrn_len[NV_RPC_WRITE_JOURNAL]; /* bytes */
+  uint32_t jrn_n;    /* stores recorded since the reset (may exceed the ring) */
+  uint32_t jrn_head; /* ring index of the oldest entry once jrn_n > the ring */
+  uint32_t jrn_lost; /* entries that fell out of the ring */
 };
 
 /* Point a queue at a built block.  rx_stage may be NULL only if the caller
@@ -489,6 +513,23 @@ int nv_rpc_link_apply(struct nv_rpc_queue *q, enum nv_rpc_link_field *bad);
  * clock past the timeout instead of sleeping.  -ETIMEDOUT / NOT_LINKED. */
 int nv_rpc_link(struct nv_rpc_queue *q, const struct nv_rpc_hw *hw,
                 uint32_t timeout_us, enum nv_rpc_reason *reason);
+
+/* ---- the write journal (see struct nv_rpc_queue) ----------------------
+ *
+ * nv_rpc_journal() is called by the three places that store into the block
+ * (link's readPtr publication, tx_commit's slots + writePtr, rx_advance's read
+ * pointer).  Recording is unconditional and cheap; the harness is the only
+ * reader, so a caller that ignores it pays a few stores and nothing else.
+ *
+ * nv_rpc_journal_reset() is the RUN BOUNDARY: after it, jrn_n counts only what
+ * this run wrote, which is what makes "the peer header moved but we did not
+ * write there" a statement about this run rather than about the boot. */
+void nv_rpc_journal(struct nv_rpc_queue *q, uint32_t off, uint32_t len);
+void nv_rpc_journal_reset(struct nv_rpc_queue *q);
+/* 1 when any journalled store overlaps [off, off+len), 0 when none does. */
+int nv_rpc_journal_overlap(const struct nv_rpc_queue *q, uint32_t off,
+                           uint32_t len);
+uint32_t nv_rpc_journal_lost(const struct nv_rpc_queue *q);
 
 /* ---- send (spec 4.3) ------------------------------------------------- */
 

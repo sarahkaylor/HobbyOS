@@ -253,6 +253,17 @@ three log regions are real 4 KiB pages, so the
 own `size` field stays `0xC8`; the RMARGS *region* entry publishes the whole
 4 KiB page, which is also the allocation.
 
+**Proving the peer is real (card t_643f58a1).** A published block and a
+doorbell prove nothing on their own: the peer's status header and our own
+write pointer are the same kind of word at the same offset of two queue
+headers, so reading back a location we wrote and calling it progress is the
+false positive this bring-up has to survive. `docs/nv-rpc-roundtrip.md` is the
+answer — two reads of the peer's 32-byte producer header, a write journal that
+says which stores were ours, and the `[NV-RPC]` row grammar (peer header, our
+write pointer, message, answer, verdict) that the hardware card quotes
+verbatim. Implementation: `src/kernel/nv_rpc_harness.c`, entry point
+`nv_gsp_rpc_roundtrip()`.
+
 ### 1.7 The doorbell
 
 | property | value | tag |

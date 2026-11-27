@@ -53,6 +53,7 @@
 #include "nv_flcn.h"
 #include "nv_dma.h"
 #include "nv_rpc.h"
+#include "nv_rpc_harness.h"
 #include "nv_gsp_glue.h"
 #include "nv_vram.h"
 #include "frame.h"
@@ -712,6 +713,56 @@ int nv_gsp_rpc_stage8_into(struct nv_gsp_rpc *r, struct nv_dev *d) {
 
 int nv_gsp_rpc_stage8(struct nv_dev *d) {
   return nv_gsp_rpc_stage8_into(&g_gsp_rpc, d);
+}
+
+/* ---- the first round trip (docs/nv-rpc-roundtrip.md) -------------------
+ *
+ * The discrimination lives in nv_rpc_harness.c, which is pure and has no idea
+ * whether it is on a card or in the unit tier.  This function supplies the
+ * three things the harness cannot supply itself: the real seam (doorbell,
+ * fence, clock), a staging element, and the row sink.
+ *
+ * Its only job is to not be clever.  The staging element is one slot, the sink
+ * is two uart_puts() calls, and there is no retry: a failed round trip is
+ * reported with its rows, never retried into a success. */
+static struct nv_rpc_rt g_rt; /* static: it holds the row ring */
+static uint8_t g_rt_tx_stage[NV_RPC_SLOT] __attribute__((aligned(4096)));
+static uint8_t g_rt_answer[NV_RPC_SLOT] __attribute__((aligned(8)));
+
+/* A row is the text between two line starts; the sink terminates the line.
+ * That is why the harness never writes "\n" itself. */
+static void gsp_rt_sink(void *ctx, const char *row) {
+  (void)ctx;
+  uart_puts(row);
+  uart_puts("\n");
+}
+
+int nv_gsp_rpc_roundtrip(struct nv_gsp_rpc *r, struct nv_dev *d, uint32_t fn,
+                         const void *payload, uint32_t payload_len,
+                         uint32_t timeout_us) {
+  if (!r || !d || !r->built || !r->published) return -EINVAL;
+  if (payload_len > NV_RPC_RT_PAYLOAD_MAX) {
+    uart_puts("[NV-RPC] stage=roundtrip FAIL reason=payload_too_big len=");
+    print_int((int)payload_len);
+    uart_puts(" max=");
+    print_int((int)NV_RPC_RT_PAYLOAD_MAX);
+    uart_puts(" (a multi-slot probe is a different test, not a bigger one)\n");
+    return -EINVAL;
+  }
+
+  struct nv_rpc_hw hw;
+  nv_rpc_hw_dev(d, &hw);
+
+  int rc = nv_rpc_rt_init(&g_rt, &r->q, &hw, gsp_rt_sink, 0, g_rt_tx_stage,
+                          sizeof(g_rt_tx_stage), timeout_us, fn, payload,
+                          payload_len);
+  if (rc != 0) {
+    uart_puts("[NV-RPC] stage=roundtrip FAIL reason=");
+    uart_puts(nv_rpc_rt_verdict_name(g_rt.verdict));
+    uart_puts(" (init refused: no seam, no bounded wait, or a bad probe)\n");
+    return rc;
+  }
+  return nv_rpc_rt_run(&g_rt, g_rt_answer, sizeof(g_rt_answer));
 }
 
 /* PFB: the write-protected-region block.  MEASURED (docs/nv-gsp-reference.md)

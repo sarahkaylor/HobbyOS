@@ -86,21 +86,22 @@ not stop a build. `.got` slots are counted and printed but never gated: the
 compiler emits them for a function's address in PIC code, they come and go with
 ordinary code, and they are not author-written tables.
 
-Measured, unit tier, on the green tree (MEASURED):
+Measured, unit tier, on the green tree (MEASURED; re-measured 2026-11-27 after the
+`nv_rpc_harness` TU landed — see §5.1 for why two numbers moved):
 
 ```
 python3 tools/kernel_reloc_audit.py --gate --baseline tools/reloc_tables_baseline.json --mode unit_tests hobbyos.elf
 # hobbyos.elf
-# kernel link range [0x40080000, 0x417B060C)   .rela.dyn=429 entries (present)
-# pointer words baked into static data (need relocating): 429
-#   applied at boot (R_AARCH64_RELATIVE, addend in image): 429
+# kernel link range [0x40080000, 0x417B63DC)   .rela.dyn=440 entries (present)
+# pointer words baked into static data (need relocating): 440
+#   applied at boot (R_AARCH64_RELATIVE, addend in image): 440
 #   NOTHING WILL APPLY THEM (left at their link address):     0
-# folded-table inventory: 21 table(s) / 424 word(s), plus 5 linker-generated .got slot(s)
-hobbyos.elf: reloc gate OK -- 429 kernel pointer word(s), every one applied at boot
-hobbyos.elf: folded-table inventory matches -- 21 table(s) / 424 word(s) as audited [MODE=unit_tests]
+# folded-table inventory: 21 table(s) / 435 word(s), plus 5 linker-generated .got slot(s)
+hobbyos.elf: reloc gate OK -- 440 kernel pointer word(s), every one applied at boot
+hobbyos.elf: folded-table inventory matches -- 21 table(s) / 435 word(s) as audited [MODE=unit_tests]
 ```
 
-`MODE=desktop` and `MODE=test` are audited too (19 tables / 418 words / 423
+`MODE=desktop` and `MODE=test` are audited too (19 tables / 429 words / 434
 pointer words each — they do not link the unit-tier test tables), and an
 unaudited mode lands on the union path:
 
@@ -125,13 +126,13 @@ marked where it matters. Words = 8-byte pointer words needing relocation.
 | 94 / 94 | `l_tab_proc` | `linux_compat_proc.c:1780` | same | no |
 | 36 / 36 | `l_tab_tmr` | `linux_compat_timers.c:1035` | same | no |
 | 26 / 26 | `l_tab_core` | `linux_compat.c:458` | same | no |
-| 18 / 18 | *(anonymous `.rodata` — three tables, §5)* | `fs.c:389`, `linux_compat.c:593`, `nv_shim.c:296` | 6 `const char *` + 6 pointers + 6 `const char *` | **yes** — all three (see §5) |
+| 27 / 27 | *(anonymous `.rodata` run — §5, §5.1)* | `fs.c:389` + `kconsole.c:314` + `kconsole.c:302` | contiguous pointer run; §5.1 explains the 18 -> 27 merge | **yes** — all three (see §5) |
 | 18 / 18 | `l_tab_mem` | `linux_compat_mem.c:784` | `const struct l_sysent[]` | no |
 | 18 / 18 | `reason_names` | `nv_rpc.c:94` | `const char *const[]` | **yes** — `nv_rpc_reason_name()` on every GSP-RPC error path |
 | 13 / 13 | `cons_dtags` | `kconsole.c:302` | `const struct cons_dtag[]` — `{const char *tag; const char *rest; uint32_t cls;}`; 10 tags + 3 `rest` strings | yes when `CP_DIAG=` is set |
 | 12 / 12 | `do_hw_params.nm` | `linux_snd.c:984` | `static const char *nm[12]` inside the function | no — `/dev/snd` is x86-only today |
 | 12 / 12 | `g_nvif_engines` | `nv_shim.c:2759` | `const struct nvif_class_row[]` — `{int32 oclass; char name[24]; const char *engine; const char *alloc;}` (2 pointer words per row) | **yes** — the NVIF class/GRAPH_UNITS rows `nvk` reads (§7.1: this one was caught by the gate when `nv/wp-units` merged) |
-| 10 / 10 | `arg_names` | `nv_rpc.c:108` | `const char *const[]` | **yes** — GSP-RPC argument validation |
+| 12 / 12 | `arg_names` | `nv_rpc.c:108` | `const char *const[]` | **yes** — GSP-RPC argument validation (§5.2) |
 | 9 / 9 | `cons_dnames` | `kconsole.c:314` | `const char *const[]` | yes when `CP_DIAG=` is set |
 | 9 / 9 | `vm_pw_name` | `vm.c:1749` | `const char *const[]` | **yes** — page-walk `[MR]` rows |
 | 8 / 8 | `el_compat_83` | `elf_loader.c:149` | `const struct {const char *name; const char *staged;}[]` | **yes** — 8.3 compat lookups |
@@ -144,8 +145,8 @@ marked where it matters. Words = 8-byte pointer words needing relocation.
 | 3 / — | `g_reloc_names` | `reloc_test.c:58` | same | yes, by the test |
 | (5 / 5) | `.got` | linker-generated | 5 slots (signal/epoll hooks) | yes — **not gated** (§3) |
 
-Totals (MEASURED): unit `424 + 5 .got = 429`; desktop and test
-`418 + 5 = 423`. Both match `.rela.dyn`'s entry count exactly, which is the
+Totals (MEASURED): unit `435 + 5 .got = 440`; desktop and test
+`429 + 5 = 434`. Both match `.rela.dyn`'s entry count exactly, which is the
 cross-check that the inventory is the whole population and not a sample.
 
 Three corrections to round 3's notes, all from this audit: `nv_rpc.c` is **not**
@@ -172,6 +173,43 @@ apart from one of these three — it shows up as the `.rodata` bucket growing
 (`GREW .rodata 18 -> 21`), which fails the link just the same. If you want it
 named, give the array a `static` name of its own; then the inventory lists it by
 symbol.
+
+### 5.1 The bucket moved when a TU was added (2026-11-27, MEASURED)
+
+Landing `src/kernel/nv_rpc_harness.c` (card t_643f58a1) added one translation
+unit and no pointer table of its own, and the gate still failed:
+
+```
+GREW  .rodata      18 -> 27 word(s)  .rodata  first slot 0x0000402133B0  .rodata+0x3f0 "open"
+GREW  arg_names    10 -> 12 word(s)  .rodata  first slot 0x000040214728  arg_names
+```
+
+`arg_names` is §5.2. The `.rodata` line is **not a new table**: the audit's
+anonymous bucket is a *contiguous run of pointer words*, so it merges or splits
+whenever `.rodata`'s layout shifts — and a new TU's string literals shift it.
+In this link the run at `0x402133B0` (27 words, first target `"open"`, i.e.
+`fs.c`'s `fd_ev_kind_name()` switch table) now reaches across
+`cons_dnames` (9 words at `0x402133E0`) and 12 of `cons_dtags`' 13 words
+(`0x40213428`) — three things §4 also lists by name, glued into one bucket.
+Every word is still relocated (`440/440` applied, `0` left at the link
+address), so nothing unsafe entered the image; only the inventory's
+granularity moved. The baseline was refreshed for all three modes
+(`make reloc_baseline MODE=unit_tests|desktop|test`) and the diff is exactly
+two keys per mode: `.rodata` 18 -> 27 and `arg_names` 10 -> 12.
+
+The lesson for the next lane: **run the ARM tier, not just intel**. A lane that
+adds a `const char *const[]` (or a dense `switch`) turns the gate red without
+touching anything ARM-specific, and the publish lane (`nv/wp-rpcpub`) shipped
+`arg_names` 10 -> 12 without noticing because it only ran the intel tier.
+
+### 5.2 `arg_names` 10 -> 12 (publish lane)
+
+`nv_rpc.c`'s `arg_names[]` names every `enum nv_rpc_arg_field` member, and
+`NV_RPC_ARG_MAGIC` / `NV_RPC_ARG_SIZE` were added with the
+`GSP_ARGUMENTS_CACHED` builder (`docs/nv-gsp-rpc-contract.md` 1.5), so the table
+grew by the two strings `"magic"` and `"size"`. It is reached on ARM:
+`nv_rpc_arg_field_name()` is how a bad argument page names the first
+disagreeing field. Recorded here rather than silently absorbed by the refresh.
 
 ## 6. When the gate fires
 

@@ -503,6 +503,7 @@ int nv_rpc_link_apply(struct nv_rpc_queue *q, enum nv_rpc_link_field *bad) {
    * the offset SWAP_RX dictates.  This is the one store that must not be at the
    * obvious place. */
   st32(q->block + q->own_readptr_off, 0);
+  nv_rpc_journal(q, q->own_readptr_off, 4); /* ours; the harness must see it */
   q->read_ptr = 0;
   q->write_ptr = ld32(q->block + q->cmd_off + NV_RPC_Q_WRITE_PTR);
   q->linked = 1;
@@ -536,6 +537,57 @@ int nv_rpc_link(struct nv_rpc_queue *q, const struct nv_rpc_hw *hw,
     }
     fence(hw);
   }
+}
+
+/* ======================================================================== */
+/* the write journal (struct nv_rpc_queue)                                   */
+/* ======================================================================== */
+
+void nv_rpc_journal(struct nv_rpc_queue *q, uint32_t off, uint32_t len) {
+  if (!q || len == 0) return;
+  uint32_t i;
+  if (q->jrn_n < NV_RPC_WRITE_JOURNAL) {
+    i = q->jrn_n; /* still filling: entry i is the i-th store */
+  } else {
+    /* Full: overwrite the oldest and COUNT the loss.  A count is what lets the
+     * harness say "I cannot prove disjointness" instead of "I found nothing",
+     * which are different answers. */
+    i = q->jrn_head;
+    q->jrn_head = (q->jrn_head + 1u) % NV_RPC_WRITE_JOURNAL;
+    q->jrn_lost++;
+  }
+  q->jrn_off[i] = off;
+  q->jrn_len[i] = len;
+  q->jrn_n++;
+}
+
+void nv_rpc_journal_reset(struct nv_rpc_queue *q) {
+  if (!q) return;
+  q->jrn_n = 0;
+  q->jrn_head = 0;
+  q->jrn_lost = 0;
+}
+
+int nv_rpc_journal_overlap(const struct nv_rpc_queue *q, uint32_t off,
+                           uint32_t len) {
+  if (!q || len == 0) return 0;
+  uint32_t kept = q->jrn_n < NV_RPC_WRITE_JOURNAL ? q->jrn_n
+                                                  : NV_RPC_WRITE_JOURNAL;
+  for (uint32_t k = 0; k < kept; k++) {
+    uint32_t i = q->jrn_n < NV_RPC_WRITE_JOURNAL
+                     ? k
+                     : (q->jrn_head + k) % NV_RPC_WRITE_JOURNAL;
+    /* 64-bit arithmetic: two block offsets are small, but a bad one must not
+     * wrap into a false "no overlap". */
+    uint64_t a0 = q->jrn_off[i], a1 = a0 + q->jrn_len[i];
+    uint64_t b0 = off, b1 = b0 + len;
+    if (a0 < b1 && b0 < a1) return 1;
+  }
+  return 0;
+}
+
+uint32_t nv_rpc_journal_lost(const struct nv_rpc_queue *q) {
+  return q ? q->jrn_lost : 0;
 }
 
 /* ======================================================================== */
@@ -813,6 +865,9 @@ int nv_rpc_tx_commit(struct nv_rpc_queue *q, const uint8_t *stage,
      * in the tail of a reused slot are a checksum failure at the receiver, and
      * the message is dropped without a diagnostic. */
     memset(dst, 0, NV_RPC_SLOT);
+    nv_rpc_journal(q, (uint32_t)(q->cmd_off + entry_off +
+                                 (uint64_t)idx * NV_RPC_SLOT),
+                   NV_RPC_SLOT); /* ours: a whole slot of commands */
     uint32_t off = k * NV_RPC_SLOT;
     if (off >= total) return -EINVAL;
     uint32_t n = total - off;
@@ -829,6 +884,7 @@ int nv_rpc_tx_commit(struct nv_rpc_queue *q, const uint8_t *stage,
   uint32_t new_wp = (wp + ec) % NV_RPC_MSG_COUNT;
   if (new_wp >= NV_RPC_MSG_COUNT) return -EINVAL;
   st32(cmdq + NV_RPC_Q_WRITE_PTR, new_wp);
+  nv_rpc_journal(q, q->cmd_off + NV_RPC_Q_WRITE_PTR, 4); /* ours: the pointer */
   q->write_ptr = new_wp;
   return 0;
 }
@@ -872,6 +928,7 @@ static int rx_advance(struct nv_rpc_queue *q, uint32_t rp, uint32_t ec,
   /* R8: published only AFTER the copy and the verification.  Publishing it
    * first would let the producer overwrite the slots while they are read. */
   st32(q->block + q->own_readptr_off, nrp);
+  nv_rpc_journal(q, q->own_readptr_off, 4); /* ours: our read index */
   q->read_ptr = nrp;
   if (bump_seq) q->rx_seq++;
   return 0;
