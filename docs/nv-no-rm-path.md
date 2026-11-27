@@ -351,12 +351,24 @@ NV_BOOTER_FILE=<fw>/ga102/sec2/hs_bl_sig.bin tools/nv/sec2-boot-lane.sh 1 hsbl
 grep -E '\[NV-SEC2T\] S tl ' evidence/nv/hsbl-a.log       # 0x094 progression
 ```
 
-The harness must be told the container is a bootloader-only image: the existing
-gate `len < 0x7700 + 0x6000` refuses it by design (the booter's geometry), so the
-lane needs the bound taken from the container's own load header (`os_code_size`,
-no data region) instead of a constant. That is a 5-line change in the lane tree,
-not a driver change; it is listed as the card's first step so the boot cannot be
-spent on a refusal to stage.
+The harness must be told which container it is staging, and it now derives that
+from the container instead of a constant: `tools/nv/sec2-boot-lane.sh` runs
+`tools/nv/booter_preflight.py`, which bounds a **bootloader-only** image
+(`data_size == 0`) by its own `os_code_off + os_code_size` and refuses a geometry
+that does not account for the file (`docs/nv-booter-staging.md`). The
+`0x7700 + 0x6000` split is the 535-generation booter's, not the format's: a lane
+that uses it refuses this image by design and, on another generation, would
+accept a file it then DMA-reads past the end of.
+
+That is a host-side change, not a driver change. Two consequences for the recipe
+above: (a) the `1 hsbl` form needs `NV_EXPECT_BOOTER_SHA256` (or the old
+`NV_BOOTER_SHA256`) to be pinned, so the boot log names the image it ran;
+(b) `ga102/sec2/hs_bl_sig.bin` is **not** that bootloader-only container — its
+`nvfw_bin_hdr` is the 4-dword ls-hsbl form, `data_size == 0` and it carries no
+`nvfw_hs_load_header_v2`, so the preflight refuses it as `load_header … outside
+the descriptor region` (MEASURED static, 2026-11-27). The container this §6 boot
+wants is one whose load header declares its `os_code` extent; stage that, not the
+signature descriptor.
 
 **Decision table:**
 

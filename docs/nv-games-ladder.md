@@ -126,8 +126,8 @@ Not withdrawn:
 |---|---|---|
 | N0 | `tools/gate/` present gate (see `nvidia-driver.md` §5) | `(1919,1079)=(255,0,0)` |
 | N1n | `tools/nv/deploy.sh --mode test --gpu` | `[NV-ENG] pgraph window ... verdict=` and `[NV-ENG] measured gpc=` |
-| N3n | stage `ga102/sec2/hs_bl_sig.bin`, one boot (§6 of `nv-no-rm-path.md`) | `[NV-SEC2T] S tl ... u94=` |
-| N3r | `tools/nv/boot-n.sh 1 r` with a vendor `booter_load` | `[NV-GSP]` stage-5 row / `0x1430` block |
+| N3n | a bootloader-only container via `NV_BOOTER_FILE=<c> NV_EXPECT_BOOTER_SHA256=<sha> tools/nv/sec2-boot-lane.sh 1 hsbl` (`docs/nv-booter-staging.md`; `hs_bl_sig.bin` itself is a signature descriptor and the preflight refuses it) | `booter staged:` row, then `[NV-SEC2T] S tl ... u94=` |
+| N3r | `tools/nv/sec2-boot-lane.sh 1 r` with a vendor `booter_load` named by `NV_BOOTER_FILE` | `booter staged:` row, then `[NV-GSP]` stage-5 row / `0x1430` block |
 | N1v | `tools/rw/run-rimworld-desktop.sh` on r1 | fps median row + `renderer=` |
 | N3v | `tools/gate/m1_virgl.py` | `[VIRGL3D] ... match=4096/4096` |
 | N8v | `tools/cp/venus/run_vkcubex_venus.py` / P9 harness | benchmark summary + `Venus` device row |

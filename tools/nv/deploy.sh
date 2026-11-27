@@ -97,6 +97,12 @@ if [ "${STAGE_FW:-1}" = "1" ] && [ -d third_party/nvfw/ga102/gsp ]; then
   # resolver does not read long-filename entries, so /NVIDIA/GSP/booter_load-
   # 535.113.01.bin would only be reachable as BOOTER~1.BIN.  8.3 role names are
   # what the driver opens (see NV_FW_BOOTER in nv_gsp.c).
+  #
+  # This block stages the first globbed booter and prints nothing about which
+  # one it was, so it cannot pin an image.  A boot whose verdict is about a
+  # *specific* booter container must go through tools/nv/sec2-boot-lane.sh,
+  # which prints `booter staged: <sha256> …` and refuses on a mismatch
+  # (docs/nv-booter-staging.md).
   stage_fw() { # <source> <8.3 name>
     [ -f "$1" ] || return 0
     mcopy -o -i disk.img "$1" "::/NVIDIA/GSP/$2" || exit 1

@@ -33,6 +33,11 @@ say() { echo "[boot-n] $*"; }
 [ -f disk.img ] || { echo "no disk.img: build it first" >&2; exit 1; }
 
 # --- firmware, exactly the roles deploy.sh stages (same 8.3 names) -----------
+# This block stages the first globbed booter and prints nothing about which one
+# it was, so it cannot pin an image.  A boot whose verdict is about a *specific*
+# booter container must go through tools/nv/sec2-boot-lane.sh, which prints
+# `booter staged: <sha256> ...` and refuses on a mismatch
+# (docs/nv-booter-staging.md).
 if [ -d third_party/nvfw/ga102/gsp ]; then
   mmd -i disk.img ::/NVIDIA 2>/dev/null || true
   mmd -i disk.img ::/NVIDIA/GSP 2>/dev/null || true
