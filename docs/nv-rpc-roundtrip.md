@@ -255,12 +255,12 @@ is refused with `-EMSGSIZE` rather than truncated.
 
 ## 6. Evidence for this lane
 
-MEASURED on VM 201, `SKIP_KVM=1` (TCG), intel unit tier:
+MEASURED on VM 201, `SKIP_KVM=1` (TCG), both unit tiers:
 
 | file | what it is |
 |---|---|
-| `evidence/nv/rpcharness-unit-green.log` | whole gate, `N` run / 0 failed, the five rows and the verdict above |
-| `evidence/nv/rpcharness-mut1-peer-static.log` | negative test: the peer's header frozen while our write pointer advances — `verdict=FAIL reason=peer_static` |
-| `evidence/nv/rpcharness-mut2-ours-overlap.log` | negative test: bytes change but our journal owns them — `verdict=FAIL reason=ours_overlap` |
+| `evidence/nv/rpcharness-unit-green.log` | intel tier, 616 run / 0 failed, and the six rows of §2.1 plus every FAIL verdict quoted above |
+| `evidence/nv/rpcharness-arm-green.log` | ARM tier, 486 run / 0 failed, reloc gate OK 440/440 |
+| `evidence/nv/rpcharness-mut1-vetoes-off.log` | mutation: `nv_rpc_journal_overlap()` forced to 0 and the `peer_moved` check removed → exactly T-30 and T-32 go red, the other four stay green |
 
 REPRODUCE: the command in §4; every number in §2.1 comes from that log.
