@@ -242,6 +242,13 @@ struct nv_wpr_meta_in {
   uint8_t heap_vf_partition_count;   /* 0 on bare metal */
   uint8_t flags;                     /* named bits beyond IN_PM_TRANSITION unknown */
   uint16_t paging_config;            /* registry passthrough; 0 = default */
+  /* pmuReservedSize: the PMU's reserved FB window, which the vendor's layout
+   * diagram puts directly above FRTS and below the FB-end reserve estimate
+   * (gsp_fw_wpr_meta.h:198-204, offset 0xF4 -- measured by compiling the
+   * vendor header, not computed from this struct).  A 32-bit wire field on
+   * purpose: the four bytes at 0xF2 are the vendor's `padding[2]` and its
+   * `verified` u64 starts at 0xF8, so a 64-bit field here would move it. */
+  uint32_t pmu_reserved_size;
   /* Written by the HOST as 0.  The booter overwrites it with
    * NV_WPR_META_VERIFIED once it accepts the block -- that is the cheap,
    * protocol-free proof that the meta was consumed. */

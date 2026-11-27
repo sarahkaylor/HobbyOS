@@ -46,6 +46,12 @@
  *  channel, restored to idle at the end.  Nothing is written to the GSP core.
  * ==========================================================================*/
 
+/* ENODEV is needed by both branches (the non-x86-64 stub at the bottom), so
+ * errno.h is included before the guard: without this the ARM unit tier does
+ * not compile this TU ("use of undeclared identifier 'ENODEV'").  Prerequisite
+ * fix for the ARM gate, not part of the vendor-shape change. */
+#include "errno.h"
+
 #ifdef __x86_64__
 
 #include "nv.h"
@@ -295,6 +301,11 @@ static void st64(uint8_t *b, uint32_t off, uint64_t v) {
 static uint32_t ld32(const uint8_t *b, uint32_t off) {
   return (uint32_t)b[off] | ((uint32_t)b[off + 1] << 8) |
          ((uint32_t)b[off + 2] << 16) | ((uint32_t)b[off + 3] << 24);
+}
+/* 64-bit wire read, so a row can quote the block the device will see rather
+ * than the struct the host built. */
+static uint64_t ld64(const uint8_t *b, uint32_t off) {
+  return (uint64_t)ld32(b, off) | ((uint64_t)ld32(b, off + 4) << 32);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -1308,16 +1319,22 @@ out:
 #define RM_SIG_BYTES      4096u         /* .fwsignature_gb20x                  */
 #define RM_HEAP_BYTES     (128ULL << 20)/* >= vendor's 88 MiB floor + 32 GB term */
 #define RM_NONHEAP_BYTES  2293760u      /* kgspGetNonWprHeapSize_GB202 (0x230000) */
-/* The vendor's own numbers for this part, from 570.144:
+/* The vendor's own numbers for this part, from 580.178.04:
  *   heap  = osCarveout(22) + fwHeapParamBaseSize(GH100/GB10x 14) +
  *           align(96 KiB * fbSizeGB, 1 MiB) + align(48 KiB*2048, 1 MiB)
  *           = 22 + 14 + 3 + 96 = 135 MiB for a 32 GB (or 24 GB) part; min 88,
  *           max 280 (g_kernel_gsp_nvoc.c, gsp_fw_heap.h, kgspGetFwHeapSize_IMPL).
- *   nonWpr = 2228224 = 0x220000 -- kgspGetNonWprHeapSize_1bb8e3, the body GB202
- *           binds (GB100/GB102/GB10B get _d505ea = 2 MiB; 0x230000 is not any
- *           of the four bodies in the 570 build). */
+ *   nonWpr = 2293760 = 0x230000 -- kgspGetNonWprHeapSize_ad951d
+ *           (g_kernel_gsp_nvoc.h:1677-1679), the body GB202 binds.
+ * The previous value here, 2228224 = 0x220000, is NOT a non-WPR heap at all:
+ * it is memmgrGetFBEndReserveSizeEstimate_GB100's ESTIMATED_RESERVE_FB
+ * (mem_mgr_gb100.c:57-67), i.e. the FB-end reserve the *FRTS offset* is
+ * computed from.  Sending it as nonWprHeapSize made fh58/rm63/rm64/rm65 label a
+ * 0x220000 heap with a name it does not have; the 7 MiB WPR2 move those boots
+ * measured stands (it was the heap alone), the label did not.  Corrected here:
+ * modes 58/63/64/67 now send the vendor's descriptor value. */
 #define RM_HEAP_BYTES_GB202   (135ULL << 20)
-#define RM_NONHEAP_BYTES_GB202 2228224u
+#define RM_NONHEAP_BYTES_GB202 2293760u  /* kgspGetNonWprHeapSize_ad951d */
 /* The vendor's own 615 stock `GspFwWprMeta.nonWprHeapSize` for GB202 PRO
  * (corpus specs/01_boot-chain.md#wprmeta; its field is honoured 1:1 in the
  * ACR's WPR2 layout, unlike `frtsSize`, which experiments/05 §05.12 measured
@@ -1327,6 +1344,28 @@ out:
 
 #define RM_VGA_WS_BYTES   0x20000u      /* kgspPopulateWprMeta_GH100           */
 #define RM_WPRM_BYTES     256u          /* sizeof(GspFwWprMeta), ct_assert'd    */
+
+/* ---- the vendor's FB-tail arithmetic, spelled out ----------------------
+ * GspFwWprMeta.pmuReservedSize: kpmuReservedMemorySizeGet()
+ *   = align128K( backing 0x900000 + surfaces 0x1000000 + misc 0x4000 )
+ *   = align128K( 0x1904000 ) = 0x1920000 = 25.125 MiB
+ * (kern_pmu.c:65-76 with g_kern_pmu_nvoc.h:63,68-69; the 0x900000/0x4000 terms
+ * are gated on kpmuGetIsSelfInit, which GB202 binds to the TRUE body --
+ * g_kern_pmu_nvoc.c:249-251).  The vendor computes this on every boot
+ * (kernel_gsp_gh100.c:318) and puts it in the descriptor at +0xF4. */
+#define RM_PMU_RESERVED_BYTES 0x1920000u
+/* The COT's FB half is an offset from the END of FB, not an address:
+ *   frtsVidmemOffset = align2M( memmgrGetFBEndReserveSizeEstimate_GB100
+ *                               + kfspGetExtraReservedMemorySize_GH100
+ *                               + pmuReservedSize )
+ *                    = align2M( 0x220000 + 0x1000 + 0x1920000 ) = 0x1C00000
+ * and frtsVidmemSize = 1 MiB (kern_fsp_gh100.c:1427-1460, mem_mgr_gb100.c:57-67,
+ * kern_fsp_cot_payload.h:44-47).  Every value this lane sent before mode 67 was
+ * 64 MiB (or the 176 MiB probe) -- 28 MiB is the vendor's own. */
+#define RM_FBEND_RESERVE_BYTES 0x220000u
+#define RM_EXTRA_RESERVED_BYTES 0x1000u
+#define RM_FRTS_VID_OFF      0x1C00000ULL
+#define RM_FRTS_VID_BYTES    0x100000u
 
 #define RM_LIBOS_ENTRY    32u
 #define RM_KIND_CONTIG    1u
@@ -1361,6 +1400,10 @@ out:
  *                  one block field changed (the FMC-restart / field sweep)
  *   '22'           the sweep again, but every COT carries the vendor's
  *                  normal-boot FB half (frtsVidmem = 64 MiB from FB end, 1 MiB)
+ *   '67'           the vendor's own shape in one first COT (t_240a0ac8):
+ *                  580.178.04's FMC + its own GspRmBoot, nonWprHeapSize
+ *                  0x230000, pmuReservedSize 0x1920000 at +0xF4, COT
+ *                  frtsVidmem 0x1C00000 / 1 MiB, args-page target 2
  */
 static int rm_cfg(int *mode) {
   struct file f;
@@ -1819,7 +1862,8 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
   rm_p("start gsp=rm mode=");
   print_int(mode);
   p(" files=/NVIDIA/GSP/{FMC.BIN,BOOTIMG.BIN,GSPRM.BIN,GSPRM.SIG}"
-    " (mode 63/64/66: FMC615.BIN,BOOT615.BIN; mode 65: FMCV.BIN,BOOTIMG.BIN)\n");
+    " (mode 63/64/66: FMC615.BIN,BOOT615.BIN; mode 65/67: FMCV.BIN,"
+    "BOOTIMG.BIN)\n");
   pkv("pre therm-boot-complete", nv_rd32(d, 0x00AD00BCu));
   pkv(" fsp-ucode-ver", nv_rd32(d, base + 0x334u));
   pe();
@@ -1850,7 +1894,8 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
   {
     const char *fmc_name = (mode == 13) ? "FMCV.BIN"
                          : (mode == 63 || mode == 64 || mode == 66) ? "FMC615.BIN"
-                         : (mode == 65) ? "FMCV.BIN" : "FMC.BIN";
+                         : (mode == 65 || mode == 67) ? "FMCV.BIN"
+                                                       : "FMC.BIN";
     if (nv_fw_load_blob(fmc_name, &fmc) != 0) {
       p("load ");
       uart_puts(fmc_name);
@@ -1858,8 +1903,8 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
       return 0;
     }
   }
-  if (mode == 65 && fmc.size != RM_FMC580_BYTES) {
-    p("mode 65 needs the 216,204-byte 580.178.04 container -- no COT sent\n"
+  if ((mode == 65 || mode == 67) && fmc.size != RM_FMC580_BYTES) {
+    p("mode 65/67 needs the 216,204-byte 580.178.04 container -- no COT sent\n"
       "verdict=fmc-size-mismatch\n");
     nv_fw_release(&fmc);
     return 0;
@@ -1989,7 +2034,8 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
        * "1 MiB at fbSize-64MiB".  One field, running state. */
       meta.frts_size = 0x100000ULL;
     }
-    if (mode == 58 || mode == 63 || mode == 64 || mode == 65 || mode == 66) {
+    if (mode == 58 || mode == 63 || mode == 64 || mode == 65 || mode == 66 ||
+        mode == 67) {
       /* The vendor's own heap pair for this part, asked in the state where the
        * FMC runs (mode 8 asked it in the 0x5 state).  Positive control: the
        * FSP sizes WPR2 from these, so wpr2_lo/hi must move by 7 MiB. */
@@ -1998,6 +2044,12 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
       /* Mode 64: the ONE field this boot spends.  The vendor's 615 stock
        * nonWprHeapSize (0x300000) instead of the 570 body's 0x220000. */
       if (mode == 64) meta.non_wpr_heap_size = RM_NONHEAP_BYTES_V615;
+      /* Mode 67: the vendor's own shape -- every field at the value the
+       * 580.178.04 driver computes for this part, in one first COT.  The
+       * descriptor gains pmuReservedSize (A2's field, 0xF4), which had never
+       * been sent in any first-COT boot; the COT's FRTS-in-FB pair and the
+       * args-page target follow below. */
+      if (mode == 67) meta.pmu_reserved_size = RM_PMU_RESERVED_BYTES;
     }
     if (mode == 19) {                 /* vendor heap pair + FRTS size */
       meta.gsp_fw_heap_size = RM_HEAP_BYTES_GB202;
@@ -2135,6 +2187,18 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
     pkv(" fb_size", back.fb_size);
     pkv(" verified", (uint64_t)nv_fw_wpr_meta_verified(&back));
     pe();
+    /* The same words read out of the WIRE buffer rather than the struct: the
+     * device reads these bytes.  +0x68 nonWprHeapSize, +0x80 gspFwHeapSize,
+     * +0xF4 pmuReservedSize and +0xF8 verified are 580's own offsets
+     * (gsp_fw_wpr_meta.h compiled at that tag: sizeof 256, those four at
+     * 0x68/0x80/0xf4/0xf8). */
+    p("wprm wire +0x68=");
+    uart_print_hex(ld64(wp, 0x68));
+    pkv(" +0x80", ld64(wp, 0x80));
+    pkv(" +0xf4", ld32(wp, 0xF4));
+    pkv(" +0xf8", ld64(wp, 0xF8));
+    pkv(" pmu_dec", back.pmu_reserved_size);
+    pe();
   }
 
   /* ---- 6. RMARGS + the libos argument table ----------------------------- */
@@ -2200,8 +2264,9 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
      * page is NV_MEMORY_CACHED -> COHERENT_SYSTEM, so the two targets differ in
      * the vendor's own block; mode 7 sends the vendor pair, mode 1 (the parent's)
      * sent COHERENT for both. */
-    st32(a, NV_FMCP_OFF_RMTGT, (mode == 7) ? GSP_DMA_TARGET_NONCOHERENT_SYSTEM
-                                           : GSP_DMA_TARGET_COHERENT_SYSTEM);
+    st32(a, NV_FMCP_OFF_RMTGT, (mode == 7 || mode == 67)
+                                   ? GSP_DMA_TARGET_NONCOHERENT_SYSTEM
+                                   : GSP_DMA_TARGET_COHERENT_SYSTEM);
     st64(a, NV_FMCP_OFF_RMARGS, nv_dma_bus(&m_libos));
     st32(a, NV_FMCP_OFF_SPDMTGT, 0);
     st64(a, NV_FMCP_OFF_SPDMBUF, 0);
@@ -2266,6 +2331,11 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
                        mode == 56 || mode == 57 || mode == 58 || mode == 59 ||
                        mode == 63 || mode == 64 || mode == 65 || mode == 66) ? 0x4000000ULL : 0;
       if (mode == 36 || mode == 37 || mode == 38) fvid = 0x0B000000ULL;   /* 176 MiB: inside the zero gap */
+      /* Mode 67: the vendor's own pair.  0x1C00000 is what its arithmetic
+       * produces with the pmuReservedSize this same boot puts in the
+       * descriptor -- so the two halves of the vendor shape agree by
+       * construction, and the row below checks that they do. */
+      if (mode == 67) fvid = RM_FRTS_VID_OFF;
       st64(c, NV_COT_OFF_FRTS_VID, fvid);
     }
     st32(c, NV_COT_OFF_FRTS_VSIZE, (mode == 17 || mode == 18 || mode == 19 ||
@@ -2276,7 +2346,8 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
                                     mode == 50 || mode == 51 || mode == 52 ||
                                     mode == 53 || mode == 54 || mode == 55 ||
                                     mode == 56 || mode == 57 || mode == 58 || mode == 59 ||
-                                    mode == 63 || mode == 64 || mode == 65 || mode == 66) ? 0x100000u : 0);
+                                    mode == 63 || mode == 64 || mode == 65 ||
+                                    mode == 66 || mode == 67) ? 0x100000u : 0);
     for (uint32_t i = 0; i < NV_COT_HASH_BYTES; i++)
       c[NV_COT_OFF_HASH + i] = sec.hash[i];
     for (uint32_t i = 0; i < NV_COT_PKEY_BYTES; i++)
@@ -2290,6 +2361,28 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
     pkv(" gspBootArgsSysmemOffset", args_bus);
     pkv(" bytes", NV_COT_BYTES);
     pe();
+    /* B1 + B2 read out of the COT buffer itself, and the vendor's own
+     * expression recomputed from the descriptor bytes this boot sends.  The
+     * two must agree: frtsVidmemOffset = align2M(fbEndReserve + extra +
+     * pmuReservedSize) with the SAME pmu that went into the block. */
+    {
+      uint64_t vend = RM_FBEND_RESERVE_BYTES;
+      if (back.pmu_reserved_size != 0)
+        vend += RM_EXTRA_RESERVED_BYTES + (uint64_t)back.pmu_reserved_size;
+      vend = (vend + 0x1FFFFFULL) & ~0x1FFFFFULL;
+      p("cot frtsVidmem off=");
+      uart_print_hex(ld64(c, NV_COT_OFF_FRTS_VID));
+      pkv(" size", ld32(c, NV_COT_OFF_FRTS_VSIZE));
+      pkv(" vendor_off", vend);
+      pkv(" pmu_desc", back.pmu_reserved_size);
+      pkv(" nonwpr_desc", back.non_wpr_heap_size);
+      pkv(" desc_target", ld32((const uint8_t *)phys_to_virt(m_args.phys), NV_FMCP_OFF_BOOTTGT));
+      pkv(" args_target", ld32((const uint8_t *)phys_to_virt(m_args.phys), NV_FMCP_OFF_RMTGT));
+      p(" verdict=");
+      uart_puts(ld64(c, NV_COT_OFF_FRTS_VID) == vend ? "vendor-shape"
+                                                     : "diverges");
+      p("\n");
+    }
   }
   if (frts_ok) {
     uint32_t lo = (uint32_t)m_frts.bus, hi = (uint32_t)(m_frts.bus >> 32);

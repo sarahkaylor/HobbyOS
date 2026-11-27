@@ -432,6 +432,7 @@ int nv_fw_wpr_meta_encode_n(const struct nv_wpr_meta_in *in, uint8_t *out,
   out[0xF0] = in->heap_vf_partition_count;
   out[0xF1] = in->flags;
   fw_put16(out + 0xF2, in->paging_config);
+  fw_put32(out + 0xF4, in->pmu_reserved_size);
   fw_put64(out + WPR_OFF_VERIFIED, in->verified);
   return 0;
 }
@@ -478,6 +479,7 @@ int nv_fw_wpr_meta_decode_n(const uint8_t *in, uint32_t len,
   out->heap_vf_partition_count = in[0xF0];
   out->flags = in[0xF1];
   out->paging_config = fw_le16(in + 0xF2);
+  out->pmu_reserved_size = fw_le32(in + 0xF4);
   out->verified = fw_le64(in + WPR_OFF_VERIFIED);
   return 0;
 }

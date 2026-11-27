@@ -493,6 +493,7 @@ static void test_nv_fw_wpr_meta_roundtrip(void) {
   in.heap_vf_partition_count = 1;
   in.flags = 2;
   in.paging_config = 0x1234;
+  in.pmu_reserved_size = 0x1920000u;   /* the vendor's GB202 value, D2 */
 
   uint8_t meta[NV_WPR_META_SIZE];
   fill(meta, sizeof meta, 0xEE); /* encode must write every byte */
@@ -508,6 +509,10 @@ static void test_nv_fw_wpr_meta_roundtrip(void) {
   EXPECT_EQ((int)meta[0xF0], 1);
   EXPECT_EQ((int)meta[0xF1], 2);
   ASSERT(le32(meta + 0xF2) == 0x1234);
+  /* pmuReservedSize: the vendor header's 0xF4 (measured by compiling
+   * gsp_fw_wpr_meta.h at 580.178.04, sizeof 256).  This asserts the field has
+   * a byte range of its own AND that adding it did not move `verified`. */
+  ASSERT(le32(meta + 0xF4) == 0x1920000u);
   /* verified is HOST-written as 0: the booter owns that word. */
   ASSERT(le64(meta + 0xF8) == 0);
   /* Reserved space is zeroed, not left as the caller's stack. */
@@ -525,6 +530,7 @@ static void test_nv_fw_wpr_meta_roundtrip(void) {
   EXPECT_EQ((int)out.heap_vf_partition_count, 1);
   EXPECT_EQ((int)out.flags, 2);
   EXPECT_EQ((int)out.paging_config, 0x1234);
+  ASSERT(out.pmu_reserved_size == 0x1920000u);
 }
 
 /* The booter's acceptance proof: it overwrites `verified` with 0xA0A0...  A

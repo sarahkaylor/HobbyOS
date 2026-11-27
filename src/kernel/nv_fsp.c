@@ -72,6 +72,14 @@
  *  nothing at all.
  * ==========================================================================*/
 
+/* uint32_t and ENODEV are needed by BOTH branches of this file: the
+ * non-x86-64 branch at the bottom defines the same symbols for the unit tier.
+ * They are included before the guard so the ARM build compiles (the base tree
+ * did not: 11 errors, "unknown type name 'uint32_t'" + "undeclared ENODEV",
+ * measured by compiling this one TU on the untouched base). */
+#include <stdint.h>
+#include "errno.h"
+
 #ifdef __x86_64__
 
 #include "nv.h"
