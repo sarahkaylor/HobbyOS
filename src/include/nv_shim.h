@@ -411,6 +411,29 @@ void nv_shim_syncfile_release(struct process *grp, int fd, void *obj,
 /* WP-SYNCFILE: `point` was set without the TIMELINE flag, which is the only
  * flag that gives the field a meaning (drm_syncobj.c's own rule). */
 #define NVSHIM_SYNC_POINT_WITHOUT_TIMELINE 14
+/* WP-TRANSFER: SYNCOBJ_TRANSFER's timeline handle->handle leg is served; the
+ * names below are what its refusals print.  Each is a different absence, and
+ * reusing one of them for another would make the log name the wrong wall:
+ *   15  the caller did not set TRANSFER_FLAGS_TIMELINE, i.e. asked for the
+ *       BINARY form (move a whole fence pointer), which a point-per-record
+ *       node does not have.
+ *   16  src_point was never handed to the source timeline (src_point >
+ *       submitted): there is no fence to move, in Linux's words "the point is
+ *       not submitted".
+ *   17  src_point was submitted but no live fence will land it (the channel it
+ *       was submitted on is gone), so a destination chained to it would wait
+ *       forever.
+ *   18  a handle the client does not hold -- a never-created number and one it
+ *       DESTROYED are the same absence here by construction (the handle table
+ *       recycles numbers, so no tombstone could tell them apart).
+ *   19  the source handle came from IMPORT_SYNC_FILE: that transfer carries a
+ *       sync_file's fence between timelines, which is the sync_file leg of this
+ *       row and a separate rung (docs/nv-shim-transfer.md §2). */
+#define NVSHIM_SYNC_TRANSFER_NEEDS_TIMELINE   15
+#define NVSHIM_SYNC_TRANSFER_POINT_UNSUBMITTED 16
+#define NVSHIM_SYNC_TRANSFER_POINT_NOT_PENDING 17
+#define NVSHIM_SYNC_TRANSFER_HANDLE_NOT_HELD  18
+#define NVSHIM_SYNC_TRANSFER_SRC_SYNC_FILE     19
 #define NVSHIM_SYNC_REASON_MAX         40
 void nv_shim_sync_refusal_name(int why, char *dst, int cap);
 
