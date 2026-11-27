@@ -298,6 +298,49 @@ struct nvshim_drm_syncobj_transfer {
 
 #define NVSHIM_DRM_SYNCOBJ_TRANSFER_FLAGS_TIMELINE (1u << 0)
 
+/* ---- EVENTFD (DRM_IOCTL_SYNCOBJ_EVENTFD, nr 0xcf) ----------------------
+ *
+ * struct drm_syncobj_eventfd, field for field and 24 bytes for size.  drm.h
+ * defines no flag bit for this row -- `flags` is MBZ and Linux's
+ * drm_syncobj_eventfd_ioctl answers -EINVAL for any non-zero value -- so the
+ * served contract is `flags == 0, pad == 0`, and there is no cancel form to
+ * express in these 24 bytes either (clearing a registration needs a request
+ * that does not exist).  Those two absences are answered by NAME, not
+ * approximated: a second registration for the same (handle, point) is refused
+ * with reason `eventfd_registered`, never a silent replace.
+ *
+ * `point` is the timeline point whose retire writes the counter:
+ *   point != 0  that point of the handle's timeline.  It must be a point that
+ *               was SUBMITTED (it is in the record's ledger), so there is a
+ *               fence for it; a point already reached signals at once, which is
+ *               Linux's dma_fence_add_callback on a signalled fence.
+ *   point == 0  the BINARY form: the handle's CURRENT fence -- the floor an
+ *               IMPORT_SYNC_FILE handle carries, else the record's highest
+ *               submitted point (the chain head Linux attaches the callback
+ *               to), else the binary stub at 1 (CREATE_SIGNALED / binary
+ *               SIGNAL).  If that fence is already signalled the counter is
+ *               written inside this request -- Linux's explicit
+ *               `fence == dma_fence_get_stub()` case and its add-callback on a
+ *               signalled fence.
+ *
+ * `fd` is resolved to the eventfd's counter slot AT REGISTRATION, together with
+ * the slot's generation; a close(2) before the retire is therefore a named
+ * refusal at retire time (`eventfd_closed`) and writes nothing -- never a
+ * later NULL, and never a write into a slot a new eventfd has since reused.
+ *
+ * On retire the counter is incremented by exactly 1: Linux's
+ * syncobj_eventfd_signal calls eventfd_signal(efd, 1).  A read(2) then returns
+ * one 8-byte u64 == 1 and a second read is -EAGAIN; poll(2) wakes on the same
+ * key l_eventfd_key() already returns for that slot.
+ */
+struct nvshim_drm_syncobj_eventfd {
+  uint32_t handle;
+  uint32_t flags; /* must be 0: drm.h defines no flag for this row */
+  uint64_t point;
+  int32_t fd;     /* must be an eventfd fd; resolved here, at registration */
+  uint32_t pad;   /* must be 0 */
+};                /* 24 bytes */
+
 
 /* ---- DRM_IOCTL_NOUVEAU_GETPARAM --------------------------------------- */
 
@@ -625,11 +668,13 @@ struct nvshim_drm_exec {
 #define NVSHIM_DRM_NR_GEM_PUSHBUF         0x81
 #define NVSHIM_DRM_NR_GEM_CPU_PREP        0x82
 #define NVSHIM_DRM_NR_GEM_CPU_FINI        0x83
-/* WP-SYNC: of the seven syncobj rows, 0xc1 / 0xc2 / 0xca / 0xcb / 0xcd are
- * defined here for the contract; 0xc1, 0xc2, 0xca and 0xcd were served by
- * WP-SYNC, WP-SYNCFAM served 0xcb (QUERY), WP-SYNCFILE served the sync_file
- * legs of 0xc1/0xc2 and WP-TRANSFER served 0xcc (the timeline handle->handle
- * leg), so 0xcf (EVENTFD) is the one named refusal left. */
+/* WP-SYNC: of the seven syncobj rows, all seven are defined here for the
+ * contract and all seven are SERVED: WP-SYNC served 0xc1 / 0xc2 / 0xca / 0xcd,
+ * WP-SYNCFAM served 0xcb (QUERY), WP-SYNCFILE the sync_file legs of 0xc1/0xc2,
+ * WP-TRANSFER 0xcc's timeline handle->handle leg, WP-TRANSFERFILE its sync_file
+ * source leg and WP-EVENTFD 0xcf (EVENTFD).  No syncobj row is refused by
+ * NUMBER any more; the legs that remain refused inside a served row print their
+ * own reason names (nv_shim.h). */
 #define NVSHIM_DRM_NR_SYNCOBJ_HANDLE_TO_FD 0xc1
 #define NVSHIM_DRM_NR_SYNCOBJ_FD_TO_HANDLE 0xc2
 #define NVSHIM_DRM_NR_SYNCOBJ_TIMELINE_WAIT 0xca
@@ -656,12 +701,14 @@ struct nvshim_drm_exec {
 #define NVSHIM_DRM_IOC_GEM_CPU_PREP     NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_GEM_CPU_PREP, 8)
 #define NVSHIM_DRM_IOC_GEM_CPU_FINI     NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_GEM_CPU_FINI, 4)
 #define NVSHIM_DRM_IOC_GEM_FLINK        NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_GEM_FLINK, 8)
-/* WP-SYNC: 0xc1, 0xc2, 0xca and 0xcd are SERVED now (macros above), and
- * WP-SYNCFAM served 0xcb (QUERY, also above).  WP-TRANSFER served 0xcc for the
- * timeline handle->handle leg (also above), so EVENTFD is the ONE syncobj row
- * left in the refusal table; its size is drm.h's true encoded size so a probe
- * built from this header is a request a real client could have sent. */
-#define NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD  NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_SYNCOBJ_EVENTFD, 24)
+/* WP-EVENTFD: 0xcf (EVENTFD) is SERVED too, so its request is drm.h's own
+ * encoding -- DRM_IOWR(0xcf, struct drm_syncobj_eventfd) = 24 bytes.  The
+ * previous spelling was a refusal-only ANY(nr, 24); the encoding is identical
+ * (0xC01864CF), so a probe written against the old macro is a request a real
+ * client could have sent. */
+#define NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD                                                         \
+  NVSHIM_DRM_IOWR(NVSHIM_DRM_NR_SYNCOBJ_EVENTFD,                                               \
+                  struct nvshim_drm_syncobj_eventfd)                   /* 0xC01864CF */
 
 /* Limits of the DRM face.  NVSHIM_DRM_VA_MAX is 1 TiB because that is the
  * total VA space Mesa's nouveau winsys asks for (TOP = 1<<40); the 'N'

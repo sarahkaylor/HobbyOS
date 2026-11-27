@@ -356,6 +356,14 @@ struct vm_object *file_memfd_obj(struct process *p, int fd);
 int file_memfd_seals(struct process *p, int fd, int cmd, int arg);
 /* cp/sys: an eventfd fd over linux_compat_fd.c's counter slots. */
 int file_eventfd_create(struct process *p, unsigned int initval, int flags);
+/* WP-EVENTFD: resolve an eventfd fd to its kernel counter slot, plus the slot's
+ * GENERATION (monotonic per allocation).  The slot is what a kernel-side writer
+ * needs; the generation is what lets the caller tell "the eventfd I registered"
+ * from "a later eventfd that reused the same slot after a close(2)" -- without
+ * it, a retired point would write into a stranger's counter.  Returns the slot
+ * (>= 0), or -EBADF for an absent/closed fd, -EINVAL for a live fd that is not
+ * an eventfd.  `gen` may be NULL. */
+int file_eventfd_slot(struct process *p, int fd, uint32_t *gen);
 /* C1-k6: signalfd.  create: a new fd (flags SFD_CLOEXEC|SFD_NONBLOCK) or
    -errno; set_mask: replace an existing signalfd's mask (-EINVAL when fd is
    not one, -EBADF when closed). */
