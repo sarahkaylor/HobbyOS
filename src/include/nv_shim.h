@@ -363,6 +363,22 @@ void nv_shim_prime_refusal_name(int why, char *dst, int cap);
  * discards a received fd with no process context). */
 void nv_shim_syncobj_release(struct process *grp, int fd, void *obj);
 
+/* WP-SYNCFILE: the sync_file fd.  fs.c installs it (file_syncfile_install,
+ * fs.h) with the (record, point) pair the exporter named, and calls
+ * nv_shim_syncfile_release() when the LAST file reference to it closes -- one
+ * record reference per file description, exactly like a syncobj fd.
+ *
+ * The difference from the two older shim fds is the readiness seam:
+ * nv_shim_syncfile_ready() is what fs.c's f1_probe_fd() branch asks, and it
+ * reads the record's `point` -- the same field sobj_wait_ready() compares --
+ * so poll(2)/select(2) report POLLIN exactly when a SYNCOBJ_WAIT at that point
+ * would succeed.  It is NOT a private readiness flag: retirement is still the
+ * shim's single completion path (client_reap_locked()), and this function only
+ * observes it. */
+int nv_shim_syncfile_ready(void *obj, uint64_t point);
+void nv_shim_syncfile_release(struct process *grp, int fd, void *obj,
+                              uint64_t point);
+
 /* Why a syncobj request was refused, as the name the console row carries.
  * Exported so the tier asserts the NAME, not only the errno.  COPIED into the
  * caller's buffer, never returned as a pointer: see the PRIME note above (a
@@ -370,8 +386,11 @@ void nv_shim_syncobj_release(struct process *grp, int fd, void *obj);
  * AArch64 relocation audit). */
 #define NVSHIM_SYNC_OK                 0
 #define NVSHIM_SYNC_NOT_SYNCOBJ        1 /* the fd is not a syncobj fd */
-#define NVSHIM_SYNC_EXPORT_SYNC_FILE   2 /* HANDLE_TO_FD asked for a sync_file */
-#define NVSHIM_SYNC_IMPORT_SYNC_FILE   3 /* FD_TO_HANDLE asked to eat a sync_file */
+/* WP-SYNCFILE: the two flags are served now; these names are what a refused
+ * sync_file leg prints (an fd that could not be installed, or one that is not
+ * a sync_file fd) -- kept in the table because the log must name the leg. */
+#define NVSHIM_SYNC_EXPORT_SYNC_FILE   2 /* a sync_file export was refused */
+#define NVSHIM_SYNC_IMPORT_SYNC_FILE   3 /* a sync_file import was refused */
 #define NVSHIM_SYNC_BAD_FLAGS          4 /* an undefined flag bit */
 #define NVSHIM_SYNC_POINT_ZERO         5 /* a timeline point of 0 is not a point */
 #define NVSHIM_SYNC_POINT_ORDER        6 /* not greater than a submitted point */
@@ -385,6 +404,13 @@ void nv_shim_syncobj_release(struct process *grp, int fd, void *obj);
  * submitted ledger has no entry for it, and answering 0 would be
  * indistinguishable from "nothing was ever submitted" -- so the row names it. */
 #define NVSHIM_SYNC_POINT_BEYOND_LEDGER 12
+/* WP-SYNCFILE: an IMPORT_SYNC_FILE whose fd is not a sync_file fd (it is the
+ * node, a plain syncobj fd, a dma-buf, a pipe).  Linux answers -EINVAL from
+ * sync_file_get_fence(); this node says WHICH object it found instead. */
+#define NVSHIM_SYNC_NOT_SYNC_FILE     13
+/* WP-SYNCFILE: `point` was set without the TIMELINE flag, which is the only
+ * flag that gives the field a meaning (drm_syncobj.c's own rule). */
+#define NVSHIM_SYNC_POINT_WITHOUT_TIMELINE 14
 #define NVSHIM_SYNC_REASON_MAX         40
 void nv_shim_sync_refusal_name(int why, char *dst, int cap);
 

@@ -2729,6 +2729,363 @@ static void test_nvshim_drm_syncobj_query(void) {
   EXPECT_EQ(nv_rm_mock_live(), 0);
 }
 
+/* ============================================================================
+ *  WP-SYNCFILE: the sync_file fd -- a fence as a file, measured through poll(2)
+ *
+ *  These are the two rows the syncobj surface refused for three rungs:
+ *  HANDLE_TO_FD with EXPORT_SYNC_FILE (a dma_fence as a file) and FD_TO_HANDLE
+ *  with IMPORT_SYNC_FILE (that file back into a handle).  The fd is a real
+ *  FILE_TYPE_SYNCFILE slot, so its readiness has to come from the ORDINARY poll
+ *  engine -- file_poll() -> f1_probe_fd() -> the shim's own record -- and never
+ *  from anything this suite can poke.  Every poll below is that call, and the
+ *  retire is the mock RM's kick(), the same completion path the timeline suite
+ *  drives.
+ *
+ *  What the suite holds to a value:
+ *    - unsignalled: 0 ready fds, revents 0 (binary and timeline forms)
+ *    - the FIRST held EXEC enqueues a pending fence: still 0, and the wait rows
+ *      agree (-ETIME) -- poll cannot claim what a wait denies
+ *    - the kick that retires it: 1 ready fd, revents == POLLIN
+ *    - IMPORT_SYNC_FILE: binary wait -ETIME before, 0 after; a LOWER timeline
+ *      point does not satisfy the imported handle (it names the file's point)
+ *    - dup / SCM_RIGHTS share ONE file description, so the record reference
+ *      count does not move; the last close drops it exactly once
+ * ========================================================================== */
+
+/* One poll(2)-engine question: does the PUBLIC path say this fd is readable
+ * now?  Returns file_poll()'s ready count and the revents it wrote. */
+static int syncfile_poll(struct drm_probe *pr, int ufd, short *revents) {
+  struct k_pollfd pf;
+  pf.fd = ufd;
+  pf.events = K_POLLIN;
+  pf.revents = 0x7FFF;
+  int rc = file_poll(pr->p, &pf, 1, 0);
+  if (revents) *revents = pf.revents;
+  return rc;
+}
+
+static void test_nvshim_drm_syncfile(void) {
+  uart_puts("  Running test_nvshim_drm_syncfile...\n");
+  tests_run++;
+
+  struct drm_probe pr;
+  EXPECT_EQ(drm_probe_up(&pr, 107), 0);
+  if (!pr.up) return;
+  struct drm_probe pr2;
+  EXPECT_EQ(drm_probe_up(&pr2, 108), 0);
+  if (!pr2.up) {
+    drm_probe_down(&pr);
+    return;
+  }
+  struct nvshim_drm_getparam q;
+  q.param = NVSHIM_PARAM_CHIPSET_ID;
+  q.value = 0;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GETPARAM, &q, (int)sizeof q), 0);
+  EXPECT_EQ(drm_ioc(&pr2, NVSHIM_DRM_IOC_GETPARAM, &q, (int)sizeof q), 0);
+
+  uint32_t bo = 0;
+  int32_t ch = 0;
+  int setup = sync_exec_setup(&pr, &bo, &ch);
+  EXPECT_EQ(setup, 0);
+  if (setup != 0) {
+    drm_probe_down(&pr2);
+    drm_probe_down(&pr);
+    return;
+  }
+
+  uint32_t h1 = 0;
+  EXPECT_EQ(sobj_create(&pr, 0, &h1), 0);
+  /* A plain syncobj fd on the same handle gives the suite the RECORD pointer,
+   * so "the sync_file names the same object" is an identity, not a guess. */
+  int pfd1 = -1;
+  EXPECT_EQ(sobj_export(&pr, h1, 0, 0, &pfd1), 0);
+  void *rec1 = pfd1 >= 0 ? file_syncobj_obj(pr.p, pfd1) : 0;
+  EXPECT_EQ((int)(rec1 != 0), 1);
+  if (!rec1) {
+    drm_probe_down(&pr2);
+    drm_probe_down(&pr);
+    return;
+  }
+  EXPECT_EQ(nv_shim_test_syncobj_refs(rec1), 2); /* handle + syncobj fd */
+
+  /* --- (1) BINARY export: an ordinary fd whose poll waits for point 1 --- */
+  int e1 = -1;
+  EXPECT_EQ(sobj_export(&pr, h1, NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE,
+                        0, &e1), 0);
+  EXPECT_EQ((int)(e1 >= 0), 1);
+  EXPECT_EQ((int)(e1 != pr.fd), 1);
+  EXPECT_EQ((int)(e1 != pfd1), 1);
+  EXPECT_EQ(file_is_syncfile(pr.p, e1), 1);
+  EXPECT_EQ(file_is_syncobj(pr.p, e1), 0); /* a sync_file, not a syncobj fd */
+  EXPECT_EQ(file_is_dmabuf(pr.p, e1), 0);
+  uint64_t e1pt = 0;
+  EXPECT_EQ((int)(file_syncfile_obj(pr.p, e1, &e1pt) == rec1), 1);
+  EXPECT_EQ(e1pt, 1ull); /* binary names point 1 */
+  EXPECT_EQ(nv_shim_test_syncobj_refs(rec1), 3); /* + the sync_file fd */
+  {
+    uint32_t ofl = 0xFFFFFFFFu;
+    EXPECT_EQ(file_open_flags(pr.p, e1, &ofl), 0);
+    EXPECT_EQ((int)((ofl & 3u) == 0u), 1); /* O_RDONLY, as sync_file_create */
+  }
+
+  short rev = -1;
+  EXPECT_EQ(syncfile_poll(&pr, e1, &rev), 0); /* nothing readable yet */
+  EXPECT_EQ((int)rev, 0);
+
+  /* The FIRST EXEC is held: the fence cannot retire, so poll must stay 0 and
+   * the wait rows must agree.  This is the "not true by construction" half. */
+  struct nvshim_drm_sync sig;
+  sig.flags = NVSHIM_DRM_SYNC_SYNCOBJ;
+  sig.handle = h1;
+  sig.timeline_value = 0;
+  nv_rm_mock_hold(1);
+  EXPECT_EQ(sync_exec_with(&pr, ch, &sig, 1), 0);
+  EXPECT_EQ(nv_rm_mock_pending(), 1);
+  EXPECT_EQ(syncfile_poll(&pr, e1, &rev), 0);
+  EXPECT_EQ((int)rev, 0);
+  {
+    uint32_t hs[1];
+    hs[0] = h1;
+    EXPECT_EQ(sobj_binary_wait(&pr, hs, 1, 0), -ETIME); /* poll == wait */
+  }
+
+  /* Release the hold and submit an unsigned EXEC: that kick retires the fence,
+   * which is the ONLY thing that may turn the fd readable. */
+  nv_rm_mock_hold(0);
+  EXPECT_EQ(sync_exec_with(&pr, ch, 0, 0), 0);
+  EXPECT_EQ(nv_rm_mock_pending(), 0);
+  EXPECT_EQ(syncfile_poll(&pr, e1, &rev), 1);
+  EXPECT_EQ((int)rev, K_POLLIN);
+  uart_puts("  [NVSHIM] syncfile binary: file_poll 0/revents 0 while the fence was held, "
+            "1/POLLIN after the kick retired it\n");
+  {
+    uint32_t hs[1];
+    hs[0] = h1;
+    EXPECT_EQ(sobj_binary_wait(&pr, hs, 1, 0), 0);
+  }
+
+  /* --- (2) TIMELINE export at 7 + IMPORT_SYNC_FILE ---------------------- */
+  uint32_t h2 = 0;
+  EXPECT_EQ(sobj_create(&pr, 0, &h2), 0);
+  int pfd2 = -1;
+  EXPECT_EQ(sobj_export(&pr, h2, 0, 0, &pfd2), 0);
+  void *rec2 = pfd2 >= 0 ? file_syncobj_obj(pr.p, pfd2) : 0;
+  EXPECT_EQ((int)(rec2 != 0), 1);
+  if (!rec2) {
+    drm_probe_down(&pr2);
+    drm_probe_down(&pr);
+    return;
+  }
+  int e2 = -1;
+  EXPECT_EQ(sobj_export(&pr, h2, NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE |
+                                     NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_TIMELINE,
+                        7, &e2), 0);
+  EXPECT_EQ((int)(e2 >= 0), 1);
+  EXPECT_EQ(file_is_syncfile(pr.p, e2), 1);
+  uint64_t e2pt = 0;
+  EXPECT_EQ((int)(file_syncfile_obj(pr.p, e2, &e2pt) == rec2), 1);
+  EXPECT_EQ(e2pt, 7ull);
+  EXPECT_EQ(nv_shim_test_syncobj_refs(rec2), 3); /* handle + syncobj fd + file */
+  EXPECT_EQ(syncfile_poll(&pr, e2, &rev), 0);
+  EXPECT_EQ((int)rev, 0);
+
+  /* IMPORT (binary form): the handle names the file's point 7, so a binary wait
+   * at 1 is NOT satisfied, and neither is a timeline wait below 7. */
+  uint32_t h3 = 0;
+  EXPECT_EQ(sobj_import(&pr, e2, NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE,
+                        0, &h3), 0);
+  EXPECT_EQ((int)(h3 != 0), 1);
+  EXPECT_EQ((int)(h3 != h2), 1); /* a new handle entry */
+  EXPECT_EQ(nv_shim_test_syncobj_refs(rec2), 4);
+  {
+    uint32_t hs[1];
+    uint64_t pts[1];
+    hs[0] = h3;
+    EXPECT_EQ(sobj_binary_wait(&pr, hs, 1, 0), -ETIME);
+    pts[0] = 3;
+    EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), -ETIME);
+    pts[0] = 7;
+    EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), -ETIME);
+  }
+  /* IMPORT (timeline form) states the point itself; same answer, same object. */
+  uint32_t h4 = 0;
+  EXPECT_EQ(sobj_import(&pr, e2, NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE |
+                                    NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_TIMELINE,
+                        7, &h4), 0);
+  EXPECT_EQ((int)(h4 != 0), 1);
+  EXPECT_EQ(nv_shim_test_syncobj_refs(rec2), 5);
+  {
+    uint32_t hs[1];
+    hs[0] = h4;
+    EXPECT_EQ(sobj_binary_wait(&pr, hs, 1, 0), -ETIME);
+  }
+
+  /* Held timeline EXEC at 7: neither surface may move. */
+  sig.flags = NVSHIM_DRM_SYNC_TIMELINE_SYNCOBJ;
+  sig.handle = h2;
+  sig.timeline_value = 7;
+  nv_rm_mock_hold(1);
+  EXPECT_EQ(sync_exec_with(&pr, ch, &sig, 1), 0);
+  EXPECT_EQ(nv_rm_mock_pending(), 1);
+  EXPECT_EQ(syncfile_poll(&pr, e2, &rev), 0);
+  EXPECT_EQ((int)rev, 0);
+  {
+    uint32_t hs[1];
+    hs[0] = h3;
+    EXPECT_EQ(sobj_binary_wait(&pr, hs, 1, 0), -ETIME);
+  }
+
+  /* The kick retires it: poll turns readable and BOTH imported handles wait 0. */
+  nv_rm_mock_hold(0);
+  EXPECT_EQ(sync_exec_with(&pr, ch, 0, 0), 0);
+  EXPECT_EQ(nv_rm_mock_pending(), 0);
+  EXPECT_EQ(syncfile_poll(&pr, e2, &rev), 1);
+  EXPECT_EQ((int)rev, K_POLLIN);
+  {
+    uint32_t hs[1];
+    uint64_t pts[1];
+    hs[0] = h3;
+    EXPECT_EQ(sobj_binary_wait(&pr, hs, 1, 0), 0);
+    pts[0] = 7;
+    EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), 0);
+    /* Past the point the file named: this mock does not invent an 8. */
+    pts[0] = 8;
+    EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), -ETIME);
+    hs[0] = h4;
+    EXPECT_EQ(sobj_binary_wait(&pr, hs, 1, 0), 0);
+  }
+  uart_puts("  [NVSHIM] syncfile timeline@7: file_poll 0/revents 0 before the kick, "
+            "1/POLLIN after; imported SYNCOBJ_WAIT -ETIME -> 0 on the same retire\n");
+
+  /* --- (3) dup and SCM_RIGHTS: ONE description, so no extra reference --- */
+  int dupfd = file_dup(pr.p, e2);
+  EXPECT_EQ((int)(dupfd >= 0), 1);
+  if (dupfd >= 0) {
+    uint64_t dpt = 0;
+    EXPECT_EQ(file_is_syncfile(pr.p, dupfd), 1);
+    EXPECT_EQ((int)(file_syncfile_obj(pr.p, dupfd, &dpt) == rec2), 1);
+    EXPECT_EQ(dpt, 7ull);
+    EXPECT_EQ(nv_shim_test_syncobj_refs(rec2), 5); /* still one description */
+    EXPECT_EQ(syncfile_poll(&pr, dupfd, &rev), 1);
+    EXPECT_EQ((int)rev, K_POLLIN);
+    EXPECT_EQ(file_close(pr.p, dupfd), 0);
+    EXPECT_EQ(file_is_syncfile(pr.p, dupfd), 0);
+    EXPECT_EQ(nv_shim_test_syncobj_refs(rec2), 5);
+    EXPECT_EQ(syncfile_poll(&pr, e2, &rev), 1); /* e2 still readable */
+  }
+
+  /* fork: fs_reopen() is exactly what fork does for every inherited fd -- one
+   * more user of the SAME description, so the record reference must NOT move,
+   * and the child's close must not free anything either. */
+  {
+    int gfd = pr.p->open_fds[e2];
+    EXPECT_EQ((int)(gfd >= 0), 1);
+    fs_reopen(gfd);
+    EXPECT_EQ(nv_shim_test_syncobj_refs(rec2), 5);
+    EXPECT_EQ(syncfile_poll(&pr, e2, &rev), 1); /* the description is shared */
+    fs_close_global(gfd);                       /* the forked side's copy goes */
+    EXPECT_EQ(nv_shim_test_syncobj_refs(rec2), 5);
+  }
+
+  {
+    int gfd = pr.p->open_fds[e2];
+    EXPECT_EQ((int)(gfd >= 0), 1);
+    EXPECT_EQ(fs_msg_ref_gfd(gfd), 0);
+    int e2b = fs_msg_install_gfd(pr2.p, gfd);
+    EXPECT_EQ((int)(e2b >= 0), 1);
+    if (e2b >= 0) {
+      uint64_t bpt = 0;
+      EXPECT_EQ(file_is_syncfile(pr2.p, e2b), 1);
+      EXPECT_EQ((int)(file_syncfile_obj(pr2.p, e2b, &bpt) == rec2), 1);
+      EXPECT_EQ(bpt, 7ull);
+      /* The RECEIVER's poll engine, on the same description. */
+      EXPECT_EQ(syncfile_poll(&pr2, e2b, &rev), 1);
+      EXPECT_EQ((int)rev, K_POLLIN);
+      EXPECT_EQ(nv_shim_test_syncobj_refs(rec2), 5);
+      uint32_t h5 = 0;
+      EXPECT_EQ(sobj_import(&pr2, e2b,
+                            NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE,
+                            0, &h5), 0);
+      EXPECT_EQ(nv_shim_test_syncobj_refs(rec2), 6);
+      {
+        uint32_t hs[1];
+        hs[0] = h5;
+        EXPECT_EQ(sobj_binary_wait(&pr2, hs, 1, 0), 0); /* already retired */
+      }
+      /* Closing the receiver's copy leaves the description (and the record's
+       * one reference) with the sender. */
+      EXPECT_EQ(file_close(pr2.p, e2b), 0);
+      EXPECT_EQ(nv_shim_test_syncobj_refs(rec2), 6);
+      EXPECT_EQ(sobj_destroy(&pr2, h5), 0);
+      EXPECT_EQ(nv_shim_test_syncobj_refs(rec2), 5);
+    }
+  }
+
+  /* --- (4) refusals: the shapes, and the rows that STILL refuse ---------- */
+  {
+    uint32_t hx = 0;
+    int fx = -1;
+    EXPECT_EQ(sobj_import(&pr, pr.fd, NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE,
+                          0, &hx), -EINVAL); /* the node is not a sync_file */
+    EXPECT_EQ(sobj_import(&pr, pfd1, NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE,
+                          0, &hx), -EINVAL); /* a plain syncobj fd is not either */
+    EXPECT_EQ(sobj_import(&pr, e1, NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE |
+                                    NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_TIMELINE,
+                          0, &hx), -EINVAL); /* timeline point 0 */
+    EXPECT_EQ(sobj_import(&pr, e1, NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE,
+                          5, &hx), -EINVAL); /* point without TIMELINE */
+    EXPECT_EQ(sobj_export(&pr, h1, NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE |
+                                     NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_TIMELINE,
+                          0, &fx), -EINVAL); /* timeline point 0 */
+    EXPECT_EQ(sobj_export(&pr, h1, NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE,
+                          5, &fx), -EINVAL); /* point without TIMELINE */
+    EXPECT_EQ(sobj_export(&pr, h1 + 900,
+                          NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE,
+                          0, &fx), -EINVAL); /* a handle this client does not hold */
+  }
+  EXPECT_EQ(sync_name_is(NVSHIM_SYNC_NOT_SYNC_FILE, "not_a_sync_file"), 1);
+  EXPECT_EQ(sync_name_is(NVSHIM_SYNC_POINT_WITHOUT_TIMELINE, "point_without_timeline"), 1);
+  /* TRANSFER and EVENTFD are the two syncobj rows this rung did NOT serve, and
+   * they still answer -ENOSYS by name (docs/nv-shim-syncfile.md §5). */
+  EXPECT_EQ(nv_shim_ioctl(pr.p, pr.fd, NVSHIM_DRM_IOC_SYNCOBJ_TRANSFER, DREQ_BASE),
+            -ENOSYS);
+  EXPECT_EQ(nv_shim_ioctl(pr.p, pr.fd, NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD, DREQ_BASE),
+            -ENOSYS);
+
+  /* --- (5) close order: one reference per description, freed at the last -- */
+  EXPECT_EQ(sobj_destroy(&pr, h3), 0);
+  EXPECT_EQ(nv_shim_test_syncobj_refs(rec2), 4);
+  EXPECT_EQ(sobj_destroy(&pr, h4), 0);
+  EXPECT_EQ(nv_shim_test_syncobj_refs(rec2), 3);
+  EXPECT_EQ(file_close(pr.p, pfd1), 0); /* the R1 syncobj fd goes */
+  EXPECT_EQ(nv_shim_test_syncobj_refs(rec1), 2);
+  EXPECT_EQ(file_close(pr.p, pfd2), 0); /* the R2 syncobj fd goes */
+  EXPECT_EQ(nv_shim_test_syncobj_refs(rec2), 2);
+  EXPECT_EQ(sobj_destroy(&pr, h2), 0); /* the record lives on the sync_file */
+  EXPECT_EQ(nv_shim_test_syncobj_refs(rec2), 1);
+  EXPECT_EQ(sobj_destroy(&pr, h1), 0);
+  EXPECT_EQ(nv_shim_test_syncobj_refs(rec1), 1);
+  EXPECT_EQ(syncfile_poll(&pr, e2, &rev), 1); /* still readable after handler */
+  EXPECT_EQ(file_close(pr.p, e1), 0);
+  EXPECT_EQ(nv_shim_test_syncobj_refs(rec1), -1); /* last close freed it, once */
+  EXPECT_EQ(file_close(pr.p, e2), 0);
+  EXPECT_EQ(nv_shim_test_syncobj_refs(rec2), -1);
+  EXPECT_EQ(file_is_syncfile(pr.p, e2), 0);
+  uart_puts("  [NVSHIM] syncfile refs: dup/fork/SCM_RIGHTS kept ONE description and "
+            "ONE record reference; the last close freed each record once: PASS\n");
+
+  struct nvshim_drm_channel_free cf;
+  cf.channel = ch;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_CHANNEL_FREE, &cf, (int)sizeof cf), 0);
+  struct nvshim_drm_gem_close gc;
+  gc.handle = bo;
+  gc.pad = 0;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_CLOSE, &gc, (int)sizeof gc), 0);
+  drm_probe_down(&pr2);
+  drm_probe_down(&pr);
+  EXPECT_EQ(nv_rm_mock_live(), 0);
+}
+
 static void test_nvshim_drm_syncobj_refusals(void) {
   uart_puts("  Running test_nvshim_drm_syncobj_refusals...\n");
   tests_run++;
@@ -2748,6 +3105,9 @@ static void test_nvshim_drm_syncobj_refusals(void) {
   /* WP-SYNCFAM: QUERY's own refusal, for a point the submitted ledger has no
    * entry for (a host-side stub: CREATE_SIGNALED, binary SIGNAL). */
   EXPECT_EQ(sync_name_is(NVSHIM_SYNC_POINT_BEYOND_LEDGER, "point_beyond_ledger"), 1);
+  /* WP-SYNCFILE: the sync_file legs' own refusals. */
+  EXPECT_EQ(sync_name_is(NVSHIM_SYNC_NOT_SYNC_FILE, "not_a_sync_file"), 1);
+  EXPECT_EQ(sync_name_is(NVSHIM_SYNC_POINT_WITHOUT_TIMELINE, "point_without_timeline"), 1);
   /* The 'N' face's feature mask advertises what the node can do. */
   EXPECT_EQ((nv_shim_features() & NVSHIM_FEAT_SYNCOBJ_TIMELINE) != 0, 1);
 
@@ -2777,9 +3137,34 @@ static void test_nvshim_drm_syncobj_refusals(void) {
   uint64_t pts[1];
   hs[0] = h;
 
-  /* --- HANDLE_TO_FD shapes --- */
-  EXPECT_EQ(sobj_export(&pr, h, NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE, 0,
-                        &fd_out), -ENOSYS);
+  /* --- HANDLE_TO_FD shapes ---
+   * WP-SYNCFILE: EXPORT_SYNC_FILE is SERVED now, so what is left here is its
+   * malformed half -- a point with no TIMELINE flag to name it, and a timeline
+   * point of 0 -- plus an ordinary export that must still work (below). */
+  EXPECT_EQ(sobj_export(&pr, h, NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE,
+                        0, &fd_out), 0);
+  if (fd_out >= 0) {
+    int sffd = fd_out;
+    EXPECT_EQ(file_is_syncfile(pr.p, sffd), 1);
+    { /* IMPORT_SYNC_FILE is served on a sync_file fd... */
+      uint32_t hs2 = 0;
+      EXPECT_EQ(sobj_import(&pr, sffd,
+                            NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE,
+                            0, &hs2), 0);
+      if (hs2) EXPECT_EQ(sobj_destroy(&pr, hs2), 0);
+      /* ... and refuses a non-sync_file fd by name. */
+      EXPECT_EQ(sobj_import(&pr, pr.fd,
+                            NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE,
+                            0, &hs2), -EINVAL);
+    }
+    EXPECT_EQ(file_close(pr.p, sffd), 0);
+    fd_out = -1;
+  }
+  EXPECT_EQ(sobj_export(&pr, h, NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE,
+                        5, &fd_out), -EINVAL);
+  EXPECT_EQ(sobj_export(&pr, h, NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE |
+                               NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_TIMELINE,
+                        0, &fd_out), -EINVAL);
   EXPECT_EQ(sobj_export(&pr, h, 0x80, 0, &fd_out), -EINVAL);
   EXPECT_EQ(sobj_export(&pr, h, 0, 5, &fd_out), -EINVAL); /* point without a sync_file */
   EXPECT_EQ(sobj_export(&pr, h + 900, 0, 0, &fd_out), -EINVAL);
@@ -2798,8 +3183,9 @@ static void test_nvshim_drm_syncobj_refusals(void) {
   /* --- FD_TO_HANDLE shapes --- */
   if (fd_out >= 0) {
     uint32_t hx = 0;
+    /* A PLAIN syncobj fd is not a sync_file, so the import flag refuses it. */
     EXPECT_EQ(sobj_import(&pr, fd_out, NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE,
-                          0, &hx), -ENOSYS);
+                          0, &hx), -EINVAL);
     EXPECT_EQ(sobj_import(&pr, fd_out, 0x80, 0, &hx), -EINVAL);
     EXPECT_EQ(sobj_import(&pr, fd_out, 0, 3, &hx), -EINVAL);
     {
@@ -2895,9 +3281,12 @@ static void test_nvshim_drm_syncobj_refusals(void) {
 
   /* --- the rows this rung did NOT serve are still -ENOSYS by name.  QUERY is
    * not in this list any more: WP-SYNCFAM serves it (test_nvshim_drm_syncobj_
-   * query drives it), and TRANSFER + EVENTFD are the two that stay refused --
-   * both on the sync_file/eventfd object this node does not have (docs/
-   * nv-shim-syncfam.md §5). --- */
+   * query drives it), and the sync_file legs of HANDLE_TO_FD/FD_TO_HANDLE are
+   * served by WP-SYNCFILE (test_nvshim_drm_syncfile drives them through
+   * poll(2)).  TRANSFER and EVENTFD are the two that stay refused; EVENTFD's
+   * kernel-side counter writer still does not exist, and TRANSFER's handle->
+   * handle leg needs no sync_file at all -- it is the next, smaller rung
+   * (docs/nv-shim-syncfile.md §5). --- */
   EXPECT_EQ(nv_shim_ioctl(pr.p, pr.fd, NVSHIM_DRM_IOC_SYNCOBJ_TRANSFER, DREQ_BASE),
             -ENOSYS);
   EXPECT_EQ(nv_shim_ioctl(pr.p, pr.fd, NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD, DREQ_BASE),
@@ -3421,6 +3810,7 @@ void nv_shim_drm_test_suite(void) {
   test_nvshim_drm_syncobj_fd();        /* WP-SYNC: syncobj fd, SCM_RIGHTS, refs */
   test_nvshim_drm_syncobj_refusals();  /* WP-SYNC: the names and the shapes */
   test_nvshim_drm_syncobj_query();     /* WP-SYNCFAM: the submitted ledger */
+  test_nvshim_drm_syncfile();          /* WP-SYNCFILE: poll(2) / import, refs */
   test_nvshim_nvif_layout();
   test_nvshim_nvif_device();
   test_nvshim_nvif_sclass();

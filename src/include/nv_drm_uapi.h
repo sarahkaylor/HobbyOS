@@ -245,6 +245,11 @@ struct nvshim_drm_syncobj_handle {
   uint64_t point;
 };                 /* 24 bytes */
 
+/* WP-SYNC: the plain form of HANDLE_TO_FD/FD_TO_HANDLE, which exports/imports a
+ * SYNCOBJ fd.  WP-SYNCFILE: the two *_SYNC_FILE flags are SERVED as well --
+ * EXPORT_SYNC_FILE produces a sync_file fd (poll(2) answers POLLIN when the
+ * point it names is reached) and IMPORT_SYNC_FILE turns such an fd back into a
+ * syncobj handle.  TIMELINE is what gives `point` a meaning on both legs. */
 #define NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE (1u << 0)
 #define NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_TIMELINE         (1u << 1)
 #define NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE (1u << 0)

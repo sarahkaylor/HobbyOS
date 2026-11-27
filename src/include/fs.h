@@ -131,7 +131,20 @@ typedef enum {
      syncobj alive -- dup(2), fork and SCM_RIGHTS need no per-type code.  The
      last close calls nv_shim_syncobj_release(), which drops the object's
      reference.  Appended last: no values shift. */
-  FILE_TYPE_SYNCOBJ
+  FILE_TYPE_SYNCOBJ,
+  /* WP-SYNCFILE: a sync_file fd exported/imported by /dev/nvshim
+     (DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD with EXPORT_SYNC_FILE).  The payload is
+     (a syncobj record, the timeline point the file names), both owned by
+     nv_shim.c (f->syncfile.obj + f->syncfile.point, opaque here).  Unlike a
+     syncobj fd this one HAS a readiness answer: f1_probe_fd() asks the shim
+     whether the record has reached that point, which is the same state a
+     SYNCOBJ_WAIT reads -- so poll(2)/select(2) on it report POLLIN when the
+     fence retires, and never before.  read/write have no data path and mmap is
+     refused.  As with the other two shim types it is an ordinary file
+     DESCRIPTION, so dup(2), fork and SCM_RIGHTS need no per-type code; the
+     last close calls nv_shim_syncfile_release(), which drops the record
+     reference.  Appended last: no values shift. */
+  FILE_TYPE_SYNCFILE
 } file_type_t;
 
 struct vm_object;
@@ -249,6 +262,18 @@ struct file {
                                         the slot's ref_count, so release runs
                                         once) */
     } syncobj;
+    struct {
+      void *obj;                   /**< WP-SYNCFILE: struct shim_sobj owned by
+                                        nv_shim.c -- the record the sync_file
+                                        names; one reference per file
+                                        description (dup/fork/SCM_RIGHTS share
+                                        the slot's ref_count, so release runs
+                                        once) */
+      uint64_t point;              /**< the timeline point this file answers
+                                        readability for (1 for a binary
+                                        export); never changes for the life of
+                                        the fd */
+    } syncfile;
   };
   int gidx;                        /**< C1-k5: this slot's global index (the
                                         table is chunked, fs.c gfile) */
@@ -668,5 +693,18 @@ int file_is_dmabuf(struct process *p, int fd);
 int file_syncobj_install(struct process *p, void *obj, int cloexec);
 void *file_syncobj_obj(struct process *p, int fd);
 int file_is_syncobj(struct process *p, int fd);
+
+/* --- WP-SYNCFILE: sync_file fds (nv_shim.h declares the object side) -----
+ * The third shim-owned file type and the first one with a READINESS answer.
+ * The slot's payload is (the exporter's syncobj record, the timeline point the
+ * file names): file_syncfile_install() takes the record reference the export
+ * holder already owns, and f1_probe_fd() asks nv_shim_syncfile_ready() whether
+ * that record has reached that point -- so poll(2) and select(2) report POLLIN
+ * exactly when a SYNCOBJ_WAIT at the same point would succeed.  dup/fork/
+ * close/SCM_RIGHTS work unchanged; the last close calls
+ * nv_shim_syncfile_release(), which drops the record reference exactly once. */
+int file_syncfile_install(struct process *p, void *obj, uint64_t point, int cloexec);
+void *file_syncfile_obj(struct process *p, int fd, uint64_t *point);
+int file_is_syncfile(struct process *p, int fd);
 
 #endif // FS_H
