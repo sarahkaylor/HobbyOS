@@ -113,14 +113,17 @@ fi
 
 mmd -i disk.img ::/NVIDIA 2>/dev/null || true
 mmd -i disk.img ::/NVIDIA/GSP 2>/dev/null || true
-stage() {
-  [ -f "$1" ] || { say "WARNING: $2 not staged: no file at '${1:-<no match>}'"; return 0; }
+stage() { # <path> <8.3 name> <what was looked for>
+  [ -f "$1" ] || { say "WARNING: $2 not staged: no file at '${1:-${3:-<none>}}'"; return 0; }
   mcopy -o -i disk.img "$1" "::/NVIDIA/GSP/$2" || { say "FATAL: mcopy $1 -> $2 failed"; exit 1; }
 }
-stage "$BOOTER" BOOTER.BIN
-stage "$(ls third_party/nvfw/ad102/gsp/bootloader-*.bin 2>/dev/null | head -1)" LOADER.BIN
-stage "$(ls third_party/nvfw/ga102/gsp/gsp-*.bin 2>/dev/null | head -1)" GSPRM.BIN
-stage "$(ls third_party/nvfw/ad102/gsp/booter_unload-*.bin 2>/dev/null | head -1)" UNLOAD.BIN
+stage "$BOOTER" BOOTER.BIN "NV_BOOTER_FILE"
+stage "$(ls third_party/nvfw/ad102/gsp/bootloader-*.bin 2>/dev/null | head -1)" LOADER.BIN \
+      "third_party/nvfw/ad102/gsp/bootloader-*.bin"
+stage "$(ls third_party/nvfw/ga102/gsp/gsp-*.bin 2>/dev/null | head -1)" GSPRM.BIN \
+      "third_party/nvfw/ga102/gsp/gsp-*.bin"
+stage "$(ls third_party/nvfw/ad102/gsp/booter_unload-*.bin 2>/dev/null | head -1)" UNLOAD.BIN \
+      "third_party/nvfw/ad102/gsp/booter_unload-*.bin"
 say "firmware staged: $(mdir -i disk.img ::/NVIDIA/GSP/ 2>/dev/null | grep -c BIN) file(s)"
 
 mdir -i disk.img ::/NVIDIA/GSP/ 2>/dev/null | grep -q BOOTER || {

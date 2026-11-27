@@ -57,7 +57,8 @@ HDR_DWORDS = 6
 HS_DWORDS = 9
 LOAD_HDR_MIN = 0x14
 MAX_PAD = 0x100          # measured: booter_unload ends 0x100 B before its data region
-APP_MAX = 8
+DESC_MAX = 0x1000        # nv_fw.h: NV_FW_CONTAINER_DESC_MAX
+APP_MAX = 4              # nv_fw.h: NV_FW_APP_MAX (entries the driver records)
 
 EXIT_OK = 0
 EXIT_ABSENT = 2
@@ -160,12 +161,12 @@ def parse(buf):
                           % (data_off + data_size, data_off, data_size),
                           "does not match the file's %d B (0x%x): the header "
                           "does not account for this file" % (n, n))
-        if bin_size < data_size or bin_size - data_size > 0x400:
+        if bin_size < data_size or bin_size - data_size > DESC_MAX:
             raise Refusal(EXIT_GEOMETRY,
                           "bin_size 0x%x vs data_size 0x%x"
                           % (bin_size, data_size),
-                          "the descriptor region must be 1..0x400 B (the "
-                          "driver's own container check)")
+                          "the descriptor region must be 1..0x%x B (nv_fw.h's "
+                          "NV_FW_CONTAINER_DESC_MAX)" % DESC_MAX)
 
     if loadhdr_off < hdr_off or loadhdr_off + loadhdr_size > desc_end:
         raise Refusal(EXIT_GEOMETRY,
