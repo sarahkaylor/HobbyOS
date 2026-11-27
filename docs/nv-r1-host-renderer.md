@@ -83,9 +83,31 @@ State left behind: VM 301 returned to **no `hostpci0`**, every VM stopped, 0
 `qemu-system-x86_64`, both 5090s back on `vfio-pci`. Nothing was installed or
 persisted on the host or the guest.
 
-**What this does and does not settle for the Cyberpunk row.** The 4090 half of
-"a Vulkan device with NVIDIA's driver exists on r1" is now measured inside a guest.
-The benchmark itself still cannot run: no guest on r1 has Proton or the game, and
+**And the open module fixes it (measured the same day).** A clone of VM 301 — VM 315,
+same Ubuntu 24.04 and kernel `6.8.0-147`, disk copied so the 580.178.04 *reference*
+image stays intact — with `41:00` passed through and `nvidia-driver-580-open`
+(`580.178.04-0ubuntu0.24.04.1`) installed brings the 5090 up **completely**:
+
+| probe | row |
+|---|---|
+| module flavour actually loaded | `modinfo -F license nvidia` = **`Dual MIT/GPL`** (open), `version 580.178.04` |
+| `nvidia-smi --query-gpu=…` | `NVIDIA GeForce RTX 5090, 580.178.04, 32607 MiB, 98.02.2E.00.03, 00000000:01:00.0` |
+| `/proc/driver/nvidia/gpus/0000:01:00.0/information` | `Model: NVIDIA GeForce RTX 5090`, `GPU Firmware: 580.178.04` (the driver's own GSP build), `DMA Size: 52 bits` |
+| `vulkaninfo --summary` | `GPU0`: `deviceID = 0x2b85`, `apiVersion = 1.4.312`, `driverVersion = 580.178.4.0` |
+
+So GB202 needs the **open** module on the guest side, and with it the vendor chain
+completes on `41:00` — which is exactly the control any comparison against our
+`0x824`/`0x0B` abort needs: the same card, the same hypervisor, NVIDIA's own driver,
+GSP firmware loaded and a Vulkan device enumerated. Evidence:
+`gb202-vendor-control.txt` (attached to `t_6217b9ed`). VM 315 is kept **stopped** as
+that control asset; it must not be started while VM 313/314 holds `41:00`.
+
+State left behind: VM 315 stopped, `41:00` back on `vfio-pci`, only VM 100 running,
+0 `qemu-system-x86_64`.
+
+**What this does and does not settle for the Cyberpunk row.** Both halves of *a Vulkan
+device with NVIDIA's driver on r1* are now measured inside a guest (4090 with the closed
+module, 5090 with the open one) — **but the benchmark itself still cannot run**: no guest on r1 has Proton or the game, and
 none of the three candidate data paths is open — VM 117's Windows volume is
 **BitLocker** (`partx` on `vm-117-disk-3` shows `BitLocker GAMING C:`, so it cannot
 be inspected without the recovery key), `strix` (192.168.0.123) is reachable by ping
