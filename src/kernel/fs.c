@@ -1948,6 +1948,17 @@ static int f1_probe_fd(struct process *p, int fd, int *r, int *w, int *e,
     if (l_signalfd_ready(f)) *r = 1;
     return 0;
   }
+  if (f->type == FILE_TYPE_SYNCFILE) {
+    /* WP-SYNCFILE: a sync_file is readable once the point it names has been
+       reached.  The answer is the shim's: nv_shim_syncfile_ready() reads the
+       SAME record field a SYNCOBJ_WAIT reads (the shim's completion path is
+       what advances it), so poll(2) cannot disagree with the wait rows.  No
+       private flag and no poll key: a parked poller re-scans on the poll
+       slice, which is what every non-notifying fd already does. */
+    if (!f->syncfile.obj) return -1;
+    if (nv_shim_syncfile_ready(f->syncfile.obj, f->syncfile.point)) *r = 1;
+    return 0;
+  }
   return -1;
 }
 
@@ -3196,6 +3207,8 @@ int file_close(struct process *cur, int fd) {
   int snd_last = -1; /* C4-audio: ALSA minor whose last reference went away */
   void *dmabuf_obj = 0; /* WP-PRIME: the dma-buf this description owned */
   void *syncobj_obj = 0; /* WP-SYNC: the syncobj this description owned */
+  void *syncfile_obj = 0; /* WP-SYNCFILE: the record a sync_file fd owned */
+  uint64_t syncfile_point = 0;
 
   /* SEC-OBS-B (security-plan.md observation B): pipe/usock close wakes
    * blocked peers, which takes proc_lock — and the documented order is
@@ -3256,6 +3269,11 @@ int file_close(struct process *cur, int fd) {
       /* WP-SYNC: same rule -- one reference per file DESCRIPTION, so this runs
        * exactly once however many dup/fork/SCM_RIGHTS copies exist. */
       syncobj_obj = f->syncobj.obj;
+    } else if (f->type == FILE_TYPE_SYNCFILE) {
+      /* WP-SYNCFILE: same rule, and the point travels with the object so the
+       * release row can name it. */
+      syncfile_obj = f->syncfile.obj;
+      syncfile_point = f->syncfile.point;
     }
     /* FILE_TYPE_NFS keeps no backend state: nothing to release. */
     f->type = FILE_TYPE_EMPTY;
@@ -3275,6 +3293,8 @@ int file_close(struct process *cur, int fd) {
    * (and, if that was the last one, the frames) and this fd's mappings. */
   if (dmabuf_obj) nv_shim_dmabuf_release(cur, fd, dmabuf_obj);
   if (syncobj_obj) nv_shim_syncobj_release(cur, fd, syncobj_obj); /* WP-SYNC */
+  if (syncfile_obj) /* WP-SYNCFILE: one record reference, one close */
+    nv_shim_syncfile_release(cur, fd, syncfile_obj, syncfile_point);
   /* C4-audio: the device teardown sends control commands: outside f->lock. */
   if (snd_last >= 0) linux_snd_release(snd_last);
 
@@ -3388,6 +3408,8 @@ void fs_close_global(int g_fd) {
   int snd_last = -1; /* C4-audio */
   void *dmb_obj = 0; /* WP-PRIME */
   void *sob_obj = 0; /* WP-SYNC */
+  void *sf_obj = 0; /* WP-SYNCFILE */
+  uint64_t sf_point = 0;
 
   ylock_acquire(&f->lock);
   if (f->type == FILE_TYPE_EMPTY) {
@@ -3436,6 +3458,10 @@ void fs_close_global(int g_fd) {
       /* WP-SYNC: same case as the dma-buf above -- no process context, the
        * reference still has to go, release runs below with fd = -1. */
       sob_obj = f->syncobj.obj;
+    } else if (f->type == FILE_TYPE_SYNCFILE) {
+      /* WP-SYNCFILE: same case again; the point rides along for the row. */
+      sf_obj = f->syncfile.obj;
+      sf_point = f->syncfile.point;
     }
     f->type = FILE_TYPE_EMPTY;
   }
@@ -3448,6 +3474,7 @@ void fs_close_global(int g_fd) {
   if (snd_last >= 0) linux_snd_release(snd_last);
   if (dmb_obj) nv_shim_dmabuf_release(0, -1, dmb_obj); /* WP-PRIME */
   if (sob_obj) nv_shim_syncobj_release(0, -1, sob_obj); /* WP-SYNC */
+  if (sf_obj) nv_shim_syncfile_release(0, -1, sf_obj, sf_point); /* WP-SYNCFILE */
 }
 
 /**
@@ -5062,6 +5089,56 @@ void *file_syncobj_obj(struct process *p, int fd) {
 
 int file_is_syncobj(struct process *p, int fd) {
   return file_syncobj_obj(p, fd) != 0;
+}
+
+/* ---- WP-SYNCFILE: sync_file fds ----------------------------------------
+ * The third instance of the same pattern, and the only one with a readiness
+ * answer.  The slot carries the record AND the point the file names, so the
+ * probe in f1_probe_fd() needs no extra table and no second lookup.  The
+ * reference the slot owns was taken by the exporter (EXPORT_SYNC_FILE) before
+ * the fd existed, exactly as the syncobj-fd leg does; this function only
+ * installs it, and the close hooks drop it once per file description.
+ */
+
+int file_syncfile_install(struct process *p, void *obj, uint64_t point,
+                          int cloexec) {
+  p = process_group(p);
+  if (!p || !obj || point == 0) return -EINVAL;
+  if (p->num_open_fds >= MAX_OPEN_FDS) return -EMFILE;
+  struct file *f = file_alloc();
+  if (!f) return -ENFILE;
+  f->type = FILE_TYPE_SYNCFILE;
+  f->syncfile.obj = obj;
+  f->syncfile.point = point;
+  /* O_RDONLY: Linux's sync_file_create() installs the anon-inode file read
+   * only, and this fd is likewise useless to read(2)/write(2). */
+  f->open_flags = 0;
+  int fd = fd_install_cloexec(p, f, cloexec != 0);
+  if (fd < 0) {
+    f->type = FILE_TYPE_EMPTY;
+    f->ref_count = 0;
+    return -EMFILE;
+  }
+  return fd;
+}
+
+/* The record a sync_file fd names, or NULL when the fd is not one.  `point`,
+ * when non-NULL, receives the timeline point that fd answers readability for.
+ * This is the check IMPORT_SYNC_FILE uses to refuse a non-sync_file fd by name
+ * instead of resolving garbage. */
+void *file_syncfile_obj(struct process *p, int fd, uint64_t *point) {
+  p = process_group(p);
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return 0;
+  int gfd = p->open_fds[fd];
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES) return 0;
+  struct file *f = gfile(gfd);
+  if (!f || f->type != FILE_TYPE_SYNCFILE) return 0;
+  if (point) *point = f->syncfile.point;
+  return f->syncfile.obj;
+}
+
+int file_is_syncfile(struct process *p, int fd) {
+  return file_syncfile_obj(p, fd, 0) != 0;
 }
 
 /* ---- C2-ntsync (docs/cp-ntsync.md): the driver's view of its fds ------- */

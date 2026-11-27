@@ -139,6 +139,11 @@ struct shim_client {
   int nsobj;
   uint32_t sobj[SHIM_MAX_SYNCOBJS];      /* the handle this client sees */
   uint8_t sobj_obj[SHIM_MAX_SYNCOBJS];   /* WP-SYNC: index+1 into g_sobjs */
+  /* WP-SYNCFILE: the point a handle can never answer below.  An imported
+   * handle names a sync_file's point P, so a binary SYNCOBJ_WAIT (which asks
+   * for point 1) on it still waits for P -- that is what makes the imported
+   * fence the one the wait observes.  0 for every ordinary handle. */
+  uint64_t sobj_floor[SHIM_MAX_SYNCOBJS];
   int npend;
   struct shim_sigpend pend[SHIM_MAX_SIGPEND];
 
@@ -408,6 +413,15 @@ static int r_sync = 128;
  * each of them once or twice (plus size-mismatch probes). */
 static int r_drm_refuse = 24;
 
+/* WP-SYNCFILE's own bucket.  The sync_file legs are driven twice (binary and
+ * timeline), then imported three ways, then polled, then walked through four
+ * close orders -- all after two earlier syncobj suites have spent most of
+ * r_sync, which is what suppressed this rung's first evidence run.  The rows
+ * that carry this card's acceptance (the export naming its point, the import
+ * naming its floor, the release naming its refcount) get their own budget so a
+ * green suite cannot hide them. */
+static int r_syncfile = 48;
+
 static void row_end(void) {
   uint32_t cpu = row_cpu();
   if (g_row_n[cpu] <= 0) return;
@@ -547,6 +561,7 @@ static void client_clear(struct shim_client *c) {
   for (int i = 0; i < SHIM_MAX_SYNCOBJS; i++) {
     c->sobj[i] = 0;
     c->sobj_obj[i] = 0;
+    c->sobj_floor[i] = 0;
   }
   c->npend = 0;
   for (int i = 0; i < SHIM_MAX_SIGPEND; i++) {
@@ -1491,13 +1506,15 @@ static const struct {
     {NVSHIM_DRM_NR_GEM_CPU_PREP, "gem_cpu_prep"},
     {NVSHIM_DRM_NR_GEM_CPU_FINI, "gem_cpu_fini"},
     /* WP-SYNC: 0xc1 / 0xc2 / 0xca / 0xcd are SERVED now (the row table above),
-     * and WP-SYNCFAM added 0xcb (QUERY) to it.  What remains of the syncobj
-     * surface is named here, and both rows are the SAME wall: a sync_file
-     * object -- a file whose poll() answers POLLIN when a fence signals.
-     * TRANSFER moves a point between timelines including through a sync_file
-     * import, and EVENTFD registers an eventfd to be written when a point
-     * signals; this node has neither object, and the eventfd half has no
-     * kernel-side counter writer to reach (docs/nv-shim-syncfam.md §5). */
+     * and WP-SYNCFAM added 0xcb (QUERY) to it.  WP-SYNCFILE served the two
+     * sync_file legs of 0xc1/0xc2 (EXPORT_SYNC_FILE / IMPORT_SYNC_FILE).  What
+     * remains of the syncobj surface is named here:
+     *   EVENTFD registers an eventfd to be written when a point signals; the
+     *   kernel-side counter writer does not exist (linux_compat_fd.c's l_efd[]
+     *   is file-static), so there is nothing to register WITH -- unchanged.
+     *   TRANSFER moves a point between two timelines.  Its handle->handle leg
+     *   needs no sync_file at all (two timelines, no fd), so it is a separate,
+     *   smaller rung -- the next one -- rather than a half-served row here. */
     {NVSHIM_DRM_NR_SYNCOBJ_TRANSFER, "syncobj_transfer"},
     {NVSHIM_DRM_NR_SYNCOBJ_EVENTFD, "syncobj_eventfd"},
 };
@@ -2775,6 +2792,62 @@ void nv_shim_syncobj_release(struct process *grp, int fd, void *obj) {
   row_end();
 }
 
+/* ---- WP-SYNCFILE: the sync_file fd's readiness + release ---------------- */
+
+/* The readiness answer fs.c's f1_probe_fd() branch asks, and the ONLY thing
+ * poll(2)/select(2) can learn about a sync_file fd.  It reads `point` -- the
+ * same field sobj_wait_ready() compares -- so the two surfaces cannot drift:
+ * the shim's one completion path (client_reap_locked) advances it, this
+ * observes it, and nobody sets a separate "readable" bit.
+ *
+ * Not live: a sync_file fd owns a record reference, so a live fd's record is
+ * live; if it is not, the fd is broken and answering "readable" is the only
+ * answer that cannot hang a poller. */
+int nv_shim_syncfile_ready(void *obj, uint64_t point) {
+  struct shim_sobj *o = (struct shim_sobj *)obj;
+  if (!o) return 0;
+  int ready = 1;
+  spinlock_acquire(&g_shim_lock);
+  if (o->used) ready = o->point >= point;
+  spinlock_release(&g_shim_lock);
+  return ready;
+}
+
+/* Called by fs.c when the LAST reference to a sync_file fd's file description
+ * goes.  One record reference -- the fd's -- drops here; the record survives
+ * while a handle entry or another exported fd still names it, so a consumer can
+ * keep the fence after the exporter's node fd is closed. */
+void nv_shim_syncfile_release(struct process *grp, int fd, void *obj,
+                              uint64_t point) {
+  (void)grp;
+  struct shim_sobj *o = (struct shim_sobj *)obj;
+  if (!o) return;
+  int id = 0, last = 0, refs = 0;
+  uint64_t reached = 0;
+  spinlock_acquire(&g_shim_lock);
+  if (o->used) {
+    id = o->id;
+    reached = o->point;
+    last = sobj_unref_locked(o);
+    refs = o->refs;
+  }
+  spinlock_release(&g_shim_lock);
+  row_begin("syncfile release", &r_syncfile);
+  row_s("obj=");
+  row_say(id);
+  row_s(" fd=");
+  row_say(fd);
+  row_s(" point=");
+  row_hex(point);
+  row_s(" reached=");
+  row_hex(reached);
+  row_s(" refs=");
+  row_say(refs);
+  row_s(" freed=");
+  row_say(last);
+  row_end();
+}
+
 /* Live references on a syncobj record: handle entries + exported fds.  -1 when
  * `obj` is not a live record.  The tier states "still alive"/"freed" with it. */
 int nv_shim_test_syncobj_refs(void *obj) {
@@ -3297,6 +3370,8 @@ static const char k_sync_reasons[][32] = {
     "wait_flag_unsupported",
     "not_this_clients_syncobj",
     "point_beyond_ledger",
+    "not_a_sync_file",
+    "point_without_timeline",
 };
 #define SYNC_NUM_REASONS (int)(sizeof k_sync_reasons / sizeof k_sync_reasons[0])
 
@@ -3367,6 +3442,7 @@ static int op_drm_syncobj_create(struct process *p, int fd, uint64_t arg) {
   }
   c->sobj[c->nsobj] = handle;
   c->sobj_obj[c->nsobj] = (uint8_t)sobj_index(o);
+  c->sobj_floor[c->nsobj] = 0; /* an ordinary handle answers from point 1 */
   c->nsobj++;
   int id = o->id;
   uint64_t point = o->point;
@@ -3400,6 +3476,7 @@ static int op_drm_syncobj_destroy(struct process *p, int fd, uint64_t arg) {
   for (int i = at; i + 1 < c->nsobj; i++) {
     c->sobj[i] = c->sobj[i + 1];
     c->sobj_obj[i] = c->sobj_obj[i + 1];
+    c->sobj_floor[i] = c->sobj_floor[i + 1];
   }
   c->nsobj--;
   /* Drop pendings that referred to it: their signal has nowhere to land. */
@@ -3452,12 +3529,19 @@ static int sobj_wait_ready(struct process *p, int fd, const struct sobj_wait *w,
   int any = 0, every = 1;
   uint32_t first = 0;
   for (uint32_t i = 0; i < w->n; i++) {
-    struct shim_sobj *o = client_sobj_obj(c, w->handles[i]);
+    int at = client_find_sobj(c, w->handles[i]);
+    struct shim_sobj *o = at >= 0 ? sobj_lookup(c->sobj_obj[at]) : 0;
     if (!o) {
       spinlock_release(&g_shim_lock);
       return -EINVAL;
     }
-    if (o->point >= w->points[i]) {
+    /* WP-SYNCFILE: a handle imported from a sync_file names that file's point,
+     * so it never answers below it -- a binary wait (point 1) on a file exported
+     * at 3 still waits for 3.  The floor is the entry's, the point is the
+     * caller's; the later of the two is what must be reached. */
+    uint64_t need = w->points[i];
+    if (c->sobj_floor[at] > need) need = c->sobj_floor[at];
+    if (o->point >= need) {
       if (!any) first = i;
       any = 1;
     } else {
@@ -3870,14 +3954,22 @@ static int op_drm_syncobj_set(struct process *p, int fd, uint64_t arg, int signa
   return 0;
 }
 
-/* ---- syncobj <-> fd (WP-SYNC) ------------------------------------------
+/* ---- syncobj <-> fd (WP-SYNC, sync_file legs WP-SYNCFILE) ---------------
  *
- * The fd names the SYNCOBJ, not a fence: an ordinary file description whose
- * payload is the record, refcounted exactly like a dma-buf fd.  FD_TO_HANDLE
- * therefore installs a second handle on the same object, and a signal through
- * either name is one write to one point.  What the fd is NOT is a sync_file --
- * EXPORT_SYNC_FILE / IMPORT_SYNC_FILE ask for a dma_fence as a file, which this
- * node has no object for, so both are refused by name.
+ * Two different objects can come out of HANDLE_TO_FD, and both are ordinary
+ * file descriptions:
+ *
+ *  - no EXPORT_SYNC_FILE: the fd names the SYNCOBJ, refcounted exactly like a
+ *    dma-buf fd.  FD_TO_HANDLE installs a second handle on the same object, and
+ *    a signal through either name is one write to one point.
+ *  - EXPORT_SYNC_FILE: the fd is a SYNC_FILE -- a (record, point) pair whose
+ *    poll(2) answers POLLIN when that point is reached (FILE_TYPE_SYNCFILE).
+ *    IMPORT_SYNC_FILE takes such an fd (and only such an fd) and installs a
+ *    handle that waits no earlier than the point the file names.
+ *
+ * The sync_file's readiness is not a shim-private bit: fs.c's f1_probe_fd()
+ * asks nv_shim_syncfile_ready(), which reads the same record field every
+ * SYNCOBJ_WAIT row compares.  One completion path, two observation surfaces.
  * ---------------------------------------------------------------------- */
 
 static int op_drm_syncobj_handle_to_fd(struct process *p, int fd, uint64_t arg) {
@@ -3894,14 +3986,33 @@ static int op_drm_syncobj_handle_to_fd(struct process *p, int fd, uint64_t arg) 
                 NVSHIM_SYNC_BAD_FLAGS);
     return -EINVAL;
   }
-  if (sh.flags & NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE) {
-    sync_refuse("drm syncobj refuse", "handle_to_fd handle=", (uint64_t)sh.handle,
-                NVSHIM_SYNC_EXPORT_SYNC_FILE);
-    return -ENOSYS;
-  }
-  /* Without EXPORT_SYNC_FILE there is no point to address; drm_syncobj.c makes
-   * the same check on the same field. */
-  if (sh.point != 0) {
+  /* WP-SYNCFILE: EXPORT_SYNC_FILE is SERVED.  The fd it produces names a
+   * (record, point) pair: the timeline form names the caller's point, the
+   * binary form names point 1 -- a binary syncobj's fence, which is the same
+   * record a timeline signal at 1 would move.  An explicit point needs TIMELINE
+   * to give it meaning (drm_syncobj.c's rule), and a timeline point of 0 is not
+   * a point (our timeline points start at 1). */
+  int sf = (sh.flags & NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE) != 0;
+  uint64_t sfpt = 0;
+  if (sf) {
+    if (sh.flags & NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_TIMELINE) {
+      if (sh.point == 0) {
+        sync_refuse("drm syncobj refuse", "handle_to_fd point=", sh.point,
+                    NVSHIM_SYNC_POINT_ZERO);
+        return -EINVAL;
+      }
+      sfpt = sh.point;
+    } else {
+      if (sh.point != 0) {
+        sync_refuse("drm syncobj refuse", "handle_to_fd point=", sh.point,
+                    NVSHIM_SYNC_POINT_WITHOUT_TIMELINE);
+        return -EINVAL;
+      }
+      sfpt = 1; /* binary: the fence a SIGNAL / EXEC binary sig installs */
+    }
+  } else if (sh.point != 0) {
+    /* Without EXPORT_SYNC_FILE there is no point to address; drm_syncobj.c makes
+     * the same check on the same field. */
     sync_refuse("drm syncobj refuse", "handle_to_fd point=", sh.point,
                 NVSHIM_SYNC_POINT_WITHOUT_FILE);
     return -EINVAL;
@@ -3920,6 +4031,46 @@ static int op_drm_syncobj_handle_to_fd(struct process *p, int fd, uint64_t arg) 
   int id = o->id;
   uint64_t point = o->point;
   spinlock_release(&g_shim_lock);
+
+  /* WP-SYNCFILE: the export that names a point installs a sync_file slot.  The
+   * record reference taken above is the SLOT's; if the fd cannot be installed
+   * it is dropped here, exactly like the syncobj-fd leg below. */
+  if (sf) {
+    int sfd = file_syncfile_install(p, o, sfpt, 1 /* O_CLOEXEC, sync_file_create's
+                                                     anon-inode file flags */);
+    if (sfd < 0) {
+      spinlock_acquire(&g_shim_lock);
+      sobj_unref_locked(o);
+      spinlock_release(&g_shim_lock);
+      row_begin("drm syncobj refuse", &r_syncfile);
+      row_s("handle_to_fd sync_file handle=");
+      row_say((int)sh.handle);
+      row_s(" rc=");
+      row_say(sfd);
+      row_s(" reason=");
+      row_sync_why(NVSHIM_SYNC_EXPORT_SYNC_FILE);
+      row_end();
+      return sfd == -ENFILE ? -ENFILE : -EMFILE;
+    }
+    sh.fd = sfd;
+    if (vm_kwrite(p, arg, &sh, (int)sizeof sh) != 0) {
+      (void)file_close(p, sfd); /* installed: close(2) semantics */
+      return -EFAULT;
+    }
+    row_begin("drm syncobj", &r_syncfile);
+    row_s("handle_to_fd sync_file=1 handle=");
+    row_say((int)sh.handle);
+    row_s(" fd=");
+    row_say(sfd);
+    row_s(" obj=");
+    row_say(id);
+    row_s(" point=");
+    row_hex(sfpt);
+    row_s(" reached=");
+    row_hex(point);
+    row_end();
+    return 0;
+  }
 
   int ufd = file_syncobj_install(p, o, 1 /* O_CLOEXEC, as Linux exports it */);
   if (ufd < 0) {
@@ -3966,26 +4117,43 @@ static int op_drm_syncobj_fd_to_handle(struct process *p, int fd, uint64_t arg) 
                 NVSHIM_SYNC_BAD_FLAGS);
     return -EINVAL;
   }
-  if (sh.flags & NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE) {
-    sync_refuse("drm syncobj refuse", "fd_to_handle fd=", (uint64_t)(int64_t)sh.fd,
-                NVSHIM_SYNC_IMPORT_SYNC_FILE);
-    return -ENOSYS;
-  }
-  if (sh.point != 0) {
+  /* WP-SYNCFILE: IMPORT_SYNC_FILE is SERVED.  `fd` must be a sync_file fd (not
+   * the node, not a plain syncobj fd): Linux's sync_file_get_fence() refuses
+   * anything else, and the named object is what the import handle observes.  An
+   * explicit point needs TIMELINE; a timeline point of 0 is not a point. */
+  int imp = (sh.flags & NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE) != 0;
+  if (imp && (sh.flags & NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_TIMELINE)) {
+    if (sh.point == 0) {
+      sync_refuse("drm syncobj refuse", "fd_to_handle point=", sh.point,
+                  NVSHIM_SYNC_POINT_ZERO);
+      return -EINVAL;
+    }
+  } else if (sh.point != 0) {
     sync_refuse("drm syncobj refuse", "fd_to_handle point=", sh.point,
-                NVSHIM_SYNC_POINT_WITHOUT_FILE);
+                imp ? NVSHIM_SYNC_POINT_WITHOUT_TIMELINE : NVSHIM_SYNC_POINT_WITHOUT_FILE);
     return -EINVAL;
   }
 
   /* Resolving the fd is a read of the file table, not of the shim's; the pointer
    * is re-checked under g_shim_lock so a concurrent close(2) cannot hand us a
-   * record that has already been freed. */
-  void *obj = file_syncobj_obj(p, sh.fd);
+   * record that has already been freed.   Which resolver runs IS the import's
+   * type check: a sync_file fd must answer file_syncfile_obj(), a plain one
+   * file_syncobj_obj(). */
+  uint64_t sfpt_in = 0;
+  void *obj = imp ? file_syncfile_obj(p, sh.fd, &sfpt_in)
+                  : file_syncobj_obj(p, sh.fd);
   if (!obj) {
     sync_refuse("drm syncobj refuse", "fd_to_handle fd=", (uint64_t)(int64_t)sh.fd,
-                NVSHIM_SYNC_NOT_SYNCOBJ);
+                imp ? NVSHIM_SYNC_NOT_SYNC_FILE : NVSHIM_SYNC_NOT_SYNCOBJ);
     return -EINVAL;
   }
+  /* The imported handle can never answer below the point the sync_file names:
+   * a binary wait (point 1) on a file exported at 3 still waits for 3.  The
+   * TIMELINE form states the point itself (Linux installs the fence at it). */
+  uint64_t floor = 0;
+  if (imp) floor = (sh.flags & NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_TIMELINE)
+                       ? sh.point
+                       : sfpt_in;
 
   spinlock_acquire(&g_shim_lock);
   struct shim_client *c = client_find(shim_pid(p), fd);
@@ -3994,10 +4162,12 @@ static int op_drm_syncobj_fd_to_handle(struct process *p, int fd, uint64_t arg) 
     return -ENODEV;
   }
   struct shim_sobj *o = (struct shim_sobj *)obj;
-  if (file_syncobj_obj(p, sh.fd) != obj || !o->used) {
+  void *now = imp ? file_syncfile_obj(p, sh.fd, &sfpt_in)
+                  : file_syncobj_obj(p, sh.fd);
+  if (now != obj || !o->used) {
     spinlock_release(&g_shim_lock);
     sync_refuse("drm syncobj refuse", "fd_to_handle fd=", (uint64_t)(int64_t)sh.fd,
-                NVSHIM_SYNC_NOT_SYNCOBJ);
+                imp ? NVSHIM_SYNC_NOT_SYNC_FILE : NVSHIM_SYNC_NOT_SYNCOBJ);
     return -EINVAL;
   }
   if (c->nsobj >= SHIM_MAX_SYNCOBJS) {
@@ -4016,19 +4186,24 @@ static int op_drm_syncobj_fd_to_handle(struct process *p, int fd, uint64_t arg) 
   o->refs++; /* the new handle entry's reference */
   c->sobj[c->nsobj] = handle;
   c->sobj_obj[c->nsobj] = (uint8_t)sobj_index(o);
+  c->sobj_floor[c->nsobj] = floor; /* 0 for a plain syncobj fd */
   c->nsobj++;
   int id = o->id;
   spinlock_release(&g_shim_lock);
 
   sh.handle = handle;
   if (vm_kwrite(p, arg, &sh, (int)sizeof sh) != 0) return -EFAULT;
-  row_begin("drm syncobj", &r_sync);
-  row_s("fd_to_handle fd=");
+  row_begin("drm syncobj", imp ? &r_syncfile : &r_sync);
+  row_s(imp ? "fd_to_handle sync_file=1 fd=" : "fd_to_handle fd=");
   row_say(sh.fd);
   row_s(" handle=");
   row_say((int)handle);
   row_s(" obj=");
   row_say(id);
+  if (imp) {
+    row_s(" point=");
+    row_hex(floor);
+  }
   row_end();
   return 0;
 }
