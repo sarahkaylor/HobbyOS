@@ -16,13 +16,15 @@ boot from being spent on the wrong container.
 
 ## 0. The answer in one table
 
-Four distinct AD102 `booter_load` containers exist in everything reachable; **three were
-already booted and all three return `0x002B0009`**; the fourth is new, was never booted,
-and is the only artifact whose static identity says it *could* pass R1.
+Four distinct AD102 `booter_load` containers exist in everything reachable; **all four
+have now been booted and all four return `0x002B0009`** — the fourth (`ec5bcd11`, the
+never-booted candidate) was spent on one authorized boot and reproduced the same word at
+the same point of the same launch path (§10). Identity compatibility was necessary and is
+not sufficient.
 
 | # | container | bytes | sha256 (16) | identity | booted? | static verdict | boot cost |
 |---|---|---|---|---|---|---|---|
-| **1** | **AD102 load, 580.196.07 → 620.73.04** (10 tags) | **58 488** | **`ec5bcd117e18166c`** | **1 / 0x1 / 3** | **no** | **IDENTITY-COMPATIBLE** | **1 boot (VM 300, ~6.5 min)** |
+| **1** | **AD102 load, 580.196.07 → 620.73.04** (10 tags) | **58 488** | **`ec5bcd117e18166c`** | **1 / 0x1 / 3** | **yes** — `r1newa` (§10) | IDENTITY-COMPATIBLE, **measured `0x002B0009`** at +4.176 ms, `INTR=0x10` | 0 — spent |
 | 2 | AD102 load, 570.86.15 → 615.71.10 (83 tags), incl. 580.178.04 | 57 720 | `8b293e19b637c5e2` | 1 / 0x1 / 3 | **yes** — `v2a` | IDENTITY-COMPATIBLE, **measured `0x002B0009`** | 0 — spent |
 | 3 | AD102 load, 555.58 → 565.77 (7 tags) | 57 720 | `3d8a9f22810234fe` | 1 / 0x1 / 3 | **yes** — `v3a` | IDENTITY-COMPATIBLE, **measured `0x002B0009`** | 0 — spent |
 | 4 | AD102 load, linux-firmware 535.113.01 | 55 928 | `7d4ef3258da016f5` | 1 / 0x1 / 3 | **yes** — `v1a` | IDENTITY-COMPATIBLE, **measured `0x002B0009`** | 0 — spent |
@@ -171,11 +173,13 @@ the lane refuse if the staged file is not this hash.
 ## 5. Ranked survivors, with the boot each would cost
 
 1. **`ec5bcd11` — AD102 `booter_load` 58 488 B (tags 580.196.07 → 620.73.04).**
-   **1 boot.** Static identity is the measured-compatible class (ucode 3, fuse 1, word
-   0x1, engine 0x1), it is an AD102 production image from the vendor's own bindata, and
-   it is the only AD102 container that has never been through the BROM. Run it from
-   branch `nv/wp-r1-rig` (§8), which stages this exact file and refuses on a hash
-   mismatch:
+   **Booted; 0 boots left to spend.** Static identity was the measured-compatible class
+   (ucode 3, fuse 1, word 0x1, engine 0x1), it is an AD102 production image from the
+   vendor's own bindata, and it was the only AD102 container that had never been through
+   the BROM. On 2026-11-27 it went through it once (`r1newa`) and returned
+   **`0x002B0009`** at +4.176 ms, `INTR=0x10` — §10, the fourth measured negative. The
+   staging recipe below is what ran (it is kept so the run is reproducible, not because a
+   further boot of this blob is expected):
    `NV_BOOTER_FILE=<rebuilt blob> NV_BOOTER_SHA256=ec5bcd11… tools/nv/sec2-boot-lane.sh 1 r1new`
    (count 1, ~6.5 min; `0 r1pre` is the same staging preflight with no VM start).
    Decision table from `docs/nv-no-rm-path.md` §6: `0x002B0009` → close R1 for this
@@ -256,7 +260,8 @@ upload** on a mismatch:
 
 ```
 [sec2-lane] booter staged: path=rebuilt-load-620.73.04.bin sha256=ec5bcd117e18166c… size=58488
-[sec2-lane] FATAL: booter sha256 <got> != NV_BOOTER_SHA256 <want> -- refusing to spend a boot on the wrong image
+[sec2-lane] FATAL: … (template: on a wrong pin the lane prints the two hashes and
+            "refusing to spend a boot on the wrong image", then exits 1)
 ```
 
 The three survey scripts are card artifacts, not repo files: take
@@ -340,3 +345,90 @@ fixed tool** (sha256 `8df90328…`) and `hs_gate-all.txt` was regenerated with i
 five rows read `num_sigs_off=0x350 num_sigs=2`, the verdicts are the same five
 `IDENTITY-COMPATIBLE`, and the pre-fix file's trailing `FileNotFoundError` (a sixth,
 absent input) is gone.
+
+## 10. The boot: `ec5bcd11` returns `0x002B0009` — the fourth measured negative
+
+One boot, **`r1newa`**, 2026-11-27 17:49Z, VM 300, from branch **`nv/wp-r1-merged`**
+(`4e40feae`; merge `e8feac31` of `nv/wp-rpc-final` `c58b1295` into `nv/wp-r1-rig`
+`5b64dc0d`). Build exit 0, unit tier 600 run / 0 failed, then `disk.img` rebuilt from
+`MODE=test` and staged by the lane.
+
+**The staged image is the candidate, checked inside the booted disk, not just at the
+lane's print.** Extracting it back out of the image the VM booted:
+
+```
+$ mcopy -n -i disk.img ::/NVIDIA/GSP/BOOTER.BIN staged-booter.bin
+ec5bcd117e18166c1f5e0336b62239457d9048e68b7e8d8a93ea628394724bc5  staged-booter.bin   (58 488 B)
+```
+
+and the guest's own container parse agrees with the candidate's geometry, not the 535
+control's (`patch_site=0x7710`, 57 720 B):
+
+```
+[NV-SEC2] image data_off=0x0000000000000378 imem@file=0x0000000000000478 len=0x0000000000008000 dmem@file=0x0000000000008478 len=0x0000000000006000 bootvec=0x0000000000000000 ends@=0x000000000000E478 file_size=0x000000000000E478 verdict=TILES-THE-FILE (IMEM runs into the DMEM image and the image ends exactly at the end of the file)
+[NV-SEC2T] S brom-para wrote para=0x0000000000000010 engid=0x0000000000000001 ucode=0x0000000000000003 modsel=0x0000000000000001 bootvec=0x0000000000000000 | readback para=0x0000000000000010 engid=0x0000000000000001 ucode=0x0000000000000003 modsel=0x0000000000000001 | fuse@0x00000000008241C8=0x0000000000000001 | container patch_site=0x0000000000008110 dmem+0x0000000000000010 sig@0x000000000000003C slots=2 slot=0x0x0000000000000180 idx=1 halfsize=0x0000000000006000 | reference(rows 11-14) para=0x10 engid=0x1 ucode=0x3 modsel=0x1 verdict=MATCH-REFERENCE (the four words are the values the reference driver writes for this part; the boot ROM is pointed at the same patch site, engine, ucode id and algorithm ours parses)
+```
+
+The **S launch path** (full falcon reset, the GSP's four state fixups, `SEC=1`
+256-byte-aligned DMA, signature patched into DMEM) ran and returned the same word every
+previous AD102 generation returned:
+
+```
+[NV-SEC2T] S tl dt_ns=0x00000000003B7920 ctl=0x0000000000000000 intr=0x0000000000000000 st4c=0x0000000000000011 sec240=0x0000000000003002 u94=0x0000000000000001 d0=0x0000000000900000 dc=0x00000000008E0437
+[NV-SEC2T] S tl dt_ns=0x00000000003C3C00 ctl=0x0000000000000000 intr=0x0000000000000000 st4c=0x0000000001000001 sec240=0x0000000000003002 u94=0x00000000003900FF d0=0x0000000000900000 dc=0x0000000000CE040F
+[NV-SEC2T] S tl dt_ns=0x00000000003FB400 ctl=0x0000000000000000 intr=0x0000000000000000 st4c=0x0000000000000001 sec240=0x0000000000003002 u94=0x00000000002B0009 d0=0x0000000000900000 dc=0x00000000008E043F
+[NV-SEC2T] S tl dt_ns=0x0000000000417A80 ctl=0x0000000000000010 intr=0x0000000000000010 st4c=0x0000000000000000 sec240=0x0000000000003002 u94=0x00000000002B0009 d0=0x0000000000900000 dc=0x00000000008E043F
+[NV-SEC2T] S tl-summary polls=0x0000000000001770 rows=0x0000000000000007 first_ns=0x00000000003B7920 last_ns=0x00000000023CAE60
+[NV-SEC2T] S verdict-wait ms=0x0000000000000259 verified=0x000000005EC2A0A0 ctl=0x0000000000000010 halted=1 pc=0x00000000BADF5620 alias130=0x00000000BADF5620 mb0=0x00000000094EA000 mb1=0x0000000000000002 polls=0x000000000438E501 verdict=NOWRITE-HALTED (the core is STOPPED and the metadata still holds the sentinel: a rejection, not a slow boot)
+[NV-GSP] stage5 result=-1 (no success reported; the [NV-SEC2] rows are the evidence)
+```
+
+| run | blob | word at `0x840094` | when | `INTR` |
+|---|---|---|---|---|
+| `v1a` | `7d4ef325` (535.113.01) | `0x002B0009` | +4.208 ms | `0x10` EXIT |
+| `v2a` | `8b293e19` (570.86.15 → 615.71.10) | `0x002B0009` | +4.163 ms | `0x10` EXIT |
+| `v3a` | `3d8a9f22` (555.58 → 565.77) | `0x002B0009` | +4.176 ms | `0x10` EXIT |
+| **`r1newa`** | **`ec5bcd11`** (580.196.07 → 620.73.04) | **`0x002B0009`** | **+4.176 ms** | **`0x10` EXIT** |
+
+**One honest caveat, because it is a signature question.** The S path patches slot **1**
+(the FWSEC helper's rule) while its own row prints the *reference* rule's answer, slot 0:
+
+```
+[NV-SEC2] fuse SEC2 ucode=3 word=0x0000000000000001 -> reg_fuse_version=1 | NVIDIA slot rule idx=num_sigs-1-reg=0 (valid)
+[NV-SEC2] sig block@0x000000000000003C slots=2 bytes=0x0000000000000180 fuse@0x00000000008241C8=0x0000000000000001 patchsite=0x0000000000008110 -> dmem+0x0x0000000000000010 fuse_rule_slot=1
+[NV-SEC2T] S sig-patched slot=1 bytes=0x0000000000000180 dmem+0x0x0000000000000010
+```
+
+So this is a **slot-1** measurement of the candidate. It is directly comparable to the
+three negatives: `bv1a`/`fz1a`/`eg1a` (the A12 evidence, same tree before the merge) show
+`S sig-patched slot=1` with `patchsite=0x7710` — same path, same slot, only the image
+differs. Slot 0 was reached in this boot only on path **A**, which does not start at all
+(`START-NEVER-VISIBLE`, `u94=0`), so a slot-0 S measurement needs
+`SEC2_AUTH_BISECT` and another boot. That is the one cheap lever left; it is not funded
+by this card and nothing here claims the answer would differ (round 11 measured both
+slots on the 5xx images, both `0x002B0009`).
+
+**The transport half, from the same boot** — this is what the merge bought: the 129-page
+block is published, the pre-boot 72/73 are queued, and the peer's header is still untouched,
+so nothing is sent:
+
+```
+[NV-RPC] stage=block bus=0x00000002094EB000 phys=0x00000002094EB000 pages=129 pte0=0x00000002094EB000 pte128=0x000000020956B000 identity=1
+[NV-ARG] stage=args bus=0x000000020956C000 phys=0x000000020956C000 magic=0x0000000020505347 size=0x00000000000000C8
+[NV-ARG] stage=args mq sharedMemPhysAddr=0x00000002094EB000 pte0=0x00000002094EB000 equal=1
+[NV-ARG] stage=args crosscheck=OK (the page in memory describes the block this boot built)
+[NV-ARG] stage=status bus=0x00000002094EB000 off=0x0000000000041000 zero=8/8 w0=0x0000000000000000 w1=0x0000000000000000 w2=0x0000000000000000 w3=0x0000000000000000 w4=0x0000000000000000 w5=0x0000000000000000 w6=0x0000000000000000 w7=0x0000000000000000 (publishing did not counterfeit the peer's first write)
+[NV-PRE] stage=system_info fn=72 len=0x2E0 ec=1 wp_after=1 sum=OK
+[NV-PRE] stage=registry fn=73 len=0x28 ec=1 wp_after=2 sum=OK
+[NV-PRE] stage=doorbell wr=2 pw=0 doorbells=1
+[NV-RPC] stage=link bus=0x00000002094EB000 linked=0 swapped=1 wr=2 rd=0 prd=0 pw=0 wr_off=0x0000000000001010 pw_off=0x0000000000041010 txseq=2 rxseq=0
+[NV-RPC] statq off=0x0000000000041000 nonzero=0/8 w0=0x0000000000000000 w1=0x0000000000000000 w2=0x0000000000000000 w3=0x0000000000000000 w4=0x0000000000000000 w5=0x0000000000000000 w6=0x0000000000000000 w7=0x0000000000000000 (nothing has written the peer header)
+[NV-RPC] peer=none (read from block+0x0000000000041000, not from the cached peer struct)
+[NV-RPC] stage=canary own_off=0x0000000000001010 before=2 wrote=49 restored=2 peer_off=0x0000000000041010 peer_before=0 peer_during=0 verdict=SEPARATE-WORDS (the peer's word did not follow a store to ours, and is still the zero we built)
+[NV-RPC] stage=init skipped: linked=0 (no peer header to answer, so nothing was sent from here and none of the doorbells=1 so far came from here)
+```
+
+Acceptance on this card, item by item: **published — MET**; **peer's status header moves —
+NOT MET** (`0/8`, canary says the two words are separate storage); **one message answered —
+NOT MET** (the send path refuses on an unlinked queue, 0 doorbells from it). Closing
+state: `VM 300: stopped`, `VM 312: stopped`, `qemu-system 0`.
