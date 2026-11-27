@@ -892,7 +892,9 @@ static int nv_gsp_load_one(struct nv_dev *d, const char *name, int parse_hs,
   uart_puts(" bytes=");
   print_int((int)b.size); /* 38 MB fits an int; sizes are well under 2 GiB */
   uart_puts(" phys=");
-  uart_print_hex(b.phys);
+  uart_print_hex(b.map.phys);
+  uart_puts(" bus=");
+  uart_print_hex(nv_fw_blob_bus(&b));
 
   if (parse_hs) {
     struct nv_fw_container c;
@@ -4825,14 +4827,12 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
    * Everything below is derived from the file and the fuse register, and each
    * derivation prints the numbers it used.
    */
-  uint64_t base = d->booter_phys;
-  /* The engine reads the booter's frames at the GPU's address.  `base` stays
-   * the CPU's way to reach them (nothing here dereferences it; the DMA and PIO
-   * copies take their source from `booter`), and every address register is
-   * programmed with base_bus. */
-  uint64_t base_bus =
-      nv_dma_bus_of_run(base, ((uint64_t)len + NV_DMA_PAGE - 1) &
-                                   ~(NV_DMA_PAGE - 1));
+  /* The xfer engine reads the booter out of system memory at a BUS address:
+   * d->booter_bus is nv_dma_bus() of the blob's mapping (recorded where the
+   * blob is loaded), never its physical address.  `booter` below is the CPU
+   * view of the same bytes, used to parse the container and to pick the
+   * signature slot. */
+  uint64_t base = d->booter_bus;
   struct nv_fw_container bc;
   struct nv_fw_hs bhs;
   for (uint32_t i = 0; i < (uint32_t)sizeof bc; i++) ((uint8_t *)&bc)[i] = 0;
@@ -4982,14 +4982,15 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
    * different facts and only one of them is about the booter. */
   int via_pio = 0;
   rc = 0;
-  if (base_bus == NV_DMA_BUS_INVALID) {
-    uart_puts("[NV-SEC2] DMA not attempted: the booter run has no GPU-visible "
-              "address (nv_dma_bus_of_run refused); PIO carries the image\n");
+  if (base == NV_DMA_BUS_INVALID) {
+    uart_puts("[NV-SEC2] DMA not attempted: the booter blob's mapping has no "
+              "GPU-visible address (nv_fw_blob_bus refused); PIO carries the "
+              "image\n");
     rc = -ENOTSUP;
   } else {
     uint32_t off = 0;
     for (; off < imem_len; off += 256) {
-      rc = falcon_dma_block(d, NV_FALCON_SEC2_BASE, base_bus, imem_file + off,
+      rc = falcon_dma_block(d, NV_FALCON_SEC2_BASE, base, imem_file + off,
                             off, 1, 1);
       if (rc != 0) break;
     }
@@ -5013,7 +5014,7 @@ int nv_gsp_sec2_start_booter_ex(struct nv_dev *d, const uint8_t *booter,
   }
   if (rc == 0) {
     for (uint32_t off = 0; off < dmem_len; off += 256) {
-      rc = falcon_dma_block(d, NV_FALCON_SEC2_BASE, base_bus, dmem_file + off,
+      rc = falcon_dma_block(d, NV_FALCON_SEC2_BASE, base, dmem_file + off,
                             off, 0, 0);
       if (rc != 0) {
         uart_puts("[NV-SEC2] DMEM dma FAILED at off=");
@@ -5120,7 +5121,9 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
       uart_puts("[NV-GSP] fw BOOTER.BIN bytes=");
       print_int((int)booter.size);
       uart_puts(" phys=");
-      uart_print_hex(booter.phys);
+      uart_print_hex(booter.map.phys);
+      uart_puts(" bus=");
+      uart_print_hex(nv_fw_blob_bus(&booter));
       uart_puts(" container ok data_off=");
       uart_print_hex(bc.data_off);
       uart_puts(" data_size=");
@@ -5128,7 +5131,7 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
       uart_puts(" sig=");
       uart_print_hex(bhs.sig_prod_size);
       uart_puts("\n");
-      d->booter_phys = booter.phys;
+      d->booter_bus = nv_fw_blob_bus(&booter);
       d->booter_size = booter.size;
     } else {
       uart_puts("[NV-GSP] fw BOOTER.BIN parse FAILED\n");
@@ -5146,6 +5149,11 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
    * would describe a buffer somebody else now owns. */
   struct nv_fw_blob loader;
   int ldr_rc = nv_fw_load_blob(NV_FW_LOADER, &loader);
+  /* The bootloader's data region is a BUS address too: the metadata block hands
+   * SEC2 `loader_bus + 0x6C` and the booter DMAs 0x8000 bytes out of it, so the
+   * value has to be the one nv_dma_bus() issued.  0 when the load failed -- the
+   * loader's frames are not a mapping then, and nothing may be published. */
+  uint64_t loader_bus = (ldr_rc == 0) ? nv_fw_blob_bus(&loader) : 0;
   /* The RM image is not loaded as a blob and handed over: the booter reads it
    * through a radix3 tree, and the tree must describe the .fwimage SECTION, not
    * the whole ELF (the meta wants 0x2448000 bytes, the file is larger).  So:
@@ -5165,7 +5173,9 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
   uart_puts(" bytes=");
   print_int((int)rm.size);
   uart_puts(" phys=");
-  uart_print_hex(rm.phys);
+  uart_print_hex(rm.map.phys);
+  uart_puts(" bus=");
+  uart_print_hex(nv_fw_blob_bus(&rm));
 
   /* Integrity before anything mutates the buffer: head and tail of the file,
    * the same check the small blobs get. */
@@ -5212,41 +5222,25 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
 
   /* The tree describes 4 KiB pages, so the image must START on a page. On this
    * firmware .fwimage sits at file offset 0x40 -- inside the ELF header page --
-   * and pointing the tree at rm.phys would hand the booter 0x40 bytes of ELF
-   * header in front of the image it expects.
+   * and pointing the tree at the blob's base would hand the booter 0x40 bytes
+   * of ELF header in front of the image it expects.
    *
    * Fix without a second 38 MB buffer: slide the section down inside the frames
    * we already own (a backwards byte move, so overlapping is safe). The blob's
-   * base is page-aligned by construction, so afterwards [phys, phys+size) is the
-   * image, exactly page-aligned, and nothing was allocated twice. */
+   * base is page-aligned by construction, so afterwards [base, base+size) is
+   * the image, exactly page-aligned, and nothing was allocated twice. */
   if (elf.fwimage.off != 0) {
     uart_puts("\n[NV-GSP] radix3 slide .fwimage down by ");
     uart_print_hex(elf.fwimage.off);
     uart_puts(" inside its own frames (no second 38 MB buffer)\n");
     nv_fw_slide_down(rm.buf, rm.size, elf.fwimage.off, elf.fwimage.size);
   }
-  /* Descriptor addresses.  The radix3 tree, the metadata block and the
-   * bootloader's data pointer are all read by the booter as DMA sources, so
-   * they must be the GPU's addresses -- contract 6 row 15 is the failure this
-   * prevents ("works bare metal, hangs under any IOMMU").  nv_dma_bus_of_run()
-   * is the accessor for frames the firmware loader already owns; a refusal
-   * means no tree and no metadata block are published, and the row says so
-   * rather than handing the booter a CPU address that happens to work today. */
-  uint64_t img_bus =
-      nv_dma_bus_of_run(rm.phys, (uint64_t)rm.pages * NV_DMA_PAGE);
-  uint64_t loader_bus = NV_DMA_BUS_INVALID;
-  if (ldr_rc == 0)
-    loader_bus =
-        nv_dma_bus_of_run(loader.phys, (uint64_t)loader.pages * NV_DMA_PAGE);
-  if (img_bus == NV_DMA_BUS_INVALID ||
-      (ldr_rc == 0 && loader_bus == NV_DMA_BUS_INVALID)) {
-    uart_puts("\n[NV-GSP] bus FAIL img=");
-    uart_print_hex(img_bus);
-    uart_puts(" loader=");
-    uart_print_hex(loader_bus);
-    uart_puts(": a descriptor address has no GPU-visible answer, so neither the "
-              "radix3 tree nor the metadata block is published\n");
-  }
+  /* CPU view and DEVICE view of the same bytes.  img_phys exists for the log
+   * and for no other reason: every address that crosses to SEC2 or the booter
+   * is spelled img_bus -- the value nv_dma_bus() issued for this mapping, plus
+   * a file offset for a section inside it (see the metadata block below). */
+  uint64_t img_phys = rm.map.phys;
+  uint64_t img_bus = nv_fw_blob_bus(&rm);
   /* ---- stage 4: assemble the metadata block -----------------------------
    * Pure memory work again: compute the VRAM layout, fill the 256-byte block,
    * encode it, and decode it back as a self-check.  Nothing is written to the
@@ -5282,47 +5276,47 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
     uart_puts(" (every field matches the contract's AD102 table)\n");
   }
 
-  uint64_t root = 0;
-  uint32_t tpages = 0;
-  int trc = -ENOTSUP;
-  if (img_bus != NV_DMA_BUS_INVALID)
-    trc = nv_radix3_build(img_bus, elf.fwimage.size, &root, &tpages);
-  else
-    uart_puts("\n[NV-GSP] radix3 NOT BUILT: no GPU-visible image address\n");
+  struct nv_radix3_tree tree;
+  int trc = nv_radix3_build(img_phys, img_bus, elf.fwimage.size, &tree);
   uart_puts("\n[NV-GSP] radix3 ");
   if (trc != 0) {
     uart_puts("build FAILED rc=");
     print_int(trc);
     uart_puts(trc == -ENOMEM ? " (no contiguous run for the tree)\n" : "\n");
   } else {
-    /* The tree's own frames are a descriptor too: the metadata block hands the
-     * booter this address, so it comes from the accessor like every other. */
-    uint64_t root_bus =
-        nv_dma_bus_of_run(root, (uint64_t)tpages * NV_DMA_PAGE);
     uart_puts("root_bus=");
-    uart_print_hex(root_bus);
+    uart_print_hex(tree.root_bus);
     uart_puts(" pages=");
-    print_int((int)tpages);
+    print_int((int)tree.map.pages);
     uart_puts(" maps ");
     print_int((int)((elf.fwimage.size + NV_RADIX3_PAGE - 1) / NV_RADIX3_PAGE));
-    uart_puts(" image pages at ");
+    uart_puts(" image pages at bus=");
     uart_print_hex(img_bus);
+    uart_puts(" phys=");
+    uart_print_hex(img_phys);
     uart_puts(" (stage 3)\n");
     if (lrc2 == 0) {
       struct nv_wpr_meta_in m, back;
       for (uint32_t i = 0; i < (uint32_t)sizeof m; i++)
         ((uint8_t *)&m)[i] = 0;
-      m.sysmem_addr_radix3_elf = root_bus;
+      m.sysmem_addr_radix3_elf = tree.root_bus;
       m.size_radix3_elf = elf.fwimage.size;
-      /* The bootloader's data region: 0x8000 bytes at file offset 0x6C. */
-      m.sysmem_addr_bootloader = loader_bus + 0x6C;
+      /* The bootloader's data region: 0x8000 bytes at file offset 0x6C.  0x6C
+       * is an offset INSIDE the mapping, so the address is loader_bus + 0x6C --
+       * one addition on a bus base, not a second address.  When the loader did
+       * not load there is nothing there and the field says so (0), instead of
+       * publishing "0 + 0x6C". */
+      m.sysmem_addr_bootloader =
+          (loader_bus && loader_bus != NV_DMA_BUS_INVALID) ? loader_bus + 0x6C : 0;
       m.size_bootloader = 0x8000;
       m.bootloader_code_offset = 0x4800;
       m.bootloader_data_offset = 0x800;
       /* The ad10x signature section.  It sits AFTER .fwimage in the file, so the
        * slide that page-aligned the image did not move it: its bytes are still at
-       * their original file offset.  Found by name, because picking the wrong
-       * section fails authentication with no host-visible reason. */
+       * their original file offset.  sig_off is that offset INSIDE the image
+       * mapping, so the published address is img_bus + sig_off.  Found by name,
+       * because picking the wrong section fails authentication with no
+       * host-visible reason. */
       uint32_t sig_off = 0, sig_size = 0;
       for (uint32_t i = 0; i < elf.nsig && i < NV_FW_SIG_MAX; i++) {
         const char *n = elf.sig[i].name;
@@ -5397,9 +5391,12 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
         uart_print_hex(nv_dma_bus(&d->gsp_meta));
         uart_puts("\n");
       }
-      d->radix3_root = root;
-      d->radix3_pages = tpages;
     }
+    /* Owned from here to the end of the function, whatever the layout said: a
+     * tree that no metadata block points at is still frames somebody must
+     * free.  (Before this card the root was only recorded inside the
+     * `lrc2 == 0` branch, so a failed layout leaked the whole tree.) */
+    d->radix3 = tree;
   }
 
   /* ---- stage 5: start the booter on SEC2 --------------------------------
@@ -5465,7 +5462,7 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
                           : " (no success reported; the [NV-SEC2] rows are the "
                             "evidence)\n");
       /* The bootloader's data region is what the booter copies into
-       * boot_bin_offset (meta.sysmem_addr_bootloader = loader.phys + 0x6C,
+       * boot_bin_offset (meta.sysmem_addr_bootloader = loader_bus + 0x6C,
        * size 0x8000), so it is also the fingerprint to compare against. */
       const uint8_t *expect = 0;
       uint32_t expect_len = 0;
@@ -5515,10 +5512,7 @@ int nv_gsp_firmware_check(struct nv_dev *d) {
    * that has not reached RM. */
   if (lrc2 == 0) (void)nv_gsp_rpc_stage8(d);
 
-  if (d->radix3_root) {
-    nv_radix3_release(d->radix3_root, d->radix3_pages);
-    d->radix3_root = 0;
-  }
+  if (d->radix3.map.pages) nv_radix3_release(&d->radix3);
   nv_fw_release(&rm);
   if (ldr_rc == 0) nv_fw_release(&loader);
   if (bldrc == 0) nv_fw_release(&booter);

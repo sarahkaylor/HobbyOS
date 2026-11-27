@@ -23,11 +23,14 @@
 
 #include <stdint.h>
 
-/* nv_dma.h only (struct nv_dma_map): the metadata block the boot path hands to
- * SEC2 is an nv_dma mapping, not a physical address.  nv_rpc.h is NOT pulled in
- * here -- the transport's state lives in nv_gsp_glue.h, so TUs that include
- * nv.h do not grow a 129-page queue description. */
+/* nv_dma.h (struct nv_dma_map) and nv_fw.h (struct nv_radix3_tree), both of
+ * which are just declarations: the metadata block the boot path hands to SEC2
+ * and the radix3 tree the booter walks are MAPPINGS, not physical addresses.
+ * nv_rpc.h is NOT pulled in here -- the transport's state lives in
+ * nv_gsp_glue.h, so TUs that include nv.h do not grow a 129-page queue
+ * description. */
 #include "nv_dma.h"
+#include "nv_fw.h"
 
 /* Bring-up state, in the order the driver reaches it.  A failed stage names
  * itself: nv.state is left at the last stage that completed. */
@@ -135,16 +138,19 @@ struct nv_dev {
 
   struct nv_mmio_ops ops;
   void *ops_ctx;
-  /* Boot-path addresses that must stay valid across stages. */
-  uint64_t booter_phys;   /* the booter blob's contiguous frames */
+  /* Boot-path addresses that must stay valid across stages.  Both are things a
+   * DEVICE reads: SEC2 DMAs the booter image out of system memory at
+   * booter_bus, and the booter walks the radix3 tree at radix3.root_bus.  The
+   * physical addresses behind them live inside the mappings (map.phys) and are
+   * CPU-side only -- see src/include/nv_dma.h. */
+  uint64_t booter_bus;    /* nv_dma_bus() of the booter blob's mapping */
   uint32_t booter_size;
   /* The 256-byte WPR metadata block: one nv_dma page, because SEC2 receives its
    * address in MAILBOX0/1 and that address is the one the GPU uses, not the CPU
    * physical one (nv_dma_bus()).  phys members are for the log and for the
    * frame pool; the BUS address is what any device-facing store gets. */
   struct nv_dma_map gsp_meta;
-  uint64_t radix3_root;   /* the RM image's radix3 tree */
-  uint32_t radix3_pages;
+  struct nv_radix3_tree radix3; /* the RM image's tree: frames + root bus */
   /* FWSEC ucode as located in the card's VBIOS (nv_vbios_probe). */
   uint32_t ucode_desc, ucode_payload, ucode_size;
   uint32_t ucode_imem, ucode_dmem, ucode_engid, ucode_id;
@@ -308,11 +314,14 @@ struct nv_info {
   uint32_t wpr_ctl_a, wpr_ctl_b; /* PFB 0x1FA804/08, the pair that moves */
   uint32_t gsp_msg0, gsp_msg1; /* GSP falcon mailbox pair */
   uint32_t gsp_ucctl;          /* GSP RISC-V status word */
-  /* Boot-path addresses that must stay valid across stages. */
-  uint64_t booter_phys;  /* the booter blob's contiguous frames */
+  /* Boot-path addresses.  NOT populated by nv_fill_info(): these five fields
+   * are dead ABI space kept so the struct's size and later offsets do not move.
+   * The live values are in struct nv_dev (booter_bus, the radix3 mapping);
+   * read them there, and remember both are DEVICE-visible addresses. */
+  uint64_t booter_phys;  /* legacy, always 0 */
   uint32_t booter_size;
-  uint64_t gsp_meta_phys; /* the 256-byte metadata block, DMA-able */
-  uint64_t radix3_root;   /* the RM image's radix3 tree */
+  uint64_t gsp_meta_phys; /* legacy, always 0 */
+  uint64_t radix3_root;   /* legacy, always 0 */
   uint32_t radix3_pages;
 };
 
