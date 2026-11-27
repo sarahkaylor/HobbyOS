@@ -29,7 +29,7 @@ struct nvshim_drm_syncobj_eventfd {   /* 24 bytes */
 ```
 
 encoded `NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD` = **`0xC01864CF`**
-(`src/include/nv_drm_uapi.h:706-708`), pinned by `test_nvshim_drm_layout`.
+(`src/include/nv_drm_uapi.h:709-711`), pinned by `test_nvshim_drm_layout`.
 
 The deliverable is the two small exports the parent's re-measurement named, plus
 the shim's registration and retire hook — nothing vendor-supplied:
@@ -49,7 +49,7 @@ the shim's registration and retire hook — nothing vendor-supplied:
   `sobj_reach_locked()` (`:3405`) called from the one completion path
   `client_reap_locked()` (`:3433`) and from EXEC's already-retired branch,
   `TIMELINE_SIGNAL`, binary `SIGNAL` and TRANSFER's reached destination;
-  `client_efd_flush()` (`:4434`) delivers the queued writes at the end of the
+  `client_efd_flush()` (`:4442`) delivers the queued writes at the end of the
   retiring ioctl; reasons 21..24 in `k_sync_reasons[]` (`:3498-3502`); a
   dedicated row bucket `r_eventfd = 32`.
 

@@ -31,7 +31,7 @@ did: `nv_shim_drm_ioctl()` answers a refusal **before** the size check, so a
 number present in both tables would look served in the contract test and never
 run. The encoded request is unchanged in value — the old refusal spelling was
 `ANY(0xcf, 24)` and drm.h's own encoding is `DRM_IOWR(0xcf, struct
-drm_syncobj_eventfd)` = **`0xC01864CF`** (`src/include/nv_drm_uapi.h:706-708`),
+drm_syncobj_eventfd)` = **`0xC01864CF`** (`src/include/nv_drm_uapi.h:709-711`),
 pinned by `test_nvshim_drm_layout` (`src/kernel/nv_shim_drm_test.c:90,131-133,
 170-172`).
 
@@ -40,7 +40,7 @@ pinned by `test_nvshim_drm_layout` (`src/kernel/nv_shim_drm_test.c:90,131-133,
 ### 2.1 The struct, from drm.h's shape
 
 ```c
-struct nvshim_drm_syncobj_eventfd {   /* src/include/nv_drm_uapi.h:333 */
+struct nvshim_drm_syncobj_eventfd {   /* src/include/nv_drm_uapi.h:336 */
   uint32_t handle;   /* 0  */
   uint32_t flags;    /* 4  must be 0 */
   uint64_t point;    /* 8  timeline point; 0 = the binary form */
@@ -108,7 +108,7 @@ the parked-reader mask, drain it, `poll_notify_obj(&l_efd[slot])`. No user
 pointer, no `copy_from_user`, no fake "wake" without a `pid_mask` drain.
 
 Delivery happens at the **end of the ioctl** that retired the point
-(`client_efd_flush()`, `src/kernel/nv_shim.c:4434`, called from
+(`client_efd_flush()`, `src/kernel/nv_shim.c:4442`, called from
 `nv_shim_drm_ioctl()`): still inside the request, so a `read(2)` issued after it
 returns observes the 1, but after `g_shim_lock` is released, because the signal
 wakes processes and notifies pollers. Rows are emitted there too (this file's
