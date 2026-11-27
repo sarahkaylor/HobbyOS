@@ -314,11 +314,14 @@ struct nvshim_drm_syncobj_transfer {
  *               was SUBMITTED (it is in the record's ledger), so there is a
  *               fence for it; a point already reached signals at once, which is
  *               Linux's dma_fence_add_callback on a signalled fence.
- *   point == 0  the binary form: the handle's one fence (point 1 in this node's
- *               model, where a binary syncobj is the same record at 1).  If the
- *               handle is already signalled (CREATE_SIGNALED, a binary SIGNAL)
- *               the counter is written inside this request -- Linux's explicit
- *               `fence == dma_fence_get_stub()` case.
+ *   point == 0  the BINARY form: the handle's CURRENT fence -- the floor an
+ *               IMPORT_SYNC_FILE handle carries, else the record's highest
+ *               submitted point (the chain head Linux attaches the callback
+ *               to), else the binary stub at 1 (CREATE_SIGNALED / binary
+ *               SIGNAL).  If that fence is already signalled the counter is
+ *               written inside this request -- Linux's explicit
+ *               `fence == dma_fence_get_stub()` case and its add-callback on a
+ *               signalled fence.
  *
  * `fd` is resolved to the eventfd's counter slot AT REGISTRATION, together with
  * the slot's generation; a close(2) before the retire is therefore a named

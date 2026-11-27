@@ -4068,6 +4068,47 @@ static void test_nvshim_drm_syncobj_eventfd(void) {
   uart_puts("  [NVSHIM] eventfd closed: the retire wrote NOTHING -- an eventfd "
             "reusing the registered slot still reads -EAGAIN; row reason=eventfd_closed\n");
 
+  /* --- (7) the BINARY form (point 0) names the handle's CURRENT fence, not a
+   * fixed point 1. --- */
+  /* (7a) CREATE_SIGNALED is a host-side stub at 1: point 0 signals at once. */
+  uint32_t hb = 0;
+  EXPECT_EQ(sobj_create(&pr, NVSHIM_DRM_SYNCOBJ_CREATE_SIGNALED, &hb), 0);
+  int e3 = file_eventfd_create(pr.p, 0, 0x800);
+  EXPECT_EQ((e3 >= 0), 1);
+  EXPECT_EQ(sobj_eventfd_reg(&pr, hb, 0, e3, 0), 0);
+  EXPECT_EQ(efd_read(&pr, e3, &got), (int)sizeof got);
+  EXPECT_EQ((int)got, 1);
+  EXPECT_EQ(efd_read(&pr, e3, 0), -EAGAIN);
+
+  /* (7b) a timeline record whose point 3 has LANDED while its point 7 is still
+   * pending: the binary form attaches to the head fence (7) and must not fire
+   * now.  Resolving point 0 to 1 would fire on the already-landed 3 -- this is
+   * the measurement that keeps that shortcut out. */
+  uint32_t hc = 0;
+  EXPECT_EQ(sobj_create(&pr, 0, &hc), 0);
+  struct nvshim_drm_sync s3;
+  s3.flags = NVSHIM_DRM_SYNC_TIMELINE_SYNCOBJ;
+  s3.handle = hc;
+  s3.timeline_value = 3;
+  nv_rm_mock_hold(0);
+  EXPECT_EQ(sync_exec_with(&pr, ch, &s3, 1), 0); /* 3 lands */
+  nv_rm_mock_hold(1);
+  struct nvshim_drm_sync s7;
+  s7.flags = NVSHIM_DRM_SYNC_TIMELINE_SYNCOBJ;
+  s7.handle = hc;
+  s7.timeline_value = 7;
+  EXPECT_EQ(sync_exec_with(&pr, ch, &s7, 1), 0); /* 7 is the head, pending */
+  int e4 = file_eventfd_create(pr.p, 0, 0x800);
+  EXPECT_EQ((e4 >= 0), 1);
+  EXPECT_EQ(sobj_eventfd_reg(&pr, hc, 0, e4, 0), 0);
+  EXPECT_EQ(efd_read(&pr, e4, 0), -EAGAIN); /* head 7 has not retired */
+  nv_rm_mock_hold(0);
+  EXPECT_EQ(sync_exec_with(&pr, ch, 0, 0), 0);
+  EXPECT_EQ(efd_read(&pr, e4, &got), (int)sizeof got);
+  EXPECT_EQ((int)got, 1);
+  uart_puts("  [NVSHIM] eventfd binary form: CREATE_SIGNALED signals inside the "
+            "registration; a pending head fence (7) is waited for, not the landed 3\n");
+
   /* The names this rung's refusals print. */
   EXPECT_EQ(sync_name_is(NVSHIM_SYNC_NOT_EVENTFD, "not_an_eventfd"), 1);
   EXPECT_EQ(sync_name_is(NVSHIM_SYNC_EVENTFD_CLOSED, "eventfd_closed"), 1);
@@ -4076,8 +4117,12 @@ static void test_nvshim_drm_syncobj_eventfd(void) {
 
   /* --- teardown --- */
   EXPECT_EQ(file_close(pr.p, efd), 0);
+  EXPECT_EQ(file_close(pr.p, e3), 0);
+  EXPECT_EQ(file_close(pr.p, e4), 0);
   for (int i = 0; i < nextra; i++) EXPECT_EQ(file_close(pr.p, extra[i]), 0);
   EXPECT_EQ(sobj_destroy(&pr, h), 0);
+  EXPECT_EQ(sobj_destroy(&pr, hb), 0);
+  EXPECT_EQ(sobj_destroy(&pr, hc), 0);
   struct nvshim_drm_channel_free cf;
   cf.channel = ch;
   EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_CHANNEL_FREE, &cf, (int)sizeof cf), 0);

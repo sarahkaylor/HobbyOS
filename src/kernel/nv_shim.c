@@ -4271,10 +4271,10 @@ static int op_drm_syncobj_transfer(struct process *p, int fd, uint64_t arg) {
  * WHAT IS SERVED: flags == 0 and pad == 0 (drm.h defines no flag bit for this
  * row, and no cancel form -- see nv_drm_uapi.h's struct comment), a handle this
  * client holds, and a point that names one of the handle's fences:
- *   - an ordinary handle: point == 0 is the binary form (point 1, Linux's
- *     stub-fence case) and any other point must be in the SUBMITTED ledger --
- *     a point that was never handed to the timeline has no fence, so nothing
- *     can ever land it;
+ *   - an ordinary handle: point == 0 is the BINARY form -- the record's current
+ *     fence (its highest submitted point, or the binary stub at 1) -- and any
+ *     other point must be in the SUBMITTED ledger: a point that was never
+ *     handed to the timeline has no fence, so nothing can ever land it;
  *   - a handle imported from IMPORT_SYNC_FILE: exactly its floor, the one fence
  *     the handle carries (its own name if not, reason 24).
  * A point already reached signals INSIDE this request, which is Linux's
@@ -4321,7 +4321,14 @@ static int op_drm_syncobj_eventfd(struct process *p, int fd, uint64_t arg) {
     return slot; /* -EBADF (absent) or -EINVAL (not an eventfd) */
   }
 
-  uint64_t eff = ef.point ? ef.point : 1; /* point 0 = the binary form */
+  /* `eff` is the point this registration waits for.  A non-zero `point` names
+   * it directly; point 0 is drm.h's BINARY form, which names the handle's
+   * CURRENT fence -- resolved after the handle is, because "current" means the
+   * imported floor for an IMPORT_SYNC_FILE handle, else the highest SUBMITTED
+   * point (the chain head Linux attaches its callback to), else the binary stub
+   * at 1 (CREATE_SIGNALED).  Resolving it to 1 unconditionally would fire on an
+   * earlier landed point while the head fence is still pending. */
+  uint64_t eff = ef.point;
   int now = 0, id = 0, regs = 0;
 
   spinlock_acquire(&g_shim_lock);
@@ -4343,6 +4350,7 @@ static int op_drm_syncobj_eventfd(struct process *p, int fd, uint64_t arg) {
     return -EINVAL;
   }
   uint64_t floor = c->sobj_floor[at];
+  if (eff == 0) eff = floor ? floor : (o->submitted ? o->submitted : 1);
   if (floor != 0 && eff != floor) {
     spinlock_release(&g_shim_lock);
     sync_refuse_rows("drm syncobj refuse", &r_eventfd, "eventfd point=", eff,

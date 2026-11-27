@@ -73,9 +73,12 @@ generation)`. `op_drm_syncobj_eventfd()` (`src/kernel/nv_shim.c:4297`):
      that was never handed to the timeline has no fence, so nothing could ever
      land it — reason 12), and exactly the floor for a handle from
      `IMPORT_SYNC_FILE` (that handle carries one fence — reason 24);
-   - `point == 0`: the binary form, effective point **1**, the same record at 1
-     that a binary `EXEC`/`SIGNAL` writes. It needs no ledger entry, because
-     `CREATE_SIGNALED` is exactly a host-side stub at 1;
+   - `point == 0`: drm.h's **binary form**, i.e. the handle's *current* fence:
+     the floor of an `IMPORT_SYNC_FILE` handle, else the record's highest
+     submitted point (the chain head Linux attaches its callback to), else the
+     binary stub at **1** (`CREATE_SIGNALED`/binary `SIGNAL`). Resolving it to 1
+     unconditionally would fire on an earlier landed point while the head fence
+     is still pending;
 5. refuses a duplicate `(record, effective point)` by name (23) — replacing
    would silently drop a signal the client already asked for;
 6. if the record has **already reached** the point, signals inside this request
@@ -147,13 +150,20 @@ Rows from the suite (intel tier, verbatim):
 [NVSHIM] drm syncobj eventfd signal slot=0 gen=1 point=0x4 handle=1 n=1
 [NVSHIM] drm syncobj eventfd reg handle=1 obj=29 point=0x9 slot=1 gen=2 regs=1
 [NVSHIM] drm syncobj refuse eventfd slot=0x1 reason=eventfd_closed
+[NVSHIM] drm syncobj eventfd reg=now handle=2 point=0x1 slot=2 gen=4 n=1
+[NVSHIM] drm syncobj eventfd reg handle=3 obj=31 point=0x7 slot=3 gen=5 regs=1
+[NVSHIM] drm syncobj eventfd signal slot=3 gen=5 point=0x7 handle=3 n=1
 ```
 
 The `eventfd signal` row is the retire: slot 0, the generation the registration
-pinned, point 4, `n=1`. The last `reg`/`refuse` pair is the closed-fd case: the
-registration is at point 9 on slot 1; the fd was closed and a **new** eventfd
+pinned, point 4, `n=1`. The `reg`/`refuse` pair after it is the closed-fd case:
+the registration is at point 9 on slot 1; the fd was closed and a **new** eventfd
 reused slot 1 (gen 2 against the pinned gen 1), so the retire wrote nothing and
-named it.
+named it. The last three rows are the binary form: `reg=now` on a
+`CREATE_SIGNALED` handle signals inside the registration at the stub point 1,
+while the timeline handle whose point 3 had landed and whose point 7 was still
+pending registers at **7** and fires only when 7 retires — the row that proves
+`point == 0` is the current fence, not a hard-wired 1.
 
 ## 4. Why the two exports are in `fs.c` / `linux_compat_fd.c`
 
@@ -187,8 +197,8 @@ each, `TOOLS_SKIP=1 BROWSER_SKIP=1 SKIP_KVM=1`, TCG (no `/dev/kvm` for uid
 
 | arch | tests run | failed | verdict | log |
 |---|---|---|---|---|
-| intel | **606** | **0** | `UNIT TESTS PASSED` | `unit-tier-intel.log:3044-3046` |
-| ARM | **485** | **0** | `UNIT TESTS PASSED` | `unit-tier-arm.log:2449-2451` |
+| intel | **606** | **0** | `UNIT TESTS PASSED` | `unit-tier-intel.log:3032-3034` |
+| ARM | **485** | **0** | `UNIT TESTS PASSED` | `unit-tier-arm.log:2453-2455` |
 
 Baseline from the fold (`t_c2079388`, `nv/integ-swarm` @ `bc857a3f`): 605 / 484.
 Delta: **+1 per arch**, `test_nvshim_drm_syncobj_eventfd`.
@@ -204,12 +214,16 @@ unit-tier-arm.log:346    [RELOC] entries=0x1AD applied=0x1AD slide=0x3FA200000 o
 ### 6.1 The suite's rows (intel)
 
 ```
-unit-tier-intel.log:2734  Running test_nvshim_drm_syncobj_eventfd...
-unit-tier-intel.log:2737  [NVSHIM] drm syncobj eventfd reg handle=1 obj=29 point=0x4 slot=0 gen=1 regs=1
-unit-tier-intel.log:2744  [NVSHIM] drm syncobj eventfd signal slot=0 gen=1 point=0x4 handle=1 n=1
-unit-tier-intel.log:2745    [NVSHIM] eventfd: read -EAGAIN before the retire, 8 bytes == 1 after the SAME unsigned EXEC, -EAGAIN on the second read; poll 0 -> POLLIN
-unit-tier-intel.log:2747  [NVSHIM] drm syncobj refuse eventfd slot=0x1 reason=eventfd_closed
-unit-tier-intel.log:2748    [NVSHIM] eventfd closed: the retire wrote NOTHING -- an eventfd reusing the registered slot still reads -EAGAIN; row reason=eventfd_closed
+unit-tier-intel.log:2718  Running test_nvshim_drm_syncobj_eventfd...
+unit-tier-intel.log:2721  [NVSHIM] drm syncobj eventfd reg handle=1 obj=29 point=0x4 slot=0 gen=1 regs=1
+unit-tier-intel.log:2728  [NVSHIM] drm syncobj eventfd signal slot=0 gen=1 point=0x4 handle=1 n=1
+unit-tier-intel.log:2729    [NVSHIM] eventfd: read -EAGAIN before the retire, 8 bytes == 1 after the SAME unsigned EXEC, -EAGAIN on the second read; poll 0 -> POLLIN
+unit-tier-intel.log:2731  [NVSHIM] drm syncobj refuse eventfd slot=0x1 reason=eventfd_closed
+unit-tier-intel.log:2732    [NVSHIM] eventfd closed: the retire wrote NOTHING -- an eventfd reusing the registered slot still reads -EAGAIN; row reason=eventfd_closed
+unit-tier-intel.log:2733  [NVSHIM] drm syncobj eventfd reg=now handle=2 point=0x1 slot=2 gen=4 n=1
+unit-tier-intel.log:2734  [NVSHIM] drm syncobj eventfd reg handle=3 obj=31 point=0x7 slot=3 gen=5 regs=1
+unit-tier-intel.log:2735  [NVSHIM] drm syncobj eventfd signal slot=3 gen=5 point=0x7 handle=3 n=1
+unit-tier-intel.log:2736    [NVSHIM] eventfd binary form: CREATE_SIGNALED signals inside the registration; a pending head fence (7) is waited for, not the landed 3
 ```
 
 The `syncobj_eventfd` **refusal** row is gone from the log
@@ -225,6 +239,10 @@ unit-tier-arm.log:2178  [NVSHIM] drm syncobj eventfd signal slot=0 gen=1 point=0
 unit-tier-arm.log:2179    [NVSHIM] eventfd: read -EAGAIN before the retire, 8 bytes == 1 after the SAME unsigned EXEC, -EAGAIN on the second read; poll 0 -> POLLIN
 unit-tier-arm.log:2181  [NVSHIM] drm syncobj refuse eventfd slot=0x1 reason=eventfd_closed
 unit-tier-arm.log:2182    [NVSHIM] eventfd closed: the retire wrote NOTHING -- an eventfd reusing the registered slot still reads -EAGAIN; row reason=eventfd_closed
+unit-tier-arm.log:2183  [NVSHIM] drm syncobj eventfd reg=now handle=2 point=0x1 slot=2 gen=4 n=1
+unit-tier-arm.log:2184  [NVSHIM] drm syncobj eventfd reg handle=3 obj=31 point=0x7 slot=3 gen=5 regs=1
+unit-tier-arm.log:2185  [NVSHIM] drm syncobj eventfd signal slot=3 gen=5 point=0x7 handle=3 n=1
+unit-tier-arm.log:2186    [NVSHIM] eventfd binary form: CREATE_SIGNALED signals inside the registration; a pending head fence (7) is waited for, not the landed 3
 ```
 
 Same rows, same values (slot 0 / gen 1 / point 4, then slot 1 / gen 2 refused),
@@ -250,10 +268,11 @@ unit-tier-arm.log` = 0.
   to retire, so a registration would wait forever. Linux's callback lives on
   the fence, which an exported fd would keep; this node says so here instead of
   pretending.
-- **`point == 0` is the binary form at point 1.** drm.h leaves the field
-  meaning "binary syncobj" when 0; a binary syncobj is the same record at 1
-  here, so the registration is at 1 and an already-signalled handle fires at
-  once.
+- **`point == 0` is the handle's CURRENT fence.** drm.h leaves the field
+  meaning "binary syncobj" when 0, and Linux attaches the callback to
+  `drm_syncobj_fence_get()` — the chain head. Here that is the imported floor
+  for an `IMPORT_SYNC_FILE` handle, else the record's highest submitted point,
+  else the binary stub at 1.
 - **The counter is written once per retire, `n = 1`.** `eventfd(2)`'s
   `EFD_SEMAPHORE` shape does not change this: Linux's syncobj signal passes 1.
 
