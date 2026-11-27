@@ -602,7 +602,7 @@ of L2**:
 
 | level | claim | status |
 |---|---|---|
-| L1 | part identification, BAR windows, firmware read + byte-for-byte digest, WPR metadata / radix3 / WPR2 layout, COT construction, the 129-page publish block and the RPC transport | **measured on both parts** (AD102 and GB202) |
+| L1 | part identification, BAR windows, firmware read + byte-for-byte digest, WPR metadata / radix3 / WPR2 layout, COT construction, the 129-page publish block and the RPC transport, **PGRAPH reachable + topology measured** (`gpc=11 tpc=64 src=register`, 2026-11-26) | **measured on both parts** (AD102 and GB202) |
 | L2, vendor-firmware part (GB202 only) | NVIDIA's FSP reports SUCCESS at its published gate, authenticates our COT (`errorCode=0`), runs NVIDIA's FMC | **measured** (§2.12) |
 | L2, the rest | our code runs on SEC2; the booter runs; GSP-RM reports `INIT_DONE`; a status queue is published | **not met on either part** — AD102 `0x002B0009` (three builds, GA102 control `0x00250009`); GB202 `0x0B` / `0x824`, `statq_written=0 linked=0 initdone=0` |
 | L3–L5 | a submit reaches the 3-D engine and reads back; nvk enumerates; a game renders on `nv` | **not started on either part, not claimed** |

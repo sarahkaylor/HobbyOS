@@ -42,9 +42,9 @@ signed container as far as that container's own verification allows.
 | # | rung | gate | today | depends on |
 |---|---|---|---|---|
 | N0 | 1080p present gate | 8,294,400 B maps; pixel visible | **closed 2026-11-23** — `(1919,1079)=(255,0,0)` in a QMP screendump | — |
-| N1n | PGRAPH reachability + measured topology | `[NV-ENG]` row: `verdict=ADDRESSABLE` and `topology verdict=MEASURED` | **implemented, not run** (`src/kernel/nv_engine.c`, 4 unit cases) | a card slot, 1 read-only boot |
-| N2 | `/dev/nv*` shim over a mock RM | probe + fence retire | **done** (16 real `DRM_IOCTL_NOUVEAU_*` rows, 21 named refusals, NVIF + `GRAPH_UNITS` served) | — |
-| **N3n** | **SEC2 accepts a published (GA102-signed) HS container** | `0x840094` is neither `0x250009` (signature class) nor `0x002B0009` (post-signature), with the core not exiting by `INTR` | **candidate prepared** (`hs_gate.py`: IDENTITY-COMPATIBLE, `1/0x1/5`); boot not run | one boot, §6 of `nv-no-rm-path.md` |
+| N1n | PGRAPH reachability + measured topology | `[NV-ENG]` row: `verdict=ADDRESSABLE` and `topology verdict=MEASURED` | **done 2026-11-26, one read-only boot** (`t_b2131040`, `t_78a50be7`): `verdict=ADDRESSABLE` — 6 of 7 named registers returned data, none fenced or absent (`0x400000` = `0xBADF5040` unreadable) — and `topology verdict=MEASURED` **gpc=11 tpc=64 `src=register`** from `0x409604=0x0C06000B` plus `GPC_UNIT(i,0x2608)` TPC_COUNT bits 4:0 (5,5,6×9), cross-checked against the mask-encoded `ppc_tpc_mask`. The DECLARED 11/64 row is **confirmed, not replaced** (`docs/nv-topology-measured.md`); the first read's tpc=44 was a whole-word popcount of a word the reference treats as a count | — |
+| N2 | `/dev/nv*` shim over a mock RM | probe + fence retire | **done** (16 real `DRM_IOCTL_NOUVEAU_*` rows, 21 named refusals, NVIF + `GRAPH_UNITS` served; client-surface census 2026-11-27: 0 ioctls absent from both tables, every served width matches Mesa) | — |
+| **N3n** | **SEC2 accepts a published (GA102-signed) HS container** | `0x840094` is neither `0x250009` (signature class) nor `0x002B0009` (post-signature), with the core not exiting by `INTR` | **closed 2026-11-27 without spending the boot.** Two independent reasons: the class question was answered by `v4a` — a GA102-signed container (different triple) rejected **at** the signature with `0x00250009` at +4.212 ms, `EXIT 0x10` — and the named candidate `ga102/sec2/hs_bl_sig.bin` is an ls-hsbl **signature descriptor, not a bootable container** (`t_90ef924c`), so no vendor-shipped HS bootloader exists to stage. Both branches the decision table could take end at "native branch closed on this part" | — |
 | N4n | ACR bootstraps FECS/GPCCS on SEC2 | ACR cmdq answers; FECS/GPCCS halt with mailbox 0 | blocked behind N3n | N3n + an **AD102-signed** ACR ucode set, which NVIDIA does not publish (linux-firmware `nvidia/ad102/` is `gsp/` only) |
 | N5n | first GR channel + submit | 64×64 clear reads back | blocked behind N4n | N4n |
 | N6n | nvk enumerates AD102 natively | `vulkaninfo` lists `AD102 (NVK)` | blocked behind N5n | N5n |
@@ -53,8 +53,13 @@ signed container as far as that container's own verification allows.
 | N9n | "reasonable performance" natively | 720p ≥30 fps incl. present | blocked behind N7n/N8n | — |
 | N3r | **GSP-RM boots** (the signed-booter branch) | mailbox moves, first RPC answered | **PARKED, not cancelled**: no reachable vendor `booter_load` authenticates (`0x2B0009` invariant over three AD102 generations, two cross-chip controls) | a signed booter for this part's fusion |
 
-`N1n` is deliberately before `N3n` in cost, not in dependency: it is four reads
-and settles whether anything above it can even be attempted.
+Both cheap native gates are now settled, and neither was a pause: **N1n measured**
+(PGRAPH addressable, topology `src=register` and equal to the declared 11/64) and
+**N3n closed in class** (no GA102-signed container is verified by this part, and no
+AD102-signed non-GSP ucode is published). What is left on the native branch above them
+is gated on an AD102-signed ucode set that NVIDIA does not ship — see `docs/nv-plan.md`
+§2.12–§2.13 for why that ends the branch as a declared ceiling rather than an open
+question.
 
 ### 2.2 Fallback branch (the one that reaches the data points today)
 
@@ -83,11 +88,12 @@ Withdrawn on this branch:
 
 * "the games rows are the same as NVIDIA's driver" — the reference behaviour is
   no longer NVIDIA's stack; the fps targets stay, the comparison does not;
-* `GRAPH_UNITS` as a measured topology — it stays `src=declared` (11 GPC / 64 TPC)
-  until N1n produces a measured row, and the declared row names its falsification
-  path;
-* treating "GSP-RM boots" as the only route to a submit — N3r is parked and the
-  native branch's gate moved to N3n.
+* `GRAPH_UNITS` as a *declared* topology — the rung N1n produced the measured row on
+  2026-11-26 (11 GPC / 64 TPC, `src=register`), so the number is no longer a guess; what
+  the shim still answers (`src=declared`, `mock_has_no_topo` on a node with no model) is
+  the *shim's* honesty about having no card, not a measurement gap;
+* treating "GSP-RM boots" as the only route to a submit — N3r is parked, and the other
+  native gate, N3n, closed in class on 2026-11-27 (see §2.1).
 
 Not withdrawn:
 
@@ -101,15 +107,16 @@ Not withdrawn:
 
 ## 4. Critical path, honestly
 
-* **N3n is the only cheap gate left on the native branch** (one boot). If it
-  fails, nothing above N0 in §2.1 can be started, and that is a *result*, not a
-  pause.
-* If N3n passes, the native critical path is N4n → N5n → N6n, and it is driver
-  work measured in weeks (ESTIMATE: 12–24 weeks to a first clear, from the
-  reference driver's own structure — netlist parsing, context image, channel/RAMFC,
-  VMM, then submit).
-* The fallback critical path is one approval (host renderer) plus harness work,
-  and it already has all three data points.
+* **No cheap native gate is left.** Both were spent and settled in 2026-11-26/27: N1n
+  measured the topology and N3n closed in class (§2.1). What remains on the native
+  branch — N4n onward — needs an **AD102-signed** ACR/FECS/GPCCS ucode set that NVIDIA
+  does not publish, so it is not a gate that can be bought with a boot or a week; it is
+  the declared ceiling (`docs/nv-plan.md` §2.13, revive condition R1/R3).
+* The fallback critical path is a **harness/fps** question, not a bring-up question: it
+  already has all three data points, and its remaining gap is N9v's 1.65× frame cost,
+  whose levers are all outside the card (`docs/nv-n9v-tail.md` §6 — native 3-D in the
+  guest, a cheaper translation chain, or re-scoping the 1 %-low bar, which is an owner
+  decision).
 
 ---
 
