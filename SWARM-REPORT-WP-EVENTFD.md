@@ -1,8 +1,10 @@
 # SWARM-REPORT-WP-EVENTFD — a retired point writes the client's eventfd (t_d14cd97e)
 
 Lane: `nv-card`. Card: `t_d14cd97e`. Base `nv/integ-swarm`: `bc857a3f` (the
-WP-TRANSFERFILE fold). Branch: `nv/wp-eventfd`. Code commit: `d19eabdc`.
-No GPU boot, no VM boot, no `qm`, no KVM, no `docs/nv-plan.md` edit.
+WP-TRANSFERFILE fold). Branch: `nv/wp-eventfd`. Code commit: `c698bf13` (the
+rung's first commit is `d19eabdc`; `c698bf13` makes point 0 the handle's current
+fence and re-measures both tiers). No GPU boot, no VM boot, no `qm`, no KVM, no
+`docs/nv-plan.md` edit.
 
 ## 1. What landed
 
@@ -54,21 +56,21 @@ the shim's registration and retire hook — nothing vendor-supplied:
 | file | Δ | what |
 |---|---|---|
 | `src/include/fs.h` | +8/−0 | `file_eventfd_slot()` declaration + contract |
-| `src/include/nv_drm_uapi.h` | +55/−11 | drm.h's eventfd struct, the served request macro (same `0xC01864CF`), comments now say the syncobj surface has no numeric refusal left |
+| `src/include/nv_drm_uapi.h` | +58/−11 | drm.h's eventfd struct, the served request macro (same `0xC01864CF`), comments now say the syncobj surface has no numeric refusal left |
 | `src/include/nv_shim.h` | +20/−0 | reasons 21 `not_an_eventfd`, 22 `eventfd_closed`, 23 `eventfd_registered`, 24 `eventfd_point_not_fence`, each with its meaning |
 | `src/kernel/fs.c` | +20/−0 | `file_eventfd_slot()` |
 | `src/kernel/linux_compat_fd.c` | +61/−0 | per-allocation `gen`, `l_eventfd_gen()`, `l_eventfd_signal()` |
-| `src/kernel/nv_shim.c` | +381/−37 | `{0xcf,24}` into `g_drm_rows[]` (and out of `g_drm_refusals[]`), the registration table, `sobj_reach_locked()`, the handler, the flush, the destroy/clear hooks, `r_eventfd` |
-| `src/kernel/nv_shim_drm_test.c` | +238/−20 | layout pins, the four stale refusal expectations, and the new `test_nvshim_drm_syncobj_eventfd` |
-| `docs/nv-shim-eventfd.md` | +270/−0 | the rung's doc |
+| `src/kernel/nv_shim.c` | +389/−37 | `{0xcf,24}` into `g_drm_rows[]` (and out of `g_drm_refusals[]`), the registration table, `sobj_reach_locked()`, the handler, the flush, the destroy/clear hooks, `r_eventfd` |
+| `src/kernel/nv_shim_drm_test.c` | +283/−20 | layout pins, the four stale refusal expectations, and the new `test_nvshim_drm_syncobj_eventfd` |
+| `docs/nv-shim-eventfd.md` | +289/−0 | the rung's doc |
 
-Source+tests: 7 files, **+783/−68** (`git show --numstat d19eabdc`). With the
-doc: 8 files, +1053/−68.
+Source+tests: 7 files, **+839/−68**. With the doc: 8 files, **+1128/−68**; with
+this report, 9 files **+1326/−68** (`git diff --stat bc857a3f HEAD` at handoff).
 
 ## 2. The acceptance, measured
 
-Both tiers ran in this card's worktree, one round each, TCG
-(`SKIP_KVM=1`; this uid is not in group `kvm`):
+Both tiers ran in this card's worktree, one round each, on the code commit
+`c698bf13`, TCG (`SKIP_KVM=1`; this uid is not in group `kvm`):
 
 ```
 TOOLS_SKIP=1 BROWSER_SKIP=1 SKIP_KVM=1 UNIT_TESTS_TIMEOUT=1200 ./run_unit_tests_intel.sh
@@ -77,8 +79,8 @@ TOOLS_SKIP=1 BROWSER_SKIP=1 SKIP_KVM=1 UNIT_TESTS_TIMEOUT=900  ./run_unit_tests.
 
 | tier | fold baseline `bc857a3f` | this rung | delta |
 |---|---|---|---|
-| intel (x86_64) | `Tests run: 605 / Tests failed: 0` (`t_c2079388/unit-tier-intel-merged.log:3027-3028`) | **`Tests run: 606 / Tests failed: 0 / UNIT TESTS PASSED`** (`unit-tier-intel.log:3044-3046`) | **+1** |
-| aarch64 | `Tests run: 484 / Tests failed: 0` (`t_c2079388/unit-tier-arm-merged.log:2432-2433`) | **`Tests run: 485 / Tests failed: 0 / UNIT TESTS PASSED`** (`unit-tier-arm.log:2449-2451`) | **+1** |
+| intel (x86_64) | `Tests run: 605 / Tests failed: 0` (`t_c2079388/unit-tier-intel-merged.log:3027-3028`) | **`Tests run: 606 / Tests failed: 0 / UNIT TESTS PASSED`** (`unit-tier-intel.log:3032-3034`) | **+1** |
+| aarch64 | `Tests run: 484 / Tests failed: 0` (`t_c2079388/unit-tier-arm-merged.log:2432-2433`) | **`Tests run: 485 / Tests failed: 0 / UNIT TESTS PASSED`** (`unit-tier-arm.log:2453-2455`) | **+1** |
 
 The delta is `test_nvshim_drm_syncobj_eventfd`, one per arch; the refusal shapes
 are asserted inside it, so they spend no extra test count. Both meet the card's
@@ -97,35 +99,44 @@ QEMU_ARGS: ` (empty — the TCG path `SKIP_KVM=1` selects); ARM
 ### 2.1 The suite's rows (intel line [ARM line])
 
 ```
-2734 [2168]   Running test_nvshim_drm_syncobj_eventfd...
-2737 [2171] [NVSHIM] drm syncobj eventfd reg handle=1 obj=29 point=0x4 slot=0 gen=1 regs=1
-2738 [2172] [NVSHIM] drm syncobj refuse eventfd dup point=0x4 reason=eventfd_registered
-2739 [2173] [NVSHIM] drm syncobj refuse eventfd fd=0x3 reason=not_an_eventfd
-2740 [2174] [NVSHIM] drm syncobj refuse eventfd fd=0xffffffffffffffff reason=not_an_eventfd
-2741 [2175] [NVSHIM] drm syncobj refuse eventfd flags=0x1 reason=bad_flags
-2742 [2176] [NVSHIM] drm syncobj refuse eventfd point=0x68 reason=point_beyond_ledger
-2743 [2177] [NVSHIM] drm syncobj refuse eventfd handle=0x1f5 reason=not_this_clients_syncobj
-2744 [2178] [NVSHIM] drm syncobj eventfd signal slot=0 gen=1 point=0x4 handle=1 n=1
-2745 [2179]   [NVSHIM] eventfd: read -EAGAIN before the retire, 8 bytes == 1 after the SAME unsigned EXEC, -EAGAIN on the second read; poll 0 -> POLLIN
-2746 [2180] [NVSHIM] drm syncobj eventfd reg handle=1 obj=29 point=0x9 slot=1 gen=2 regs=1
-2747 [2181] [NVSHIM] drm syncobj refuse eventfd slot=0x1 reason=eventfd_closed
-2748 [2182]   [NVSHIM] eventfd closed: the retire wrote NOTHING -- an eventfd reusing the registered slot still reads -EAGAIN; row reason=eventfd_closed
+2718 [2168]   Running test_nvshim_drm_syncobj_eventfd...
+2721 [2171] [NVSHIM] drm syncobj eventfd reg handle=1 obj=29 point=0x4 slot=0 gen=1 regs=1
+2722 [2172] [NVSHIM] drm syncobj refuse eventfd dup point=0x4 reason=eventfd_registered
+2723 [2173] [NVSHIM] drm syncobj refuse eventfd fd=0x3 reason=not_an_eventfd
+2724 [2174] [NVSHIM] drm syncobj refuse eventfd fd=0xffffffffffffffff reason=not_an_eventfd
+2725 [2175] [NVSHIM] drm syncobj refuse eventfd flags=0x1 reason=bad_flags
+2726 [2176] [NVSHIM] drm syncobj refuse eventfd point=0x68 reason=point_beyond_ledger
+2727 [2177] [NVSHIM] drm syncobj refuse eventfd handle=0x1f5 reason=not_this_clients_syncobj
+2728 [2178] [NVSHIM] drm syncobj eventfd signal slot=0 gen=1 point=0x4 handle=1 n=1
+2729 [2179]   [NVSHIM] eventfd: read -EAGAIN before the retire, 8 bytes == 1 after the SAME unsigned EXEC, -EAGAIN on the second read; poll 0 -> POLLIN
+2730 [2180] [NVSHIM] drm syncobj eventfd reg handle=1 obj=29 point=0x9 slot=1 gen=2 regs=1
+2731 [2181] [NVSHIM] drm syncobj refuse eventfd slot=0x1 reason=eventfd_closed
+2732 [2182]   [NVSHIM] eventfd closed: the retire wrote NOTHING -- an eventfd reusing the registered slot still reads -EAGAIN; row reason=eventfd_closed
+2733 [2183] [NVSHIM] drm syncobj eventfd reg=now handle=2 point=0x1 slot=2 gen=4 n=1
+2734 [2184] [NVSHIM] drm syncobj eventfd reg handle=3 obj=31 point=0x7 slot=3 gen=5 regs=1
+2735 [2185] [NVSHIM] drm syncobj eventfd signal slot=3 gen=5 point=0x7 handle=3 n=1
+2736 [2186]   [NVSHIM] eventfd binary form: CREATE_SIGNALED signals inside the registration; a pending head fence (7) is waited for, not the landed 3
 ```
 
-The `eventfd signal` row is the retire itself: slot 0, the generation the
-registration pinned, point 4, `n=1`. The last pair is the closed-fd case: the
-registration is on slot 1, the fd was closed, a **new** eventfd reused slot 1
-(gen 2 against the pinned gen 1), so the retire wrote nothing and named it.
+The `eventfd signal` row at 2728 is the retire itself: slot 0, the generation
+the registration pinned, point 4, `n=1`. The 2730/2731 pair is the closed-fd
+case: the registration is on slot 1, the fd was closed, a **new** eventfd reused
+slot 1 (gen 2 against the pinned gen 1), so the retire wrote nothing and named
+it. The last three rows are the binary form: `reg=now` on a `CREATE_SIGNALED`
+handle signals inside the registration at its stub point 1, while the timeline
+handle whose point 3 had landed and whose point 7 was still pending registers at
+**7** and fires only when 7 retires — the row that proves point 0 is not a
+hard-wired 1.
 
 | acceptance bullet | how it is measured |
 |---|---|
 | a **real** eventfd fd and a **real** `read(2)`, through the real route table and `0xC01864CF` | `file_eventfd_create(pr.p, 0, EFD_NONBLOCK)` makes the fd `eventfd2` makes; `file_read_user(pr.p, efd, user_va, 8, 0)` is the path `read(2)` takes (the same function the syscall handler calls); the request goes through `drm_ioc(&pr, NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD, ...)` at the header's own encoding |
-| before the retire: non-blocking read `-EAGAIN` | `unit-tier-intel.log:2737` registration, then `efd_read()` → `-EAGAIN` before the kick |
-| after the single unsigned EXEC: 8 bytes == 1; a second read `-EAGAIN` | one `sync_exec_with(&pr, ch, 0, 0)` after `nv_rm_mock_hold(0)`; `efd_read()` returns 8 and the value 1, the next call returns `-EAGAIN`; row `:2744` is the write, `:2745` the suite's summary |
+| before the retire: non-blocking read `-EAGAIN` | `unit-tier-intel.log:2721` registration, then `efd_read()` → `-EAGAIN` before the kick |
+| after the single unsigned EXEC: 8 bytes == 1; a second read `-EAGAIN` | one `sync_exec_with(&pr, ch, 0, 0)` after `nv_rm_mock_hold(0)`; `efd_read()` returns 8 and the value 1, the next call returns `-EAGAIN`; row `:2728` is the write, `:2729` the suite's summary |
 | `poll(2)` wakes at retire | `file_poll()` — the engine `poll(2)` runs — returns 0 / revents 0 before the kick and 1 / `K_POLLIN` after it |
-| closed before the retire: refused by its own name, nothing written | the slot is learned from the resolver, the fd is closed, and fresh eventfds are allocated until one **reuses that exact slot**; after the retire the new fd still reads `-EAGAIN` and the row is `reason=eventfd_closed` (`:2746-2748`) |
+| closed before the retire: refused by its own name, nothing written | the slot is learned from the resolver, the fd is closed, and fresh eventfds are allocated until one **reuses that exact slot**; after the retire the new fd still reads `-EAGAIN` and the row is `reason=eventfd_closed` (`:2730-2732`) |
 | the row moves to `g_drm_rows[]` as `{0xcf, 24}`; the refusal row disappears from both logs | `grep -c 'drm refuse syncobj_eventfd' unit-tier-intel.log unit-tier-arm.log` = **0 / 0**; the fold's logs carried 4 each (`t_c2079388/unit-tier-intel-merged.log:2258`, `unit-tier-arm-merged.log:1692` …) |
-| the serve rows appear in both logs | 12 eventfd rows in each log, quoted above with both line numbers |
+| the serve rows appear in both logs | the suite's 17 eventfd lines in each log, quoted above with both line numbers |
 | both arches one round, ARM reloc gate ok | §2 table + the `[RELOC]` line above |
 
 ## 3. The generation, and why it is not optional
@@ -172,9 +183,10 @@ design**, never absent.
   in this node a destroyed handle has no fence left to land the point (an
   exported fd keeps the object but cannot be submitted through), so leaving the
   registration would wait forever.
-- **`point == 0` is the binary form at point 1** — the same record, the same
-  field `CREATE_SIGNALED`/binary `SIGNAL` write, and it fires at once when the
-  handle is already signalled (Linux's explicit stub-fence case).
+- **`point == 0` is the handle's current fence** — the imported floor, else the
+  record's highest submitted point (the chain head Linux attaches its callback
+  to), else the binary stub at 1 — and it fires at once when that fence is
+  already signalled (Linux's explicit stub-fence case).
 - The counter always moves by **1** per retire: Linux's
   `syncobj_eventfd_signal()` calls `eventfd_signal(efd, 1)`.
 
@@ -193,6 +205,6 @@ design**, never absent.
 
 ## 7. Artifacts
 
-- `unit-tier-intel.log` — intel, `Tests run: 606 / Tests failed: 0 / UNIT TESTS PASSED` (`:3044-3046`)
-- `unit-tier-arm.log` — aarch64, `Tests run: 485 / Tests failed: 0 / UNIT TESTS PASSED` (`:2449-2451`), reloc gate ok (`:346`)
+- `unit-tier-intel.log` — intel, `Tests run: 606 / Tests failed: 0 / UNIT TESTS PASSED` (`:3032-3034`)
+- `unit-tier-arm.log` — aarch64, `Tests run: 485 / Tests failed: 0 / UNIT TESTS PASSED` (`:2453-2455`), reloc gate ok (`:346`)
 - this report; `docs/nv-shim-eventfd.md` in the tree
