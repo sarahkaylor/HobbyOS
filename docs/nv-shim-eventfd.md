@@ -32,7 +32,7 @@ number present in both tables would look served in the contract test and never
 run. The encoded request is unchanged in value — the old refusal spelling was
 `ANY(0xcf, 24)` and drm.h's own encoding is `DRM_IOWR(0xcf, struct
 drm_syncobj_eventfd)` = **`0xC01864CF`** (`src/include/nv_drm_uapi.h:706-708`),
-pinned by `test_nvshim_drm_layout` (`src/kernel/nv_shim_drm_test.c:92,132-136,
+pinned by `test_nvshim_drm_layout` (`src/kernel/nv_shim_drm_test.c:90,131-133,
 170-172`).
 
 ## 2. What "served" means
@@ -174,7 +174,7 @@ semantics.
 ## 5. The rows get their own budget
 
 The registration and retire rows are what this card reports, and they run after
-six syncobj suites. They get `r_eventfd = 32` (`src/kernel/nv_shim.c:469-478`)
+six syncobj suites. They get `r_eventfd = 32` (`src/kernel/nv_shim.c:470-477`)
 rather than sharing `r_sync` — the WP-SYNCFILE/WP-TRANSFER lesson: a green tier
 whose log has no `eventfd signal slot=` row is exactly the silent-budget failure
 this project has paid for twice.
