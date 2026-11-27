@@ -154,8 +154,9 @@ flags are documented as served in `src/include/nv_drm_uapi.h:253-256`.
 ## 5. `docs/nv-shim-syncfile.md` is on the branch now
 
 It did not exist on the integration tip before the fold — `git show
-974519ed:docs/nv-shim-syncfile.md` → `fatal: path 'docs/nv-shim-syncfile.md' … not in
-'974519ed'` — and is now present at 251 lines. Its §2/§6 rows are the lane's own pre-fold
+974519ed:docs/nv-shim-syncfile.md` → `fatal: path 'docs/nv-shim-syncfile.md' exists on disk,
+but not in '974519ed'` (the leading clause is worktree wording; the commit has no such path) —
+and is now present at 251 lines. Its §2/§6 rows are the lane's own pre-fold
 measurement (`974519ed` → `0c42cc9d`): intel 601 → 602, ARM 480 → 481, +1 each,
 `test_nvshim_drm_syncfile`. Those rows **match this merged run**; no doc edit was made or
 needed.
