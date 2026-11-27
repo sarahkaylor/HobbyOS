@@ -96,7 +96,7 @@ static const char *const reason_names[] = {
     "no_space",     "too_big",        "peer_geom",  "big_elem",
     "bad_ec",       "checksum",       "seq_gap",    "seq_stale",
     "bad_sig",      "bad_len",        "event",      "unknown_fn",
-    "continuation", "busy",
+    "continuation", "busy",           "no_reply",
 };
 
 const char *nv_rpc_reason_name(enum nv_rpc_reason r) {
@@ -109,7 +109,7 @@ static const char *const arg_names[] = {
     "ok",                 "sharedMemPhysAddr",   "pageTableEntryCount",
     "cmdQueueOffset",     "statQueueOffset",     "queueElementHdrSize",
     "queueElementSizeMin", "queueElementSizeMax", "queueHeaderAlign",
-    "queueElementAlign",
+    "queueElementAlign",  "magic",               "size",
 };
 
 const char *nv_rpc_arg_field_name(enum nv_rpc_arg_field f) {
@@ -208,17 +208,403 @@ int nv_rpc_args_crosscheck(const struct nv_rpc_geom *g, uint64_t block_bus,
   /* The RMARGS page and this block describe the same geometry twice (spec 3
    * step 5).  One function, one field at a time, named on failure: this is the
    * cheapest test in the document and it catches the class of bug that costs a
-   * boot. */
+   * boot.
+   *
+   * magic and size come first: without them a page of correct-looking numbers
+   * is just a page of numbers, and "the firmware did not find the block" and
+   * "the firmware found something that is not our block" would print the same
+   * row. */
+  if (a->magic != NV_RPC_GSP_ARGS_MAGIC) return NV_RPC_ARG_MAGIC;
+  if (a->size != NV_RPC_GSP_ARGS_SIZE) return NV_RPC_ARG_SIZE;
   if (a->shared_mem_phys != block_bus) return NV_RPC_ARG_SHARED_MEM;
   if (a->pte_count != g->pte_count) return NV_RPC_ARG_PTE_COUNT;
   if (a->cmd_queue_off != g->cmd_off) return NV_RPC_ARG_CMD_OFF;
   if (a->stat_queue_off != g->stat_off) return NV_RPC_ARG_STAT_OFF;
   if (a->elem_hdr_size != NV_RPC_ELEM_HDR) return NV_RPC_ARG_HDR_SIZE;
   if (a->elem_size_min != g->msg_size) return NV_RPC_ARG_ELEM_MIN;
-  if (a->elem_size_max != 0x10000u) return NV_RPC_ARG_ELEM_MAX;
-  if (a->header_align != 4u) return NV_RPC_ARG_HDR_ALIGN;
-  if (a->elem_align != 12u) return NV_RPC_ARG_ELEM_ALIGN;
+  if (a->elem_size_max != NV_RPC_ARG_ELEM_MAX) return NV_RPC_ARG_ELEM_MAX;
+  if (a->header_align != NV_RPC_ARG_HDR_ALIGN) return NV_RPC_ARG_HDR_ALIGN;
+  if (a->elem_align != NV_RPC_ARG_ELEM_ALIGN) return NV_RPC_ARG_ELEM_ALIGN;
   return NV_RPC_ARG_OK;
+}
+
+/* ======================================================================== */
+/* publishing: GSP_ARGUMENTS_CACHED + the libos-args table (contract 1.5/6)  */
+/* ======================================================================== */
+
+int nv_rpc_args_build(uint8_t *page, const struct nv_rpc_geom *g,
+                      uint64_t block_bus) {
+  if (!page || !g) return -EINVAL;
+  /* The argument block describes THIS transport.  A geometry that is not the
+   * one nv_rpc_queue_geom() fixes would publish a page describing queues the
+   * firmware cannot find, which reads as "RM never started". */
+  struct nv_rpc_geom chk;
+  if (nv_rpc_queue_geom(&chk) != 0) return -EINVAL;
+  if (g->pte_count != chk.pte_count || g->cmd_off != chk.cmd_off ||
+      g->stat_off != chk.stat_off || g->msg_size != chk.msg_size ||
+      g->block_size != chk.block_size || g->msg_count != chk.msg_count)
+    return -EINVAL;
+  /* Same rule the PTE table is built under: a zero or unaligned base is not
+   * an address, and this one is handed to firmware as PTE[0]. */
+  if (block_bus == 0 || (block_bus & 0xFFFu)) return -EINVAL;
+
+  /* The reserved tail (0x68..0xC7 and everything to the page end) is zero by
+   * construction rather than by remembering to clear it. */
+  memset(page, 0, NV_RPC_GSP_ARGS_PAGE);
+
+  st32(page + NV_RPC_ARG_O_MAGIC, NV_RPC_GSP_ARGS_MAGIC);
+  /* size is u16 at +0x04 followed by two reserved bytes: one 32-bit store of
+   * 0x000000C8 writes exactly the three bytes the contract asks for. */
+  st32(page + NV_RPC_ARG_O_SIZE, NV_RPC_GSP_ARGS_SIZE);
+  st64(page + NV_RPC_ARG_O_FLAGS, 0);    /* not a resume */
+  st64(page + NV_RPC_ARG_O_MQ_FLAGS, 0); /* no queue encryption (no CC) */
+  st64(page + NV_RPC_ARG_O_MQ_SHARED, block_bus);
+  st64(page + NV_RPC_ARG_O_MQ_CMD, (uint64_t)g->cmd_off);
+  st64(page + NV_RPC_ARG_O_MQ_STAT, (uint64_t)g->stat_off);
+  st32(page + NV_RPC_ARG_O_MQ_HDR_SIZE, NV_RPC_ELEM_HDR);
+  st32(page + NV_RPC_ARG_O_MQ_ELEM_MIN, g->msg_size);
+  st32(page + NV_RPC_ARG_O_MQ_ELEM_MAX, NV_RPC_ARG_ELEM_MAX);
+  st32(page + NV_RPC_ARG_O_MQ_HDR_ALIGN, NV_RPC_ARG_HDR_ALIGN);
+  st32(page + NV_RPC_ARG_O_MQ_ELEM_ALIGN, NV_RPC_ARG_ELEM_ALIGN);
+  st32(page + NV_RPC_ARG_O_MQ_PTE_COUNT, g->pte_count);
+  st32(page + NV_RPC_ARG_O_SR_OLD_LEVEL, 0); /* cold boot, not a resume */
+  st32(page + NV_RPC_ARG_O_SR_FLAGS, 0);
+  st32(page + NV_RPC_ARG_O_GPU_INSTANCE, 0);
+
+  /* Read back the two fields a writer could get wrong without noticing (a
+   * store that landed somewhere else still returns from this function). */
+  if (ld32(page + NV_RPC_ARG_O_MAGIC) != NV_RPC_GSP_ARGS_MAGIC) return -EIO;
+  if ((uint16_t)(ld32(page + NV_RPC_ARG_O_SIZE) & 0xFFFFu) !=
+      NV_RPC_GSP_ARGS_SIZE)
+    return -EIO;
+  if (ld64(page + NV_RPC_ARG_O_MQ_SHARED) != block_bus) return -EIO;
+  return 0;
+}
+
+int nv_rpc_args_read(const uint8_t *page, struct nv_rpc_rmargs *a) {
+  if (!page || !a) return -EINVAL;
+  /* Every field the cross-check names, from the bytes and from nowhere else:
+   * a caller that built the page from a struct could otherwise "verify" its
+   * own variables. */
+  a->magic = ld32(page + NV_RPC_ARG_O_MAGIC);
+  a->size = (uint16_t)(ld32(page + NV_RPC_ARG_O_SIZE) & 0xFFFFu);
+  a->shared_mem_phys = ld64(page + NV_RPC_ARG_O_MQ_SHARED);
+  a->cmd_queue_off = ld64(page + NV_RPC_ARG_O_MQ_CMD);
+  a->stat_queue_off = ld64(page + NV_RPC_ARG_O_MQ_STAT);
+  a->elem_hdr_size = ld32(page + NV_RPC_ARG_O_MQ_HDR_SIZE);
+  a->elem_size_min = ld32(page + NV_RPC_ARG_O_MQ_ELEM_MIN);
+  a->elem_size_max = ld32(page + NV_RPC_ARG_O_MQ_ELEM_MAX);
+  a->header_align = ld32(page + NV_RPC_ARG_O_MQ_HDR_ALIGN);
+  a->elem_align = ld32(page + NV_RPC_ARG_O_MQ_ELEM_ALIGN);
+  a->pte_count = ld32(page + NV_RPC_ARG_O_MQ_PTE_COUNT);
+  return 0;
+}
+
+uint64_t nv_rpc_id8(const char *s) {
+  if (!s) return 0;
+  /* Up to eight characters, NUL padded to eight: "RMARGS" is six characters
+   * and its id is 0x0000534752414D52 -- the two zero bytes are part of the
+   * name, not an accident.
+   *
+   * Length first, and only within the string: reading s[8] to decide whether
+   * the name was too long reads past a shorter literal, and the corruption
+   * that follows is a NUL-padded name silently turning into "no id". */
+  uint32_t n = 0;
+  while (n < NV_RPC_LIBOS_ID_BYTES && s[n] != 0) n++;
+  if (n == 0) return 0;
+  if (s[n] != 0) return 0; /* a ninth character: the name would be truncated */
+
+  uint64_t v = 0;
+  for (uint32_t i = 0; i < n; i++)
+    v |= (uint64_t)(uint8_t)s[i] << (8u * i);
+  return v;
+}
+
+int nv_rpc_libos_build(uint8_t *page, const struct nv_rpc_libos_region *e,
+                       uint32_t n) {
+  if (!page || !e || n == 0 || n > NV_RPC_LIBOS_MAX) return -EINVAL;
+
+  memset(page, 0, NV_RPC_GSP_ARGS_PAGE);
+
+  for (uint32_t i = 0; i < n; i++) {
+    uint64_t id = e[i].id ? nv_rpc_id8(e[i].id) : e[i].id8;
+    if (id == 0) return -EINVAL;
+    if (e[i].pa == 0 || (e[i].pa & 0xFFFu)) return -EINVAL;
+    if (e[i].size == 0) return -EINVAL;
+
+    uint8_t *p = page + (uint64_t)i * NV_RPC_LIBOS_ENTRY;
+    st64(p + NV_RPC_LIBOS_O_ID8, id);
+    st64(p + NV_RPC_LIBOS_O_PA, e[i].pa);
+    st64(p + NV_RPC_LIBOS_O_SIZE, e[i].size);
+    p[NV_RPC_LIBOS_O_KIND] = e[i].kind;
+    p[NV_RPC_LIBOS_O_LOC] = e[i].loc;
+
+    if (ld64(p + NV_RPC_LIBOS_O_ID8) != id ||
+        ld64(p + NV_RPC_LIBOS_O_PA) != e[i].pa)
+      return -EIO;
+  }
+  return 0;
+}
+
+int nv_rpc_libos_read(const uint8_t *page, uint32_t i,
+                      struct nv_rpc_libos_region *out) {
+  if (!page || !out || i >= NV_RPC_LIBOS_MAX) return -EINVAL;
+  const uint8_t *p = page + (uint64_t)i * NV_RPC_LIBOS_ENTRY;
+  /* id8 is the packed u64 from the page, not a string: the page has no NUL,
+   * so a caller comparing it to a name compares it to nv_rpc_id8("RMARGS"). */
+  out->id = 0;
+  out->id8 = ld64(p + NV_RPC_LIBOS_O_ID8);
+  out->pa = ld64(p + NV_RPC_LIBOS_O_PA);
+  out->size = ld64(p + NV_RPC_LIBOS_O_SIZE);
+  out->kind = p[NV_RPC_LIBOS_O_KIND];
+  out->loc = p[NV_RPC_LIBOS_O_LOC];
+  return 0;
+}
+
+/* ======================================================================== */
+/* the pre-boot payloads: 72 GSP_SET_SYSTEM_INFO, 73 SET_REGISTRY            */
+/* ======================================================================== */
+
+static const char *const si_field_names[] = {
+    "ok",           "header",
+    "gpuPhysAddr",  "gpuPhysFbAddr",
+    "gpuPhysInstAddr", "nvDomainBusDeviceFunc",
+    "maxUserVa",    "pciConfigMirrorBase",
+    "pciConfigMirrorSize", "Chipset",
+    "sysTimerOffsetNs", "zeros",
+    "size",
+};
+
+const char *nv_rpc_si_field_name(enum nv_rpc_si_field f) {
+  if ((int)f < 0 || (unsigned)f >= sizeof(si_field_names) / sizeof(si_field_names[0]))
+    return "?";
+  return si_field_names[f];
+}
+
+/* Every byte of [from, to) is zero, which is what the contract's table says
+ * for every field this driver does not fill.  Split into ranges rather than
+ * one call so the failure can name "zeros" and the caller can see which region
+ * by the offsets quoted in the caller's own comment. */
+static int si_is_zero(const uint8_t *p, uint32_t from, uint32_t to) {
+  for (uint32_t i = from; i < to; i++)
+    if (p[i] != 0) return 0;
+  return 1;
+}
+
+int nv_rpc_system_info_build(uint8_t *stage,
+                             const struct nv_rpc_system_info *in,
+                             uint32_t seq) {
+  if (!stage || !in) return -EINVAL;
+
+  const uint32_t len = NV_RPC_RPC_HDR + NV_RPC_SYSTEM_INFO_SIZE;
+  if (nv_rpc_req_init(stage, NV_RPC_FN_SET_SYSTEM_INFO, len) != 0) return -EINVAL;
+
+  uint8_t *p = stage + NV_RPC_R_PAYLOAD;
+  /* Zero the whole 0x2C0 first: every field the contract leaves at zero is
+   * then zero because this wrote it, not because the buffer was fresh. */
+  memset(p, 0, NV_RPC_SYSTEM_INFO_SIZE);
+
+  st64(p + NV_RPC_SI_O_GPU_PHYS, in->gpu_phys_addr);
+  st64(p + NV_RPC_SI_O_GPU_FB, in->gpu_phys_fb_addr);
+  st64(p + NV_RPC_SI_O_GPU_INST, in->gpu_phys_inst_addr);
+  st64(p + NV_RPC_SI_O_BUSDEVFUNC, in->nv_domain_bus_device_func);
+  st64(p + NV_RPC_SI_O_MAX_USER_VA, in->max_user_va);
+  st32(p + NV_RPC_SI_O_PCI_MIRROR_BASE, in->pci_config_mirror_base);
+  st32(p + NV_RPC_SI_O_PCI_MIRROR_SIZE, in->pci_config_mirror_size);
+  st32(p + NV_RPC_SI_O_CHIPSET, in->chipset);
+  st64(p + NV_RPC_SI_O_TIMER_OFFSET, in->sys_timer_offset_ns);
+
+  /* The two fields whose displacement is easiest to get wrong: one at the
+   * start of the payload and one 0x280 in, past every structure that a
+   * "close enough" offset table would shift.  A store that landed elsewhere
+   * still returns from this function, so read it back. */
+  if (ld64(p + NV_RPC_SI_O_GPU_PHYS) != in->gpu_phys_addr) return -EIO;
+  if (ld64(p + NV_RPC_SI_O_TIMER_OFFSET) != in->sys_timer_offset_ns) return -EIO;
+
+  return nv_rpc_elem_build(stage, len, seq);
+}
+
+enum nv_rpc_si_field nv_rpc_system_info_check(
+    const uint8_t *stage, const struct nv_rpc_system_info *in) {
+  if (!stage || !in) return NV_RPC_SI_F_HEADER;
+
+  const uint8_t *p = stage + NV_RPC_R_PAYLOAD;
+
+  /* The header first: a message with the wrong function is not this message,
+   * however well its payload is laid out. */
+  if (ld32(stage + NV_RPC_R_HDRVER) != NV_RPC_VERSION) return NV_RPC_SI_F_HEADER;
+  if (ld32(stage + NV_RPC_R_SIG) != NV_RPC_SIG) return NV_RPC_SI_F_HEADER;
+  if (ld32(stage + NV_RPC_R_FUNCTION) != NV_RPC_FN_SET_SYSTEM_INFO)
+    return NV_RPC_SI_F_HEADER;
+  if (ld32(stage + NV_RPC_R_LENGTH) != NV_RPC_RPC_HDR + NV_RPC_SYSTEM_INFO_SIZE)
+    return NV_RPC_SI_F_SIZE;
+
+  if (ld64(p + NV_RPC_SI_O_GPU_PHYS) != in->gpu_phys_addr)
+    return NV_RPC_SI_F_GPU_PHYS;
+  if (ld64(p + NV_RPC_SI_O_GPU_FB) != in->gpu_phys_fb_addr)
+    return NV_RPC_SI_F_GPU_FB;
+  if (ld64(p + NV_RPC_SI_O_GPU_INST) != in->gpu_phys_inst_addr)
+    return NV_RPC_SI_F_GPU_INST;
+  if (ld64(p + NV_RPC_SI_O_BUSDEVFUNC) != in->nv_domain_bus_device_func)
+    return NV_RPC_SI_F_BUSDEVFUNC;
+  if (ld64(p + NV_RPC_SI_O_MAX_USER_VA) != in->max_user_va)
+    return NV_RPC_SI_F_MAX_USER_VA;
+  if (ld32(p + NV_RPC_SI_O_PCI_MIRROR_BASE) != in->pci_config_mirror_base)
+    return NV_RPC_SI_F_PCI_MIRROR_BASE;
+  if (ld32(p + NV_RPC_SI_O_PCI_MIRROR_SIZE) != in->pci_config_mirror_size)
+    return NV_RPC_SI_F_PCI_MIRROR_SIZE;
+  if (ld32(p + NV_RPC_SI_O_CHIPSET) != in->chipset) return NV_RPC_SI_F_CHIPSET;
+  if (ld64(p + NV_RPC_SI_O_TIMER_OFFSET) != in->sys_timer_offset_ns)
+    return NV_RPC_SI_F_TIMER_OFFSET;
+
+  /* Everything else the contract pins at zero, by range: simulation address,
+   * atomics mask, console size / maxUserVa / mirror / oorArch gap / clPdb,
+   * the four topology flags and the two following, upstreamAddressValid,
+   * FHBBusInfo, chipsetIDInfo, the 488-byte ACPI blob, hypervisorType,
+   * virtualConfigBits, bIsPassthru, gspVFInfo, bTdrEventSupported and the
+   * four-byte tail.  A field written one slot too far lands in one of these
+   * ranges and is caught here even if its "own" offset happens to hold a
+   * value that compares equal. */
+  if (!si_is_zero(p, NV_RPC_SI_O_SIM_ACCESS, NV_RPC_SI_O_MAX_USER_VA))
+    return NV_RPC_SI_F_ZERO;
+  /* 0x048 oorArch + its 7 pad bytes + 0x050 clPdb; Chipset at 0x058 is a
+   * field of ours, so the range stops before it and resumes at 0x05C. */
+  if (!si_is_zero(p, NV_RPC_SI_O_OOR_ARCH, NV_RPC_SI_O_CHIPSET))
+    return NV_RPC_SI_F_ZERO;
+  if (!si_is_zero(p, NV_RPC_SI_O_FLAGS, NV_RPC_SI_O_TIMER_OFFSET))
+    return NV_RPC_SI_F_ZERO;
+  if (!si_is_zero(p, NV_RPC_SI_O_VF_INFO, NV_RPC_SYSTEM_INFO_SIZE))
+    return NV_RPC_SI_F_ZERO;
+  return NV_RPC_SI_F_OK;
+}
+
+/* ---- the registry table ------------------------------------------------- */
+
+static uint32_t reg_strlen(const char *s) {
+  uint32_t n = 0;
+  if (!s) return 0;
+  while (s[n]) n++;
+  return n;
+}
+
+/* The bytes a value occupies in the table: 4 for a dword (the size of the
+ * value -- INFERRED, contract 5.2 names the field but not its value for
+ * type 1), `length` for a blob, strlen + 1 for a string. */
+static int reg_value_bytes(const struct nv_rpc_registry_entry *e,
+                           uint32_t *len_out) {
+  switch (e->type) {
+  case NV_RPC_REG_TYPE_DWORD:
+    *len_out = 4u;
+    return 0;
+  case NV_RPC_REG_TYPE_BINARY:
+    if (!e->blob || e->length == 0) return -EINVAL;
+    *len_out = e->length;
+    return 0;
+  case NV_RPC_REG_TYPE_STRING:
+    if (!e->str) return -EINVAL;
+    *len_out = reg_strlen(e->str) + 1u;
+    return 0;
+  default:
+    return -EINVAL;
+  }
+}
+
+/* names_at: where the first name goes; values_at: where the first string or
+ * blob goes; total: the table's size.  One pass, so the writer and the size
+ * cannot disagree. */
+static int reg_measure(const struct nv_rpc_registry_entry *e, uint32_t n,
+                       uint32_t *names_at, uint32_t *values_at,
+                       uint32_t *total) {
+  uint64_t off = (uint64_t)NV_RPC_REG_HDR + (uint64_t)n * NV_RPC_REG_ENTRY;
+  if (off > NV_RPC_PAYLOAD_MAX) return -EMSGSIZE;
+  if (n && !e) return -EINVAL;
+
+  *names_at = (uint32_t)off;
+  for (uint32_t i = 0; i < n; i++) {
+    uint32_t nl = reg_strlen(e[i].name);
+    uint32_t vl = 0;
+    if (!e[i].name || nl == 0) return -EINVAL;
+    if (reg_value_bytes(&e[i], &vl) != 0) return -EINVAL;
+    off += nl + 1u;
+    if (off > NV_RPC_PAYLOAD_MAX) return -EMSGSIZE;
+  }
+
+  *values_at = (uint32_t)off;
+  for (uint32_t i = 0; i < n; i++) {
+    uint32_t vl = 0;
+    (void)reg_value_bytes(&e[i], &vl); /* validated in the pass above */
+    if (e[i].type != NV_RPC_REG_TYPE_DWORD) off += vl;
+    if (off > NV_RPC_PAYLOAD_MAX) return -EMSGSIZE;
+  }
+
+  *total = (uint32_t)off;
+  if (*total < NV_RPC_REG_HDR) return -EINVAL;
+  return 0;
+}
+
+uint32_t nv_rpc_registry_table_size(const struct nv_rpc_registry_entry *e,
+                                    uint32_t n) {
+  uint32_t names_at = 0, values_at = 0, total = 0;
+  if (reg_measure(e, n, &names_at, &values_at, &total) != 0) return 0;
+  return total;
+}
+
+int nv_rpc_registry_build(uint8_t *stage,
+                          const struct nv_rpc_registry_entry *e, uint32_t n,
+                          uint32_t seq) {
+  if (!stage || (n && !e)) return -EINVAL;
+
+  uint32_t names_at = 0, values_at = 0, total = 0;
+  int mrc = reg_measure(e, n, &names_at, &values_at, &total);
+  if (mrc != 0) return mrc;
+
+  const uint32_t len = NV_RPC_RPC_HDR + total;
+  if (nv_rpc_req_init(stage, NV_RPC_FN_SET_REGISTRY, len) != 0) return -EINVAL;
+
+  /* The table starts immediately after the RPC header; every offset inside it
+   * is relative to this byte. */
+  uint8_t *t = stage + NV_RPC_R_PAYLOAD;
+  memset(t, 0, total);
+
+  st32(t + NV_RPC_REG_O_SIZE, total);
+  st32(t + NV_RPC_REG_O_NUM, n);
+
+  uint32_t name_cursor = names_at;
+  uint32_t value_cursor = values_at;
+  for (uint32_t i = 0; i < n; i++) {
+    uint8_t *ent = t + NV_RPC_REG_HDR + (uint64_t)i * NV_RPC_REG_ENTRY;
+    uint32_t nl = reg_strlen(e[i].name);
+    uint32_t vl = 0;
+    (void)reg_value_bytes(&e[i], &vl);
+
+    st32(ent + NV_RPC_REG_E_NAMEOFF, name_cursor);
+    ent[NV_RPC_REG_E_TYPE] = e[i].type;
+
+    if (e[i].type == NV_RPC_REG_TYPE_DWORD) {
+      st32(ent + NV_RPC_REG_E_DATA, e[i].dword);
+      st32(ent + NV_RPC_REG_E_LENGTH, 4u);
+    } else {
+      st32(ent + NV_RPC_REG_E_DATA, value_cursor);
+      st32(ent + NV_RPC_REG_E_LENGTH, vl);
+      memcpy(t + value_cursor, e[i].type == NV_RPC_REG_TYPE_STRING
+                                  ? (const void *)e[i].str
+                                  : e[i].blob,
+             vl);
+      value_cursor += vl;
+    }
+
+    /* The NUL after the name is part of the name's bytes and is already zero
+     * from the fill above; copy only the characters. */
+    memcpy(t + name_cursor, e[i].name, nl);
+    name_cursor += nl + 1u;
+  }
+
+  /* The two words a reader starts with: a wrong `size` makes the table
+   * unparseable and a wrong `numEntries` makes the tail look like entries. */
+  if (ld32(t + NV_RPC_REG_O_SIZE) != total) return -EIO;
+  if (ld32(t + NV_RPC_REG_O_NUM) != n) return -EIO;
+
+  return nv_rpc_elem_build(stage, len, seq);
 }
 
 /* ======================================================================== */
@@ -901,6 +1287,134 @@ int nv_rpc_rx_release(struct nv_rpc_queue *q) {
 }
 
 /* ======================================================================== */
+/* the peer's header, read at call time (spec 4.2, 6.2 #2)                   */
+/* ======================================================================== */
+
+void nv_rpc_peer_snapshot(const struct nv_rpc_queue *q,
+                          struct nv_rpc_peer_statq *s) {
+  if (!s) return;
+  for (uint32_t i = 0; i < 8; i++) s->w[i] = 0;
+  s->nonzero = 0;
+  if (!q || !q->block) return;
+  /* The eight words are exactly what nv_rpc_link_validate() reads, in the
+   * order it reads them, so a row built from this snapshot explains that
+   * function's -EAGAIN without a second interpretation of the block. */
+  for (uint32_t i = 0; i < 8; i++) {
+    s->w[i] = ld32(q->block + q->stat_off + i * 4u);
+    if (s->w[i] != 0) s->nonzero++;
+  }
+}
+
+/* ======================================================================== */
+/* the first round trip (contract 4.1 steps 9-10)                            */
+/* ======================================================================== */
+
+int nv_rpc_static_info_request(uint8_t *stage, uint32_t seq) {
+  if (!stage) return -EINVAL;
+  const uint32_t len = NV_RPC_STATIC_INFO_LEN;
+  /* The payload is zeroed because the request is a size declaration, not data:
+   * the contract's rpcGetGspStaticInfo_v14_00 sends sizeof(GspStaticConfigInfo)
+   * zero bytes to tell firmware how much it may send back. */
+  memset(stage, 0, NV_RPC_ELEM_HDR + len);
+  int rc = nv_rpc_req_init(stage, NV_RPC_FN_GET_STATIC_INFO, len);
+  if (rc != 0) return rc;
+  /* The RPC's own sequence stays 0 (no source shows the firmware echoing it);
+   * the ELEMENT sequence is what the receiver orders messages by. */
+  return nv_rpc_elem_build(stage, len, seq);
+}
+
+int nv_rpc_rx_wait(struct nv_rpc_queue *q, const struct nv_rpc_hw *hw,
+                   uint32_t fn, uint32_t timeout_us, void *out, uint32_t cap,
+                   uint32_t *result, enum nv_rpc_reason *reason) {
+  if (reason) *reason = NV_RPC_OK;
+  if (!q || !q->block) return -EINVAL;
+
+  int have_clock = (hw && hw->now_us);
+  uint64_t start = have_clock ? hw->now_us(hw->ctx) : 0;
+  /* rx_take() matches on want_fn, so the wait is that function and nothing
+   * else.  Saved and restored: a caller's outstanding request is its own
+   * business, and this helper must not leave the queue pointed at an event. */
+  uint32_t saved = q->want_fn;
+  q->want_fn = fn;
+
+  for (;;) {
+    enum nv_rpc_reason why = NV_RPC_OK;
+    int n = nv_rpc_rx_take(q, hw, out, cap, &why);
+    if (n > 0) {
+      /* Read the verdict from the RPC stream (out + 0x10), not from a cached
+       * field: a reply that is a copy of our own PENDING request would report
+       * 0xFFFFFFFF, which is the "no reply" sentinel and not success. */
+      if (result) *result = ld32((const uint8_t *)out + NV_RPC_H_RESULT);
+      int rrc = nv_rpc_rx_release(q);
+      q->want_fn = saved;
+      if (rrc != 0) {
+        if (reason) *reason = NV_RPC_PEER_GEOM;
+        return rrc;
+      }
+      if (reason) *reason = NV_RPC_OK;
+      return n;
+    }
+    if (n != -EAGAIN) {
+      q->want_fn = saved;
+      if (reason) *reason = why;
+      return n;
+    }
+    if (!have_clock) {
+      q->want_fn = saved;
+      if (reason) *reason = why ? why : NV_RPC_NOTHING;
+      return -EAGAIN;
+    }
+    if (hw->now_us(hw->ctx) - start >= timeout_us) {
+      q->want_fn = saved;
+      if (reason) *reason = NV_RPC_NO_REPLY;
+      return -ETIMEDOUT;
+    }
+    fence(hw);
+  }
+}
+
+int nv_rpc_roundtrip(struct nv_rpc_queue *q, const struct nv_rpc_hw *hw,
+                     uint8_t *stage, uint32_t reply_fn, uint32_t timeout_us,
+                     void *out, uint32_t cap, uint32_t *result,
+                     enum nv_rpc_reason *reason) {
+  if (reason) *reason = NV_RPC_OK;
+  if (!q || !q->block || !hw || !stage) return -EINVAL;
+
+  /* The link gate comes before every store.  This is the difference between a
+   * monitored send and a send nobody can see: with no peer header there is no
+   * consumer, and a doorbell written into that window is not a delivery. */
+  if (!q->linked) {
+    if (reason) *reason = NV_RPC_NOT_LINKED;
+    return -EAGAIN;
+  }
+
+  uint32_t rpc_len = ld32(stage + NV_RPC_R_LENGTH);
+  uint32_t ec = 0;
+  int rc = nv_rpc_tx_prepare(q, rpc_len, &ec, reason);
+  if (rc != 0) return rc;
+
+  q->tx_busy = 1;
+  rc = nv_rpc_tx_commit(q, stage, hw);
+  if (rc != 0) {
+    q->tx_busy = 0;
+    return rc;
+  }
+  rc = nv_rpc_kick(q, hw);
+  if (rc != 0) {
+    q->tx_busy = 0;
+    return rc;
+  }
+
+  rc = nv_rpc_rx_wait(q, hw, reply_fn, timeout_us, out, cap, result, reason);
+  /* The one outstanding request ends here, answered or timed out.  A timeout is
+   * NOT a licence to resend: contract 6 row 2 says the message may have been
+   * consumed by a firmware that then died, and a resend turns one failure into
+   * two. */
+  q->tx_busy = 0;
+  return rc;
+}
+
+/* ======================================================================== */
 /* real seam + the log row (x86_64 only, like the rest of the driver)         */
 /* ======================================================================== */
 
@@ -962,34 +1476,67 @@ void nv_rpc_dump(const char *stage, const struct nv_rpc_queue *q) {
   print_int((int)(q->block ? ld32(q->block + q->peer_readptr_off) : 0));
   uart_puts(" pw=");
   print_int((int)(q->block ? ld32(q->block + q->peer_writeptr_off) : 0));
+  /* The two words the acceptance row turns on, named by ADDRESS: `wr` is our
+   * producer pointer at block+cmd_off+0x10, `pw` is the peer's at
+   * block+stat_off+0x10.  They are different words 0x40000 apart, and a row
+   * that printed only their values could not show that. */
+  uart_puts(" wr_off=");
+  uart_print_hex(q->cmd_off + NV_RPC_Q_WRITE_PTR);
+  uart_puts(" pw_off=");
+  uart_print_hex(q->stat_off + NV_RPC_Q_WRITE_PTR);
   uart_puts(" txseq=");
   print_int((int)q->tx_seq);
   uart_puts(" rxseq=");
   print_int((int)q->rx_seq);
   uart_puts("\n");
 
-  if (!q->peer.size && !q->peer.msg_size && !q->peer.flags) {
-    uart_puts("[NV-RPC] peer=none\n");
+  /* The peer's own words, read NOW (not the cached struct nv_rpc_peer): a row
+   * that says "no peer" from our bookkeeping is an inference, the same row
+   * from block+stat_off is an observation.  This is the eight-word set
+   * nv_rpc_link_validate() starts from, so a nonzero count of 0 is exactly the
+   * -EAGAIN case. */
+  struct nv_rpc_peer_statq st;
+  nv_rpc_peer_snapshot(q, &st);
+  uart_puts("[NV-RPC] statq off=");
+  uart_print_hex(q->stat_off);
+  uart_puts(" nonzero=");
+  print_int((int)st.nonzero);
+  uart_puts("/8");
+  for (uint32_t i = 0; i < 8; i++) {
+    uart_puts(" w");
+    print_int((int)i);
+    uart_puts("=");
+    uart_print_hex(st.w[i]);
+  }
+  uart_puts(st.nonzero == 0 ? " (nothing has written the peer header)\n"
+                            : " (the peer header is written)\n");
+
+  if (st.nonzero == 0) {
+    uart_puts("[NV-RPC] peer=none (read from block+");
+    uart_print_hex(q->stat_off);
+    uart_puts(", not from the cached peer struct)\n");
     return;
   }
   /* All five fields verbatim: a wrong `size` means the RMARGS offsets were
    * wrong, a never-valid header means the firmware never found the block, and
    * those are different bugs. */
   uart_puts("[NV-RPC] peer version=");
-  print_int((int)q->peer.version);
+  print_int((int)st.w[0]);
   uart_puts(" size=");
-  uart_print_hex(q->peer.size);
+  uart_print_hex(st.w[1]);
   uart_puts(" msgSize=");
-  uart_print_hex(q->peer.msg_size);
+  uart_print_hex(st.w[2]);
   uart_puts(" msgCount=");
-  print_int((int)q->peer.msg_count);
+  print_int((int)st.w[3]);
   uart_puts(" entryOff=");
-  uart_print_hex(q->peer.entry_off);
+  uart_print_hex(st.w[7]);
   uart_puts(" rxHdrOff=");
-  uart_print_hex(q->peer.rx_hdr_off);
+  uart_print_hex(st.w[6]);
   uart_puts(" flags=");
-  print_int((int)q->peer.flags);
-  uart_puts("\n");
+  print_int((int)st.w[5]);
+  uart_puts(" (the peer's words; linked=");
+  print_int(q->linked);
+  uart_puts(" is our verdict on them)\n");
 }
 
 #else /* !__x86_64__ */

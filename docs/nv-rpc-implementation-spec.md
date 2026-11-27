@@ -455,6 +455,10 @@ sleeping, and a test for "the doorbell was never rung" is simply
 | `nv_rpc_rx_take` | q, out, cap, reason | len or `-EAGAIN`/`-EIO`/`-EMSGSIZE`/`-EINVAL` | R1..R7 and R10's classification |
 | `nv_rpc_rx_release` | q | 0 | R8/R9, split out so "took but did not release" is testable |
 | `nv_rpc_split_plan` | payload | array of chunk sizes | §4.5 |
+| `nv_rpc_peer_snapshot` | q | the eight statq words + a nonzero count, **read from `block+stat_off` at call time** | the row must observe the peer's word, not echo a cached `struct nv_rpc_peer` |
+| `nv_rpc_static_info_request` | staging, seq | elem_count | `GET_GSP_STATIC_INFO` (65), `length = 0x20 + 0xCF0`, zeroed payload, result PENDING (contract §4.1 row 10) |
+| `nv_rpc_rx_wait` | q, hw, fn, timeout | len, or `-ETIMEDOUT`/`NO_REPLY` | bounded wait for **one** function code; reads `rpc_result` from the RPC stream and releases the element |
+| `nv_rpc_roundtrip` | q, hw, staging, fn, timeout | len, or the transport's error | link gate **before any store**, then prepare/commit/**one** kick/wait. An unlinked queue is `-EAGAIN` with zero doorbells |
 
 `tx_prepare` / `tx_commit` / `kick` being three calls is what makes the
 "doorbell not written" failure a *test* rather than an incident: after
@@ -610,6 +614,27 @@ Two more that are cheap and worth having: **T-23** `nv_rpc_link_validate` on a
 header with `size = 0x20000` returns `-EINVAL` and names `size`; **T-24** a
 link header with `msgCount` inconsistent with `(size-entryOff)/msgSize` returns
 `-EINVAL` (the "header arrived intact" recomputation).
+
+Five more, added with the publish side and the first round trip and
+implemented in `src/kernel/nv_rpc_test.c`:
+
+- **T-25** the `GSP_ARGUMENTS_CACHED` encoder: every field at the contract §1.5
+  offset, and the cross-check names the first field that disagrees.
+- **T-26** the libos-args table: `id8` NUL padding (`"RMARGS"` is six
+  characters and its id contains two zero bytes), entry stride 0x20, refusals
+  for a truncating name, an unaligned `pa` and a zero-sized region.
+- **T-27** the status header is **read, not remembered**: after the peer's words
+  are zeroed, `q->peer.size` still holds `0x40000` (the cache) while
+  `nv_rpc_peer_snapshot()` returns `nonzero == 0` and `link_validate` agrees
+  with `-EAGAIN`. A row that printed the cache would be an inference.
+- **T-28** `GET_GSP_STATIC_INFO` framing: `length 0xD10`, one element,
+  `result 0xFFFFFFFF`, element seq set, whole-element fold 0, and one flipped
+  payload byte breaks the fold.
+- **T-29** the round trip: (a) unlinked → `-EAGAIN`/`NOT_LINKED`, **zero**
+  doorbells, no slot written; (b) linked, `INIT_DONE` ahead of the reply → the
+  event is consumed and logged, the `fn 65` reply is returned, exactly one
+  doorbell, read pointer advanced past both; (c) linked and silent →
+  `-ETIMEDOUT`/`NO_REPLY`, one doorbell, no retry.
 
 Test-tier mechanics: one `TEST(fn)` per row, `tests_run++`, `EXPECT_EQ` on
 return codes, `ASSERT` on preconditions, registered in `nv_test_suite()`

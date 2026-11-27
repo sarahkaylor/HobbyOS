@@ -342,6 +342,8 @@ static void test_t04_args_crosscheck(void) {
   ASSERT(nv_rpc_queue_geom(&g) == 0);
   struct nv_rpc_rmargs a;
   zero_bytes(&a, sizeof(a));
+  a.magic = NV_RPC_GSP_ARGS_MAGIC;
+  a.size = NV_RPC_GSP_ARGS_SIZE;
   a.shared_mem_phys = TEST_BUS;
   a.pte_count = 129;
   a.cmd_queue_off = 0x1000;
@@ -354,10 +356,26 @@ static void test_t04_args_crosscheck(void) {
 
   EXPECT_EQ(nv_rpc_args_crosscheck(&g, TEST_BUS, &a), 0);
 
+  /* The two fields that make the page a GSP_ARGUMENTS block at all.  A page
+   * of perfect geometry with the wrong magic is not "RM did not start", it is
+   * "RM was handed something that is not this structure". */
+  a.magic = 0;
+  int f = nv_rpc_args_crosscheck(&g, TEST_BUS, &a);
+  EXPECT_EQ((int)f, (int)NV_RPC_ARG_MAGIC);
+  EXPECT_EQ((int)str_eq(nv_rpc_arg_field_name((enum nv_rpc_arg_field)f),
+                        "magic"),
+            1);
+  a.magic = NV_RPC_GSP_ARGS_MAGIC;
+  a.size = 0xC0;
+  f = nv_rpc_args_crosscheck(&g, TEST_BUS, &a);
+  EXPECT_EQ((int)f, (int)NV_RPC_ARG_SIZE);
+  a.size = NV_RPC_GSP_ARGS_SIZE;
+  EXPECT_EQ(nv_rpc_args_crosscheck(&g, TEST_BUS, &a), 0);
+
   /* The drift this catches: the RMARGS page saying the status queue starts
    * where the command queue does. */
   a.stat_queue_off = 0x40000;
-  int f = nv_rpc_args_crosscheck(&g, TEST_BUS, &a);
+  f = nv_rpc_args_crosscheck(&g, TEST_BUS, &a);
   EXPECT_EQ((int)f, (int)NV_RPC_ARG_STAT_OFF);
   EXPECT_EQ((int)str_eq(nv_rpc_arg_field_name((enum nv_rpc_arg_field)f),
                         "statQueueOffset"),
@@ -1245,9 +1263,638 @@ static void test_t24_link_msgcount(void) {
 }
 
 /* ======================================================================== */
+/* T-25 GSP_ARGUMENTS_CACHED encoder (contract 1.5)                          */
+/* ======================================================================== */
+
+/* One page each: the argument structure and the libos-args table.  Separate
+ * buffers on purpose -- a bug that writes one over the other would otherwise
+ * be invisible. */
+static uint8_t arg_page[NV_RPC_GSP_ARGS_PAGE] __attribute__((aligned(4096)));
+static uint8_t libos_page[NV_RPC_GSP_ARGS_PAGE] __attribute__((aligned(4096)));
+
+static void test_t25_args_page(void) {
+  uart_puts("  Running test_t25_args_page...\n");
+  tests_run++;
+
+  struct nv_rpc_geom g;
+  ASSERT(nv_rpc_queue_geom(&g) == 0);
+
+  /* Prefill, so "the reserved bytes are zero" is a property of the builder and
+   * not of the buffer's history. */
+  for (uint32_t i = 0; i < NV_RPC_GSP_ARGS_PAGE; i++) arg_page[i] = 0xCD;
+
+  ASSERT(nv_rpc_args_build(arg_page, &g, TEST_BUS) == 0);
+
+  /* Offsets written out as literals from the contract's table.  An encoder
+   * tested through its own #defines would follow them off a cliff. */
+  ASSERT(get32(arg_page + 0x00) == 0x20505347u); /* 'G' 'S' 'P' ' ' */
+  ASSERT((get32(arg_page + 0x04) & 0xFFFFu) == 0xC8u);
+  ASSERT((get32(arg_page + 0x04) >> 16) == 0u); /* the two reserved bytes */
+  ASSERT(get64(arg_page + 0x08) == 0);          /* flags: not a resume */
+  ASSERT(get64(arg_page + 0x10) == 0);          /* mq.flags: no encryption */
+  ASSERT(get64(arg_page + 0x18) == TEST_BUS);   /* mq.sharedMemPhysAddr */
+  ASSERT(get64(arg_page + 0x20) == 0x1000u);    /* cmdQueueOffset */
+  ASSERT(get64(arg_page + 0x28) == 0x41000u);   /* statQueueOffset */
+  ASSERT(get32(arg_page + 0x30) == 0x30u);      /* queueElementHdrSize */
+  ASSERT(get32(arg_page + 0x34) == 0x1000u);    /* queueElementSizeMin */
+  ASSERT(get32(arg_page + 0x38) == 0x10000u);   /* queueElementSizeMax */
+  ASSERT(get32(arg_page + 0x3Cu) == 4u);        /* queueHeaderAlign */
+  ASSERT(get32(arg_page + 0x40) == 12u);        /* queueElementAlign */
+  ASSERT(get32(arg_page + 0x44) == 129u);       /* pageTableEntryCount */
+  ASSERT(get32(arg_page + 0x50) == 0u);         /* sr.oldLevel: cold boot */
+  ASSERT(get32(arg_page + 0x54) == 0u);         /* sr.flags */
+  ASSERT(get32(arg_page + 0x64) == 0u);         /* gpuInstance */
+
+  /* Every reserved hole, and everything past the 0xC8 structure. */
+  ASSERT(get32(arg_page + 0x48) == 0u);
+  ASSERT(get32(arg_page + 0x58) == 0u);
+  ASSERT(get32(arg_page + 0x60) == 0u);
+  for (uint32_t i = 0x68; i < 0xC8; i += 8) ASSERT(get64(arg_page + i) == 0);
+  for (uint32_t i = 0xC8; i < NV_RPC_GSP_ARGS_PAGE; i++) ASSERT(arg_page[i] == 0);
+
+  /* The re-read + cross-check pair the boot row is built from. */
+  struct nv_rpc_rmargs a;
+  ASSERT(nv_rpc_args_read(arg_page, &a) == 0);
+  EXPECT_EQ(nv_rpc_args_crosscheck(&g, TEST_BUS, &a), 0);
+
+  /* The cross-check reads the BYTES: break the page, not the struct. */
+  put32(arg_page + 0x00, 0x20505348u); /* "HSP " */
+  ASSERT(nv_rpc_args_read(arg_page, &a) == 0);
+  EXPECT_EQ((int)nv_rpc_args_crosscheck(&g, TEST_BUS, &a),
+            (int)NV_RPC_ARG_MAGIC);
+  EXPECT_EQ((int)str_eq(nv_rpc_arg_field_name(NV_RPC_ARG_MAGIC), "magic"), 1);
+  ASSERT(nv_rpc_args_build(arg_page, &g, TEST_BUS) == 0);
+
+  /* Refusals.  A base the firmware would walk to nowhere is not an address;
+   * a geometry that is not this transport's would publish queues that do not
+   * exist. */
+  EXPECT_EQ(nv_rpc_args_build(arg_page, &g, 0), -EINVAL);
+  EXPECT_EQ(nv_rpc_args_build(arg_page, &g, TEST_BUS + 8), -EINVAL);
+  struct nv_rpc_geom bad = g;
+  bad.stat_off = 0x40000;
+  EXPECT_EQ(nv_rpc_args_build(arg_page, &bad, TEST_BUS), -EINVAL);
+  bad = g;
+  bad.pte_count = 128;
+  EXPECT_EQ(nv_rpc_args_build(arg_page, &bad, TEST_BUS), -EINVAL);
+  EXPECT_EQ(nv_rpc_args_build(0, &g, TEST_BUS), -EINVAL);
+  EXPECT_EQ(nv_rpc_args_read(0, &a), -EINVAL);
+}
+
+/* ======================================================================== */
+/* T-26 the libos-args table (contract 1.6)                                  */
+/* ======================================================================== */
+
+static void test_t26_libos_page(void) {
+  uart_puts("  Running test_t26_libos_page...\n");
+  tests_run++;
+
+  /* id8: the first character in the least significant byte, NUL padded to
+   * eight.  "RMARGS" is spelled in the contract's own table, so it is the
+   * anchor; the others must be non-zero and distinct. */
+  ASSERT(nv_rpc_id8("RMARGS") == 0x0000534752414D52ull);
+  ASSERT(nv_rpc_id8("LOGINIT") == 0x0054494E49474F4Cull);
+  ASSERT(nv_rpc_id8("LOGRM") != 0);
+  ASSERT(nv_rpc_id8("LOGINIT") != nv_rpc_id8("LOGINTR"));
+  /* The padding is part of the name: a prefix is a different region. */
+  ASSERT(nv_rpc_id8("RMARG") != nv_rpc_id8("RMARGS"));
+  /* Truncation is refused, not silently applied. */
+  ASSERT(nv_rpc_id8("RMARGSXYZ") == 0);
+  ASSERT(nv_rpc_id8("") == 0);
+  ASSERT(nv_rpc_id8(0) == 0);
+
+  struct nv_rpc_libos_region e[NV_RPC_LIBOS_MAX];
+  const char *ids[NV_RPC_LIBOS_MAX] = {"LOGINIT", "LOGINTR", "LOGRM", "RMARGS"};
+  for (int i = 0; i < (int)NV_RPC_LIBOS_MAX; i++) {
+    e[i].id = ids[i];
+    e[i].id8 = 0;
+    e[i].pa = 0x30000000ull + (uint64_t)i * 0x1000u;
+    e[i].size = 0x1000u;
+    e[i].kind = NV_RPC_LIBOS_KIND_CONTIG;
+    e[i].loc = NV_RPC_LIBOS_LOC_SYSMEM;
+  }
+  e[3].size = 0xC8u; /* the structure's size, not the page's: legal */
+
+  for (uint32_t i = 0; i < NV_RPC_GSP_ARGS_PAGE; i++) libos_page[i] = 0xCD;
+  ASSERT(nv_rpc_libos_build(libos_page, e, NV_RPC_LIBOS_MAX) == 0);
+
+  /* Layout, byte by byte: 32-byte entries, in the order given. */
+  ASSERT(get64(libos_page + 0x00) == nv_rpc_id8("LOGINIT"));
+  ASSERT(get64(libos_page + 0x08) == 0x30000000ull);
+  ASSERT(get64(libos_page + 0x10) == 0x1000ull);
+  ASSERT(libos_page[0x18] == 1u && libos_page[0x19] == 1u);
+  /* Entry 3 starts at 3 * 0x20 = 0x60. */
+  ASSERT(get64(libos_page + 0x60) == 0x0000534752414D52ull);
+  ASSERT(get64(libos_page + 0x68) == 0x30003000ull);
+  ASSERT(get64(libos_page + 0x70) == 0xC8ull);
+  ASSERT(libos_page[0x78] == 1u && libos_page[0x79] == 1u);
+  /* Reserved bytes inside an entry, and everything past the table. */
+  for (uint32_t i = 0x1A; i < 0x20; i++) ASSERT(libos_page[i] == 0);
+  ASSERT(get64(libos_page + 0x80) == 0); /* a fifth entry does not exist */
+  for (uint32_t i = 0x80; i < NV_RPC_GSP_ARGS_PAGE; i++) ASSERT(libos_page[i] == 0);
+
+  /* Read back what is in the page, entry by entry. */
+  for (uint32_t i = 0; i < NV_RPC_LIBOS_MAX; i++) {
+    struct nv_rpc_libos_region b;
+    ASSERT(nv_rpc_libos_read(libos_page, i, &b) == 0);
+    ASSERT(b.id == 0);
+    ASSERT(b.id8 == nv_rpc_id8(ids[i]));
+    ASSERT(b.pa == e[i].pa);
+    ASSERT(b.size == e[i].size);
+    ASSERT(b.kind == e[i].kind && b.loc == e[i].loc);
+  }
+  struct nv_rpc_libos_region fifth;
+  EXPECT_EQ(nv_rpc_libos_read(libos_page, NV_RPC_LIBOS_MAX, &fifth), -EINVAL);
+
+  /* Refusals that would otherwise reach the firmware as a region nobody
+   * named, or one that starts mid-page. */
+  EXPECT_EQ(nv_rpc_libos_build(libos_page, e, 0), -EINVAL);
+  EXPECT_EQ(nv_rpc_libos_build(libos_page, e, NV_RPC_LIBOS_MAX + 1u), -EINVAL);
+  EXPECT_EQ(nv_rpc_libos_build(libos_page, 0, 1), -EINVAL);
+  struct nv_rpc_libos_region bad[NV_RPC_LIBOS_MAX];
+  for (int i = 0; i < (int)NV_RPC_LIBOS_MAX; i++) bad[i] = e[i];
+  bad[0].id = "LOGINITXX"; /* nine characters: would be truncated */
+  EXPECT_EQ(nv_rpc_libos_build(libos_page, bad, NV_RPC_LIBOS_MAX), -EINVAL);
+  bad[0] = e[0];
+  bad[1].pa = 0x30001008ull; /* not page aligned */
+  EXPECT_EQ(nv_rpc_libos_build(libos_page, bad, NV_RPC_LIBOS_MAX), -EINVAL);
+  bad[1] = e[1];
+  bad[2].size = 0; /* a zero-sized region names nothing */
+  EXPECT_EQ(nv_rpc_libos_build(libos_page, bad, NV_RPC_LIBOS_MAX), -EINVAL);
+}
+
+/* ======================================================================== */
+/* T-27 GspSystemInfo (opcode 72, contract 5.1), offset by offset            */
+/* ======================================================================== */
+
+/* Two slots: enough for any one of these messages, and separate from the
+ * queue fixtures above so a bug in one cannot hide in the other. */
+static uint8_t pre_stage[0x2000] __attribute__((aligned(4096)));
+
+/* Every value distinct and non-zero, so a field written at a WRONG offset
+ * cannot pass by coincidence: a zero-at-the-right-place/zero-at-the-wrong-
+ * place pair would be indistinguishable.  The boot path supplies zeros for the
+ * three NOT ESTABLISHED fields; that is a value decision, not an encoding one,
+ * and it is tested by the glue case. */
+static void si_fixture(struct nv_rpc_system_info *si) {
+  si->gpu_phys_addr = 0x80000000ull;
+  si->gpu_phys_fb_addr = 0x8000000000ull;
+  si->gpu_phys_inst_addr = 0x7000000000ull;
+  si->nv_domain_bus_device_func = 0x0100ull;
+  si->max_user_va = 0x7FFFFFFF0000ull;
+  si->pci_config_mirror_base = 0xE0000000u;
+  si->pci_config_mirror_size = 0x1000u;
+  si->chipset = 0x162u;
+  si->sys_timer_offset_ns = 0x1234ABCDull;
+}
+
+static void test_t27_system_info_layout(void) {
+  uart_puts("  Running test_t27_system_info_layout...\n");
+  tests_run++;
+
+  struct nv_rpc_system_info si;
+  si_fixture(&si);
+
+  for (uint32_t i = 0; i < 0x2000; i++) pre_stage[i] = 0xCD;
+  ASSERT(nv_rpc_system_info_build(pre_stage, &si, 0) == 1);
+
+  /* The header, at the slot offsets the transport uses. */
+  ASSERT(get32(pre_stage + 0x30) == 0x03000000u);      /* header_version */
+  ASSERT(get32(pre_stage + 0x34) == 0x43505256u);      /* "VRPC" */
+  ASSERT(get32(pre_stage + 0x38) == 0x20u + 0x2C0u);   /* length = 0x2E0 */
+  ASSERT(get32(pre_stage + 0x3C) == 72u);              /* function */
+  ASSERT(get32(pre_stage + 0x40) == 0xFFFFFFFFu);      /* rpc_result pending */
+  ASSERT(get32(pre_stage + 0x44) == 0xFFFFFFFFu);      /* result_private */
+  ASSERT(get32(pre_stage + 0x48) == 0u);               /* sequence */
+  ASSERT(get32(pre_stage + 0x4C) == 0u);               /* spare */
+  ASSERT(get32(pre_stage + 0x24) == 0u);               /* elem seqNum */
+  ASSERT(get32(pre_stage + 0x28) == 1u);               /* elemCount */
+  ASSERT(get32(pre_stage + 0x2C) == 0u);               /* pad */
+
+  /* The payload, at every offset the contract's 5.1 table gives.  Literals
+   * from the table, never this file's #defines: an encoder tested through its
+   * own macros follows them off a cliff. */
+  const uint8_t *p = pre_stage + 0x50;
+  ASSERT(get64(p + 0x000) == si.gpu_phys_addr);              /* gpuPhysAddr */
+  ASSERT(get64(p + 0x008) == si.gpu_phys_fb_addr);           /* gpuPhysFbAddr */
+  ASSERT(get64(p + 0x010) == si.gpu_phys_inst_addr);         /* gpuPhysInstAddr */
+  ASSERT(get64(p + 0x018) == si.nv_domain_bus_device_func);  /* bus/dev/fn */
+  ASSERT(get64(p + 0x020) == 0);                             /* simAccess */
+  ASSERT(get64(p + 0x028) == 0);                             /* atomics */
+  ASSERT(get64(p + 0x030) == 0);                             /* consoleMemSize */
+  ASSERT(get64(p + 0x038) == si.max_user_va);                /* maxUserVa */
+  ASSERT(get32(p + 0x040) == si.pci_config_mirror_base);
+  ASSERT(get32(p + 0x044) == si.pci_config_mirror_size);
+  ASSERT(p[0x048] == 0);                                     /* oorArch */
+  for (uint32_t i = 0x049; i < 0x050; i++) ASSERT(p[i] == 0); /* its padding */
+  ASSERT(get64(p + 0x050) == 0);                             /* clPdbProperties */
+  ASSERT(get32(p + 0x058) == si.chipset);                    /* Chipset */
+  for (uint32_t i = 0x05C; i < 0x074; i++) ASSERT(p[i] == 0); /* 6 flags */
+  ASSERT(p[0x074] == 0);                                     /* upstreamValid */
+  for (uint32_t i = 0x075; i < 0x08C; i++) ASSERT(p[i] == 0); /* FHBBusInfo,
+                                                              * chipsetIDInfo */
+  /* The 488-byte ACPI blob, sampled at both ends and once in the middle. */
+  for (uint32_t i = 0x08C; i < 0x274; i++) ASSERT(p[i] == 0);
+  ASSERT(get32(p + 0x274) == 0);                             /* hypervisorType */
+  ASSERT(p[0x278] == 0 && p[0x279] == 0);                    /* virtualConfig */
+  ASSERT(get32(p + 0x27C) == 0);                             /* bIsPassthru */
+  ASSERT(get64(p + 0x280) == si.sys_timer_offset_ns);        /* sysTimerOffset */
+  for (uint32_t i = 0x288; i < 0x2B8; i++) ASSERT(p[i] == 0); /* gspVFInfo */
+  ASSERT(get32(p + 0x2B8) == 0);                             /* bTdrEvent */
+
+  /* Total size 0x2C0, and everything after it in the slot is zero (the
+   * checksum covers the whole slot, so a survivor there is a rejected
+   * element). */
+  for (uint32_t i = 0x50 + 0x2C0; i < 0x1000; i++) ASSERT(pre_stage[i] == 0);
+  ASSERT(nv_rpc_cksum(pre_stage, 0x1000) == 0);
+  enum nv_rpc_reason why = NV_RPC_OK;
+  ASSERT(nv_rpc_elem_check(pre_stage, 1, &why) == 0);
+  EXPECT_EQ((int)nv_rpc_system_info_check(pre_stage, &si), (int)NV_RPC_SI_F_OK);
+
+  /* ---- a WRONG OFFSET must fail, and name the field -------------------- *
+   * Shift gpuPhysAddr by one field (the classic off-by-8): +0x000 is then
+   * zero and +0x008 holds it twice.  The checker reads the bytes, so it sees
+   * the first half. */
+  put64(pre_stage + 0x50 + 0x000, 0);
+  put64(pre_stage + 0x50 + 0x008, si.gpu_phys_addr);
+  EXPECT_EQ((int)nv_rpc_system_info_check(pre_stage, &si),
+            (int)NV_RPC_SI_F_GPU_PHYS);
+  ASSERT(nv_rpc_system_info_build(pre_stage, &si, 0) == 1);
+
+  /* The field most likely to be shifted by the two fields a 535-only shape
+   * adds: sysTimerOffsetNs, 0x280 in. */
+  put64(pre_stage + 0x50 + 0x280, 0);
+  put64(pre_stage + 0x50 + 0x278, si.sys_timer_offset_ns);
+  EXPECT_EQ((int)nv_rpc_system_info_check(pre_stage, &si),
+            (int)NV_RPC_SI_F_TIMER_OFFSET);
+  ASSERT(nv_rpc_system_info_build(pre_stage, &si, 0) == 1);
+
+  /* A byte the contract pins at zero: an ACPI blob's bValid, an oorArch. */
+  pre_stage[0x50 + 0x08C] = 1;
+  EXPECT_EQ((int)nv_rpc_system_info_check(pre_stage, &si), (int)NV_RPC_SI_F_ZERO);
+  pre_stage[0x50 + 0x08C] = 0;
+  pre_stage[0x50 + 0x048] = 3;
+  EXPECT_EQ((int)nv_rpc_system_info_check(pre_stage, &si), (int)NV_RPC_SI_F_ZERO);
+  pre_stage[0x50 + 0x048] = 0;
+
+  /* Header mutations: the wrong function is a different message, and a wrong
+   * length is not a 0x2C0 payload however right the payload is. */
+  ASSERT(nv_rpc_system_info_build(pre_stage, &si, 0) == 1);
+  put32(pre_stage + 0x3C, 73u);
+  EXPECT_EQ((int)nv_rpc_system_info_check(pre_stage, &si),
+            (int)NV_RPC_SI_F_HEADER);
+  ASSERT(nv_rpc_system_info_build(pre_stage, &si, 0) == 1);
+  put32(pre_stage + 0x38, 0x2E0u - 8u);
+  EXPECT_EQ((int)nv_rpc_system_info_check(pre_stage, &si), (int)NV_RPC_SI_F_SIZE);
+
+  /* Refusals. */
+  EXPECT_EQ(nv_rpc_system_info_build(0, &si, 0), -EINVAL);
+  EXPECT_EQ(nv_rpc_system_info_build(pre_stage, 0, 0), -EINVAL);
+}
+
+/* ======================================================================== */
+/* T-28 PACKED_REGISTRY_TABLE (opcode 73, contract 5.2)                     */
+/* ======================================================================== */
+
+/* An independent parse of the table: this file must not borrow the encoder's
+ * idea of where a name or a value is.  Returns 1 when every name offset and
+ * value range is inside the table and NUL-terminated, 0 otherwise. */
+static int reg_parses(const uint8_t *t) {
+  uint32_t size = get32(t + 0x00);
+  uint32_t n = get32(t + 0x04);
+  if (size < 8u || size > 0x1000u) return 0;
+  uint32_t entries_end = 8u + n * 16u;
+  if (entries_end > size) return 0;
+  for (uint32_t i = 0; i < n; i++) {
+    const uint8_t *e = t + 8u + i * 16u;
+    uint32_t no = get32(e + 0x00);
+    uint32_t data = get32(e + 0x08);
+    uint32_t len = get32(e + 0x0C);
+    if (no < entries_end || no >= size) return 0;
+    uint32_t k = no;
+    while (k < size && t[k] != 0) k++;
+    if (k >= size) return 0; /* no NUL inside the table */
+    if (e[0x04] != 1u) {
+      if (data < entries_end || data + len > size) return 0;
+    } else if (len != 4u) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static void test_t28_registry_layout(void) {
+  uart_puts("  Running test_t28_registry_layout...\n");
+  tests_run++;
+
+  static const uint8_t blob[4] = {0xDE, 0xAD, 0xBE, 0xEF};
+  struct nv_rpc_registry_entry e[3];
+  e[0].name = "enable";
+  e[0].type = NV_RPC_REG_TYPE_DWORD;
+  e[0].dword = 0xCAFEBABEu;
+  e[0].blob = 0;
+  e[0].str = 0;
+  e[0].length = 0;
+  e[1].name = "pm";
+  e[1].type = NV_RPC_REG_TYPE_STRING;
+  e[1].dword = 0;
+  e[1].blob = 0;
+  e[1].str = "on";
+  e[1].length = 0; /* derived: strlen + 1 */
+  e[2].name = "blob";
+  e[2].type = NV_RPC_REG_TYPE_BINARY;
+  e[2].dword = 0;
+  e[2].blob = blob;
+  e[2].str = 0;
+  e[2].length = 4;
+
+  for (uint32_t i = 0; i < 0x2000; i++) pre_stage[i] = 0xCD;
+  ASSERT(nv_rpc_registry_build(pre_stage, e, 3, 0) == 1);
+
+  const uint8_t *t = pre_stage + 0x50;
+
+  /* header(8) + 3*16 = 0x38; names "enable\0"+"pm\0"+"blob\0" = 15 bytes, so
+   * values start at 0x47; "on\0" (3) + blob (4) = 7, total 0x4E. */
+  ASSERT(get32(t + 0x00) == 0x4Eu); /* size */
+  ASSERT(get32(t + 0x04) == 3u);    /* numEntries */
+  ASSERT(nv_rpc_registry_table_size(e, 3) == 0x4Eu);
+
+  /* Entry 0: 16 bytes at 0x08. */
+  ASSERT(get32(t + 0x08 + 0x00) == 0x38u);        /* nameOffset, table-relative */
+  ASSERT(t[0x08 + 0x04] == 1u);                   /* type = dword */
+  ASSERT(get32(t + 0x08 + 0x08) == 0xCAFEBABEu);  /* data = the dword */
+  ASSERT(get32(t + 0x08 + 0x0C) == 4u);           /* length = sizeof(u32) */
+  /* Entry 1 at 0x18: string, name after "enable\0". */
+  ASSERT(get32(t + 0x18 + 0x00) == 0x3Fu);
+  ASSERT(t[0x18 + 0x04] == 3u);                   /* type = string */
+  ASSERT(get32(t + 0x18 + 0x08) == 0x47u);        /* data = offset of "on" */
+  ASSERT(get32(t + 0x18 + 0x0C) == 3u);           /* length = "on" + NUL */
+  /* Entry 2 at 0x28: binary, name after "pm\0". */
+  ASSERT(get32(t + 0x28 + 0x00) == 0x42u);
+  ASSERT(t[0x28 + 0x04] == 2u);                   /* type = binary */
+  ASSERT(get32(t + 0x28 + 0x08) == 0x4Au);        /* data = offset of blob */
+  ASSERT(get32(t + 0x28 + 0x0C) == 4u);
+
+  /* Names, packed in entry order, each NUL-terminated. */
+  ASSERT(t[0x38] == 'e' && t[0x39] == 'n' && t[0x3A] == 'a' && t[0x3B] == 'b');
+  ASSERT(t[0x3C] == 'l' && t[0x3D] == 'e' && t[0x3E] == 0);
+  ASSERT(t[0x3F] == 'p' && t[0x40] == 'm' && t[0x41] == 0);
+  ASSERT(t[0x42] == 'b' && t[0x43] == 'l' && t[0x44] == 'o' && t[0x45] == 'b');
+  ASSERT(t[0x46] == 0);
+  /* Values, after the names: the string then the blob. */
+  ASSERT(t[0x47] == 'o' && t[0x48] == 'n' && t[0x49] == 0);
+  ASSERT(t[0x4A] == 0xDE && t[0x4B] == 0xAD && t[0x4C] == 0xBE &&
+         t[0x4D] == 0xEF);
+  /* Nothing after `size`. */
+  ASSERT(t[0x4E] == 0);
+
+  ASSERT(reg_parses(t) == 1);
+  ASSERT(get32(pre_stage + 0x38) == 0x20u + 0x4Eu); /* RPC length */
+  ASSERT(get32(pre_stage + 0x3C) == 73u);           /* function */
+  ASSERT(get32(pre_stage + 0x28) == 1u);            /* elemCount */
+  ASSERT(nv_rpc_cksum(pre_stage, 0x1000) == 0);
+  enum nv_rpc_reason why = NV_RPC_OK;
+  ASSERT(nv_rpc_elem_check(pre_stage, 1, &why) == 0);
+
+  /* A wrong nameOffset is caught by an independent parse, not by the encoder
+   * agreeing with itself. */
+  put32(pre_stage + 0x50 + 0x08 + 0x00, 0x39u);
+  ASSERT(reg_parses(pre_stage + 0x50) == 1); /* still inside, but ... */
+  ASSERT(get32(pre_stage + 0x50 + 0x08) != 0x38u); /* ... no longer "enable" */
+  ASSERT(pre_stage[0x50 + 0x39] != 'e');
+  /* A value offset that runs past the table is a parse failure. */
+  ASSERT(nv_rpc_registry_build(pre_stage, e, 3, 0) == 1);
+  put32(pre_stage + 0x50 + 0x08 + 0x0C, 0x100u); /* dword length 256 */
+  ASSERT(reg_parses(pre_stage + 0x50) == 0);
+
+  /* ---- the empty table: well-formed, and the honest default until the
+   * mandatory-key set is established (contract 5.2) --------------------- */
+  ASSERT(nv_rpc_registry_build(pre_stage, 0, 0, 1) == 1);
+  ASSERT(get32(pre_stage + 0x38) == 0x28u); /* 32 + 8 */
+  ASSERT(get32(pre_stage + 0x50 + 0x00) == 8u);
+  ASSERT(get32(pre_stage + 0x50 + 0x04) == 0u);
+  ASSERT(nv_rpc_cksum(pre_stage, 0x1000) == 0);
+  ASSERT(nv_rpc_registry_table_size(0, 0) == 8u);
+
+  /* ---- refusals ------------------------------------------------------- */
+  EXPECT_EQ(nv_rpc_registry_build(0, e, 3, 0), -EINVAL);
+  EXPECT_EQ(nv_rpc_registry_build(pre_stage, 0, 1, 0), -EINVAL);
+  struct nv_rpc_registry_entry b[1];
+  b[0] = e[0];
+  b[0].name = "";
+  EXPECT_EQ(nv_rpc_registry_build(pre_stage, b, 1, 0), -EINVAL);
+  b[0] = e[0];
+  b[0].type = 0;
+  EXPECT_EQ(nv_rpc_registry_build(pre_stage, b, 1, 0), -EINVAL);
+  b[0].type = 4;
+  EXPECT_EQ(nv_rpc_registry_build(pre_stage, b, 1, 0), -EINVAL);
+  b[0] = e[1];
+  b[0].str = 0;
+  EXPECT_EQ(nv_rpc_registry_build(pre_stage, b, 1, 0), -EINVAL);
+  b[0] = e[2];
+  b[0].blob = 0;
+  EXPECT_EQ(nv_rpc_registry_build(pre_stage, b, 1, 0), -EINVAL);
+  b[0].length = 0;
+  EXPECT_EQ(nv_rpc_registry_build(pre_stage, b, 1, 0), -EINVAL);
+  /* One message, 65456 payload bytes: a table that does not fit is refused
+   * rather than truncated into a table RM would misparse. */
+  b[0] = e[2];
+  b[0].length = NV_RPC_PAYLOAD_MAX;
+  EXPECT_EQ(nv_rpc_registry_build(pre_stage, b, 1, 0), -EMSGSIZE);
+  EXPECT_EQ(nv_rpc_registry_table_size(b, 1), 0u);
+}
+
+/* ======================================================================== */
+/* T-29 the framing both pre-boot messages share                            */
+/* ======================================================================== */
+
+static void test_t29_preboot_framing(void) {
+  uart_puts("  Running test_t29_preboot_framing...\n");
+  tests_run++;
+
+  struct nv_rpc_system_info si;
+  si_fixture(&si);
+
+  /* seqNum comes from the caller (per queue, per MESSAGE), and the element
+   * sequence is NOT the RPC sequence: the RPC header's own sequence stays 0
+   * for a fire-and-forget send (contract 2.4). */
+  ASSERT(nv_rpc_system_info_build(pre_stage, &si, 7) == 1);
+  EXPECT_EQ((int)get32(pre_stage + 0x24), 7);
+  EXPECT_EQ((int)get32(pre_stage + 0x48), 0);
+  ASSERT(nv_rpc_registry_build(pre_stage, 0, 0, 8) == 1);
+  EXPECT_EQ((int)get32(pre_stage + 0x24), 8);
+  EXPECT_EQ((int)get32(pre_stage + 0x48), 0);
+
+  /* A single corrupt payload byte breaks the fold -- the property the
+   * receiver relies on (contract 6 rows 9 and 12). */
+  ASSERT(nv_rpc_system_info_build(pre_stage, &si, 0) == 1);
+  ASSERT(nv_rpc_cksum(pre_stage, 0x1000) == 0);
+  pre_stage[0x50 + 0x2BF] ^= 0x01; /* the last byte of the payload */
+  ASSERT(nv_rpc_cksum(pre_stage, 0x1000) != 0);
+  enum nv_rpc_reason why = NV_RPC_OK;
+  EXPECT_EQ(nv_rpc_elem_check(pre_stage, 1, &why), -EIO);
+  EXPECT_EQ((int)why, (int)NV_RPC_CHECKSUM);
+
+  /* A corrupt header byte is a different failure and gets a different name.
+   * Re-fold afterwards, exactly as a sender that built a bad header would:
+   * then the checksum is valid and the signature check is what fires. */
+  ASSERT(nv_rpc_system_info_build(pre_stage, &si, 0) == 1);
+  pre_stage[0x34] ^= 0xFF; /* signature */
+  put32(pre_stage + 0x20, 0);
+  put32(pre_stage + 0x20, nv_rpc_cksum(pre_stage, 0x1000));
+  ASSERT(nv_rpc_cksum(pre_stage, 0x1000) == 0);
+  EXPECT_EQ(nv_rpc_elem_check(pre_stage, 1, &why), -EIO);
+  EXPECT_EQ((int)why, (int)NV_RPC_BAD_SIG);
+}
+
+/* ======================================================================== */
+/* T-30 the peer's header is read, not remembered (the row's discriminator)  */
+/* ======================================================================== */
+
+static void test_t30_peer_snapshot_is_a_read(void) {
+  uart_puts("  Running test_t30_peer_snapshot_is_a_read...\n");
+  tests_run++;
+
+  struct nv_rpc_hw hw;
+  hw_reset(&hw);
+  struct nv_rpc_queue q;
+  ASSERT(link_queue(&q, &hw, NV_RPC_FLAGS_SWAP_RX) == 0);
+  EXPECT_EQ((int)q.linked, 1);
+
+  struct nv_rpc_peer_statq s;
+  nv_rpc_peer_snapshot(&q, &s);
+  /* Six of the eight words are nonzero: `version` and the producer `writePtr`
+   * are legitimately 0 in a fresh header, so "all eight nonzero" is NOT the
+   * test for a usable peer -- the count is only the -EAGAIN discriminator. */
+  EXPECT_EQ((int)s.nonzero, 6);
+  EXPECT_EQ((int)s.w[0], 0);          /* version */
+  EXPECT_EQ((int)s.w[1], 0x40000);    /* size */
+  EXPECT_EQ((int)s.w[2], 0x1000);     /* msgSize */
+  EXPECT_EQ((int)s.w[3], 63);         /* msgCount */
+  EXPECT_EQ((int)s.w[4], 0);          /* writePtr: the peer's, still 0 */
+  EXPECT_EQ((int)s.w[7], 0x1000);     /* entryOff */
+
+  /* Now the peer's header goes away (a reset, a reboot, a wrong block).  The
+   * cached struct still holds the last good fields -- that is what the old row
+   * printed -- while the words say nothing is there.  A row must believe the
+   * words: "peer=none" from the cache is an inference, from block+stat_off it
+   * is an observation. */
+  zero_bytes(blk + q.stat_off, NV_RPC_SLOT);
+  nv_rpc_peer_snapshot(&q, &s);
+  EXPECT_EQ((int)s.nonzero, 0);
+  EXPECT_EQ((int)q.linked, 1);          /* our stale verdict, unchanged */
+  EXPECT_EQ((int)q.peer.size, 0x40000); /* the cache the row must not print */
+
+  /* And the words now agree with the validating call, not with the cache. */
+  enum nv_rpc_link_field bad = NV_RPC_LINK_OK;
+  EXPECT_EQ(nv_rpc_link_validate(blk + q.stat_off, NV_RPC_QUEUE_BYTES,
+                                 NV_RPC_SLOT, 0, &bad),
+            -EAGAIN);
+  EXPECT_EQ((int)bad, (int)NV_RPC_LINK_OK);
+}
+
+/* ======================================================================== */
+/* T-31 the first request: GET_GSP_STATIC_INFO framing (contract 4.1 row 10) */
+/* ======================================================================== */
+
+static void test_t31_static_info_request(void) {
+  uart_puts("  Running test_t31_static_info_request...\n");
+  tests_run++;
+
+  /* The request's length is a size declaration, so the number is the contract:
+   * 0x20 header + 0xCF0 payload = 0xD10, which is one element. */
+  EXPECT_EQ((int)NV_RPC_STATIC_INFO_LEN, 0xD10);
+  zero_bytes(tx_stage, sizeof tx_stage);
+  ASSERT(nv_rpc_static_info_request(tx_stage, 7) == 1);
+
+  EXPECT_EQ((int)get32(tx_stage + NV_RPC_R_HDRVER), (int)NV_RPC_VERSION);
+  EXPECT_EQ((int)get32(tx_stage + NV_RPC_R_SIG), (int)NV_RPC_SIG);
+  EXPECT_EQ((int)get32(tx_stage + NV_RPC_R_LENGTH), 0xD10);
+  EXPECT_EQ((int)get32(tx_stage + NV_RPC_R_FUNCTION), 65);
+  EXPECT_EQ((int)get32(tx_stage + NV_RPC_R_RESULT), -1); /* PENDING */
+  EXPECT_EQ((int)get32(tx_stage + NV_RPC_R_RESULT_PRIV), -1);
+  EXPECT_EQ((int)get32(tx_stage + NV_RPC_E_SEQ), 7);
+  EXPECT_EQ((int)get32(tx_stage + NV_RPC_E_ELEMCOUNT), 1);
+
+  /* A framed request re-folds to zero (the receiver's acceptance test), and a
+   * single flipped payload byte breaks it -- so a stale tail cannot pass. */
+  EXPECT_EQ((int)nv_rpc_cksum(tx_stage, NV_RPC_SLOT), 0);
+  tx_stage[NV_RPC_ELEM_HDR + NV_RPC_RPC_HDR] ^= 0x01;
+  EXPECT_EQ((int)(nv_rpc_cksum(tx_stage, NV_RPC_SLOT) != 0), 1);
+  tx_stage[NV_RPC_ELEM_HDR + NV_RPC_RPC_HDR] ^= 0x01;
+  EXPECT_EQ((int)nv_rpc_cksum(tx_stage, NV_RPC_SLOT), 0);
+
+  /* NULL is a refusal, not a crash. */
+  EXPECT_EQ(nv_rpc_static_info_request(0, 0), -EINVAL);
+}
+
+/* ======================================================================== */
+/* T-32 the round trip: gate, one doorbell, event skipped, reply matched     */
+/* ======================================================================== */
+
+static void test_t32_roundtrip(void) {
+  uart_puts("  Running test_t32_roundtrip...\n");
+  tests_run++;
+
+  /* (a) Not linked: refused BEFORE any store and BEFORE the doorbell.  A send
+   * into a queue whose peer never published is a send nobody can see, and the
+   * acceptance row would have counted a doorbell for it. */
+  struct nv_rpc_hw hw;
+  hw_reset(&hw);
+  struct nv_rpc_queue q;
+  ASSERT(fresh_queue(&q) == 0);
+  ASSERT(nv_rpc_static_info_request(tx_stage, 0) == 1);
+  enum nv_rpc_reason why = NV_RPC_OK;
+  uint32_t result = 0;
+  EXPECT_EQ(nv_rpc_roundtrip(&q, &hw, tx_stage, 65, 4000, rx_out,
+                             sizeof(rx_out), &result, &why),
+            -EAGAIN);
+  EXPECT_EQ((int)why, (int)NV_RPC_NOT_LINKED);
+  EXPECT_EQ((int)fh.db_calls, 0);
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_WRITE_PTR), 0);
+  EXPECT_EQ((int)slot_bytes_not(&q, 0, 0), 0); /* no slot written at all */
+
+  /* (b) Linked, with the init event ahead of the reply: the event is consumed
+   * and logged, the reply is what comes back, and exactly one doorbell rings. */
+  ASSERT(link_queue(&q, &hw, NV_RPC_FLAGS_SWAP_RX) == 0);
+  ASSERT(fw_put(&q, 0, NV_RPC_FN_INIT_DONE, 0, 32, 0x00) == 1);
+  ASSERT(fw_put(&q, 1, 65, 1, NV_RPC_STATIC_INFO_LEN, 0x5A) == 1);
+  fw_set_wp(&q, 2);
+
+  /* The event first, exactly as the boot waits for it (step 9). */
+  EXPECT_EQ(nv_rpc_rx_wait(&q, &hw, NV_RPC_FN_INIT_DONE, 4000, rx_out,
+                           sizeof(rx_out), &result, &why),
+            32);
+  EXPECT_EQ((int)result, 0);
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_READ_PTR), 1);
+
+  ASSERT(nv_rpc_static_info_request(tx_stage, q.tx_seq) == 1);
+  int n = nv_rpc_roundtrip(&q, &hw, tx_stage, 65, 4000, rx_out, sizeof(rx_out),
+                           &result, &why);
+  EXPECT_EQ(n, (int)NV_RPC_STATIC_INFO_LEN);
+  EXPECT_EQ((int)result, 0);
+  EXPECT_EQ((int)get32(rx_out + NV_RPC_H_FUNCTION), 65);
+  EXPECT_EQ((int)get32(rx_out + NV_RPC_H_PAYLOAD), 0x5A5A5A5A);
+  EXPECT_EQ((int)fh.db_calls, 1);
+  EXPECT_EQ((int)q.tx_busy, 0);
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_WRITE_PTR), 1);
+  EXPECT_EQ((int)get32(blk + NV_RPC_CMD_OFF + NV_RPC_Q_READ_PTR), 2);
+
+  /* (c) Linked, nothing comes back: a bounded wait ends it (the fake clock is
+   * what advances), the request stays counted, and there is no retry. */
+  ASSERT(nv_rpc_static_info_request(tx_stage, q.tx_seq) == 1);
+  EXPECT_EQ(nv_rpc_roundtrip(&q, &hw, tx_stage, 65, 4000, rx_out,
+                             sizeof(rx_out), &result, &why),
+            -ETIMEDOUT);
+  EXPECT_EQ((int)why, (int)NV_RPC_NO_REPLY);
+  EXPECT_EQ((int)fh.db_calls, 2);
+  EXPECT_EQ((int)q.tx_busy, 0);
+}
+
+/* ======================================================================== */
 
 void nv_rpc_test_suite(void) {
-  uart_puts("[NV-RPC] unit suite (spec section 7: T-01..T-24)\n");
+  uart_puts("[NV-RPC] unit suite (spec section 7: T-01..T-24, contract "
+            "T-25/26/27/28/29 and first round trip T-30..T-32)\n");
   test_t01_block_geometry();
   test_t02_cmdq_header();
   test_t03_statq_not_written();
@@ -1272,6 +1919,14 @@ void nv_rpc_test_suite(void) {
   test_t22_event_vs_reply();
   test_t23_link_size();
   test_t24_link_msgcount();
+  test_t25_args_page();
+  test_t26_libos_page();
+  test_t27_system_info_layout();
+  test_t28_registry_layout();
+  test_t29_preboot_framing();
+  test_t30_peer_snapshot_is_a_read();
+  test_t31_static_info_request();
+  test_t32_roundtrip();
 }
 
 #endif /* KERNEL_MODE_UNIT_TEST */

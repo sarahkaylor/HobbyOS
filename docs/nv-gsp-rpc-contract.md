@@ -239,6 +239,18 @@ For a first round trip they can be zero-sized; whether the firmware tolerates a
 missing/zero-sized log region is **NOT ESTABLISHED** — it is cheap to provide
 three valid 4 KiB regions and remove the question.
 
+**Implementation (card t_2081ec4f).** §1.5 is built by
+`nv_rpc_args_build()` / read back by `nv_rpc_args_read()`
+(`src/kernel/nv_rpc.c`, offsets in `src/include/nv_rpc.h`); §1.6 by
+`nv_rpc_libos_build()` / `nv_rpc_id8()` in the same file. The boot-path glue
+(`nv_gsp_rpc_publish()`, `src/kernel/nv_gsp.c`) allocates the three pages,
+takes every address from `nv_dma_bus()`, writes MAILBOX1:MAILBOX0, and logs
+one `[NV-ARG]` row per claim — including the status header re-read afterwards,
+which must still be zero. The three log regions are real 4 KiB pages, so the
+"zero-sized log region" question above is not left open. The argument page's
+own `size` field stays `0xC8`; the RMARGS *region* entry publishes the whole
+4 KiB page, which is also the allocation.
+
 ### 1.7 The doorbell
 
 | property | value | tag |
@@ -511,6 +523,36 @@ Notes on the rows that are surprising:
   `hInternalClient/Device/Subdevice` from static config there is no way to issue
   a control RPC, so this is the natural *first round trip*: a request whose reply
   is large, self-describing, and harmless.
+
+### 4.1.1 What this driver actually stages (implemented)
+
+`nv_gsp_rpc_preboot()` (`src/kernel/nv_gsp.c`) runs rows 2-5 in the order above,
+after the GSP reset / FWSEC attempt and **before** the launch.  The payloads come
+from `nv_rpc_system_info_build()` and `nv_rpc_registry_build()` in
+`src/kernel/nv_rpc.c`; both are pure and their byte layouts are pinned by
+`nv_rpc_test.c` T-27..T-29 against the offset tables in 5.1/5.2.
+
+| row | what goes out | where the values come from |
+|---|---|---|
+| 2 | `GSP_ARGUMENTS_CACHED` + libos table + `MAILBOX0/1` | `nv_gsp_rpc_publish()`, every address from `nv_dma_bus()` |
+| 3 | 72, `length = 0x2E0`, one slot | `gpuPhysAddr` = BAR0 base (`0x80000000`); `gpuPhysFbAddr` = BAR1 aperture base; `nvDomainBusDeviceFunc` = `(bus<<8)\|devfn` = `0x0100`; `Chipset` = 0 |
+| 4 | 73, `length = 0x28`, one slot | an **empty** table (`size = 8`, `numEntries = 0`) |
+| 5 | one write of 0 to `0x110C00` | after both messages; `writePtr` 0 -> 1 -> 2 |
+
+Three fields are sent as **zero** because their value is NOT ESTABLISHED, and the
+boot logs say so rather than inventing one: `gpuPhysInstAddr` (no BAR2 on this
+card; the 32 MiB BAR3 was not tried), `maxUserVa` (non-Linux host), and
+`pciConfigMirrorBase`/`Size` (the PCI layer exposes no MMCONFIG physical base).
+
+The registry table is empty **on purpose**: 5.2 says neither source documents a
+minimum, an empty table is well-formed, and the alternative -- inventing keys --
+would leave a non-zero `GSP_INIT_DONE` result as the only symptom.  When a
+firmware answers, the key set is something to bisect from the reference list,
+not to guess here.
+
+Neither message is waited on, and the row that proves the state is the doorbell
+line: `wr=2` (our producer) with `pw=0` (the peer's) means two messages are
+queued and no processor has started -- the pre-boot state, exactly.
 
 ### 4.2 What "initialised" finally looks like
 

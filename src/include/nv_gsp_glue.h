@@ -19,9 +19,12 @@
  *
  *  This header names the place where the two meet, and nothing else does.
  *  Everything in it is pure memory work plus the three function pointers in
- *  struct nv_rpc_hw; no function here writes a register except through that
- *  seam, so the whole path is drivable in the kernel unit tier with a counting
- *  doorbell (src/kernel/nv_gsp_glue_test.c).
+ *  struct nv_rpc_hw, with ONE named exception: nv_gsp_rpc_publish() programs
+ *  the two GSP falcon mailbox words, because that is where the argument page
+ *  is advertised and there is no link yet to carry it (contract 1.6).  It is
+ *  two dwords, both written through d->ops->wr32, and the unit tier counts
+ *  them: exactly 0x110040 and 0x110044, values = the libos page's bus address
+ *  low and high.
  *
  *  The two claims this file exists to make checkable:
  *
@@ -46,10 +49,18 @@ struct nv_dev;
 struct nv_gsp_rpc {
   struct nv_dma_map block; /* the 129-page block, owned by nv_dma          */
   struct nv_rpc_queue q;   /* the transport's view of the same bytes       */
+  /* The publish side (contract 1.5/1.6).  Three more mappings, all owned by
+   * nv_dma and all freed by nv_gsp_rpc_teardown(): the argument page, the
+   * libos-args table, and the three log regions that table names. */
+  struct nv_dma_map args;  /* GSP_ARGUMENTS_CACHED, one page               */
+  struct nv_dma_map libos; /* the table whose address goes in MAILBOX0/1   */
+  struct nv_dma_map logs;  /* NV_RPC_LIBOS_LOG_PAGES x 4 KiB, LOGINIT/...  */
   uint8_t *rx_stage;       /* caller scratch, NV_RPC_SLOT * NV_RPC_ELEM_MAX */
   uint32_t sends;          /* messages committed to the ring               */
   uint32_t doorbells;      /* notifications rung (must equal sends)        */
   int built;
+  int published;           /* the two mailbox words were written           */
+  int preboot;             /* 72 and 73 are queued and the doorbell rang   */
 };
 
 /* Allocate the block through nv_dma, build it, and point the queue at it.
@@ -74,6 +85,35 @@ int nv_gsp_rpc_build(struct nv_gsp_rpc *r);
 /* Release the frames and forget the queue.  Safe on a zeroed struct. */
 void nv_gsp_rpc_teardown(struct nv_gsp_rpc *r);
 
+/* Build the two pages that TELL firmware where the block is and program the
+ * two mailbox words that name the first of them (contract 1.5/1.6):
+ *
+ *   1. GSP_ARGUMENTS_CACHED at nv_dma_bus(&r->args), carrying the BLOCK's
+ *      nv_dma_bus(&r->block) as mq.sharedMemPhysAddr == PTE[0], the queue
+ *      offsets, and pageTableEntryCount = 129;
+ *   2. the libos-args table at nv_dma_bus(&r->libos): LOGINIT, LOGINTR, LOGRM
+ *      (one 4 KiB page each, from r->logs) then RMARGS pointing at (1);
+ *   3. MAILBOX1:MAILBOX0 = that table's bus address, low:high.
+ *
+ * Everything it claims is re-read from memory or from its own call, and logged
+ * as [NV-ARG] rows -- the page is read back with nv_rpc_args_read() and
+ * cross-checked with nv_rpc_args_crosscheck().  MAILBOX0/1 are WRITE
+ * registers that read 0 by design on this card (contract 1.6, MEASURED), so
+ * they are logged and never gated on.
+ *
+ * Publishing deliberately does not touch the status queue: a zero status
+ * header is the boot's only proof that RM has not started, and manufacturing
+ * one here would counterfeit the evidence the link stage reads.
+ *
+ *   -EINVAL   NULL, or a transport that was never built.
+ *   -ENOTSUP  nv_dma_bus() refused a page or the block (VT-d translation is
+ *             live): nothing is written and no mailbox is programmed.
+ *   -EIO      the block's bus address is not the one the PTEs were built from,
+ *             or a page did not read back what was written.
+ * Idempotent: a second call rewrites the same two pages and the same two
+ * mailbox words. */
+int nv_gsp_rpc_publish(struct nv_gsp_rpc *r, struct nv_dev *d);
+
 /* Commit one staged element (nv_rpc_req_init + nv_rpc_elem_build format,
  * length at NV_RPC_R_LENGTH) and notify the peer.  Exactly one
  * nv_rpc_kick() per successful call: commit does not notify and nothing else
@@ -85,13 +125,54 @@ int nv_gsp_rpc_notify(struct nv_gsp_rpc *r, const uint8_t *stage,
 /* Boot-path stage 8: build the block, log one [NV-RPC] row per stage, and
  * publish it.  The notification is withheld until the peer's status-queue
  * header validates, which only RM writes (spec 3 step 4): this stage cannot
- * ring the doorbell on a card where RM is not running, and it says so. */
-int nv_gsp_rpc_stage8(struct nv_dev *d);
+ * ring the doorbell on a card where RM is not running, and it says so.
+ *
+ * link_timeout_us == 0: one read, which is what a boot with no possible peer
+ * wants.  > 0: poll the peer's header for that long (contract 4.1 row 7 uses
+ * 4 s), so a boot whose booter DID report success gives RM the documented time
+ * to publish before the stage calls it absent. */
+int nv_gsp_rpc_stage8_wait(struct nv_dev *d, uint32_t link_timeout_us);
+
+/* Pre-boot (contract 4.1 rows 3-5): build and publish if that has not happened
+ * yet, stage GSP_SET_SYSTEM_INFO (72) and then SET_REGISTRY (73) into the
+ * command queue (writePtr 0 -> 1 -> 2), and ring the doorbell ONCE for both.
+ *
+ * It runs BEFORE the processor starts and must: both messages are "stuffed
+ * into the message queue before the GSP is booted" (contract 4.1 notes), so
+ * firmware consumes them as its first work items.  Neither is waited on --
+ * there is no processor to answer yet.
+ *
+ * The doorbell is per NOTIFICATION, not per message: two messages are staged
+ * and the queue is announced once, which is why this function does not go
+ * through nv_gsp_rpc_notify() (that is one message, one kick).
+ *
+ * Everything the row prints is read back out of the block: length, elemCount,
+ * writePtr and the whole-element fold, so "staged" means "the ring holds a
+ * message that re-folds to zero", not "a function returned 0".
+ *
+ *   -EINVAL / -ENOTSUP / -ENOMEM  from setup or publish: nothing is staged.
+ *   -EIO                          a staged message does not read back.
+ * Idempotent: a second call stages nothing and rings nothing.
+ */
+int nv_gsp_rpc_preboot(struct nv_gsp_rpc *r, struct nv_dev *d);
 
 /* The same stage against caller-owned state, so the unit tier drives the exact
  * function the boot path calls (with a counting/fake MMIO device) instead of
  * re-implementing it.  nv_gsp_rpc_stage8() is this, with the singleton. */
 int nv_gsp_rpc_stage8_into(struct nv_gsp_rpc *r, struct nv_dev *d);
+
+/* Boot-path stage 9, and the card's first round trip: wait for GSP_INIT_DONE
+ * (0x1001) and read its rpc_result, then send GET_GSP_STATIC_INFO (65) and
+ * wait for its reply.  Every send goes through nv_rpc_roundtrip(), so an
+ * unlinked queue is refused before any store and before any doorbell.
+ *
+ *   -EAGAIN   the link is not up: nothing was sent, no doorbell was rung.
+ *   -ETIMEDOUT  the peer is linked but did not answer within the contract's
+ *               4 s; `reason` names which wait ran out.
+ *   -EIO      INIT_DONE arrived with a nonzero rpc_result (RM's own verdict).
+ *   0         one message was answered: the row carries fn/len/result. */
+int nv_gsp_rpc_stage9(struct nv_dev *d);
+int nv_gsp_rpc_stage9_into(struct nv_gsp_rpc *r, struct nv_dev *d);
 
 /* The singleton state, for a reader (the log rows and the unit tier are the
  * only readers).  One card, one GSP: the driver is a singleton by design. */

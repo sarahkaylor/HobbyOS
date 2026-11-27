@@ -153,6 +153,7 @@ enum nv_rpc_reason {
   NV_RPC_UNKNOWN_FN,   /* 0: dispatched and dropped */
   NV_RPC_CONTINUATION, /* 0: function 71, appended to the assembly */
   NV_RPC_BUSY,         /* -EBUSY: one request already outstanding (4.1 P4) */
+  NV_RPC_NO_REPLY,     /* -ETIMEDOUT: sent, but the expected message never came */
 };
 
 const char *nv_rpc_reason_name(enum nv_rpc_reason r);
@@ -190,8 +191,14 @@ struct nv_rpc_geom {
 
 /* The RMARGS view of the SAME geometry (docs/nv-gsp-rpc-contract.md 1.5).
  * Field names are the contract's, because nv_rpc_args_crosscheck() reports the
- * first disagreement BY NAME. */
+ * first disagreement BY NAME.
+ *
+ * magic and size are part of the view, not decoration: they are the two words
+ * that make the page a GSP_ARGUMENTS_CACHED block rather than a page of
+ * plausible-looking geometry, so the cross-check reads them too. */
 struct nv_rpc_rmargs {
+  uint32_t magic;           /* +0x00 GSP_ARGUMENTS_MAGIC_VALUE */
+  uint16_t size;            /* +0x04 sizeof(GSP_ARGUMENTS_CACHED) = 0xC8 */
   uint64_t shared_mem_phys; /* +0x18 mq.sharedMemPhysAddr = PTE[0] */
   uint64_t cmd_queue_off;   /* +0x20 */
   uint64_t stat_queue_off;  /* +0x28 */
@@ -214,6 +221,8 @@ enum nv_rpc_arg_field {
   NV_RPC_ARG_ELEM_MAX,    /* queueElementSizeMax */
   NV_RPC_ARG_HDR_ALIGN,   /* queueHeaderAlign */
   NV_RPC_ARG_ELEM_ALIGN,  /* queueElementAlign */
+  NV_RPC_ARG_MAGIC,       /* +0x00: this is not a GSP_ARGUMENTS page */
+  NV_RPC_ARG_SIZE,        /* +0x04: the struct size the firmware validates */
 };
 
 const char *nv_rpc_arg_field_name(enum nv_rpc_arg_field f);
@@ -232,6 +241,291 @@ int nv_rpc_block_build(uint8_t *block, uint64_t block_bus);
  * disagrees (spec 3 step 5). */
 int nv_rpc_args_crosscheck(const struct nv_rpc_geom *g, uint64_t block_bus,
                            const struct nv_rpc_rmargs *a);
+
+/* ---- publishing: GSP_ARGUMENTS_CACHED and the libos-args table ---------
+ *
+ * The block above is what RM walks.  These two pages are how RM is TOLD it
+ * exists (docs/nv-gsp-rpc-contract.md 1.5 and 1.6): a one-page argument block
+ * holding the block's GPU address and the geometry, and a one-page table of
+ * named regions whose fourth entry points at that argument block.  The table's
+ * address goes into the two GSP falcon mailbox words, and that is the entire
+ * handshake -- the firmware does not scan memory.
+ *
+ * Both builders are PURE: bytes in, bytes out, no MMIO, no allocation, no
+ * clock.  The address they are handed is the GPU-visible one, which the caller
+ * obtains only through nv_dma_bus(); nothing in this file can tell whether it
+ * is a bus address or a CPU physical address, which is exactly why the caller
+ * must not substitute one for the other.
+ * ---------------------------------------------------------------------- */
+
+/* The 535 build of the structure (contract 1.5 field table).  0xC8 is what
+ * goes in the size field; the allocation is a full page either way.
+ *
+ * NAMING: NV_RPC_GSP_ARGS_* is a WIRE value (what the firmware reads),
+ * NV_RPC_ARG_* is a FIELD ID (what the cross-check reports).  Two namespaces
+ * on purpose -- a single NV_RPC_ARG_MAGIC for both would make
+ * nv_rpc_arg_field_name(NV_RPC_ARG_MAGIC) ask for the string at index
+ * 0x20505347, and a preprocessor macro silently wins over the enum. */
+#define NV_RPC_GSP_ARGS_MAGIC 0x20505347u /* bytes 47 53 50 20 = "GSP " */
+#define NV_RPC_GSP_ARGS_SIZE 0xC8u
+#define NV_RPC_GSP_ARGS_PAGE 0x1000u
+
+/* Page-relative offsets.  Named once so the writer, the reader and the log row
+ * cannot drift apart; the two halves of this file both use these. */
+#define NV_RPC_ARG_O_MAGIC 0x00u
+#define NV_RPC_ARG_O_SIZE 0x04u
+#define NV_RPC_ARG_O_FLAGS 0x08u
+#define NV_RPC_ARG_O_MQ_FLAGS 0x10u
+#define NV_RPC_ARG_O_MQ_SHARED 0x18u
+#define NV_RPC_ARG_O_MQ_CMD 0x20u
+#define NV_RPC_ARG_O_MQ_STAT 0x28u
+#define NV_RPC_ARG_O_MQ_HDR_SIZE 0x30u
+#define NV_RPC_ARG_O_MQ_ELEM_MIN 0x34u
+#define NV_RPC_ARG_O_MQ_ELEM_MAX 0x38u
+#define NV_RPC_ARG_O_MQ_HDR_ALIGN 0x3Cu
+#define NV_RPC_ARG_O_MQ_ELEM_ALIGN 0x40u
+#define NV_RPC_ARG_O_MQ_PTE_COUNT 0x44u
+#define NV_RPC_ARG_O_SR_OLD_LEVEL 0x50u
+#define NV_RPC_ARG_O_SR_FLAGS 0x54u
+#define NV_RPC_ARG_O_GPU_INSTANCE 0x64u
+
+/* The geometry constants the transport fixes (contract 1.5, +0x30..+0x44).
+ * They live here rather than in the builder because the cross-check compares
+ * them and the row prints them; one definition, three readers. */
+#define NV_RPC_ARG_ELEM_MAX 0x10000u /* queueElementSizeMax = 16 slots */
+#define NV_RPC_ARG_HDR_ALIGN 4u      /* queueHeaderAlign: log2(16) */
+#define NV_RPC_ARG_ELEM_ALIGN 12u    /* queueElementAlign: log2(4096) */
+
+/* Write one GSP_ARGUMENTS_CACHED into `page` (all NV_RPC_ARG_PAGE bytes are
+ * zeroed first, so the reserved tail is zero by construction) describing the
+ * transport `g` that was built at `block_bus`.
+ *   -EINVAL  NULL, a `g` that is not this transport's geometry, or a
+ *            block_bus that is zero or not page aligned (a PTE[0] the
+ *            firmware would walk to nowhere).
+ *   -EIO     the page does not read back what was written to it.
+ * Nothing outside this page is touched. */
+int nv_rpc_args_build(uint8_t *page, const struct nv_rpc_geom *g,
+                      uint64_t block_bus);
+
+/* Read the page's OWN bytes back into the cross-check's view (contract 1.5).
+ * A builder that returns 0 proves only that it was called; this is how a boot
+ * row shows what is actually in memory.  Returns 0, or -EINVAL on NULL. */
+int nv_rpc_args_read(const uint8_t *page, struct nv_rpc_rmargs *a);
+
+/* ---- the libos-args table (contract 1.6) ------------------------------ */
+
+#define NV_RPC_LIBOS_ENTRY 0x20u /* 32 bytes: id8, pa, size, kind, loc */
+#define NV_RPC_LIBOS_MAX 4u      /* the reference driver publishes four */
+#define NV_RPC_LIBOS_ID_BYTES 8u
+/* Three 4 KiB log regions (LOGINIT, LOGINTR, LOGRM).  The contract leaves
+ * "does the firmware tolerate a zero-sized log region" NOT ESTABLISHED and
+ * says providing real ones is cheap; three pages is cheap. */
+#define NV_RPC_LIBOS_LOG_PAGES 3u
+
+#define NV_RPC_LIBOS_O_ID8 0x00u
+#define NV_RPC_LIBOS_O_PA 0x08u
+#define NV_RPC_LIBOS_O_SIZE 0x10u
+#define NV_RPC_LIBOS_O_KIND 0x18u
+#define NV_RPC_LIBOS_O_LOC 0x19u
+
+#define NV_RPC_LIBOS_KIND_CONTIG 1u /* kind = 1: one contiguous region */
+#define NV_RPC_LIBOS_LOC_SYSMEM 1u  /* loc  = 1: system memory          */
+
+struct nv_rpc_libos_region {
+  const char *id; /* INPUT (build): up to 8 characters, NUL padded, packed
+                   * low byte first */
+  uint64_t id8;   /* the packed value.  build() fills it from `id`; read()
+                   * fills it from the page and leaves `id` NULL, so a caller
+                   * comparing what is in memory to a name compares to
+                   * nv_rpc_id8("RMARGS") and never to a local string. */
+  uint64_t pa;    /* GPU-visible address of the region */
+  uint64_t size;  /* bytes; need not be a multiple of the page */
+  uint8_t kind;   /* NV_RPC_LIBOS_KIND_* */
+  uint8_t loc;    /* NV_RPC_LIBOS_LOC_* */
+};
+
+/* "RMARGS" -> 0x0000534752414D52: first character in the least significant
+ * byte, NUL padded to eight (_kgspGenerateInitArgId).  The reference names are
+ * shorter than eight characters, so the zero bytes are part of the id.
+ * Returns 0 for NULL, for an empty string, or for a name longer than eight --
+ * a truncated name is a different region and must not be packed silently. */
+uint64_t nv_rpc_id8(const char *s);
+
+/* Zero the page, then write `n` entries at 32 bytes each in the given order.
+ *   -EINVAL  NULL, n == 0, n > NV_RPC_LIBOS_MAX, a malformed id, a zero or
+ *            unaligned pa, or a zero size.
+ *   -EIO     an entry does not read back what was written. */
+int nv_rpc_libos_build(uint8_t *page, const struct nv_rpc_libos_region *e,
+                       uint32_t n);
+
+/* Read entry `i` (0-based) back out of the page.  `out->id` is set to NULL:
+ * the page holds the packed u64, and the caller that called build() already
+ * knows the string.  Returns 0 or -EINVAL (NULL, or i >= NV_RPC_LIBOS_MAX). */
+int nv_rpc_libos_read(const uint8_t *page, uint32_t i,
+                      struct nv_rpc_libos_region *out);
+
+/* ---- the pre-boot payloads (contract 4.1 rows 3-5, 5.1, 5.2) ----------
+ *
+ * Two messages exist before the firmware does: GSP_SET_SYSTEM_INFO (72) and
+ * SET_REGISTRY (73).  They are staged into the command queue while the
+ * processor is stopped and neither is waited on -- there is no processor to
+ * answer yet, and any reply arrives later interleaved with events.  The
+ * encoders here are PURE (bytes in, bytes out, no MMIO, no clock): the boot
+ * path owns the queue and the one doorbell.
+ *
+ * Both return the element's elemCount (> 0), or a negative errno.  The seqNum
+ * is a parameter and not something the encoder may invent: it is per queue and
+ * per MESSAGE (contract 2.4), so the caller that knows how many messages are
+ * already queued is the only one that can assign it.
+ * ---------------------------------------------------------------------- */
+
+#define NV_RPC_SYSTEM_INFO_SIZE 0x2C0u /* 704: the 535 shape of GspSystemInfo */
+
+/* Payload offsets, straight from the contract's table (5.1).  A byte written
+ * one field off is caught by nv_rpc_system_info_check(), which names the field
+ * -- the offsets here are what it checks against. */
+#define NV_RPC_SI_O_GPU_PHYS 0x000u      /* u64 gpuPhysAddr */
+#define NV_RPC_SI_O_GPU_FB 0x008u        /* u64 gpuPhysFbAddr */
+#define NV_RPC_SI_O_GPU_INST 0x010u      /* u64 gpuPhysInstAddr */
+#define NV_RPC_SI_O_BUSDEVFUNC 0x018u    /* u64 nvDomainBusDeviceFunc */
+#define NV_RPC_SI_O_SIM_ACCESS 0x020u    /* u64 simAccessBufPhysAddr */
+#define NV_RPC_SI_O_ATOMICS 0x028u       /* u64 pcieAtomicsOpMask */
+#define NV_RPC_SI_O_CONSOLE_SIZE 0x030u  /* u64 consoleMemSize */
+#define NV_RPC_SI_O_MAX_USER_VA 0x038u   /* u64 maxUserVa */
+#define NV_RPC_SI_O_PCI_MIRROR_BASE 0x040u /* u32 */
+#define NV_RPC_SI_O_PCI_MIRROR_SIZE 0x044u /* u32 */
+#define NV_RPC_SI_O_OOR_ARCH 0x048u      /* u8  oorArch */
+#define NV_RPC_SI_O_CL_PDB 0x050u        /* u64 clPdbProperties */
+#define NV_RPC_SI_O_CHIPSET 0x058u       /* u32 Chipset */
+#define NV_RPC_SI_O_FLAGS 0x05Cu         /* 4 x u32 PCIe topology flags */
+#define NV_RPC_SI_O_FLAGS2 0x06Cu        /* 2 x u32 */
+#define NV_RPC_SI_O_UPSTREAM 0x074u      /* u8  upstreamAddressValid */
+#define NV_RPC_SI_O_FHB_BUS_INFO 0x076u  /* 10 bytes */
+#define NV_RPC_SI_O_CHIPSET_ID 0x080u    /* 10 bytes */
+#define NV_RPC_SI_O_ACPI 0x08Cu          /* 488 bytes, all zero, bValid = 0 */
+#define NV_RPC_SI_O_HYPERVISOR 0x274u    /* u32 */
+#define NV_RPC_SI_O_VIRTUAL_CFG 0x278u   /* u16 virtualConfigBits */
+#define NV_RPC_SI_O_IS_PASSTHRU 0x27Cu   /* u32 */
+#define NV_RPC_SI_O_TIMER_OFFSET 0x280u  /* u64 sysTimerOffsetNs */
+#define NV_RPC_SI_O_VF_INFO 0x288u       /* 48 bytes */
+#define NV_RPC_SI_O_TDR 0x2B8u           /* u32 bTdrEventSupported */
+
+/* The fields WE fill.  Everything else in the structure is zero by
+ * construction: the contract's table says so for every remaining field
+ * (simulation, atomics, console, topology flags, ACPI, VF info), and a zero
+ * written by the builder is a decision while a zero left by luck is not. */
+struct nv_rpc_system_info {
+  uint64_t gpu_phys_addr;  /* +0x000 BAR0 base */
+  uint64_t gpu_phys_fb_addr; /* +0x008 BAR1 aperture base */
+  uint64_t gpu_phys_inst_addr; /* +0x010 NOT ESTABLISHED on this card (no BAR2) */
+  uint64_t nv_domain_bus_device_func; /* +0x018 (bus << 8) | devfn */
+  uint64_t max_user_va;    /* +0x038 NOT ESTABLISHED for a non-Linux host */
+  uint64_t sys_timer_offset_ns; /* +0x280 0 is safe (only timestamped logs) */
+  uint32_t pci_config_mirror_base; /* +0x040 0 = no mirror (not established) */
+  uint32_t pci_config_mirror_size; /* +0x044 */
+  uint32_t chipset;        /* +0x058 0: the vendor driver never assigns it */
+};
+
+/* Which field the checker disagreed with, by name, so a boot row says what is
+ * wrong instead of "verify failed". */
+enum nv_rpc_si_field {
+  NV_RPC_SI_F_OK = 0,
+  NV_RPC_SI_F_HEADER,
+  NV_RPC_SI_F_GPU_PHYS,
+  NV_RPC_SI_F_GPU_FB,
+  NV_RPC_SI_F_GPU_INST,
+  NV_RPC_SI_F_BUSDEVFUNC,
+  NV_RPC_SI_F_MAX_USER_VA,
+  NV_RPC_SI_F_PCI_MIRROR_BASE,
+  NV_RPC_SI_F_PCI_MIRROR_SIZE,
+  NV_RPC_SI_F_CHIPSET,
+  NV_RPC_SI_F_TIMER_OFFSET,
+  NV_RPC_SI_F_ZERO, /* a byte the contract says is zero is not */
+  NV_RPC_SI_F_SIZE   /* total size is not 0x2C0 */
+};
+
+const char *nv_rpc_si_field_name(enum nv_rpc_si_field f);
+
+/* Write one opcode-72 element: RPC header (version, signature, length
+ * 0x20 + 0x2C0, function 72, both PENDING sentinels), the 0x2C0-byte payload
+ * at every offset above, then the framing (elemCount, checksum over the whole
+ * element).  `stage` must hold NV_RPC_SLOT * 16 bytes.
+ *   -EINVAL  NULL stage/input.
+ * Returns the elemCount (1 for this payload) or a negative errno from
+ * nv_rpc_elem_build(). */
+int nv_rpc_system_info_build(uint8_t *stage,
+                             const struct nv_rpc_system_info *in, uint32_t seq);
+
+/* Check a built opcode-72 element against the contract's offset table and the
+ * values it was built from: header fields, every named field, every byte the
+ * contract says is zero, and the total size.  Reads the BYTES, never the
+ * input struct, so it catches a store that landed one field away.
+ * Returns NV_RPC_SI_F_OK or the first disagreement. */
+enum nv_rpc_si_field nv_rpc_system_info_check(
+    const uint8_t *stage, const struct nv_rpc_system_info *in);
+
+/* ---- SET_REGISTRY (contract 5.2): a packed table, not a list of structs --
+ *
+ *   +0x00 u32 size        total bytes of the table (header + entries + names
+ *                         + string/binary values)
+ *   +0x04 u32 numEntries
+ *   +0x08 16 x N entries  nameOffset (u32, from the table start), type (u8),
+ *                         data (u32: the dword value, or an offset for
+ *                         string/binary), length (u32)
+ *   then                  NUL-terminated key names, then values, packed
+ *
+ * The table starts immediately after the 32-byte RPC header, and both offsets
+ * are relative to the table's start.
+ *
+ * `length` for a dword entry is 4 -- the size of the value it describes.
+ * NEITHER source states it (contract 5.2 gives the field, not its value for
+ * type 1); RM reads `data` according to `type`, so the number is bookkeeping.
+ * It is pinned by T-28 and stated as INFERRED in the code, not presented as a
+ * documented constant.
+ *
+ * WHICH KEYS ARE MANDATORY IS NOT ESTABLISHED (contract 5.2).  nv_rpc_registry_build
+ * takes the list from the caller and accepts n == 0: an empty table is
+ * well-formed, and a driver that needs keys the source does not name has to
+ * find them from a firmware that answers, not from a guess.
+ */
+#define NV_RPC_REG_HDR 0x08u
+#define NV_RPC_REG_ENTRY 0x10u
+#define NV_RPC_REG_O_SIZE 0x00u
+#define NV_RPC_REG_O_NUM 0x04u
+#define NV_RPC_REG_E_NAMEOFF 0x00u
+#define NV_RPC_REG_E_TYPE 0x04u
+#define NV_RPC_REG_E_DATA 0x08u
+#define NV_RPC_REG_E_LENGTH 0x0Cu
+#define NV_RPC_REG_TYPE_DWORD 1u
+#define NV_RPC_REG_TYPE_BINARY 2u
+#define NV_RPC_REG_TYPE_STRING 3u
+
+struct nv_rpc_registry_entry {
+  const char *name; /* NUL-terminated key name; required */
+  uint8_t type;     /* NV_RPC_REG_TYPE_* */
+  uint32_t dword;   /* type 1: the value */
+  const void *blob; /* type 2: `length` bytes */
+  const char *str;  /* type 3: NUL-terminated, length derived (len + 1) */
+  uint32_t length;  /* type 2 only */
+};
+
+/* Write one opcode-73 element: the RPC header (function 73), the packed table
+ * with names after the entries and values after the names, then the framing.
+ *   -EINVAL   NULL stage, a NULL/empty name, a type outside 1..3, a string
+ *             entry without `str`, a binary entry with no blob or length 0.
+ *   -EMSGSIZE the table does not fit one message (65456 payload bytes);
+ *             splitting into CONTINUATION_RECORD (71) is the transport's, and
+ *             the pre-boot path has exactly one slot for this opcode.
+ * Returns the elemCount (> 0) or a negative errno. */
+int nv_rpc_registry_build(uint8_t *stage,
+                          const struct nv_rpc_registry_entry *e, uint32_t n,
+                          uint32_t seq);
+
+/* The table's total size in bytes for this entry list, or 0 when the list is
+ * malformed (same rules as the builder).  Exposed because the row that reports
+ * the staged message has to say what it expected before it reads it back. */
+uint32_t nv_rpc_registry_table_size(const struct nv_rpc_registry_entry *e,
+                                    uint32_t n);
 
 /* ---- link (spec 4.2) -------------------------------------------------- */
 
@@ -391,6 +685,51 @@ int nv_rpc_rx_take(struct nv_rpc_queue *q, const struct nv_rpc_hw *hw,
 
 /* R8/R9 for the message rx_take() returned. */
 int nv_rpc_rx_release(struct nv_rpc_queue *q);
+
+/* ---- the peer's header as an observation (spec 4.2, 6.2 #2) ---------- */
+
+/* The eight words nv_rpc_link_validate() starts from, read out of
+ * block + stat_off at the moment of the call -- never the cached
+ * struct nv_rpc_peer.  The difference matters: on a boot whose peer never ran,
+ * "peer=none" printed from the cache is an inference ("we never linked"), while
+ * the same sentence printed from these words is a read of the peer's own
+ * address.  `nonzero` counts the eight; 0 is "nothing has written the header
+ * yet", which is what -EAGAIN from nv_rpc_link_validate() means. */
+struct nv_rpc_peer_statq {
+  uint32_t w[8]; /* version,size,msgSize,msgCount,writePtr,flags,rxHdrOff,entryOff */
+  uint32_t nonzero;
+};
+void nv_rpc_peer_snapshot(const struct nv_rpc_queue *q,
+                          struct nv_rpc_peer_statq *s);
+
+/* ---- the first round trip (contract 4.1 steps 9-10) ------------------ */
+
+#define NV_RPC_STATIC_INFO_PAYLOAD 0xCF0u /* reply size the request declares */
+#define NV_RPC_STATIC_INFO_LEN (NV_RPC_RPC_HDR + NV_RPC_STATIC_INFO_PAYLOAD)
+
+/* Build GET_GSP_STATIC_INFO (function 65, length 0x20 + 0xCF0, zeroed payload,
+ * rpc_result PENDING) in a staging buffer and frame it.  Returns elemCount
+ * (1 at this size) or -EINVAL/-EMSGSIZE/-EIO. */
+int nv_rpc_static_info_request(uint8_t *stage, uint32_t seq);
+
+/* Wait for one message whose function is `fn` -- an event such as 0x1001, or a
+ * reply -- bounded by hw->now_us, and release the element once copied.  On
+ * success returns its RPC length (> 0) and stores rpc_result (out + 0x10) in
+ * *result.  No ring stores other than the read pointer, and no doorbell.
+ * -ETIMEDOUT / NV_RPC_NO_REPLY when nothing with that function arrived. */
+int nv_rpc_rx_wait(struct nv_rpc_queue *q, const struct nv_rpc_hw *hw,
+                   uint32_t fn, uint32_t timeout_us, void *out, uint32_t cap,
+                   uint32_t *result, enum nv_rpc_reason *reason);
+
+/* Send `stage` and wait for the reply with function `reply_fn`: tx_prepare,
+ * tx_commit, exactly one doorbell, then rx_wait().  A queue that is not linked
+ * is refused BEFORE any store and before the doorbell (-EAGAIN/NOT_LINKED): a
+ * kick into a queue whose peer never published is a send nobody can see, and
+ * ringing it would look like delivery. */
+int nv_rpc_roundtrip(struct nv_rpc_queue *q, const struct nv_rpc_hw *hw,
+                     uint8_t *stage, uint32_t reply_fn, uint32_t timeout_us,
+                     void *out, uint32_t cap, uint32_t *result,
+                     enum nv_rpc_reason *reason);
 
 /* ---- real seam + log row (x86_64 only, like the rest of the driver) --- */
 
