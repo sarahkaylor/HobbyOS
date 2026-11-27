@@ -66,6 +66,7 @@
  * "no engine here", and it is never a reason to fail a probe. */
 #define NV_REG_UNREADABLE 0xBADF5040u
 #define NV_REG_FENCED 0xBADF5620u
+#define NV_REG_BLOCK_SENTINEL 0xBADF4100u /* the part does not decode this address */
 /* MEASURED r2a: the falcon's PIO *code* port answers this at every IMEM
  * address, secure bit set or not, on a card whose DMEM port answers real data
  * in the same run.  "DEAD SEC1" is the same class of answer as 0xBADF5620 --
@@ -86,6 +87,12 @@ static inline int nv_is_badf(uint32_t v) {
  * "unreadable" because a fenced window is the state our own boot writes into,
  * while an unreadable register is simply not ours to read. */
 static inline int nv_is_fenced(uint32_t v) { return v == NV_REG_FENCED; }
+/* Block sentinel: the part does not decode this address at all (GB202's
+ * 0x10A000/0x110000/0x840000).  Distinct from fenced: there is no engine here
+ * for a start bit to reach, so it is never "do not touch it yet". */
+static inline int nv_is_block_sentinel(uint32_t v) {
+  return v == NV_REG_BLOCK_SENTINEL;
+}
 
 /* ---- PBUS: host/bus glue, BAR0 + 0x100000 (pbus.rst) -------------------
  * CONTRADICTED on AD102 (measured): 0x100100 and 0x100140 both read the
@@ -123,6 +130,26 @@ static inline int nv_is_fenced(uint32_t v) { return v == NV_REG_FENCED; }
 #define NV_FALCON_PMU_BASE 0x10A000
 #define NV_FALCON_GSP_BASE 0x110000
 #define NV_FALCON_SEC2_BASE 0x840000
+
+/* GB202's PFSP at BAR0 0x8F0000: the part's SEC2-class boot processor, started
+ * by the pre-OS chain.  Read-only from this driver (nv_pfsp_probe). */
+#define NV_FALCON_FSP_BASE 0x008F0000
+
+/* GB202 PFSP handoff words (NVIDIA gb202/dev_fsp_pri.h + dev_fsp_addendum.h):
+ *   NV_PFSP_FALCON_COMMON_SCRATCH_GROUP_2(i) = 0x008f0320 + 4i
+ *   NV_PFSP_FALCON_COMMON_SCRATCH_GROUP_3(i) = 0x008f0330 + 4i
+ *   NV_GFW_FSP_UCODE_VERSION = SCRATCH_GROUP_3(1), fields 11:0,
+ *                              major 11:8, minor 7:0
+ * The version is written by the FSP's own ucode, so reading 0x44C (4.76) is
+ * evidence that a boot happened -- not that the engine is still running (the
+ * control words answer the fence word to a non-privileged host). */
+#define NV_PFSP_SCRATCH_GROUP_2 0x0320u
+#define NV_PFSP_SCRATCH_GROUP_3 0x0330u
+#define NV_PFSP_UCODE_VERSION_OFF                                               \
+  (NV_FALCON_FSP_BASE + NV_PFSP_SCRATCH_GROUP_3 + 4u) /* group 3, word 1 */
+#define NV_PFSP_UCODE_VERSION(v) ((v) & 0xfffu)
+#define NV_PFSP_UCODE_MAJOR(v) (((v) >> 8) & 0xfu)
+#define NV_PFSP_UCODE_MINOR(v) ((v) & 0xffu)
 
 /* Falcon IO registers, host view (falcon/io.rst table: "Host" column). */
 #define NV_FALCON_INTR (0x008)

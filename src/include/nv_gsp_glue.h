@@ -113,6 +113,22 @@ void nv_gsp_rpc_teardown(struct nv_gsp_rpc *r);
  * mailbox words. */
 int nv_gsp_rpc_publish(struct nv_gsp_rpc *r, struct nv_dev *d);
 
+/* The address-only half of the same build, for the FMC-abort harness: ensure
+ * the singleton's block exists, then return the bus address and PTE count the
+ * caller writes into RMARGS (mq.sharedMemPhysAddr = PTE[0]).  It does NOT
+ * program the mailbox pair -- nv_gsp_rpc_publish() does that, and doing both
+ * here would be two writes where the harness measured one. */
+int nv_gsp_rpc_publish_bus(struct nv_dev *d, uint64_t *bus_out,
+                           uint32_t *pte_count_out);
+
+/* The peer side (the harness's readback): the status queue's producer header
+ * words verbatim, one link attempt, one message read before consuming it, and
+ * "has GSP-RM written the size word yet". */
+void nv_gsp_rpc_peer_row(const char *tag, int t_ms);
+int nv_gsp_rpc_peer_link(struct nv_dev *d);
+int nv_gsp_rpc_peer_take(const char *tag);
+int nv_gsp_rpc_peer_written(void);
+
 /* Commit one staged element (nv_rpc_req_init + nv_rpc_elem_build format,
  * length at NV_RPC_R_LENGTH) and notify the peer.  Exactly one
  * nv_rpc_kick() per successful call: commit does not notify and nothing else

@@ -714,6 +714,225 @@ int nv_gsp_rpc_stage8(struct nv_dev *d) {
   return nv_gsp_rpc_stage8_into(&g_gsp_rpc, d);
 }
 
+/* ============================================================================
+ *  The peer side: publish early, then read what GSP-RM wrote.
+ *
+ *  WHY THESE EXIST.  Stage 8 above can only tell you "the status header is
+ *  still zero" -- it publishes a block nobody has been told about.  On the
+ *  Hopper/Blackwell boot path the block's address reaches GSP-RM *inside its
+ *  boot arguments* (the RMARGS region: mq.sharedMemPhysAddr = PTE[0],
+ *  cmdQueueOffset, statQueueOffset), so the block must be built BEFORE the COT
+ *  that boots the FMC.  nv_gsp_rpc_publish_bus() is that ordering: it returns
+ *  the bus address the caller writes into RMARGS, and it is the same singleton
+ *  the later link/read use.
+ *
+ *  nv_gsp_rpc_peer_row() prints the status queue's producer header words
+ *  verbatim -- those are the bytes GSP-RM writes, and on a boot where the RM
+ *  never runs they stay zero.  nv_gsp_rpc_peer_take() reads ONE message and
+ *  prints its element and RPC headers before advancing our read pointer, so
+ *  the log keeps the id it saw (INIT_DONE is 0x1001, an event) instead of
+ *  letting nv_rpc_rx_take() dispatch it into a counter.
+ *
+ *  FOLD NOTE: this block is the gb202 FMC-abort harness's copy, carried onto
+ *  the per-instance transport (struct nv_gsp_rpc *r) the integ-swarm tip has.
+ *  The address-only publish is named _bus so it does not collide with
+ *  nv_gsp_rpc_publish(r, d), which also programs the two mailbox words.
+ * ========================================================================== */
+
+static uint32_t peer_ld32(const uint8_t *p) {
+  const volatile uint8_t *b = p;
+  return (uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) |
+         ((uint32_t)b[3] << 24);
+}
+
+static void peer_st32(uint8_t *p, uint32_t v) {
+  volatile uint8_t *b = p;
+  b[0] = (uint8_t)v; b[1] = (uint8_t)(v >> 8);
+  b[2] = (uint8_t)(v >> 16); b[3] = (uint8_t)(v >> 24);
+}
+
+int nv_gsp_rpc_publish_bus(struct nv_dev *d, uint64_t *bus_out,
+                           uint32_t *pte_count_out) {
+  if (!d) return -EINVAL;
+  if (bus_out) *bus_out = 0;
+  if (pte_count_out) *pte_count_out = 0;
+
+  int rc = g_gsp_rpc.built ? 0 : nv_gsp_rpc_setup(&g_gsp_rpc, g_rpc_rx_stage);
+  if (rc != 0) {
+    uart_puts("[NV-RPC] publish FAIL rc=");
+    print_int(rc);
+    uart_puts(" (no block: nothing to hand the RM in RMARGS)\n");
+    return rc;
+  }
+  if (g_gsp_rpc.q.bus == NV_DMA_BUS_INVALID) return -ENOTSUP;
+
+  uint8_t *block = (uint8_t *)phys_to_virt(g_gsp_rpc.block.phys);
+  uart_puts("[NV-RPC] publish bus=");
+  uart_print_hex(g_gsp_rpc.q.bus);
+  uart_puts(" pte0=");
+  uart_print_hex(glue_ld64(block));
+  uart_puts(" pte_count=");
+  print_int((int)g_gsp_rpc.q.pte_count);
+  uart_puts(" cmd=0x");
+  uart_print_hex(g_gsp_rpc.q.cmd_off);
+  uart_puts(" stat=0x");
+  uart_print_hex(g_gsp_rpc.q.stat_off);
+  uart_puts(" (this address is what RMARGS publishes to GSP-RM)\n");
+
+  if (bus_out) *bus_out = g_gsp_rpc.q.bus;
+  if (pte_count_out) *pte_count_out = g_gsp_rpc.q.pte_count;
+  return 0;
+}
+
+/* The nine producer-header words of the status queue, verbatim.  The first
+ * eight are GSP-RM's own write (the host never touches statq); the ninth is
+ * the read pointer, which belongs to whichever side consumes that queue and so
+ * is only meaningful once SWAP_RX was negotiated. */
+void nv_gsp_rpc_peer_row(const char *tag, int t_ms) {
+  if (!g_gsp_rpc.built) {
+    uart_puts("[NV-RPC] peer ");
+    uart_puts(tag ? tag : "?");
+    uart_puts(" no-block\n");
+    return;
+  }
+  const uint8_t *s = (const uint8_t *)phys_to_virt(g_gsp_rpc.block.phys) +
+                     g_gsp_rpc.q.stat_off;
+  uart_puts("[NV-RPC] peer ");
+  uart_puts(tag ? tag : "?");
+  uart_puts(" t_ms=");
+  print_int(t_ms);
+  uart_puts(" v=");
+  uart_print_hex(peer_ld32(s + NV_RPC_Q_VERSION));
+  uart_puts(" size=");
+  uart_print_hex(peer_ld32(s + NV_RPC_Q_SIZE));
+  uart_puts(" msgsize=");
+  uart_print_hex(peer_ld32(s + NV_RPC_Q_MSG_SIZE));
+  uart_puts(" count=");
+  uart_print_hex(peer_ld32(s + NV_RPC_Q_MSG_COUNT));
+  uart_puts(" wp=");
+  uart_print_hex(peer_ld32(s + NV_RPC_Q_WRITE_PTR));
+  uart_puts(" flags=");
+  uart_print_hex(peer_ld32(s + NV_RPC_Q_FLAGS));
+  uart_puts(" rxhdroff=");
+  uart_print_hex(peer_ld32(s + NV_RPC_Q_RX_HDR_OFF));
+  uart_puts(" entryoff=");
+  uart_print_hex(peer_ld32(s + NV_RPC_Q_ENTRY_OFF));
+  uart_puts(" rp=");
+  uart_print_hex(peer_ld32(s + NV_RPC_Q_READ_PTR));
+  uart_puts(peer_ld32(s + NV_RPC_Q_SIZE) ? "\n" : " (header still zero)\n");
+}
+
+/* One link attempt.  0 = the peer published a usable status header; -EAGAIN =
+ * nothing there yet; anything else = written but unusable (the row names the
+ * field).  On success the queue's read-pointer offsets are resolved, which is
+ * what nv_gsp_rpc_peer_take() needs. */
+int nv_gsp_rpc_peer_link(struct nv_dev *d) {
+  if (!d) return -EINVAL;
+  if (!g_gsp_rpc.built) return -EINVAL;
+  enum nv_rpc_link_field bad = NV_RPC_LINK_OK;
+  int rc = nv_rpc_link_apply(&g_gsp_rpc.q, &bad);
+  uart_puts("[NV-RPC] peer link ");
+  if (rc == 0) {
+    uart_puts("linked=1 swapped=");
+    print_int((int)g_gsp_rpc.q.swapped);
+    uart_puts(" flags=0x");
+    uart_print_hex(g_gsp_rpc.q.peer.flags);
+    uart_puts(" (GSP-RM wrote the status header)\n");
+  } else if (rc == -EAGAIN) {
+    uart_puts("linked=0 peer=none (status header still zero: no RM task has "
+              "started)\n");
+  } else {
+    uart_puts("linked=0 field=");
+    uart_puts(nv_rpc_link_field_name(bad));
+    uart_puts(" (header written but unusable)\n");
+  }
+  return rc;
+}
+
+/* Nonzero once GSP-RM has written the status queue's size word. */
+int nv_gsp_rpc_peer_written(void) {
+  if (!g_gsp_rpc.built) return 0;
+  const uint8_t *s = (const uint8_t *)phys_to_virt(g_gsp_rpc.block.phys) +
+                     g_gsp_rpc.q.stat_off;
+  return peer_ld32(s + NV_RPC_Q_SIZE) != 0;
+}
+
+/* Read ONE message from the status queue and print it BEFORE consuming it.
+ * Returns 1 when a message was read and printed, 0 when the queue is empty,
+ * negative on a malformed queue.  Advancing our read pointer is the same write
+ * nv_rpc_rx_release() does (spec 4.3 R8/R9); nothing else is touched. */
+int nv_gsp_rpc_peer_take(const char *tag) {
+  if (!g_gsp_rpc.built) return 0;
+  uint8_t *block = (uint8_t *)phys_to_virt(g_gsp_rpc.block.phys);
+  uint8_t *statq = block + g_gsp_rpc.q.stat_off;
+
+  uint32_t wp = peer_ld32(statq + NV_RPC_Q_WRITE_PTR);
+  uint32_t entry_off = peer_ld32(statq + NV_RPC_Q_ENTRY_OFF);
+  uint32_t rp = peer_ld32(block + g_gsp_rpc.q.own_readptr_off);
+  if (wp >= NV_RPC_MSG_COUNT || rp >= NV_RPC_MSG_COUNT) return -EINVAL;
+  if (entry_off < NV_RPC_SLOT || (entry_off & 0xFFFu)) return -EINVAL;
+  uint32_t avail = (wp + NV_RPC_MSG_COUNT - rp) % NV_RPC_MSG_COUNT;
+  if (avail == 0) return 0;
+
+  const uint8_t *slot = statq + entry_off + (uint64_t)rp * NV_RPC_SLOT;
+  uint32_t ec = peer_ld32(slot + NV_RPC_E_ELEMCOUNT);
+  /* The first slot of a multi-slot message carries the whole RPC header. */
+  const uint8_t *rpc = slot + NV_RPC_ELEM_HDR;
+  uart_puts("[NV-RPC] rx ");
+  uart_puts(tag ? tag : "?");
+  uart_puts(" slot=");
+  print_int((int)rp);
+  uart_puts(" avail=");
+  print_int((int)avail);
+  uart_puts(" ec=");
+  print_int((int)ec);
+  uart_puts(" cksum=0x");
+  uart_print_hex(peer_ld32(slot + NV_RPC_E_CKSUM));
+  uart_puts(" seq=0x");
+  uart_print_hex(peer_ld32(slot + NV_RPC_E_SEQ));
+  uart_puts("\n[NV-RPC] rx-hdr hdrver=0x");
+  uart_print_hex(peer_ld32(rpc + 0x00));
+  uart_puts(" sig=0x");
+  uart_print_hex(peer_ld32(rpc + 0x04));
+  uart_puts(" len=0x");
+  uart_print_hex(peer_ld32(rpc + 0x08));
+  uart_puts(" fn=0x");
+  uart_print_hex(peer_ld32(rpc + 0x0C));
+  uart_puts(" result=0x");
+  uart_print_hex(peer_ld32(rpc + 0x10));
+  uart_puts(" priv=0x");
+  uart_print_hex(peer_ld32(rpc + 0x14));
+  uart_puts(" seq=0x");
+  uart_print_hex(peer_ld32(rpc + 0x18));
+  uart_puts(" spare=0x");
+  uart_print_hex(peer_ld32(rpc + 0x1C));
+  {
+    uint32_t fn = peer_ld32(rpc + 0x0C);
+    uart_puts(" (");
+    uart_puts(fn == NV_RPC_FN_INIT_DONE ? "NV_VGPU_MSG_EVENT_GSP_INIT_DONE, 0x1001"
+                                        : "not the INIT_DONE event");
+    uart_puts(")\n");
+  }
+  /* The first four payload dwords, so a request/response pair is quotable. */
+  uart_puts("[NV-RPC] rx-payload");
+  for (uint32_t i = 0; i < 4; i++) {
+    uart_puts(" d");
+    print_int((int)i);
+    uart_puts("=0x");
+    uart_print_hex(peer_ld32(rpc + NV_RPC_RPC_HDR + i * 4u));
+  }
+  uart_puts("\n");
+
+  uint32_t next = (rp + (ec ? ec : 1u)) % NV_RPC_MSG_COUNT;
+  peer_st32(block + g_gsp_rpc.q.own_readptr_off, next);
+  uart_puts("[NV-RPC] rx-ack rp ");
+  print_int((int)rp);
+  uart_puts(" -> ");
+  print_int((int)next);
+  uart_puts(" (our status read index, written where SWAP_RX put it)\n");
+  return 1;
+}
+
 /* PFB: the write-protected-region block.  MEASURED (docs/nv-gsp-reference.md)
  * and RE-DERIVED from sources (docs/nv-gsp-wpr-contract.md section 2.1):
  *
