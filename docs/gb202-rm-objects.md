@@ -1,0 +1,490 @@
+# GB202 (RTX 5090 `41:00.0`, VM 313) — every FMC / boot-image / ACR blob reachable, and the two abort points
+
+Card `t_a769beaa`, reopened by the owner on 2026-11-27 (**R4**, `docs/nv-plan.md`
+§2.13.1). The reopening's first step is a **zero-boot survey**; this run spent
+**0 boots**. Every row measured on hardware below is quoted from a log written
+before this run and is labelled with its boot; every row this run produced is a
+**static** fact about a file (size, sha256, a decoded header), with its source
+named.
+
+**Part discipline.** Every hardware row is **GB202, `41:00.0`, VM 313**. No AD102
+number is used as a GB202 number. Closing state of this run: VM 313 `stopped`,
+VM 300 `stopped`, `pgrep -c qemu-system-x86` = **0** on r1 and on this worker.
+
+---
+
+## 0. The answer, in six lines
+
+1. **Nothing newer than the 620.70.10 set exists.** `620.73.04` is the newest
+   public tag (`open-gpu-kernel-modules`, commit `a4b95f6a2d`). Its GB202 FMC and
+   boot-image bindata are **byte-identical** to `620.70.10`'s: file sha256
+   `f36554a8…` / `1053c2dc…`, decoded FMC image sha256 `55042efa…`, boot image
+   `fc42d268…`. So does `620.70.06`. A boot spent hunting an FMC newer than 620
+   buys nothing.
+2. **The whole reachable corpus is 11 distinct GB202 FMC images and 11 distinct
+   boot images**, across every public tag from `570.86.16` to `620.73.04` (§2).
+   Only **three FMC images have ever been on the card**: `570.144` (`e4d17650…`,
+   the 0x0B ladder), `580.178.04` (`cea2190c…`, once, on the pre-FRTS COT — 0x5),
+   `620.70.10` (`55042efa…`, 0x824).
+3. **The abort point follows the FMC image, not the artifact set.** With a
+   byte-identical COT, descriptor and boot image, the 570 FMC ends `0x0B` and the
+   620 FMC ends `0x824` at 150 ms (§5). The boot image, the signature/ELF and the
+   ACR cannot move either code; the only host-substitutable input that changes
+   the code is the FMC itself.
+4. **There is no GB202 ACR blob to enumerate.** No `BooterLoadUcode`,
+   `BooterUnloadUcode` or `Sec2Bl` for GB100/GB202 exists in **any** of the 15
+   tags' generated trees, in linux-firmware, or in either `.run`; GB202 exposes
+   no SEC2 window (`0x840000` = `0xBADF4100` 7/7, measured `t_67f09feb`), and its
+   FSP is started by BootFSM out of chip reset and **cannot be staged**.
+5. **One boot is left that answers a question the corpus has not:** the
+   `615.78.08` FMC (`5b74fefd…`) with its own boot image (`37159b4b…`), on the
+   COT that yields `0x0B`. It is the immediate predecessor of the 620 branch and
+   the cleanest single bracket for where `0x824` was introduced. One boot, one
+   variable (§6, §7).
+6. **The comparison that decides whether the FMC or our host structures is the
+   wall needs NVIDIA's own path on this part**: VM 301 (Ubuntu 24.04) with
+   **`nvidia-open-580.178.04`** — the closed module refuses a GB202 (measured,
+   `docs/nv-r1-host-renderer.md` §1.1) — with `41:00` passed through. That is the
+   only success path on this silicon, and its FMC is statically known to be
+   `cea2190c…` (§7).
+
+**Acceptance is not claimed and not moved by this document.** No channel, VA
+space or engine class exists, because GSP-RM has still never started.
+
+---
+
+## 1. What was searched, and what is reachable on 2026-11-27
+
+The survey treated "reachable" as *every path this lane can read without a GPU
+boot*: the worker's disks, r1 as root, the public NVIDIA source tags, the driver
+packages (`.run`), linux-firmware, and the guest images.
+
+| source | what is there | what it yielded |
+|---|---|---|
+| this worker, `/srv/nv5090/work/dl/` | `NVIDIA-Linux-x86_64-570.144.run` (375,742,470 B), `NVIDIA-Linux-x86_64-580.178.04.run` (397,214,534 B), extracted trees `x/` (570), `y/` (580) | the two `.run`s ship **only** `firmware/gsp_ga10x.bin` (570: 63,571,696 B `a8c3ebee…`; 580: 75,028,464 B `3b89a63f…`) and `gsp_tu10x.bin`; no separate FMC, boot or ACR blob |
+| this worker, workspace `fw/` | rebuilt containers `FMC.BIN` 199,820 (`cb59a35c…`), `FMC580.BIN` 215,624 (`cea2190c…`), `FMC595.BIN` 287,884, `FMC620.BIN` 287,884; staged images `BOOTIMG.BIN` 217,088 (`ac068832…`), `BLB.BIN` 200,812 (`d40b48e4…`), `BOOT620.BIN` 290,816 (`fc42d268…`); bindata for 580 and 595 | the exact artifacts the wall's boots staged (§2.2); the 580/595 bindata |
+| this worker, `cache/scratch/t620/` | 620.70.10 GB202 bindata (Boot, Fmc, CcFmc, ConcatenatedFMC + descs) | 620.70.10 row of the table |
+| r1, as root | `/lib/firmware/nvidia/gb202/gsp/` = `bootloader-570.144.bin` 200,812, `fmc-570.144.bin` 199,820, `gsp-570.144.bin` → `../../ga102/gsp/gsp-570.144.bin`; `pve-firmware` 3.18-7; no `.run`, no `nvidia-open` source tree, no DKMS module | linux-firmware's GB202 directory is the **570.144 set only** — the same bytes already on the card; nothing newer |
+| r1, VMs | 313 disk `/root/hobbyos5090/disk.img` (the staged `FMC/BLB/BOOTIMG` set), 301 disk `local-lvm:vm-301-disk-0` (Ubuntu 24.04 + 580.178.04) | 313's staged set is §2.2; 301's 580 firmware is the same 75 MB `gsp_ga10x.bin` already extracted (no need to mount) |
+| GitHub `NVIDIA/open-gpu-kernel-modules` | tags back past 550 (two API pages); every tag ≥ `570.86.16` carries `g_bindata_kgspGetBinArchiveGspRm{Boot,FmcGfwProdSigned}_GB202.c`; newest `620.73.04` | the 15-tag matrix in §2.1–§2.2 (files fetched by `raw.githubusercontent`, no API budget spent on blobs) |
+| linux-firmware | `nvidia/gb202/gsp/{bootloader,fmc,gsp}-570.144.bin` (r1, above) | 570.144 only |
+| GB202 VBIOS / ACR ucode | **no dump exists in the repo** (`docs/nv-vbios-evidence/` holds the 4090's AD102 VBIOS only); the 5090's VBIOS would need a VM 312 ROM-dump boot | not enumerated; and moot — the ACR row in §5.2 and §3 |
+| strix / NAS | documented as unreachable from this lane (`docs/nv-r1-host-renderer.md` §1.1: strix answers ping but not a key; NAS copy is `0770 sarah:sarah`) | nothing |
+
+Method note: file-identity comparisons use the **git blob sha** GitHub returns
+for `src/nvidia/generated/` at each tag (one API call per tag), so "unchanged
+between tags" is a property of the repository, not of my download. Artifact
+hashes below are computed locally from the decoded arrays.
+
+---
+
+## 2. The GB202 artifact corpus, decoded
+
+Every row was decoded from the tag's generated bindata with
+`decode_bindata.py` (this card's tool, attached): it parses the `_data[]` array
+(either `NvU8` byte literals or `NvU64` `0x…ULL` literals, including the
+`NV_DECLARE_ALIGNED` form), trims to the declared `DATA SIZE`, inflates a
+`DESC` with raw deflate, and parses `RM_RISCV_UCODE_DESC`.
+
+### 2.1 FMC images (`g_gsp_gb20x_dyn_prd_gfw_image.bin`, in `GspRmFmcGfwProdSigned_GB202`)
+
+| tag(s) | image B | image sha256 | header `+4` / `+0x0C` | `hash==SHA384(image)` | ever booted on GB202? |
+|---|---|---|---|---|---|
+| 570.86.16 | 198,984 | `eccbd503ae2f803cf2b523a15c98b14e97c5c1fe3928ed9b096dc8ce4178d3b2` | `0x30A00` / `0x25700` | true | no |
+| 570.144 | 199,240 | `e4d176500d82d824c1a915202aca89e093c27febf8be1cf1a0705b544c2d6ddb` | `0x30A00` / `0x25800` | true | **yes — 19+ boots, 0x0B** |
+| 570.211.01 | 199,240 | `52fb09e72c0d8300c294fa74e9be6d68e0bd2fcea9fa9d8b6deceefcde6d6515` | `0x30A00` / `0x25800` | true | no |
+| 575.64.05 | 199,240 | `2e8cd01deb31b5238866da97c5bb26452407247ee17ed0b2db5cd9df7c657a0f` | `0x30A00` / `0x25800` | true | no |
+| 580.65.06 | 215,624 | `c62856e9787222fc68c1c41e44e4ba7c022f9aaff3a56622f3437e3382af50ee` | `0x34A00` / `0x25800` | true | no |
+| 580.178.04 = 580.196.11 | 215,624 | `cea2190cc8d7f74f65c0bd3dbf1c87377b2360417d866dd24345f9419b76703e` | `0x34A00` / `0x25800` | true | **once: `rm23`/mode 13, pre-FRTS COT → 0x5** |
+| 590.48.01 | 286,792 | `6252aafcdd1a6e45dcce8beb6f7f7475ed706d470e57dca56728f9f41efaf0bf` | `0x46000` / `0x36E00` | true | no |
+| 595.104.02 = 595.112.13 | 287,304 | `d7174df2c31d9e7f732fcc6176de233e8716dbc6e002be99bfcab497a986ed6a` | `0x46200` / `0x37000` | true | no |
+| 610.57.04 | 287,304 | `17a15ce8f0e697f83d6d59ee48dc7beb9f8574ad6206d6956564c33fe5584ce0` | `0x46200` / `0x37000` | true | no |
+| 615.78.08 | 287,304 | `5b74fefd42fc7b5f2e30c03e7558631d76899d9c6237ee9115c4e0829c63548b` | `0x46200` / `0x37000` | true | no |
+| 620.70.06 = 620.70.10 = 620.73.04 | 287,304 | `55042efa5e02ded619105c80ae8b110d54ab5c3af22702419c8b0057bc19eef6` | `0x46200` / `0x37000` | true | **yes — 3 boots (`fh620`, `fh60b`, `fh62`), 0x824** |
+
+All eleven carry the **same production public key**, `048bf118bbeb9c0f…`, and
+every `UCODE_HASH` equals `SHA-384(image)` (the FMC is the only GB202 archive
+that has a published hash). The header's `+0x0C` word is the **monitor code
+size** and `+4` the image's total extent; they must agree with the paired boot
+image's `RM_RISCV_UCODE_DESC` (§2.4), which is a free pairing check.
+
+### 2.2 Boot images (`g_gsp_gb20x_dyn_prd_image.bin`, in `GspRmBoot_GB202`)
+
+| tag(s) | image B | image sha256 | desc | code / data / manifest | ever staged on GB202? |
+|---|---|---|---|---|---|
+| 570.86.16 | 200,704 | `c3016bcff080784d1567029ef15128c2c41a7db4b1701e729685cf9a9a4a459b` | v5 (84/28) | `0xB200` / `0x25700`, data `0xA00` | no |
+| 570.144 | 200,704 | `8b8cf1a1067c6f9d0cd966ca9553f9a6894a71b69607171a4c2c98e62e5ead4b` | v5 (84/28) | `0xB200` / `0x25800`, data `0xA00` | no (this is the **bootloader** geometry; `BLB.BIN` wraps it) |
+| 570.211.01 | 200,704 | `df2ed9060e1ea253812afb183504a1088d728b3c81e67d44d0bd764e4174ba67` | v5 | `0xB200` / `0x25800`, data `0xA00` | no |
+| 575.64.05 | 200,704 | `ec081adc7fef0db76f28e3a7dada13b60db542429187896ccb0970ee163ddc38` | v5 | `0xB200` / `0x25800`, data `0xA00` | no |
+| 580.65.06 | 217,088 | `2fe1c6c232a014293cd92ccd6d43bc100b95a8cec36481924aa9097d84285e6c` | v5 | `0xF200` / `0x25800`, data `0xA00` | no |
+| 580.178.04 = 580.196.11 | 217,088 | `ac0688326c1ea8aae2da26d785e7091bedb9a45565b03543a479ed05db0ba367` | v5 | `0xF200` / `0x25800`, data `0xA00` | **yes — every wall boot staged this file as `BOOTIMG.BIN`** |
+| 590.48.01 | 286,720 | `e1265e10912cc87a77e91944d162dd43294576e1ec0c545a03851831607652de` | v6 (92/28) | `0xF200` / `0x36E00`, data `0xA00` | no |
+| 595.104.02 = 595.112.13 | 290,816 | `eb8d7c1f5ccbcff006a3f68031e973e2cca0853eeba5c4cbcfbc89dba8f36cfe` | v6 | `0xF200` / `0x37000`, data `0xA00` | no |
+| 610.57.04 | 290,816 | `146a49168cae2b385d8ae7a79fd11c503004c070550dbca651967bddee0ed0c2` | v6 | `0xF200` / `0x37000`, data `0xA00` | no |
+| 615.78.08 | 290,816 | `37159b4b7ce28066bbf83d11d50abff8e26722eb6bc2825290c14944a7c6aef0` | v6 | `0xF200` / `0x37000`, data `0xA00` | no |
+| 620.70.06 = 620.70.10 = 620.73.04 | 290,816 | `fc42d2683f131df161c3afb1fcf9895b9fca8661e86234f3283fdcaacea3c4c1` | v7 (96/29) | `0xF200` / `0x37000`, data `0xA00` | **yes — `fh62` staged it as `BOOT620.BIN`** |
+
+Two facts that correct a loose reading of the earlier rounds:
+
+* **`BLB.BIN` is the 570.144 bootloader container**: its `nvfw` header is
+  `magic 0x10de, ver 1, size 0x31100, hdr 0x18, data 0x6c + 0x31000`, and the
+  200,704-byte image at `0x6c` is exactly the 570.144 `GspRmBoot_GB202`
+  payload (`8b8cf1a1…`, full-image match checked). Its inner desc is the one
+  the kernel quotes (`code@0xB200 size 0x25800`), so the 570-generation archive
+  is the **bootloader image**, while 580+ ships the **GSP-RM boot image** at
+  `code@0xF200`.
+* `rm55`'s `0x1C` is therefore *consistent with* the 570 bootloader container
+  being offered where a GSP-RM boot image was expected; the row does not by
+  itself prove which check wrote `0x1C` (the same code answers descriptor-field
+  violations), so this is an inference, not a second measurement.
+
+### 2.3 Provenance correction: which driver ships which boot image
+
+This is new and it changes a label, not a row. The 570.144 and 580.178.04
+`.run` packages ship their closed module as
+`kernel/nvidia/nv-kernel.o_binary` (98,164,824 B and 112,677,456 B). Searching
+those two objects for the first 16 bytes of each boot image gives a unique
+answer:
+
+| image | 570.144 `nv-kernel.o_binary` | 580.178.04 `nv-kernel.o_binary` |
+|---|---|---|
+| 570.144 boot `8b8cf1a1…` (200,704, code `0xB200`) | **@0x2dbaea8** | absent |
+| 580.178.04 boot `ac068832…` (217,088, code `0xF200`) | **absent** | **@0x36df1c8** |
+| 570.144 FMC `e4d17650…` | @0x2d8ae60 | absent |
+| 580.178.04 FMC `cea2190c…` | absent | @0x36ab180 |
+
+So the **217,088-byte `BOOTIMG.BIN` that every wall boot staged is the
+580.178.04 image**, and the 570.144 driver's own boot image (200,704,
+`8b8cf1a1…`, `code@0xB200`) **has never been on the card**. The kernel comment
+at `src/kernel/nv_fsp_cot.c:1507–1509` ("the vendor's dyn_prd image (0x34A00
+content, code@0xF200) the 570 driver ships") is **not supported by the bytes**:
+the 570 module embeds the 0x30A00 image, the 580 module the 0x34A00 one. No
+measured row changes — the rows already name the size and the container — but
+the earlier reports' phrase "the 570 boot image" for the 217,088-byte file is a
+mislabelling, and it means the **true 570.144 pair has never been run** (§6,
+rank 5).
+
+### 2.4 The static pairing rule (new, zero-boot)
+
+The FMC image header's `+0x0C` code size equals the paired boot image's
+`monitorCodeSize` in **every** generation:
+
+| class | FMC `+0x0C` | boot desc `monitorCodeSize` | tags |
+|---|---|---|---|
+| 199 KiB | `0x25700` / `0x25800` | `0x25700` / `0x25800` | 570.86 / 570.144–575 |
+| 215 KiB | `0x25800` | `0x25800`, code at `0xF200` | 580 |
+| 286 KiB | `0x36E00` | `0x36E00` | 590 |
+| 287 KiB | `0x37000` | `0x37000` | 595, 610, 615, 620 |
+
+So a *legitimate* one-variable FMC swap also stages that FMC's own boot image
+(the `fh62` pair already did this for 620 and still got `0x824`; the geometry was
+right, which is why the negative is informative).
+
+---
+
+## 3. "Newer than 570 and the 620.70.10 set": the proof of nothing new
+
+The public tag list (`/tags?per_page=100`, two pages, down to `550.40.85` —
+older than any GB202-capable tag) was read whole.
+The GB202-relevant tags, their commit dates, and the git blob shas of the two
+GB202 bindata:
+
+| tag | commit date | `GspRmBoot_GB202` blob | `GspRmFmcGfwProdSigned_GB202` blob |
+|---|---|---|---|
+| 570.86.16 | 2025-01-30 | `631d347748a4` | `7206a8bdb750` |
+| 570.144 | — | `a58b9899ef21` | `af135475fd87` |
+| 570.211.01 | 2026-01-13 | `0c6f6c44655a` | `be18c302217c` |
+| 575.64.05 | 2025-07-22 | `f0e397e7c9ab` | `7d904fa5b3a7` |
+| 580.65.06 | — | `73158c175249` | `1d00cc123f67` |
+| 580.178.04 | 2026-08-03 | `2cb97d9fe513` | `f0bc104f4c4d` |
+| 580.196.11 | — | `2cb97d9fe513` | `f0bc104f4c4d` (same) |
+| 590.48.01 | 2025-12-18 | `99e7e8facb41` | `9d4d3c4078b5` |
+| 595.104.02 | 2026-09-22 | `3ec9002e1cf0` | `af6cedb07d44` |
+| 595.112.13 | — | `3ec9002e1cf0` | `af6cedb07d44` (same) |
+| 610.57.04 | 2026-08-03 | `20c3a76fbe04` | `03b00601bb8d` |
+| 615.78.08 | 2026-10-07 | `2b09b1e7eb9f` | `8d978b7e4a64` |
+| 620.70.06 | 2026-11-05 | `e64a54452c90` | `5ae49fb706e9` |
+| 620.70.10 | 2026-11-23 | `e64a54452c90` | `5ae49fb706e9` (same) |
+| **620.73.04** | 2026-11-18 (tag commit) | **`e64a54452c90`** | **`5ae49fb706e9`** (same) |
+
+**The newest tag moves no GB202 byte.** `620.70.06`, `620.70.10` and `620.73.04`
+share both blobs; the decoded images are identical (`55042efa…`, `fc42d268…`),
+and the local 620.70.10 files are byte-identical to the 620.73.04 downloads
+(sha256 `f36554a84612654e…` and `1053c2dc1127ff2a…`). Two other pairs are also
+identical and cannot be re-booted as if new: `580.178.04 == 580.196.11`,
+`595.104.02 == 595.112.13`.
+
+Also checked at `620.73.04` (`src/nvidia/generated/`, 546 entries, one API read):
+
+* **No `BooterLoadUcode` / `BooterUnloadUcode` / `Sec2Bl` for GB100 or GB202.**
+  The booter set is `{TU102, TU116, GA100, GA102, AD102}`; `ksec2GetBinArchiveBlUcode`
+  is TU102-only. The same is true of the 14 other tags' listings (`grep` over all
+  15 `gen/*.json`: **0** GB-class booter files in every one).
+* **No GB202 FSP image.** The only `fsp` entries are `g_kern_fsp_nvoc.c`,
+  `g_fsp_events_nvoc.c` and `g_bindata_spdmGetBinArchiveFspL1Certificate_IMPL.c`.
+  `kern_fsp_gb202.c` (620.73.04, and byte-identical in 620.70.10) still says:
+  *"In GB202, Bootfsm triggers FSP execution out of chip reset."*
+
+That is the complete answer to "anything newer": **the FMC/boot/ACR corpus is
+closed at 620.70.10 for GB202**. What remains unmeasured is a *class*, not a
+"newer" artifact: the 590/595/610/615 range (four distinct FMC images), plus the
+580 pair on the corrected COT and the true 570.144 same-tag pair (§6).
+
+---
+
+## 4. The 620 `UCODE_DESC_PROD`, re-decoded (confirming `t_320e84e5`)
+
+The 620.70.10 boot image's desc is **not** a 32-byte tag: it is 4 `NvU64`
+literals holding a **29-byte raw-deflate stream** of a **96-byte
+`RM_RISCV_UCODE_DESC` version 7**. This run's decoder reproduces the parent's
+result from both 620 tags, byte for byte:
+
+```
+stored 96 B (compressed size 29), inflated 96
++0x00 07 00 00 00   version 7
++0x20 00 0A 00 00   manifestOffset 0      (manifestSize 0xA00 at +0x24)
++0x28 00 0A 00 00   monitorDataOffset 0xA00
++0x2C E8 00 00 00   monitorDataSize 0xE800 (59,392)
++0x30 F2 00 00 00   monitorCodeOffset 0xF200
++0x34 70 03 00 00   monitorCodeSize 0x37000 (225,280)
++0x38 01 00 00 00   bIsMonitorEnabled 1
+```
+
+Image 290,816 B (`0x47000`): manifest `0 / 0xA00`, monitor data `0xA00 /
+0xE800`, monitor code `0xF200 / 0x37000`, then 3,584 B of zeros — the three
+regions tile the front of the file (quoted from `t_320e84e5` §1.2, re-checked
+against the image here). The **570 desc is the same three offsets** with
+`monitorCodeSize 0x25800`; what changes at 620 is the *size* of the image and the
+struct's trailing fields (`bIsSmp`, `bIsPlicEnabled`, `numDebugBuffers`), not the
+placement the FMC consumes. `kgspPopulateWprMeta_GH100` reads exactly
+`monitorCode/Data/manifestOffset`, which is why the earlier "unpublished offsets"
+worry was a decoder problem, not a missing field.
+
+---
+
+## 5. The two abort points, and which artifacts can move each
+
+### 5.1 What the two points are, quoted
+
+**`0x0B` — the 570.144 FMC's terminal code** (`t_0936a17f` `rm41`, GB202 VM 313):
+
+```
+[NV-FSPCOT] ttl t_s=27 hwcfg2=0x000000008187A7F7 m0=0x0000000000000000 … wpr2_lo=0x0000000007E61200 wpr2_hi=0x0000000007F1EE00 statq_d0=0x0000000000000000
+[NV-FSPCOT] ttl t_s=28 hwcfg2=0x000000008187A7F7 m0=0x000000000000000B … wpr2_lo=0x000000007FFFFE00 wpr2_hi=0x0000000000000000 statq_d0=0x0000000000000000
+```
+
+**`0x824` — the 620.70.10 FMC's code** (`t_320e84e5` `fh60b`, GB202 VM 313):
+
+```
+fmc image bytes=287304  file=FMC620.BIN fmc img_d0=0x0000000000480403 img_d1=0x0000000000046200
+[NV-FSPCOT] rm tl t_ms=150 hwcfg2=0x000000008187A7F7 m0=0x0000000000000824 … wpr2_lo=0x000000007FFFFE00 wpr2_hi=0x0000000000000000 fmcerr=0x0000000012000824
+[NV-FSPCOT] fmcerr verdict reg=0x14dc=0x0000000012000824 … variant=1 partition=1 err=0x0000000000000824 info=0
+```
+
+`fh60b` staged the 217,088-byte boot image the wall always used (the 580.178.04
+image, `ac068832…`; `t_320e84e5` calls it the 570 image — see §2.3) with the 620
+FMC; `fh62` staged the 620 boot image with it. Both: `0x824` at 150 ms,
+`0x14DC = 0x12000824`. So the boot image does not select this code either.
+
+### 5.2 The rule the corpus establishes
+
+> **With the host inputs held byte-identical, the FMC image selects the abort
+> point. The boot image, the GSP-RM signature, the radix3 ELF and the ACR are
+> all downstream of, or absent from, that choice.**
+
+Evidence for each clause:
+
+| artifact | can it move `0x0B`? | can it move `0x824`? | the row |
+|---|---|---|---|
+| **FMC image** | **yes** — 570.144 is `0x0B`; 620.70.10 is `0x824`; 580.178.04 is `0x5` on the old COT | **yes** | `rm41`, `fh60b`, `fh62`, `rm23` |
+| boot image **content/address** | no | no | `rm56` (address unmapped → same `0x0B`); `fh62` (620 image → same `0x824`) |
+| boot image **container form** | no — it changes a *different* code | no | `rm55` (`BLB.BIN` → `0x1C`) |
+| GSP-RM **signature** | no | no | `rm53` (`0x1D`) |
+| radix3 **ELF** | no | no | `rm54` (`0x02`) |
+| **ACR / SEC2** | no — no blob exists, no window accepts one | no | `t_67f09feb`: `0x840000` = `0xBADF4100` 7/7, gate `0xAD00BC` = `0xFF` |
+| **FSP** | no — in-chip, BootFSM-started, not stageable | no | `kern_fsp_gb202.c`, no FSP image in any tag |
+| descriptor / COT **fields** | no (each measured) | no (each measured) | `docs/gb202-rm-parked.md` §5, 20 rows |
+
+### 5.3 The one gap in the corpus
+
+Only **three** of the eleven FMC images have been on the card, and the 580 one
+was only run on the **pre-FRTS COT** (`frtsVidmemSize = 0`), where every FMC
+stops at `0x5` before the `0x0B` gate:
+
+* `570.144` → `0x0B` (19+ boots, the whole `t_a769beaa`/`t_0936a17f` ladder);
+* `580.178.04` → `0x5` once (`rm23`, mode 13, vendor FMC + vendor boot image,
+  before `rm29` found that the COT needs a non-zero FRTS pair);
+* `620.70.10` → `0x824` (3 boots).
+
+Everything in the 199 KiB class except 570.144, the whole 590/595/610/615 range,
+and the 580 pair **on the corrected COT** is unmeasured.
+
+---
+
+## 6. Ranked candidates, with the boot each costs
+
+A candidate is worth a boot only if it can change one of the two codes at fixed
+host inputs. Ranking is by *new information per boot*, not by version.
+
+| # | candidate | pair to stage | boots | which abort it can move | why it is ranked here |
+|---|---|---|---|---|---|
+| 1 | **615.78.08** | FMC `5b74fefd…` + `BOOT615` `37159b4b…` | **1** | `0x824` (if the early check predates 620) or `0x0B` (if it is 620-only) | the **immediate predecessor of the 620 branch** (2026-10-07 vs 2026-11-05) and the cleanest single bracket; the formatted-error path is a 610+/620 feature, so if it aborts it may write a *named* code in `0x14DC`; geometry `0x37000` matches its boot image |
+| 2 | **580.178.04** | FMC `cea2190c…` + `BOOTIMG.BIN` `ac068832…` (already staged) | **1** | `0x0B` (or `0x824`, or the wall moving) | NVIDIA's own GB202 FMC for the 580 driver that signs this part; booted **only** on the pre-FRTS COT (`0x5`), never on the COT that yields `0x0B`; the boot image is already the 580 one, so this is the first true **same-tag** pair, and no new artifact has to be built |
+| 3 | **610.57.04** | FMC `17a15ce8…` + `BOOT610` `146a4916…` | 1 | bisects `0x824` | only needed if 615 answers `0x824`: the 610 branch (2026-08-03) is an earlier 287 KiB generation and moves the boundary two months back |
+| 4 | **570.211.01** | FMC `52fb09e7…` + `BOOT570.211` `df2ed906…` | 1 | `0x0B` (build specificity only) | cheapest falsifier of "`0x0B` is the 570.144 build", but same class/geometry — low information |
+| 5 | **570.144 same-tag pair** | FMC `e4d17650…` + the **570.144** boot `8b8cf1a1…`, `code@0xB200` | 1 | `0x0B` (control) | the true 570 driver pair has **never** been on the card (§2.3): every wall boot used the 580 boot image at `0xF200`. Expected to reproduce `0x0B` (`rm56` says the boot image is read after that point), so it is a control, not a lever; it needs the boot image and the `bootloaderCodeOffset` changed together |
+| 6 | 590.48.01, 595.104.02, 575.64.05, 580.65.06, 570.86.16 | — | — | — | no question left that rows 1–3 do not answer; their class boundary is covered by 610/615 |
+
+**Do not spend:** 620.70.06 / 620.70.10 / 620.73.04 (identical to the FMC already
+booted), 580.196.11 (= 580.178.04), 595.112.13 (= 595.104.02), any "newer" FMC
+(none exists), any booter/ACR blob (none exists), any FSP (not stageable), and
+every host-field variation in `docs/gb202-rm-parked.md` §5.
+
+---
+
+## 7. The single comparison that would distinguish them
+
+### 7.1 Primary: one variable, the missing third point
+
+Hold the **COT, the WPR descriptor, the boot args page and the boot args offsets
+byte-identical** to the state that yields `0x0B` (mode 58/59's vendor heap pair,
+FRTS-in-FB 64 MiB/1 MiB, `frts_size 0`), and vary **only the FMC image**. The
+corpus already has two ends:
+
+* 570.144 → `0x0B` (measured, 19+ boots);
+* 620.70.10 → `0x824` at 150 ms (measured, 3 boots).
+
+The missing point is **615.78.08** — the immediate predecessor of the 620
+branch, formatted-error capable, geometry `0x37000` with its own boot image. One
+boot decides:
+
+| 615 outcome | what it proves |
+|---|---|
+| `0x0B`, `0x14DC=0` | the early abort is **620-specific**; the 620 FMC added a WPR-phase check 615 does not have — and `0x0B` is what the pre-620 FMCs do on this part |
+| `0x824` (or any formatted `0x14DC`) | the early abort is **not 620-specific**; a 287 KiB FMC that predates 620 already rejects this host state, so the wall is the FMC↔FSP protocol, not a 620 regression — and 610 (§6 rank 3) then bisects when it appeared |
+| `0x0`/`INIT_DONE`, status queue written | the wall moves — that is an **R2** event, and the card stops being a wall |
+
+**What it needs:** the HobbyOS 5090 image in **VM 313**, booted with
+`tools/nv/gb202fsp-boot.sh <img> <tag>` (one boot, `STOP_AFTER_VERDICT=1`,
+`STOP_PATTERN='^\[NV-FSPRM\] verdict='`), the 615 FMC container and `BOOT615.BIN`
+staged as `/NVIDIA/GSP/FMC.BIN` and `/NVIDIA/GSP/BOOTIMG.BIN`. **No kernel module
+is involved** — our kernel is the driver. Before that boot, add the vendor's own
+failure registers to the sampler (§8): it costs no boot and may name the code.
+
+**Guest/module flavour for the control (7.2):** the Linux guest is **VM 301**
+(Ubuntu 24.04, DKMS), and the module must be **`nvidia-open-580.178.04`** — the
+closed `nvidia.ko` **refuses a GB202 by design**, measured 2026-11-27:
+`NVRM: … requires use of the NVIDIA open kernel modules`, `RmInitAdapter failed!
+(0x22:0x56:897)` (`docs/nv-r1-host-renderer.md` §1.1). A 5090 baseline built on
+the closed module fails before it can say anything about the FSP.
+
+### 7.2 The control only NVIDIA can give: its own path on the same part
+
+The primary comparison can tell you *where* the abort changes; it cannot tell you
+whether **any** of our FMCs is the one this part expects. The only success path
+on GB202 is NVIDIA's own driver, and the comparison is a single guest boot:
+
+* **guest:** VM 301, Ubuntu 24.04, `41:00` passed through (`qm set 301 --hostpci0
+  0000:41:00,pcie=1`), `nvidia-open-580.178.04` (not the closed module);
+* **capture, at the same offsets this kernel reads:** `NV_PGSP_FALCON_MAILBOX0/1`,
+  `NV_PBUS_ZB_SW_SCRATCH_GSP_FMC_ERROR` (`0x14DC`), `NV_THERM_I2CS_SCRATCH`
+  (`0xAD00BC`), and `NV_PFSP_FALCON_COMMON_SCRATCH_GROUP_2(0..3)`, on the success
+  path and on any failure;
+* **the known answer to "which FMC":** the 580 open module binds
+  `GspRmFmcGfwProdSigned_GB202` = **`cea2190c…` (215,624 B)** — the same image as
+  rank 2. If NVIDIA's own 580 path reaches `INIT_DONE` on this part, then a
+  215,624-byte FMC **can** boot here, and our `0x0B` is a host-structure
+  difference (the COT/descriptor/args), not an FMC-generation wall. If it does
+  not, the wall is the in-chip FSP's generation, and no host artifact can move
+  it.
+
+That is the distinguishing experiment, and it is one guest boot plus one HobbyOS
+boot against a **known FMC identity**, not another sweep of host fields.
+
+---
+
+## 8. The instrument gap (zero-boot fix, do this before the boot)
+
+NVIDIA's own failure path, `kfspDumpDebugState_GB100` (620.73.04
+`src/nvidia/src/kernel/gpu/fsp/arch/blackwell/kern_fsp_gb100.c`), reads **more
+registers than this kernel's sampler**:
+
+```
+NV_PFSP_FALCON_COMMON_SCRATCH_GROUP_2(0) … (3)
+NV_PGSP_FALCON_MAILBOX0 / MAILBOX1
+NV_PBUS_SW_SCRATCH_GSP_FMC_ERROR                     (0x14DC)
+NV_PGSP_MAILBOX(0) … NV_PGSP_MAILBOX(NV_PGSP_MAILBOX__SIZE_1-1)
+FSP microcode version (GFW FSP_UCODE_VERSION), then the CMS2 and DMEM logs
+```
+
+Our sampler prints `m0`, `m1`, `0x14DC`, `HWCFG2`, `FALCON_OS/RM`, `rvctl` — but
+**not** `SCRATCH_GROUP_2[0..3]` and **not** `NV_PGSP_MAILBOX(1..)`: the kernel
+reads `NV_GSP_ENGINE_MAILBOX0` (`0x804`, index 0) but never the rest of that
+array. `t_67f09feb` measured the FSP's own scratch at +2 ms
+(`scratch2 s0=0x9F s3=0xA`, `ucode_ver 0x44C`) — those are live FSP progress
+words, and the `0x0B` transition has never been sampled against them. Adding six
+readbacks to the 1 Hz loop costs **0 boots** and is the cheapest chance to give
+`0x0B` a name (the FMC's code is encrypted; the FSP's scratch is not).
+
+---
+
+## 9. Statically ruled out — do not spend a boot on it
+
+Everything in `docs/gb202-rm-parked.md` §5 still holds (descTarget, `fbSize`,
+`frtsSize`, signature/ELF/boot-image identity and address, the boot-image
+container, FRTS-in-FB, the heap pair, the 620-pair result, `0x14DC` from a 570
+FMC). This survey adds:
+
+| hypothesis | ruled out by |
+|---|---|
+| an FMC **newer than 620.70.10** exists | `620.73.04` is the newest tag; its two GB202 blobs are identical to `620.70.10`'s (§3) |
+| `620.70.06` is a different GB202 artifact | same two blob shas as 620.70.10/620.73.04 |
+| `580.196.11` / `595.112.13` are new artifacts | same blob shas as 580.178.04 / 595.104.02 |
+| a GB202 **SEC2 booter / ACR ucode** is reachable | absent from 15/15 `generated/` listings (442→546 entries), absent from linux-firmware (`nvidia/gb202/` has `gsp/` only), absent from both `.run`s |
+| "the 217,088-byte boot image is the 570.144 one" | the 570.144 `nv-kernel.o_binary` embeds `8b8cf1a1…` (200,704, code `0xB200`); `ac068832…` is in the 580.178.04 module (§2.3) |
+| a GB202 **FSP** image is stageable | absent from every tag; `kern_fsp_gb202.c`: BootFSM starts it out of chip reset; the gate `0xAD00BC` is the host's only lever |
+| the **boot image** can move `0x824` | `fh62` (620 image, right geometry) == `fh60b` (570 image) == `0x824` |
+| the **boot image** can move `0x0B` | `rm56` (address unmapped) == baseline `0x0B` at the same time |
+| **`0x14DC`** is readable from a 570 FMC | 0 in all 8 `t_0936a17f` boots; the formatted-error reader/format is 610+/620 |
+| a **cross-generation FMC pair** is invalid by geometry | the FMC header `+0x0C` matches the boot desc's code size for every class (§2.4); 570 FMC + 580 boot is code-size-compatible (`0x25800`) |
+| the **ACR writes/copies anything** into FB | `rm43`/`rm59b` census: `other=0 meta=0 gfw=0`; 256-byte stride over the WPR2 band, `nz_head=0 nz_all=0` |
+
+**Not** ruled out: the **580 FMC on the corrected COT**; the **610/615 generation
+boundary**; and the **meaning of `0x0B`** (not in `flcnretval.h`, not an FSP
+`kern_fsp_retval.h` code, and the producing FMC is encrypted).
+
+---
+
+## 10. Method and evidence
+
+Static-only commands, reproducible from this workspace:
+
+```sh
+# the tag matrix (one API read per tag, blobs by raw.githubusercontent)
+curl -s "https://api.github.com/repos/NVIDIA/open-gpu-kernel-modules/contents/src/nvidia/generated?ref=<tag>"
+# the decode (no third-party deps; raw deflate for DESC, hashlib for identity)
+python3 decode_bindata.py matrix/*_Boot.c matrix/*_FmcGfwProdSigned.c … > survey.json
+# the FMC header geometry check
+python3 fmchdr.py    # +4 = image extent, +0x0C = monitor code size
+```
+
+Attached to the card: `REPORT-gb202-rm-survey.md` (this file),
+`gb202-rm-survey-evidence.tar.gz` (the 15 `gen/*.json` listings, `survey.json`,
+the decoded FMC/boot images, `decode_bindata.py`, `fmchdr.py`, `mktable.py`),
+and the full `survey.json`.
+
+Files staged by the wall (for the boot in §7.1), with this run's hashes:
+
+```
+FMC.BIN     199,820  cb59a35c1d4bd1274d7267fd…  (linux-firmware 570.144; image e4d17650…)
+FMC580.BIN  215,624  cea2190cc8d7f74f65c0bd3d…  (580.178.04 bindata; image cea2190c…)
+FMC595.BIN  287,884  17057676d36400fdeb7dda5e…  (595.104.02 bindata; image d7174df2…)
+FMC620.BIN  287,884  ec87ba3509186302ab194f7a…  (620.70.10 container; image 55042efa…)
+BOOTIMG.BIN 217,088  ac0688326c1ea8aae2da26d7…  (580.178.04 boot image)
+BLB.BIN     200,812  d40b48e431d1707dc77af360…  (570.144 bootloader, nvfw container)
+BOOT620.BIN 290,816  fc42d2683f131df161c3afb1…  (620.70.10 boot image)
+```
+
+**No boot was spent. Nothing on r1 was started, bound, or installed.** Closing
+state: VM 313 `stopped`, VM 300 `stopped`, `pgrep -c qemu-system-x86` = 0 on r1
+and on this worker.
