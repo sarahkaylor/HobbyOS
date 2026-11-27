@@ -213,11 +213,15 @@ static int g_dmabuf_serial;
  *     refs = one per client GEM-handle-STYLE table entry (a handle entry, not
  *            the numeric handle) + one per exported syncobj fd
  *
- * `point` is the whole state: 0 = never signalled, N = the last point reached.
- * A binary syncobj is this same field at 1 (Linux's syncobj is a fence pointer
- * and CREATE_SIGNALED installs the stub fence), so the binary rows and the
- * timeline rows cannot drift apart.  The table is node-wide and bounded; a
- * create that finds it full refuses -ENOSPC by name.
+ * `point` is the state that makes a wait true: 0 = never signalled, N = the
+ * last point reached.  A binary syncobj is this same field at 1 (Linux's
+ * syncobj is a fence pointer and CREATE_SIGNALED installs the stub fence), so
+ * the binary rows and the timeline rows cannot drift apart.  Since WP-SYNCFAM
+ * the record also carries `submitted`, the ledger QUERY answers from; it is
+ * written at submit time so it outlives the pending entry (struct
+ * shim_sobj's own comment has the rules, including why a host-side binary
+ * signal is NOT a submission).  The table is node-wide and bounded; a create
+ * that finds it full refuses -ENOSPC by name.
  *
  * The record and its refcount helpers live here, above the client table, because
  * client_clear()/client_teardown() have to drop the handle entries' references.
@@ -227,6 +231,18 @@ struct shim_sobj {
   int refs;
   int id;         /* serial for the console rows */
   uint64_t point; /* the signalled point; 0 = never */
+  /* WP-SYNCFAM: the SUBMITTED-point ledger.  `point` is what the object has
+   * REACHED; this is the highest point a fence was handed at SUBMIT time (an
+   * EXEC's sig, or a TIMELINE_SIGNAL), and it is written before the fence can
+   * retire, so it survives client_reap_locked() dropping the pending entry.
+   * That is exactly what QUERY's LAST_SUBMITTED needs: the pending table is
+   * not a ledger, it is a to-do list.  A host-side binary SIGNAL or CREATE_
+   * SIGNALED reaches point 1 without submitting a timeline point, so it moves
+   * `point` alone -- and QUERY with LAST_SUBMITTED then names that gap instead
+   * of answering 0 (see op_drm_syncobj_query).  RESET clears both: Linux's
+   * reset replaces the fence with NULL, so the chain -- and with it every
+   * submitted point -- is gone. */
+  uint64_t submitted;
 };
 #define SHIM_MAX_SOBJ_OBJS 32
 static struct shim_sobj g_sobjs[SHIM_MAX_SOBJ_OBJS];
@@ -253,6 +269,7 @@ static struct shim_sobj *sobj_alloc_locked(void) {
       o->used = 1;
       o->refs = 1;
       o->point = 0;
+      o->submitted = 0;
       o->id = ++g_sobj_serial;
       return o;
     }
@@ -266,6 +283,7 @@ static int sobj_unref_locked(struct shim_sobj *o) {
   o->used = 0;
   o->refs = 0;
   o->point = 0;
+  o->submitted = 0;
   o->id = 0;
   return 1;
 }
@@ -380,6 +398,15 @@ static int r_prime = 24;
  * the timeline suite and hid the fd/release rows, which are the evidence for
  * acceptance item 3. */
 static int r_sync = 128;
+
+/* WP-SYNCFAM's own bucket, for the DRM face's OWN refusal row ("drm refuse
+ * <name> errno=ENOSYS"), which used to share r_refuse with every refused stage
+ * of both faces.  r_refuse is 8 rows per BOOT and is spent by the 'N' face and
+ * the DRM argument refusals long before the syncobj suites run, so the rows
+ * that name the sync_file wall -- the evidence this card reports -- were
+ * silently suppressed.  One row per refused request number, and the tier sends
+ * each of them once or twice (plus size-mismatch probes). */
+static int r_drm_refuse = 24;
 
 static void row_end(void) {
   uint32_t cpu = row_cpu();
@@ -1434,6 +1461,9 @@ static const struct drm_row g_drm_rows[] = {
     {0xc4, 16}, /* SYNCOBJ_RESET               struct drm_syncobj_array     */
     {0xc5, 16}, /* SYNCOBJ_SIGNAL              struct drm_syncobj_array     */
     {0xca, 48}, /* SYNCOBJ_TIMELINE_WAIT       struct ..._timeline_wait     */
+    /* WP-SYNCFAM: QUERY takes drm.h's timeline_array (24), and there `points`
+     * is the OUT array -- no new struct, no new number. */
+    {0xcb, 24}, /* SYNCOBJ_QUERY               struct ..._timeline_array    */
     {0xcd, 24}, /* SYNCOBJ_TIMELINE_SIGNAL     struct ..._timeline_array    */
 };
 
@@ -1461,11 +1491,13 @@ static const struct {
     {NVSHIM_DRM_NR_GEM_CPU_PREP, "gem_cpu_prep"},
     {NVSHIM_DRM_NR_GEM_CPU_FINI, "gem_cpu_fini"},
     /* WP-SYNC: 0xc1 / 0xc2 / 0xca / 0xcd are SERVED now (the row table above),
-     * so they are no longer refusals.  What remains of the syncobj surface is
-     * named here: QUERY would need a submitted-point ledger, TRANSFER a
-     * sync_file/point move this node has no object for, and EVENTFD an
-     * eventfd registration -- each is a different rung, not a poll. */
-    {NVSHIM_DRM_NR_SYNCOBJ_QUERY, "syncobj_query"},
+     * and WP-SYNCFAM added 0xcb (QUERY) to it.  What remains of the syncobj
+     * surface is named here, and both rows are the SAME wall: a sync_file
+     * object -- a file whose poll() answers POLLIN when a fence signals.
+     * TRANSFER moves a point between timelines including through a sync_file
+     * import, and EVENTFD registers an eventfd to be written when a point
+     * signals; this node has neither object, and the eventfd half has no
+     * kernel-side counter writer to reach (docs/nv-shim-syncfam.md §5). */
     {NVSHIM_DRM_NR_SYNCOBJ_TRANSFER, "syncobj_transfer"},
     {NVSHIM_DRM_NR_SYNCOBJ_EVENTFD, "syncobj_eventfd"},
 };
@@ -3198,17 +3230,15 @@ static struct shim_sobj *client_sobj_obj(const struct shim_client *c, uint32_t h
   return sobj_lookup(c->sobj_obj[at]);
 }
 
-/* The highest point already SUBMITTED for a syncobj: the signalled point, or a
- * point a pending fence will write when it retires.  This is what makes "you
- * are going back in time" detectable at submit time instead of at retire time,
- * where a lower point would silently be overwritten. */
-static uint64_t sobj_submitted_locked(const struct shim_client *c, uint32_t idx) {
-  uint64_t hi = 0;
-  struct shim_sobj *o = sobj_lookup(idx);
-  if (o) hi = o->point;
-  for (int i = 0; i < c->npend; i++)
-    if (c->pend[i].obj == idx && c->pend[i].point > hi) hi = c->pend[i].point;
-  return hi;
+/* The highest point already SUBMITTED for a syncobj -- the ledger, not the
+ * pending table.  Written at SUBMIT time (an EXEC's accepted sig, or a
+ * TIMELINE_SIGNAL), so it is still there after client_reap_locked() drops the
+ * pending entry at retire.  Two callers depend on that being the same number:
+ * this is what makes "you are going back in time" detectable at submit time
+ * instead of at retire time, where a lower point would silently be
+ * overwritten, and it is what QUERY answers with LAST_SUBMITTED. */
+static uint64_t sobj_submitted_locked(const struct shim_sobj *o) {
+  return o ? o->submitted : 0;
 }
 
 /* A syncobj reaches its point when the fence it is waiting on has retired.
@@ -3266,6 +3296,7 @@ static const char k_sync_reasons[][32] = {
     "bad_shape",
     "wait_flag_unsupported",
     "not_this_clients_syncobj",
+    "point_beyond_ledger",
 };
 #define SYNC_NUM_REASONS (int)(sizeof k_sync_reasons / sizeof k_sync_reasons[0])
 
@@ -3322,7 +3353,10 @@ static int op_drm_syncobj_create(struct process *p, int fd, uint64_t arg) {
     return -ENOSPC;
   }
   /* CREATE_SIGNALED is "point 1": the same record a timeline signal at 1 would
-   * leave, which is what makes the two rows one state machine. */
+   * leave, which is what makes the two rows one state machine.  It is a
+   * HOST-side stub, though, so it moves the signalled point only: the
+   * submitted ledger stays empty and QUERY with LAST_SUBMITTED names the gap
+   * (op_drm_syncobj_query) instead of inventing a submission. */
   o->point = (sc.flags & NVSHIM_DRM_SYNCOBJ_CREATE_SIGNALED) ? 1 : 0;
   uint32_t handle = 0;
   for (uint32_t cand = 1;; cand++) {
@@ -3670,7 +3704,7 @@ static int op_drm_syncobj_timeline_signal(struct process *p, int fd, uint64_t ar
      * report and no chain to clamp into one field, so it refuses the point and
      * names it -- a signal that silently lands on a lower point is a fence the
      * consumer can never distinguish from the one it is waiting on. */
-    if (points[i] <= sobj_submitted_locked(c, sobj_index(o))) {
+    if (points[i] <= sobj_submitted_locked(o)) {
       spinlock_release(&g_shim_lock);
       sync_refuse("drm syncobj refuse", "timeline_signal point=", points[i],
                   NVSHIM_SYNC_POINT_ORDER);
@@ -3681,6 +3715,11 @@ static int op_drm_syncobj_timeline_signal(struct process *p, int fd, uint64_t ar
   for (uint32_t i = 0; i < sa.count_handles; i++) {
     struct shim_sobj *o = client_sobj_obj(c, handles[i]);
     if (o && points[i] > o->point) o->point = points[i];
+    /* WP-SYNCFAM: a timeline signal ADDS a point to the object's timeline (in
+     * Linux it is drm_syncobj_add_point with an already-signalled stub), so it
+     * is a submission and the ledger records it -- otherwise QUERY would have
+     * to answer LAST_SUBMITTED from the signalled mark alone. */
+    if (o && points[i] > o->submitted) o->submitted = points[i];
     if (points[i] > last) last = points[i];
   }
   spinlock_release(&g_shim_lock);
@@ -3690,6 +3729,97 @@ static int op_drm_syncobj_timeline_signal(struct process *p, int fd, uint64_t ar
   row_say((int)sa.count_handles);
   row_s(" point=");
   row_hex(last);
+  row_end();
+  return 0;
+}
+
+/* ---- QUERY (WP-SYNCFAM) -------------------------------------------------
+ * "What point is this object at?" -- the one syncobj row whose answer the
+ * PENDING TABLE cannot give: an EXEC's entry is dropped the moment its fence
+ * retires (client_reap_locked), and that is precisely when a consumer asks.
+ * So the answer comes from the per-record ledger (o->submitted / o->point).
+ *
+ * The uAPI is drm.h's: DRM_IOCTL_SYNCOBJ_QUERY is DRM_IOWR(0xcb, struct
+ * drm_syncobj_timeline_array) -- the SAME struct TIMELINE_SIGNAL takes, but
+ * here `points` is the OUTPUT array, one u64 per handle.  There is no input
+ * point: the flag chooses WHICH high-water mark is written,
+ *   DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED -> the last point SUBMITTED
+ *   no flag                                -> the last point SIGNALLED
+ * which is Linux's drm_syncobj_query_ioctl (chain head's seqno vs the last
+ * signalled link in the chain).
+ *
+ * Everything is resolved before anything is written: a batch with one foreign
+ * handle writes NOTHING (drm_syncobj_array_find is all-or-nothing), and a
+ * record whose point came from a HOST-side stub -- CREATE_SIGNALED or a binary
+ * SIGNAL, where Linux has a chain-less stub fence and answers 0 -- is refused
+ * by name instead, because 0 there cannot be told from "nothing submitted".
+ * ---------------------------------------------------------------------- */
+static int op_drm_syncobj_query(struct process *p, int fd, uint64_t arg) {
+  struct nvshim_drm_syncobj_timeline_array qa;
+  if (vm_user_read(p, arg, &qa, (int)sizeof qa) != 0) return -EFAULT;
+  if (qa.flags & ~(uint32_t)NVSHIM_DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED) {
+    sync_refuse("drm syncobj refuse", "query flags=", (uint64_t)qa.flags,
+                NVSHIM_SYNC_BAD_FLAGS);
+    return -EINVAL;
+  }
+  if (qa.count_handles == 0 || qa.count_handles > SHIM_MAX_SYNCOBJS) {
+    sync_refuse("drm syncobj refuse", "query count=", (uint64_t)qa.count_handles,
+                NVSHIM_SYNC_BAD_SHAPE);
+    return -EINVAL;
+  }
+  /* `points` is the answer: a query with nowhere to put it is a shape error,
+   * not a silent success (Linux fails the copy_to_user with -EFAULT). */
+  if (qa.points == 0) {
+    sync_refuse("drm syncobj refuse", "query points=", 0, NVSHIM_SYNC_BAD_SHAPE);
+    return -EINVAL;
+  }
+  uint32_t handles[SHIM_MAX_SYNCOBJS];
+  uint64_t answers[SHIM_MAX_SYNCOBJS];
+  int rc = drm_user_u32s(p, qa.handles, handles, qa.count_handles);
+  if (rc != 0) return rc;
+  int last = (qa.flags & NVSHIM_DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED) != 0;
+
+  spinlock_acquire(&g_shim_lock);
+  struct shim_client *c = client_find(shim_pid(p), fd);
+  if (!c) {
+    spinlock_release(&g_shim_lock);
+    return -ENODEV;
+  }
+  for (uint32_t i = 0; i < qa.count_handles; i++) {
+    struct shim_sobj *o = client_sobj_obj(c, handles[i]);
+    if (!o) {
+      /* A point past the ledger: this client holds no such object, so there is
+       * no point to answer.  Named, and nothing written for the batch. */
+      spinlock_release(&g_shim_lock);
+      sync_refuse("drm syncobj refuse", "query handle=", (uint64_t)handles[i],
+                  NVSHIM_SYNC_NOT_THIS_CLIENTS);
+      return -EINVAL;
+    }
+    if (last && o->point > o->submitted) {
+      /* The object reached a point the submitted ledger has no entry for
+       * (a host-side stub).  Linux answers 0 here -- its stub fence carries no
+       * chain -- and 0 is exactly what "nothing was ever submitted" answers,
+       * so this node refuses and names the gap instead. */
+      spinlock_release(&g_shim_lock);
+      sync_refuse("drm syncobj refuse", "query handle=", (uint64_t)handles[i],
+                  NVSHIM_SYNC_POINT_BEYOND_LEDGER);
+      return -EINVAL;
+    }
+    answers[i] = last ? o->submitted : o->point;
+  }
+  uint64_t row_point = answers[0];
+  spinlock_release(&g_shim_lock);
+
+  if (vm_kwrite(p, qa.points, answers,
+                (int)(qa.count_handles * (uint32_t)sizeof(uint64_t))) != 0)
+    return -EFAULT;
+  row_begin("drm syncobj", &r_sync);
+  row_s("query n=");
+  row_say((int)qa.count_handles);
+  row_s(" point=");
+  row_hex(row_point);
+  row_s(" last_submitted=");
+  row_say(last);
   row_end();
   return 0;
 }
@@ -3723,7 +3853,18 @@ static int op_drm_syncobj_set(struct process *p, int fd, uint64_t arg, int signa
   }
   for (uint32_t i = 0; i < sa.count_handles; i++) {
     struct shim_sobj *o = client_sobj_obj(c, handles[i]);
+    /* WP-SYNCFAM: the binary rows are HOST-side fence writes, not timeline
+     * submissions.
+     *  - SIGNAL installs a stub fence (Linux: drm_syncobj_assign_null_handle's
+     *    already-signalled fence), which has no chain, so it moves `point` and
+     *    leaves the ledger alone; QUERY with LAST_SUBMITTED names that gap
+     *    instead of answering 0 for it.
+     *  - RESET replaces the fence with NULL, which drops the chain and with it
+     *    every submitted point -- so it clears the ledger too, and QUERY answers
+     *    0 in both modes afterwards, exactly as Linux's chain-less object does.
+     * `point` never goes backwards except here, where going back IS the call. */
     o->point = signal ? 1 : 0;
+    if (!signal) o->submitted = 0;
   }
   spinlock_release(&g_shim_lock);
   return 0;
@@ -4014,7 +4155,7 @@ static int op_drm_exec(struct process *p, int fd, uint64_t arg) {
        * signalled one and any pending retire. */
       if (want[i] > 1 || (syncs[i].flags & NVSHIM_DRM_SYNC_TYPE_MASK) ==
                             NVSHIM_DRM_SYNC_TIMELINE_SYNCOBJ) {
-        if (sobj_submitted_locked(c, c->sobj_obj[at]) >= want[i]) {
+        if (sobj_submitted_locked(sobj_lookup(c->sobj_obj[at])) >= want[i]) {
           order_ok = 0;
           bad_point = want[i];
         }
@@ -4105,6 +4246,12 @@ static int op_drm_exec(struct process *p, int fd, uint64_t arg) {
       if (at < 0) continue;
       struct shim_sobj *o = sobj_lookup(c->sobj_obj[at]);
       if (!o) continue;
+      /* WP-SYNCFAM: the ledger is written HERE, at submit, before the fence
+       * can retire -- so the answer to "what point did you submit?" is the
+       * same before and after client_reap_locked() drops this pending entry.
+       * A ledger written at retire would forget exactly the points a QUERY
+       * client asks about. */
+      if (want[i] > o->submitted) o->submitted = want[i];
       if (rm()->fence_test(ch, fence) == 0) {
         /* Retired already: the point is there now, no pending entry needed. */
         if (want[i] > o->point) o->point = want[i];
@@ -4596,7 +4743,7 @@ int nv_shim_drm_ioctl(struct process *p, int fd, unsigned long req, uint64_t arg
 
   const char *ref = drm_refusal_name(nr);
   if (ref) {
-    row_begin("drm refuse", &r_refuse);
+    row_begin("drm refuse", &r_drm_refuse);
     row_s(ref);
     row_s(" errno=ENOSYS");
     row_end();
@@ -4615,7 +4762,7 @@ int nv_shim_drm_ioctl(struct process *p, int fd, unsigned long req, uint64_t arg
    * check a winsys built against a different header trips, and it is the one a
    * mutation test is pointed at. */
   if (NVSHIM_DRM_SIZE(r) != (uint32_t)want) {
-    row_begin("drm refuse", &r_refuse);
+    row_begin("drm refuse", &r_drm_refuse);
     row_s("size nr=");
     row_say((int)nr);
     row_s(" want=");
@@ -4649,6 +4796,7 @@ int nv_shim_drm_ioctl(struct process *p, int fd, unsigned long req, uint64_t arg
   case 0xc4: return op_drm_syncobj_set(p, fd, arg, 0);
   case 0xc5: return op_drm_syncobj_set(p, fd, arg, 1);
   case 0xca: return op_drm_syncobj_timeline_wait(p, fd, arg);
+  case 0xcb: return op_drm_syncobj_query(p, fd, arg);
   case 0xcd: return op_drm_syncobj_timeline_signal(p, fd, arg);
   default: return -ENOTTY; /* unreachable: drm_row_size() covered the table */
   }

@@ -141,6 +141,9 @@ static void test_nvshim_drm_layout(void) {
   EXPECT_EQ((int)NVSHIM_DRM_IOC_SYNCOBJ_FD_TO_HANDLE, (int)0xC01864C2u);
   EXPECT_EQ((int)NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_SIGNAL, (int)0xC01864CDu);
   EXPECT_EQ((int)NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT, (int)0xC03064CAu);
+  /* WP-SYNCFAM: QUERY is drm.h's DRM_IOWR(0xcb, timeline_array) -- 24 bytes,
+   * the same struct TIMELINE_SIGNAL takes. */
+  EXPECT_EQ((int)NVSHIM_DRM_IOC_SYNCOBJ_QUERY, (int)0xC01864CBu);
 
   /* Field decomposition: magic 'd', the uAPI sub-number, the struct size. */
   EXPECT_EQ((int)NVSHIM_DRM_TYPE(NVSHIM_DRM_IOC_EXEC), 0x64);
@@ -161,8 +164,10 @@ static void test_nvshim_drm_layout(void) {
   EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_SYNCOBJ_FD_TO_HANDLE), 24);
   EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_SIGNAL), 24);
   EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT), 48);
-  /* ... and the three that stay refused answer 0 (refused) at any width. */
-  EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_SYNCOBJ_QUERY), 0);
+  /* ... and the two that stay refused answer 0 (refused) at any width.
+   * WP-SYNCFAM: QUERY left this list -- it is a served row now, so it carries
+   * drm.h's 24 rather than a refusal's 0. */
+  EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_SYNCOBJ_QUERY), 24);
   EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_SYNCOBJ_TRANSFER), 0);
   EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD), 0);
   /* NVIF is served since WP-NVIF, and it is the ONE row whose encoded size is
@@ -180,13 +185,13 @@ static void test_nvshim_drm_layout(void) {
   /* Refusal names exist for every refused row, and for nothing served. */
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_NVIF) != 0), 0);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_GEM_PUSHBUF) != 0), 1);
-  /* WP-SYNC: the four served syncobj rows left the refusal table; the three that
-   * are still refusals kept their names. */
+  /* WP-SYNC: the four served syncobj rows left the refusal table; WP-SYNCFAM
+   * served QUERY, so the two that are still refusals kept their names. */
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT) != 0), 0);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_SIGNAL) != 0), 0);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_HANDLE_TO_FD) != 0), 0);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_FD_TO_HANDLE) != 0), 0);
-  EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_QUERY) != 0), 1);
+  EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_QUERY) != 0), 0);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_TRANSFER) != 0), 1);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD) != 0), 1);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_EXEC) != 0), 0);
@@ -230,13 +235,14 @@ static void test_nvshim_drm_refusals(void) {
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_PRIME_HANDLE_TO_FD, 0), -EINVAL);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_PRIME_FD_TO_HANDLE, 0), -EINVAL);
   /* WP-SYNC: 0xc1 / 0xc2 / 0xca / 0xcd are SERVED now, so with no process they
-   * answer the same -EINVAL every served row does; the three syncobj rows this
-   * node still refuses stay -ENOSYS by name. */
+   * answer the same -EINVAL every served row does; WP-SYNCFAM served QUERY for
+   * the same reason, and the two syncobj rows this node still refuses stay
+   * -ENOSYS by name. */
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_HANDLE_TO_FD, 0), -EINVAL);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_FD_TO_HANDLE, 0), -EINVAL);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT, 0), -EINVAL);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_SIGNAL, 0), -EINVAL);
-  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_QUERY, 0), -ENOSYS);
+  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_QUERY, 0), -EINVAL);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_TRANSFER, 0), -ENOSYS);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD, 0), -ENOSYS);
 
@@ -1890,12 +1896,14 @@ static void test_nvshim_drm_prime_refusals(void) {
    * anything when PRIME left it, and WP-SYNC removed exactly the four syncobj
    * rows it serves --- */
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_GEM_FLINK, 0), -ENOSYS);
-  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_QUERY, 0), -ENOSYS);
+  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_TRANSFER, 0), -ENOSYS);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_GEM_PUSHBUF, 0), -ENOSYS);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SETPARAM, 0), -ENOSYS);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_GEM_FLINK) != 0), 1);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT) != 0), 0);
-  EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_QUERY) != 0), 1);
+  /* WP-SYNCFAM: QUERY left the refusal table -- it is served, so it has no
+   * refusal name and is driven for real by test_nvshim_drm_syncobj_query. */
+  EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_QUERY) != 0), 0);
   /* ... and the two PRIME numbers are served, not refused-by-size: a wrong
    * encoded size is -EINVAL (the number exists), never -ENOSYS. */
   EXPECT_EQ(nv_shim_ioctl(pr.p, pr.fd, NVSHIM_DRM_IOC_ANY(0x2d, 16), pr.base), -EINVAL);
@@ -2482,6 +2490,245 @@ static void test_nvshim_drm_syncobj_fd(void) {
   EXPECT_EQ(nv_rm_mock_live(), 0);
 }
 
+/* ============================================================================
+ *  WP-SYNCFAM: SYNCOBJ_QUERY -- the submitted-point ledger, read through the
+ *  uAPI's own output array.
+ *
+ *  QUERY is the row the PENDING TABLE cannot answer.  An EXEC's pending entry
+ *  is dropped by client_reap_locked() the moment its fence retires, and that
+ *  is exactly when a consumer asks "what point did you submit?" -- so the shim
+ *  keeps `submitted` per record (written at submit time) and `point` (what has
+ *  been reached).  This suite drives both through DRM_IOCTL_SYNCOBJ_QUERY and
+ *  reads the answer out of the uAPI's own points[] array; it never calls the
+ *  kernel seam (nv_shim_test_syncobj_point), which is what makes it evidence
+ *  for a client rather than for an implementation.
+ *
+ *  drm.h's shape: DRM_IOCTL_SYNCOBJ_QUERY is DRM_IOWR(0xcb, struct
+ *  drm_syncobj_timeline_array) -- handles[], points[], count, flags -- and
+ *  `points` is the OUTPUT array.  There is no input point in this row; the
+ *  flag picks which high-water mark is written.
+ * ========================================================================== */
+
+#define QUERY_SENTINEL 0x5A5A5A5A5A5A5A5Aull
+
+/* One QUERY.  The points[] window is seeded with a sentinel every time, so a
+ * refusal that wrote anything would be visible as a changed word. */
+static int sobj_query(struct drm_probe *pr, const uint32_t *hs, uint64_t *ps,
+                      uint32_t n, uint32_t flags) {
+  struct nvshim_drm_syncobj_timeline_array qa;
+  for (unsigned i = 0; i < sizeof qa; i++) ((unsigned char *)&qa)[i] = 0;
+  qa.handles = DREQ_HANDLES;
+  qa.points = DREQ_POINTS;
+  qa.count_handles = n;
+  qa.flags = flags;
+  if (n && vm_kwrite(pr->p, DREQ_HANDLES, (void *)hs, (int)(n * sizeof(uint32_t))) != 0)
+    return -1000;
+  for (uint32_t i = 0; i < n; i++) ps[i] = QUERY_SENTINEL;
+  if (n && vm_kwrite(pr->p, DREQ_POINTS, (void *)ps, (int)(n * sizeof(uint64_t))) != 0)
+    return -1001;
+  int rc = drm_ioc(pr, NVSHIM_DRM_IOC_SYNCOBJ_QUERY, &qa, (int)sizeof qa);
+  if (rc == 0 && vm_user_read(pr->p, DREQ_POINTS, ps, (int)(n * sizeof(uint64_t))) != 0)
+    return -1002;
+  return rc;
+}
+
+/* The binary SIGNAL row (struct drm_syncobj_array, nr 0xc5). */
+static int sobj_binary_signal(struct drm_probe *pr, uint32_t h) {
+  struct nvshim_drm_syncobj_array sa;
+  sa.handles = DREQ_HANDLES;
+  sa.count_handles = 1;
+  sa.pad = 0;
+  if (vm_kwrite(pr->p, DREQ_HANDLES, &h, (int)sizeof h) != 0) return -1000;
+  return drm_ioc(pr, NVSHIM_DRM_IOC_SYNCOBJ_SIGNAL, &sa, (int)sizeof sa);
+}
+
+static void test_nvshim_drm_syncobj_query(void) {
+  uart_puts("  Running test_nvshim_drm_syncobj_query...\n");
+  tests_run++;
+
+  struct drm_probe pr;
+  EXPECT_EQ(drm_probe_up(&pr, 106), 0);
+  if (!pr.up) return;
+  uint32_t bo = 0;
+  int32_t ch = 0;
+  int setup = sync_exec_setup(&pr, &bo, &ch);
+  EXPECT_EQ(setup, 0);
+  if (setup != 0) {
+    drm_probe_down(&pr);
+    return;
+  }
+
+  uint32_t h = 0, hs[1];
+  uint64_t pts[1];
+  EXPECT_EQ(sobj_create(&pr, 0, &h), 0);
+  hs[0] = h;
+
+  /* --- (1) BEFORE any EXEC: the pre-submit value, in both modes.  A fresh
+   * record has submitted nothing and reached nothing, so both answer 0 -- and
+   * that 0 is a measured value (the output array is overwritten from the
+   * sentinel), not an untouched buffer. --- */
+  pts[0] = 0;
+  EXPECT_EQ(sobj_query(&pr, hs, pts, 1, NVSHIM_DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED), 0);
+  EXPECT_EQ((int)pts[0], 0);
+  pts[0] = 0;
+  EXPECT_EQ(sobj_query(&pr, hs, pts, 1, 0), 0);
+  EXPECT_EQ((int)pts[0], 0);
+
+  /* --- (2) a TIMELINE_SIGNAL adds a point, so it IS a submission: both modes
+   * answer it at once (Linux's add_point with an already-signalled stub). --- */
+  pts[0] = 5;
+  EXPECT_EQ(sobj_tl_signal(&pr, hs, pts, 1), 0);
+  pts[0] = QUERY_SENTINEL;
+  EXPECT_EQ(sobj_query(&pr, hs, pts, 1, NVSHIM_DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED), 0);
+  EXPECT_EQ((int)pts[0], 5);
+  pts[0] = QUERY_SENTINEL;
+  EXPECT_EQ(sobj_query(&pr, hs, pts, 1, 0), 0);
+  EXPECT_EQ((int)pts[0], 5);
+
+  /* --- (3) EXEC signalling 11, HELD so its fence cannot retire.  The point is
+   * submitted but not reached: LAST_SUBMITTED answers 11, the signalled row
+   * still answers the pre-submit 5.  This is the pair the ledger exists for --
+   * and the reason QUERY used to be a named refusal. --- */
+  struct nvshim_drm_sync sig;
+  sig.flags = NVSHIM_DRM_SYNC_TIMELINE_SYNCOBJ;
+  sig.handle = h;
+  sig.timeline_value = 11;
+  nv_rm_mock_hold(1);
+  EXPECT_EQ(sync_exec_with(&pr, ch, &sig, 1), 0);
+  EXPECT_EQ(nv_rm_mock_pending(), 1);
+  pts[0] = QUERY_SENTINEL;
+  EXPECT_EQ(sobj_query(&pr, hs, pts, 1, NVSHIM_DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED), 0);
+  EXPECT_EQ((int)pts[0], 11);
+  pts[0] = QUERY_SENTINEL;
+  EXPECT_EQ(sobj_query(&pr, hs, pts, 1, 0), 0);
+  EXPECT_EQ((int)pts[0], 5);
+
+  /* --- (4) release the hold and retire the fence with one unsigned EXEC: 11
+   * is now reached as well.  The pending entry is GONE (npend == 0), and the
+   * answer is unchanged -- it comes from the ledger, not from the entry. --- */
+  nv_rm_mock_hold(0);
+  EXPECT_EQ(sync_exec_with(&pr, ch, 0, 0), 0);
+  EXPECT_EQ(nv_rm_mock_pending(), 0);
+  pts[0] = QUERY_SENTINEL;
+  EXPECT_EQ(sobj_query(&pr, hs, pts, 1, NVSHIM_DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED), 0);
+  EXPECT_EQ((int)pts[0], 11);
+  pts[0] = QUERY_SENTINEL;
+  EXPECT_EQ(sobj_query(&pr, hs, pts, 1, 0), 0);
+  EXPECT_EQ((int)pts[0], 11);
+
+  /* A second, higher submission keeps both marks moving forward. */
+  sig.timeline_value = 12;
+  EXPECT_EQ(sync_exec_with(&pr, ch, &sig, 1), 0);
+  EXPECT_EQ(sync_exec_with(&pr, ch, 0, 0), 0); /* kick: retire it */
+  pts[0] = QUERY_SENTINEL;
+  EXPECT_EQ(sobj_query(&pr, hs, pts, 1, NVSHIM_DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED), 0);
+  EXPECT_EQ((int)pts[0], 12);
+
+  /* --- (5) TWO handles in one batch: one u64 per handle, in order. --- */
+  {
+    uint32_t h2 = 0;
+    EXPECT_EQ(sobj_create(&pr, 0, &h2), 0);
+    uint32_t hs2[2];
+    uint64_t pts2[2];
+    hs2[0] = h;
+    hs2[1] = h2;
+    pts2[0] = pts2[1] = QUERY_SENTINEL;
+    EXPECT_EQ(sobj_query(&pr, hs2, pts2, 2, NVSHIM_DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED), 0);
+    EXPECT_EQ((int)pts2[0], 12);
+    EXPECT_EQ((int)pts2[1], 0); /* the fresh one has submitted nothing */
+    EXPECT_EQ(sobj_destroy(&pr, h2), 0);
+  }
+
+  /* --- (6) refusals, every one BY NAME, and nothing written --- */
+  /* a point past the ledger: a handle this client does not hold.  The whole
+   * batch is refused, so the OTHER handle's slot keeps its sentinel too. */
+  {
+    uint32_t bad[2];
+    uint64_t bp[2];
+    bad[0] = h;
+    bad[1] = h + 900;
+    bp[0] = bp[1] = QUERY_SENTINEL;
+    EXPECT_EQ(sobj_query(&pr, bad, bp, 2, NVSHIM_DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED),
+              -EINVAL);
+    EXPECT_EQ((int)(bp[0] == QUERY_SENTINEL), 1);
+    EXPECT_EQ((int)(bp[1] == QUERY_SENTINEL), 1);
+  }
+  /* a point beyond the ledger: CREATE_SIGNALED's point 1 is a HOST-side stub,
+   * never a timeline submission, so LAST_SUBMITTED has no answer for it and
+   * the node refuses (reason=point_beyond_ledger) instead of returning 0.
+   * The signalled row answers the model's point 1. */
+  {
+    uint32_t hb = 0;
+    EXPECT_EQ(sobj_create(&pr, NVSHIM_DRM_SYNCOBJ_CREATE_SIGNALED, &hb), 0);
+    uint32_t hb1[1];
+    hb1[0] = hb;
+    pts[0] = QUERY_SENTINEL;
+    EXPECT_EQ(sobj_query(&pr, hb1, pts, 1, NVSHIM_DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED),
+              -EINVAL);
+    EXPECT_EQ((int)(pts[0] == QUERY_SENTINEL), 1);
+    pts[0] = QUERY_SENTINEL;
+    EXPECT_EQ(sobj_query(&pr, hb1, pts, 1, 0), 0);
+    EXPECT_EQ((int)pts[0], 1);
+    /* ... and the same gap from the binary SIGNAL row on a fresh object. */
+    EXPECT_EQ(sobj_destroy(&pr, hb), 0);
+    uint32_t hb2 = 0;
+    EXPECT_EQ(sobj_create(&pr, 0, &hb2), 0);
+    EXPECT_EQ(sobj_binary_signal(&pr, hb2), 0);
+    hb1[0] = hb2;
+    pts[0] = QUERY_SENTINEL;
+    EXPECT_EQ(sobj_query(&pr, hb1, pts, 1, NVSHIM_DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED),
+              -EINVAL);
+    EXPECT_EQ((int)(pts[0] == QUERY_SENTINEL), 1);
+    /* RESET drops the chain: both marks go back to 0, as Linux's NULL fence
+     * makes both modes answer 0. */
+    {
+      struct nvshim_drm_syncobj_array ra;
+      ra.handles = DREQ_HANDLES;
+      ra.count_handles = 1;
+      ra.pad = 0;
+      EXPECT_EQ(vm_kwrite(pr.p, DREQ_HANDLES, hb1, (int)sizeof(uint32_t)), 0);
+      EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_SYNCOBJ_RESET, &ra, (int)sizeof ra), 0);
+    }
+    pts[0] = QUERY_SENTINEL;
+    EXPECT_EQ(sobj_query(&pr, hb1, pts, 1, NVSHIM_DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED), 0);
+    EXPECT_EQ((int)pts[0], 0);
+    pts[0] = QUERY_SENTINEL;
+    EXPECT_EQ(sobj_query(&pr, hb1, pts, 1, 0), 0);
+    EXPECT_EQ((int)pts[0], 0);
+    EXPECT_EQ(sobj_destroy(&pr, hb2), 0);
+  }
+  /* shape refusals: an undefined flag bit, no handles, and no answer array. */
+  {
+    pts[0] = QUERY_SENTINEL;
+    EXPECT_EQ(sobj_query(&pr, hs, pts, 1, 0x80), -EINVAL);
+    EXPECT_EQ((int)(pts[0] == QUERY_SENTINEL), 1);
+    EXPECT_EQ(sobj_query(&pr, hs, pts, 0, 0), -EINVAL);
+    struct nvshim_drm_syncobj_timeline_array qa;
+    for (unsigned i = 0; i < sizeof qa; i++) ((unsigned char *)&qa)[i] = 0;
+    qa.handles = DREQ_HANDLES;
+    qa.points = 0; /* nowhere to write the answer */
+    qa.count_handles = 1;
+    qa.flags = 0;
+    EXPECT_EQ(vm_kwrite(pr.p, DREQ_HANDLES, hs, (int)sizeof(uint32_t)), 0);
+    EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_SYNCOBJ_QUERY, &qa, (int)sizeof qa), -EINVAL);
+  }
+
+  uart_puts("  [NVSHIM] syncobj query: submitted vs signalled, pre/post submit, "
+            "held fence, refusals by name: PASS\n");
+
+  /* --- teardown --- */
+  EXPECT_EQ(sobj_destroy(&pr, h), 0);
+  struct nvshim_drm_channel_free cf;
+  cf.channel = ch;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_CHANNEL_FREE, &cf, (int)sizeof cf), 0);
+  struct nvshim_drm_gem_close gc;
+  gc.handle = bo;
+  gc.pad = 0;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_CLOSE, &gc, (int)sizeof gc), 0);
+  drm_probe_down(&pr);
+  EXPECT_EQ(nv_rm_mock_live(), 0);
+}
+
 static void test_nvshim_drm_syncobj_refusals(void) {
   uart_puts("  Running test_nvshim_drm_syncobj_refusals...\n");
   tests_run++;
@@ -2498,6 +2745,9 @@ static void test_nvshim_drm_syncobj_refusals(void) {
   EXPECT_EQ(sync_name_is(NVSHIM_SYNC_BAD_SHAPE, "bad_shape"), 1);
   EXPECT_EQ(sync_name_is(NVSHIM_SYNC_WAIT_UNSUPPORTED, "wait_flag_unsupported"), 1);
   EXPECT_EQ(sync_name_is(NVSHIM_SYNC_NOT_THIS_CLIENTS, "not_this_clients_syncobj"), 1);
+  /* WP-SYNCFAM: QUERY's own refusal, for a point the submitted ledger has no
+   * entry for (a host-side stub: CREATE_SIGNALED, binary SIGNAL). */
+  EXPECT_EQ(sync_name_is(NVSHIM_SYNC_POINT_BEYOND_LEDGER, "point_beyond_ledger"), 1);
   /* The 'N' face's feature mask advertises what the node can do. */
   EXPECT_EQ((nv_shim_features() & NVSHIM_FEAT_SYNCOBJ_TIMELINE) != 0, 1);
 
@@ -2643,8 +2893,11 @@ static void test_nvshim_drm_syncobj_refusals(void) {
               -EINVAL);
   }
 
-  /* --- the rows this rung did NOT serve are still -ENOSYS by name --- */
-  EXPECT_EQ(nv_shim_ioctl(pr.p, pr.fd, NVSHIM_DRM_IOC_SYNCOBJ_QUERY, DREQ_BASE), -ENOSYS);
+  /* --- the rows this rung did NOT serve are still -ENOSYS by name.  QUERY is
+   * not in this list any more: WP-SYNCFAM serves it (test_nvshim_drm_syncobj_
+   * query drives it), and TRANSFER + EVENTFD are the two that stay refused --
+   * both on the sync_file/eventfd object this node does not have (docs/
+   * nv-shim-syncfam.md §5). --- */
   EXPECT_EQ(nv_shim_ioctl(pr.p, pr.fd, NVSHIM_DRM_IOC_SYNCOBJ_TRANSFER, DREQ_BASE),
             -ENOSYS);
   EXPECT_EQ(nv_shim_ioctl(pr.p, pr.fd, NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD, DREQ_BASE),
@@ -3167,6 +3420,7 @@ void nv_shim_drm_test_suite(void) {
   test_nvshim_drm_syncobj_timeline();  /* WP-SYNC: timeline points, EXEC retire */
   test_nvshim_drm_syncobj_fd();        /* WP-SYNC: syncobj fd, SCM_RIGHTS, refs */
   test_nvshim_drm_syncobj_refusals();  /* WP-SYNC: the names and the shapes */
+  test_nvshim_drm_syncobj_query();     /* WP-SYNCFAM: the submitted ledger */
   test_nvshim_nvif_layout();
   test_nvshim_nvif_device();
   test_nvshim_nvif_sclass();
