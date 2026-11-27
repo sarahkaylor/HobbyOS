@@ -3278,6 +3278,183 @@ static void test_nvshim_drm_syncobj_transfer(void) {
 }
 
 /* ============================================================================
+ *  WP-TRANSFERFILE: SYNCOBJ_TRANSFER's sync_file SOURCE leg
+ *
+ *  The one reachable form of 0xcc left after WP-TRANSFER: src_handle came from
+ *  IMPORT_SYNC_FILE, so the only point it can name is the floor the import
+ *  installed (the exported file's point, or the explicit TIMELINE point).  A
+ *  transfer at that floor is served in both shapes:
+ *    - the record is PENDING there: the destination gets its own entry on the
+ *      SAME (channel, fence) and one retire lands both -- the destination's
+ *      TIMELINE_WAIT must be -ETIME until the source's fence retires;
+ *    - the record has ALREADY reached it: the destination reaches dst_point
+ *      inside the ioctl (Linux's add_point of an already-signalled fence).
+ *  Which floor a handle carries is measured, not assumed: shape (1) imports
+ *  the file's own point (binary import), shape (2) installs it with TIMELINE.
+ * ========================================================================== */
+static void test_nvshim_drm_syncobj_transfer_syncfile(void) {
+  uart_puts("  Running test_nvshim_drm_syncobj_transfer_syncfile...\n");
+  tests_run++;
+
+  struct drm_probe pr;
+  EXPECT_EQ(drm_probe_up(&pr, 111), 0);
+  if (!pr.up) return;
+  struct nvshim_drm_getparam q;
+  q.param = NVSHIM_PARAM_CHIPSET_ID;
+  q.value = 0;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GETPARAM, &q, (int)sizeof q), 0);
+  uint32_t bo = 0;
+  int32_t ch = 0;
+  int setup = sync_exec_setup(&pr, &bo, &ch);
+  EXPECT_EQ(setup, 0);
+  if (setup != 0) {
+    drm_probe_down(&pr);
+    return;
+  }
+
+  const uint32_t TL = NVSHIM_DRM_SYNCOBJ_TRANSFER_FLAGS_TIMELINE;
+  const uint32_t EX = NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE;
+  const uint32_t EXT = EX | NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_TIMELINE;
+  const uint32_t IM = NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE;
+  const uint32_t IMT = IM | NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_TIMELINE;
+
+  /* --- (1) PENDING: submit 9 through an EXEC, hold the kick, export the file
+   * at 9, import it as a plain (binary) import -- the floor is the file's own
+   * point, 9 -- and transfer from that floor. --- */
+  uint32_t src = 0, dst = 0;
+  EXPECT_EQ(sobj_create(&pr, 0, &src), 0);
+  EXPECT_EQ(sobj_create(&pr, 0, &dst), 0);
+  const uint64_t N = 9;
+  struct nvshim_drm_sync sig;
+  sig.flags = NVSHIM_DRM_SYNC_TIMELINE_SYNCOBJ;
+  sig.handle = src;
+  sig.timeline_value = N;
+  nv_rm_mock_hold(1);
+  EXPECT_EQ(sync_exec_with(&pr, ch, &sig, 1), 0);
+  EXPECT_EQ(nv_rm_mock_pending(), 1);
+
+  int sf = -1;
+  EXPECT_EQ(sobj_export(&pr, src, EXT, N, &sf), 0);
+  uint32_t imp = 0;
+  EXPECT_EQ(sobj_import(&pr, sf, IM, 0, &imp), 0); /* floor = the file's 9 */
+
+  EXPECT_EQ(sobj_transfer(&pr, imp, dst, N, N, TL), 0); /* chained, not copied */
+  {
+    uint32_t hs[1];
+    uint64_t pts[1];
+    hs[0] = dst;
+    pts[0] = N;
+    EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), -ETIME); /* not signalled yet */
+    EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, (int64_t)((timer_get_ms() + 1) * 1000000ull)),
+              -ETIME);
+    EXPECT_EQ(sobj_query(&pr, hs, pts, 1, NVSHIM_DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED), 0);
+    EXPECT_EQ(pts[0], N);
+    EXPECT_EQ(sobj_query(&pr, hs, pts, 1, 0), 0);
+    EXPECT_EQ(pts[0], 0ull);
+    /* the imported handle itself waits on the same floor -- and the source's
+     * fence is what both of them are waiting for */
+    hs[0] = imp;
+    pts[0] = N;
+    EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), -ETIME);
+    hs[0] = src;
+    EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), -ETIME);
+  }
+
+  /* --- (2) one retire lands all three: the source's own entry, the imported
+   * handle's floor (the same record) and the destination's chained entry. --- */
+  nv_rm_mock_hold(0);
+  EXPECT_EQ(sync_exec_with(&pr, ch, 0, 0), 0);
+  EXPECT_EQ(nv_rm_mock_pending(), 0);
+  {
+    uint32_t hs[1];
+    uint64_t pts[1];
+    hs[0] = src;
+    pts[0] = N;
+    EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), 0);
+    hs[0] = imp;
+    EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), 0);
+    hs[0] = dst;
+    EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), 0);
+    pts[0] = 0;
+    EXPECT_EQ(sobj_query(&pr, hs, pts, 1, 0), 0);
+    EXPECT_EQ(pts[0], N);
+  }
+
+  /* ... and the same imported handle, its point now REACHED, transfers again
+   * with no fence at all: the destination is signalled inside the call. --- */
+  {
+    uint32_t dst2 = 0;
+    EXPECT_EQ(sobj_create(&pr, 0, &dst2), 0);
+    EXPECT_EQ(sobj_transfer(&pr, imp, dst2, N, 13, TL), 0);
+    {
+      uint32_t hs[1];
+      uint64_t pts[1];
+      hs[0] = dst2;
+      pts[0] = 13;
+      EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), 0);
+      pts[0] = 0;
+      EXPECT_EQ(sobj_query(&pr, hs, pts, 1, 0), 0);
+      EXPECT_EQ(pts[0], 13ull);
+    }
+    EXPECT_EQ(sobj_destroy(&pr, dst2), 0);
+  }
+  uart_puts("  [NVSHIM] transfer from a sync_file: dst wait -ETIME while the file's fence "
+            "was held, 0 on the SAME retire; a reached floor lands at once\n");
+
+  /* --- (3) ALREADY RETIRED at import time, and the floor installed by an
+   * explicit TIMELINE import point: export at 12 after the signal, import with
+   * TIMELINE at 12, transfer -- the destination wait returns immediately. --- */
+  uint32_t src2 = 0, dst3 = 0;
+  EXPECT_EQ(sobj_create(&pr, 0, &src2), 0);
+  EXPECT_EQ(sobj_create(&pr, 0, &dst3), 0);
+  const uint64_t M = 12;
+  {
+    uint32_t hs[1];
+    uint64_t pts[1];
+    hs[0] = src2;
+    pts[0] = M;
+    EXPECT_EQ(sobj_tl_signal(&pr, hs, pts, 1), 0); /* submitted AND reached */
+  }
+  int sf2 = -1;
+  EXPECT_EQ(sobj_export(&pr, src2, EXT, M, &sf2), 0);
+  uint32_t imp2 = 0;
+  EXPECT_EQ(sobj_import(&pr, sf2, IMT, M, &imp2), 0); /* floor = the stated 12 */
+  EXPECT_EQ(sobj_transfer(&pr, imp2, dst3, M, M, TL), 0);
+  {
+    uint32_t hs[1];
+    uint64_t pts[1];
+    hs[0] = dst3;
+    pts[0] = M;
+    EXPECT_EQ(sobj_tl_wait(&pr, hs, pts, 1, 0), 0); /* no fence to wait for */
+    pts[0] = 0;
+    EXPECT_EQ(sobj_query(&pr, hs, pts, 1, 0), 0);
+    EXPECT_EQ(pts[0], M);
+    pts[0] = 0;
+    EXPECT_EQ(sobj_query(&pr, hs, pts, 1, NVSHIM_DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED), 0);
+    EXPECT_EQ(pts[0], M);
+  }
+
+  /* --- teardown --- */
+  EXPECT_EQ(file_close(pr.p, sf), 0);
+  EXPECT_EQ(file_close(pr.p, sf2), 0);
+  EXPECT_EQ(sobj_destroy(&pr, imp), 0);
+  EXPECT_EQ(sobj_destroy(&pr, imp2), 0);
+  EXPECT_EQ(sobj_destroy(&pr, src), 0);
+  EXPECT_EQ(sobj_destroy(&pr, src2), 0);
+  EXPECT_EQ(sobj_destroy(&pr, dst), 0);
+  EXPECT_EQ(sobj_destroy(&pr, dst3), 0);
+  struct nvshim_drm_channel_free cf;
+  cf.channel = ch;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_CHANNEL_FREE, &cf, (int)sizeof cf), 0);
+  struct nvshim_drm_gem_close gc;
+  gc.handle = bo;
+  gc.pad = 0;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_CLOSE, &gc, (int)sizeof gc), 0);
+  drm_probe_down(&pr);
+  EXPECT_EQ(nv_rm_mock_live(), 0);
+}
+
+/* ============================================================================
  *  WP-TRANSFER: every shape the served leg does NOT answer, by name
  *
  *  Three of these are the card's own: a point that was never submitted, a
@@ -3301,6 +3478,8 @@ static void test_nvshim_drm_syncobj_transfer_refusals(void) {
                          "transfer_point_not_pending"), 1);
   EXPECT_EQ(sync_name_is(NVSHIM_SYNC_TRANSFER_HANDLE_NOT_HELD, "transfer_handle_not_held"), 1);
   EXPECT_EQ(sync_name_is(NVSHIM_SYNC_TRANSFER_SRC_SYNC_FILE, "transfer_src_sync_file"), 1);
+  EXPECT_EQ(sync_name_is(NVSHIM_SYNC_TRANSFER_POINT_BELOW_IMPORT,
+                         "transfer_point_below_import"), 1);
 
   struct drm_probe pr;
   EXPECT_EQ(drm_probe_up(&pr, 110), 0);
@@ -3366,27 +3545,46 @@ static void test_nvshim_drm_syncobj_transfer_refusals(void) {
   EXPECT_EQ(sobj_transfer(&pr, src, dst, 4, 4, TL), -EINVAL);
   EXPECT_EQ(sobj_transfer(&pr, src, dst, 4, 3, TL), -EINVAL);
 
-  /* --- (g) the sync_file leg: a source handle from IMPORT_SYNC_FILE carries a
-   * sync_file's fence, so the transfer is refused by name rather than served
-   * as if it were a timeline point. --- */
+  /* --- (g) the sync_file source leg is SERVED only at the floor its import
+   * installed.  A point BELOW that floor names a fence that never existed on
+   * this record (reason 20 -- its own name, never a silent clamp to the
+   * floor), a point ABOVE it while still inside the submitted ledger names a
+   * later fence the handle does not carry (reason 19), and a point above the
+   * ledger is reason 16 like any other handle. --- */
   {
+    uint32_t sfsrc = 0;
+    EXPECT_EQ(sobj_create(&pr, 0, &sfsrc), 0);
+    {
+      uint32_t hs[1];
+      uint64_t pts[1];
+      hs[0] = sfsrc;
+      pts[0] = 4; /* submitted AND reached: the record's ledger is 4 */
+      EXPECT_EQ(sobj_tl_signal(&pr, hs, pts, 1), 0);
+    }
     int sf = -1;
-    EXPECT_EQ(sobj_export(&pr, other, NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE,
-                          0, &sf), 0);
+    EXPECT_EQ(sobj_export(&pr, sfsrc,
+                          NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE |
+                              NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_TIMELINE,
+                          2, &sf), 0); /* the file names point 2 */
     uint32_t imp = 0;
     EXPECT_EQ(sobj_import(&pr, sf, NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE,
-                          0, &imp), 0);
-    EXPECT_EQ(sobj_transfer(&pr, imp, dst, 1, 5, TL), -EINVAL);
+                          0, &imp), 0); /* floor = the file's 2 */
+    EXPECT_EQ(sobj_transfer(&pr, imp, dst, 1, 5, TL), -EINVAL); /* below the floor */
+    EXPECT_EQ(sobj_transfer(&pr, imp, dst, 4, 5, TL), -EINVAL); /* above it, submitted */
+    EXPECT_EQ(sobj_transfer(&pr, imp, dst, 5, 5, TL), -EINVAL); /* above the ledger */
     EXPECT_EQ(file_close(pr.p, sf), 0);
     EXPECT_EQ(sobj_destroy(&pr, imp), 0);
+    EXPECT_EQ(sobj_destroy(&pr, sfsrc), 0);
   }
 
   /* --- (h) a SUBMITTED point whose fence can no longer land: the source's
    * pending entry was dropped when its handle was destroyed (the record lived
-   * on through a syncobj fd), so the ledger says "submitted" and nothing will
-   * ever say "reached".  A destination chained to that would wait forever, so
-   * the transfer names the gap instead -- reason 17, which (c) cannot reach
-   * because there the ledger is empty. --- */
+   * on through an fd), so the ledger says "submitted" and nothing will ever
+   * say "reached".  A destination chained to that would wait forever, so the
+   * transfer names the gap instead -- reason 17, which (c) cannot reach
+   * because there the ledger is empty.  Measured from BOTH kinds of handle
+   * that keep the record alive: a plain syncobj fd (floor 0) and a sync_file
+   * fd (floor 7, the imported-source shape this rung serves elsewhere). --- */
   {
     uint32_t bo = 0;
     int32_t ch = 0;
@@ -3395,6 +3593,11 @@ static void test_nvshim_drm_syncobj_transfer_refusals(void) {
     EXPECT_EQ(sobj_create(&pr, 0, &hs), 0);
     int pfd = -1;
     EXPECT_EQ(sobj_export(&pr, hs, 0, 0, &pfd), 0); /* keeps the record alive */
+    int sf7 = -1;
+    EXPECT_EQ(sobj_export(&pr, hs,
+                          NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE |
+                              NVSHIM_DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_TIMELINE,
+                          7, &sf7), 0); /* ... and so does this, at point 7 */
     struct nvshim_drm_sync s7;
     s7.flags = NVSHIM_DRM_SYNC_TIMELINE_SYNCOBJ;
     s7.handle = hs;
@@ -3408,6 +3611,12 @@ static void test_nvshim_drm_syncobj_transfer_refusals(void) {
     uint32_t again = 0;
     EXPECT_EQ(sobj_import(&pr, pfd, 0, 0, &again), 0);
     EXPECT_EQ(sobj_transfer(&pr, again, dst, 7, 7, TL), -EINVAL);
+    /* the same absence through the sync_file fd: floor 7, the same dropped
+     * pending entry, so reason 17 with an IMPORT_SYNC_FILE source handle */
+    uint32_t from_sf = 0;
+    EXPECT_EQ(sobj_import(&pr, sf7, NVSHIM_DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE,
+                          0, &from_sf), 0);
+    EXPECT_EQ(sobj_transfer(&pr, from_sf, dst, 7, 7, TL), -EINVAL);
     /* drain the mock's fence so the teardown's liveness check is about the
      * SHIM's state, not about a fence no shim entry is waiting on any more */
     nv_rm_mock_hold(0);
@@ -3421,7 +3630,9 @@ static void test_nvshim_drm_syncobj_transfer_refusals(void) {
       EXPECT_EQ(sobj_tl_wait(&pr, wh, wp, 1, 0), -ETIME); /* nothing landed */
     }
     EXPECT_EQ(sobj_destroy(&pr, again), 0);
+    EXPECT_EQ(sobj_destroy(&pr, from_sf), 0);
     EXPECT_EQ(file_close(pr.p, pfd), 0);
+    EXPECT_EQ(file_close(pr.p, sf7), 0);
     struct nvshim_drm_channel_free cf;
     cf.channel = ch;
     EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_CHANNEL_FREE, &cf, (int)sizeof cf), 0);
@@ -3445,7 +3656,8 @@ static void test_nvshim_drm_syncobj_transfer_refusals(void) {
     EXPECT_EQ(pts[0], 4ull);
   }
   uart_puts("  [NVSHIM] transfer refusals: binary form, unknown flag, unsubmitted point, "
-            "destroyed handle, zero point, dst point order, sync_file source -- all named\n");
+            "destroyed handle, zero point, dst point order, sync_file source below/above "
+            "its floor -- all named\n");
 
   EXPECT_EQ(sobj_destroy(&pr, src), 0);
   EXPECT_EQ(sobj_destroy(&pr, dst), 0);
@@ -4175,6 +4387,7 @@ void nv_shim_drm_test_suite(void) {
   test_nvshim_drm_syncobj_query();     /* WP-SYNCFAM: the submitted ledger */
   test_nvshim_drm_syncfile();          /* WP-SYNCFILE: poll(2) / import, refs */
   test_nvshim_drm_syncobj_transfer();          /* WP-TRANSFER: a point moves */
+  test_nvshim_drm_syncobj_transfer_syncfile(); /* WP-TRANSFERFILE: the file's point */
   test_nvshim_drm_syncobj_transfer_refusals(); /* WP-TRANSFER: the named walls */
   test_nvshim_nvif_layout();
   test_nvshim_nvif_device();

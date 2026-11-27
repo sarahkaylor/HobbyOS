@@ -17,7 +17,7 @@ for the timeline form:
 |---|---|---|---|---|
 | `DRM_IOCTL_SYNCOBJ_TRANSFER` | `TRANSFER_FLAGS_TIMELINE`, handle→handle | `0xcc` | `-ENOSYS`, reason `syncobj_transfer` | **served** — the destination's wait observes the source's retire |
 | `DRM_IOCTL_SYNCOBJ_TRANSFER` | no `TRANSFER_FLAGS_TIMELINE` (binary) | `0xcc` | `-ENOSYS` (whole row) | `-EINVAL`, reason `transfer_needs_timeline` |
-| `DRM_IOCTL_SYNCOBJ_TRANSFER` | source handle from `IMPORT_SYNC_FILE` | `0xcc` | `-ENOSYS` (whole row) | `-EINVAL`, reason `transfer_src_sync_file` (§2) |
+| `DRM_IOCTL_SYNCOBJ_TRANSFER` | source handle from `IMPORT_SYNC_FILE` | `0xcc` | `-ENOSYS` (whole row) | `-EINVAL`, reason `transfer_src_sync_file` (§2); since WP-TRANSFERFILE: **served at the imported floor**, see `docs/nv-shim-transferfile.md` |
 | `DRM_IOCTL_SYNCOBJ_EVENTFD` | — | `0xcf` | `-ENOSYS` by name | **unchanged** (docs/nv-shim-syncfile.md §5.2) |
 
 The row left `g_drm_refusals[]` (`src/kernel/nv_shim.c:1533` is now EVENTFD
@@ -105,7 +105,7 @@ chained or found the source already reached:
 | `transfer_point_unsubmitted` (16) | `-EINVAL` | `src_point > source.submitted` | nothing was ever handed that point; there is no fence to chain to (`drm_syncobj_find_fence`'s `-EINVAL`) |
 | `transfer_point_not_pending` (17) | `-EINVAL` | submitted, not reached, and no live pending entry | different cause (the entry was dropped with its handle), same "would wait forever" outcome — so a different name |
 | `transfer_handle_not_held` (18) | `-EINVAL` | a handle this client does not hold | a never-created number and a DESTROYED handle are the same absence here: the handle table recycles numbers, so no tombstone could separate them. The row names the absence instead of borrowing a sync_file name |
-| `transfer_src_sync_file` (19) | `-EINVAL` | the source handle came from `IMPORT_SYNC_FILE` | that transfer carries a sync_file's fence, i.e. the sync_file leg of this row — still a separate rung |
+| `transfer_src_sync_file` (19) | `-EINVAL` | the source handle came from `IMPORT_SYNC_FILE` and `src_point` is **above** the floor that import installed (the sync_file leg itself is served at the floor since WP-TRANSFERFILE — `docs/nv-shim-transferfile.md`) | the handle carries exactly one fence, its floor; a later submitted point is not the fence this handle names |
 | `timeline_point_zero` (5) | `-EINVAL` | `src_point == 0` or `dst_point == 0` | shared with the other timeline rows on purpose: 0 is not a point in this node anywhere |
 | `bad_flags` (4) | `-EINVAL` | any other flag bit | the same rule as every other row |
 | `bad_shape` (9) | `-EINVAL` | `pad != 0` | the same rule as every other row |
@@ -239,7 +239,9 @@ pending entry rather than a point. The assertions around it:
   synchronous kick rather than an interrupt; the retire path exercised is the
   same `client_reap_locked()` the timeline suite has always driven;
 * `TRANSFER`'s sync_file leg (an imported fence as the source) is refused by
-  name (reason 19) and is the next rung, not a half-served row;
+  name (reason 19) and is the next rung, not a half-served row. **Served since
+  WP-TRANSFERFILE** at the imported floor, with `transfer_point_below_import`
+  (20) for a point below it — `docs/nv-shim-transferfile.md`;
 * a destination `RESET` while a transferred point is pending still lands that
   point (see §7.3) — pre-existing model behaviour, not introduced here;
 * the pending table is per client (`SHIM_MAX_SIGPEND = 32`); a transfer costs it

@@ -426,14 +426,21 @@ void nv_shim_syncfile_release(struct process *grp, int fd, void *obj,
  *   18  a handle the client does not hold -- a never-created number and one it
  *       DESTROYED are the same absence here by construction (the handle table
  *       recycles numbers, so no tombstone could tell them apart).
- *   19  the source handle came from IMPORT_SYNC_FILE: that transfer carries a
- *       sync_file's fence between timelines, which is the sync_file leg of this
- *       row and a separate rung (docs/nv-shim-transfer.md §2). */
+ *   19  the source handle came from IMPORT_SYNC_FILE and src_point is ABOVE the
+ *       point that import installed: the handle names exactly ONE fence (its
+ *       floor), so a later point -- even one the record has submitted since --
+ *       is not the fence this handle carries (WP-TRANSFERFILE).
+ *   20  src_point is BELOW the floor an IMPORT_SYNC_FILE handle installed: that
+ *       point never had a fence on this record, and chaining to the floor's
+ *       entry would make the destination wait on the WRONG fence (and report
+ *       reached for a point that was never submitted).  Its own name, never a
+ *       silent clamp (WP-TRANSFERFILE). */
 #define NVSHIM_SYNC_TRANSFER_NEEDS_TIMELINE   15
 #define NVSHIM_SYNC_TRANSFER_POINT_UNSUBMITTED 16
 #define NVSHIM_SYNC_TRANSFER_POINT_NOT_PENDING 17
 #define NVSHIM_SYNC_TRANSFER_HANDLE_NOT_HELD  18
 #define NVSHIM_SYNC_TRANSFER_SRC_SYNC_FILE     19
+#define NVSHIM_SYNC_TRANSFER_POINT_BELOW_IMPORT 20
 #define NVSHIM_SYNC_REASON_MAX         40
 void nv_shim_sync_refusal_name(int why, char *dst, int cap);
 
