@@ -1,0 +1,11 @@
+# mutation 2: nv_rpc_args_build() stored block_bus + 0x1000 in mq.sharedMemPhysAddr
+# expected red: T-25 args page, stage8 publish; observed:
+Tests failed!
+    RUNNING KERNEL UNIT TESTS     
+  Running test_t25_args_page...
+ASSERTION FAILED: get64(arg_page + 0x18) == TEST_BUS at src/kernel/nv_rpc_test.c:1295
+  Running test_nv_gsp_rpc_stage8_publishes_and_holds_the_doorbell...
+EXPECT_EQ FAILED: rc == -EAGAIN at src/kernel/nv_gsp_glue_test.c:377
+Tests run:    610
+Tests failed: 2
+UNIT TESTS FAILED

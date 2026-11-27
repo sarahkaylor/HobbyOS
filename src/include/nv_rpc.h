@@ -190,8 +190,14 @@ struct nv_rpc_geom {
 
 /* The RMARGS view of the SAME geometry (docs/nv-gsp-rpc-contract.md 1.5).
  * Field names are the contract's, because nv_rpc_args_crosscheck() reports the
- * first disagreement BY NAME. */
+ * first disagreement BY NAME.
+ *
+ * magic and size are part of the view, not decoration: they are the two words
+ * that make the page a GSP_ARGUMENTS_CACHED block rather than a page of
+ * plausible-looking geometry, so the cross-check reads them too. */
 struct nv_rpc_rmargs {
+  uint32_t magic;           /* +0x00 GSP_ARGUMENTS_MAGIC_VALUE */
+  uint16_t size;            /* +0x04 sizeof(GSP_ARGUMENTS_CACHED) = 0xC8 */
   uint64_t shared_mem_phys; /* +0x18 mq.sharedMemPhysAddr = PTE[0] */
   uint64_t cmd_queue_off;   /* +0x20 */
   uint64_t stat_queue_off;  /* +0x28 */
@@ -214,6 +220,8 @@ enum nv_rpc_arg_field {
   NV_RPC_ARG_ELEM_MAX,    /* queueElementSizeMax */
   NV_RPC_ARG_HDR_ALIGN,   /* queueHeaderAlign */
   NV_RPC_ARG_ELEM_ALIGN,  /* queueElementAlign */
+  NV_RPC_ARG_MAGIC,       /* +0x00: this is not a GSP_ARGUMENTS page */
+  NV_RPC_ARG_SIZE,        /* +0x04: the struct size the firmware validates */
 };
 
 const char *nv_rpc_arg_field_name(enum nv_rpc_arg_field f);
@@ -232,6 +240,128 @@ int nv_rpc_block_build(uint8_t *block, uint64_t block_bus);
  * disagrees (spec 3 step 5). */
 int nv_rpc_args_crosscheck(const struct nv_rpc_geom *g, uint64_t block_bus,
                            const struct nv_rpc_rmargs *a);
+
+/* ---- publishing: GSP_ARGUMENTS_CACHED and the libos-args table ---------
+ *
+ * The block above is what RM walks.  These two pages are how RM is TOLD it
+ * exists (docs/nv-gsp-rpc-contract.md 1.5 and 1.6): a one-page argument block
+ * holding the block's GPU address and the geometry, and a one-page table of
+ * named regions whose fourth entry points at that argument block.  The table's
+ * address goes into the two GSP falcon mailbox words, and that is the entire
+ * handshake -- the firmware does not scan memory.
+ *
+ * Both builders are PURE: bytes in, bytes out, no MMIO, no allocation, no
+ * clock.  The address they are handed is the GPU-visible one, which the caller
+ * obtains only through nv_dma_bus(); nothing in this file can tell whether it
+ * is a bus address or a CPU physical address, which is exactly why the caller
+ * must not substitute one for the other.
+ * ---------------------------------------------------------------------- */
+
+/* The 535 build of the structure (contract 1.5 field table).  0xC8 is what
+ * goes in the size field; the allocation is a full page either way.
+ *
+ * NAMING: NV_RPC_GSP_ARGS_* is a WIRE value (what the firmware reads),
+ * NV_RPC_ARG_* is a FIELD ID (what the cross-check reports).  Two namespaces
+ * on purpose -- a single NV_RPC_ARG_MAGIC for both would make
+ * nv_rpc_arg_field_name(NV_RPC_ARG_MAGIC) ask for the string at index
+ * 0x20505347, and a preprocessor macro silently wins over the enum. */
+#define NV_RPC_GSP_ARGS_MAGIC 0x20505347u /* bytes 47 53 50 20 = "GSP " */
+#define NV_RPC_GSP_ARGS_SIZE 0xC8u
+#define NV_RPC_GSP_ARGS_PAGE 0x1000u
+
+/* Page-relative offsets.  Named once so the writer, the reader and the log row
+ * cannot drift apart; the two halves of this file both use these. */
+#define NV_RPC_ARG_O_MAGIC 0x00u
+#define NV_RPC_ARG_O_SIZE 0x04u
+#define NV_RPC_ARG_O_FLAGS 0x08u
+#define NV_RPC_ARG_O_MQ_FLAGS 0x10u
+#define NV_RPC_ARG_O_MQ_SHARED 0x18u
+#define NV_RPC_ARG_O_MQ_CMD 0x20u
+#define NV_RPC_ARG_O_MQ_STAT 0x28u
+#define NV_RPC_ARG_O_MQ_HDR_SIZE 0x30u
+#define NV_RPC_ARG_O_MQ_ELEM_MIN 0x34u
+#define NV_RPC_ARG_O_MQ_ELEM_MAX 0x38u
+#define NV_RPC_ARG_O_MQ_HDR_ALIGN 0x3Cu
+#define NV_RPC_ARG_O_MQ_ELEM_ALIGN 0x40u
+#define NV_RPC_ARG_O_MQ_PTE_COUNT 0x44u
+#define NV_RPC_ARG_O_SR_OLD_LEVEL 0x50u
+#define NV_RPC_ARG_O_SR_FLAGS 0x54u
+#define NV_RPC_ARG_O_GPU_INSTANCE 0x64u
+
+/* The geometry constants the transport fixes (contract 1.5, +0x30..+0x44).
+ * They live here rather than in the builder because the cross-check compares
+ * them and the row prints them; one definition, three readers. */
+#define NV_RPC_ARG_ELEM_MAX 0x10000u /* queueElementSizeMax = 16 slots */
+#define NV_RPC_ARG_HDR_ALIGN 4u      /* queueHeaderAlign: log2(16) */
+#define NV_RPC_ARG_ELEM_ALIGN 12u    /* queueElementAlign: log2(4096) */
+
+/* Write one GSP_ARGUMENTS_CACHED into `page` (all NV_RPC_ARG_PAGE bytes are
+ * zeroed first, so the reserved tail is zero by construction) describing the
+ * transport `g` that was built at `block_bus`.
+ *   -EINVAL  NULL, a `g` that is not this transport's geometry, or a
+ *            block_bus that is zero or not page aligned (a PTE[0] the
+ *            firmware would walk to nowhere).
+ *   -EIO     the page does not read back what was written to it.
+ * Nothing outside this page is touched. */
+int nv_rpc_args_build(uint8_t *page, const struct nv_rpc_geom *g,
+                      uint64_t block_bus);
+
+/* Read the page's OWN bytes back into the cross-check's view (contract 1.5).
+ * A builder that returns 0 proves only that it was called; this is how a boot
+ * row shows what is actually in memory.  Returns 0, or -EINVAL on NULL. */
+int nv_rpc_args_read(const uint8_t *page, struct nv_rpc_rmargs *a);
+
+/* ---- the libos-args table (contract 1.6) ------------------------------ */
+
+#define NV_RPC_LIBOS_ENTRY 0x20u /* 32 bytes: id8, pa, size, kind, loc */
+#define NV_RPC_LIBOS_MAX 4u      /* the reference driver publishes four */
+#define NV_RPC_LIBOS_ID_BYTES 8u
+/* Three 4 KiB log regions (LOGINIT, LOGINTR, LOGRM).  The contract leaves
+ * "does the firmware tolerate a zero-sized log region" NOT ESTABLISHED and
+ * says providing real ones is cheap; three pages is cheap. */
+#define NV_RPC_LIBOS_LOG_PAGES 3u
+
+#define NV_RPC_LIBOS_O_ID8 0x00u
+#define NV_RPC_LIBOS_O_PA 0x08u
+#define NV_RPC_LIBOS_O_SIZE 0x10u
+#define NV_RPC_LIBOS_O_KIND 0x18u
+#define NV_RPC_LIBOS_O_LOC 0x19u
+
+#define NV_RPC_LIBOS_KIND_CONTIG 1u /* kind = 1: one contiguous region */
+#define NV_RPC_LIBOS_LOC_SYSMEM 1u  /* loc  = 1: system memory          */
+
+struct nv_rpc_libos_region {
+  const char *id; /* INPUT (build): up to 8 characters, NUL padded, packed
+                   * low byte first */
+  uint64_t id8;   /* the packed value.  build() fills it from `id`; read()
+                   * fills it from the page and leaves `id` NULL, so a caller
+                   * comparing what is in memory to a name compares to
+                   * nv_rpc_id8("RMARGS") and never to a local string. */
+  uint64_t pa;    /* GPU-visible address of the region */
+  uint64_t size;  /* bytes; need not be a multiple of the page */
+  uint8_t kind;   /* NV_RPC_LIBOS_KIND_* */
+  uint8_t loc;    /* NV_RPC_LIBOS_LOC_* */
+};
+
+/* "RMARGS" -> 0x0000534752414D52: first character in the least significant
+ * byte, NUL padded to eight (_kgspGenerateInitArgId).  The reference names are
+ * shorter than eight characters, so the zero bytes are part of the id.
+ * Returns 0 for NULL, for an empty string, or for a name longer than eight --
+ * a truncated name is a different region and must not be packed silently. */
+uint64_t nv_rpc_id8(const char *s);
+
+/* Zero the page, then write `n` entries at 32 bytes each in the given order.
+ *   -EINVAL  NULL, n == 0, n > NV_RPC_LIBOS_MAX, a malformed id, a zero or
+ *            unaligned pa, or a zero size.
+ *   -EIO     an entry does not read back what was written. */
+int nv_rpc_libos_build(uint8_t *page, const struct nv_rpc_libos_region *e,
+                       uint32_t n);
+
+/* Read entry `i` (0-based) back out of the page.  `out->id` is set to NULL:
+ * the page holds the packed u64, and the caller that called build() already
+ * knows the string.  Returns 0 or -EINVAL (NULL, or i >= NV_RPC_LIBOS_MAX). */
+int nv_rpc_libos_read(const uint8_t *page, uint32_t i,
+                      struct nv_rpc_libos_region *out);
 
 /* ---- link (spec 4.2) -------------------------------------------------- */
 

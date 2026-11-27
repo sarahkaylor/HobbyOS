@@ -109,7 +109,7 @@ static const char *const arg_names[] = {
     "ok",                 "sharedMemPhysAddr",   "pageTableEntryCount",
     "cmdQueueOffset",     "statQueueOffset",     "queueElementHdrSize",
     "queueElementSizeMin", "queueElementSizeMax", "queueHeaderAlign",
-    "queueElementAlign",
+    "queueElementAlign",  "magic",               "size",
 };
 
 const char *nv_rpc_arg_field_name(enum nv_rpc_arg_field f) {
@@ -208,17 +208,157 @@ int nv_rpc_args_crosscheck(const struct nv_rpc_geom *g, uint64_t block_bus,
   /* The RMARGS page and this block describe the same geometry twice (spec 3
    * step 5).  One function, one field at a time, named on failure: this is the
    * cheapest test in the document and it catches the class of bug that costs a
-   * boot. */
+   * boot.
+   *
+   * magic and size come first: without them a page of correct-looking numbers
+   * is just a page of numbers, and "the firmware did not find the block" and
+   * "the firmware found something that is not our block" would print the same
+   * row. */
+  if (a->magic != NV_RPC_GSP_ARGS_MAGIC) return NV_RPC_ARG_MAGIC;
+  if (a->size != NV_RPC_GSP_ARGS_SIZE) return NV_RPC_ARG_SIZE;
   if (a->shared_mem_phys != block_bus) return NV_RPC_ARG_SHARED_MEM;
   if (a->pte_count != g->pte_count) return NV_RPC_ARG_PTE_COUNT;
   if (a->cmd_queue_off != g->cmd_off) return NV_RPC_ARG_CMD_OFF;
   if (a->stat_queue_off != g->stat_off) return NV_RPC_ARG_STAT_OFF;
   if (a->elem_hdr_size != NV_RPC_ELEM_HDR) return NV_RPC_ARG_HDR_SIZE;
   if (a->elem_size_min != g->msg_size) return NV_RPC_ARG_ELEM_MIN;
-  if (a->elem_size_max != 0x10000u) return NV_RPC_ARG_ELEM_MAX;
-  if (a->header_align != 4u) return NV_RPC_ARG_HDR_ALIGN;
-  if (a->elem_align != 12u) return NV_RPC_ARG_ELEM_ALIGN;
+  if (a->elem_size_max != NV_RPC_ARG_ELEM_MAX) return NV_RPC_ARG_ELEM_MAX;
+  if (a->header_align != NV_RPC_ARG_HDR_ALIGN) return NV_RPC_ARG_HDR_ALIGN;
+  if (a->elem_align != NV_RPC_ARG_ELEM_ALIGN) return NV_RPC_ARG_ELEM_ALIGN;
   return NV_RPC_ARG_OK;
+}
+
+/* ======================================================================== */
+/* publishing: GSP_ARGUMENTS_CACHED + the libos-args table (contract 1.5/6)  */
+/* ======================================================================== */
+
+int nv_rpc_args_build(uint8_t *page, const struct nv_rpc_geom *g,
+                      uint64_t block_bus) {
+  if (!page || !g) return -EINVAL;
+  /* The argument block describes THIS transport.  A geometry that is not the
+   * one nv_rpc_queue_geom() fixes would publish a page describing queues the
+   * firmware cannot find, which reads as "RM never started". */
+  struct nv_rpc_geom chk;
+  if (nv_rpc_queue_geom(&chk) != 0) return -EINVAL;
+  if (g->pte_count != chk.pte_count || g->cmd_off != chk.cmd_off ||
+      g->stat_off != chk.stat_off || g->msg_size != chk.msg_size ||
+      g->block_size != chk.block_size || g->msg_count != chk.msg_count)
+    return -EINVAL;
+  /* Same rule the PTE table is built under: a zero or unaligned base is not
+   * an address, and this one is handed to firmware as PTE[0]. */
+  if (block_bus == 0 || (block_bus & 0xFFFu)) return -EINVAL;
+
+  /* The reserved tail (0x68..0xC7 and everything to the page end) is zero by
+   * construction rather than by remembering to clear it. */
+  memset(page, 0, NV_RPC_GSP_ARGS_PAGE);
+
+  st32(page + NV_RPC_ARG_O_MAGIC, NV_RPC_GSP_ARGS_MAGIC);
+  /* size is u16 at +0x04 followed by two reserved bytes: one 32-bit store of
+   * 0x000000C8 writes exactly the three bytes the contract asks for. */
+  st32(page + NV_RPC_ARG_O_SIZE, NV_RPC_GSP_ARGS_SIZE);
+  st64(page + NV_RPC_ARG_O_FLAGS, 0);    /* not a resume */
+  st64(page + NV_RPC_ARG_O_MQ_FLAGS, 0); /* no queue encryption (no CC) */
+  st64(page + NV_RPC_ARG_O_MQ_SHARED, block_bus);
+  st64(page + NV_RPC_ARG_O_MQ_CMD, (uint64_t)g->cmd_off);
+  st64(page + NV_RPC_ARG_O_MQ_STAT, (uint64_t)g->stat_off);
+  st32(page + NV_RPC_ARG_O_MQ_HDR_SIZE, NV_RPC_ELEM_HDR);
+  st32(page + NV_RPC_ARG_O_MQ_ELEM_MIN, g->msg_size);
+  st32(page + NV_RPC_ARG_O_MQ_ELEM_MAX, NV_RPC_ARG_ELEM_MAX);
+  st32(page + NV_RPC_ARG_O_MQ_HDR_ALIGN, NV_RPC_ARG_HDR_ALIGN);
+  st32(page + NV_RPC_ARG_O_MQ_ELEM_ALIGN, NV_RPC_ARG_ELEM_ALIGN);
+  st32(page + NV_RPC_ARG_O_MQ_PTE_COUNT, g->pte_count);
+  st32(page + NV_RPC_ARG_O_SR_OLD_LEVEL, 0); /* cold boot, not a resume */
+  st32(page + NV_RPC_ARG_O_SR_FLAGS, 0);
+  st32(page + NV_RPC_ARG_O_GPU_INSTANCE, 0);
+
+  /* Read back the two fields a writer could get wrong without noticing (a
+   * store that landed somewhere else still returns from this function). */
+  if (ld32(page + NV_RPC_ARG_O_MAGIC) != NV_RPC_GSP_ARGS_MAGIC) return -EIO;
+  if ((uint16_t)(ld32(page + NV_RPC_ARG_O_SIZE) & 0xFFFFu) !=
+      NV_RPC_GSP_ARGS_SIZE)
+    return -EIO;
+  if (ld64(page + NV_RPC_ARG_O_MQ_SHARED) != block_bus) return -EIO;
+  return 0;
+}
+
+int nv_rpc_args_read(const uint8_t *page, struct nv_rpc_rmargs *a) {
+  if (!page || !a) return -EINVAL;
+  /* Every field the cross-check names, from the bytes and from nowhere else:
+   * a caller that built the page from a struct could otherwise "verify" its
+   * own variables. */
+  a->magic = ld32(page + NV_RPC_ARG_O_MAGIC);
+  a->size = (uint16_t)(ld32(page + NV_RPC_ARG_O_SIZE) & 0xFFFFu);
+  a->shared_mem_phys = ld64(page + NV_RPC_ARG_O_MQ_SHARED);
+  a->cmd_queue_off = ld64(page + NV_RPC_ARG_O_MQ_CMD);
+  a->stat_queue_off = ld64(page + NV_RPC_ARG_O_MQ_STAT);
+  a->elem_hdr_size = ld32(page + NV_RPC_ARG_O_MQ_HDR_SIZE);
+  a->elem_size_min = ld32(page + NV_RPC_ARG_O_MQ_ELEM_MIN);
+  a->elem_size_max = ld32(page + NV_RPC_ARG_O_MQ_ELEM_MAX);
+  a->header_align = ld32(page + NV_RPC_ARG_O_MQ_HDR_ALIGN);
+  a->elem_align = ld32(page + NV_RPC_ARG_O_MQ_ELEM_ALIGN);
+  a->pte_count = ld32(page + NV_RPC_ARG_O_MQ_PTE_COUNT);
+  return 0;
+}
+
+uint64_t nv_rpc_id8(const char *s) {
+  if (!s) return 0;
+  /* Up to eight characters, NUL padded to eight: "RMARGS" is six characters
+   * and its id is 0x0000534752414D52 -- the two zero bytes are part of the
+   * name, not an accident.
+   *
+   * Length first, and only within the string: reading s[8] to decide whether
+   * the name was too long reads past a shorter literal, and the corruption
+   * that follows is a NUL-padded name silently turning into "no id". */
+  uint32_t n = 0;
+  while (n < NV_RPC_LIBOS_ID_BYTES && s[n] != 0) n++;
+  if (n == 0) return 0;
+  if (s[n] != 0) return 0; /* a ninth character: the name would be truncated */
+
+  uint64_t v = 0;
+  for (uint32_t i = 0; i < n; i++)
+    v |= (uint64_t)(uint8_t)s[i] << (8u * i);
+  return v;
+}
+
+int nv_rpc_libos_build(uint8_t *page, const struct nv_rpc_libos_region *e,
+                       uint32_t n) {
+  if (!page || !e || n == 0 || n > NV_RPC_LIBOS_MAX) return -EINVAL;
+
+  memset(page, 0, NV_RPC_GSP_ARGS_PAGE);
+
+  for (uint32_t i = 0; i < n; i++) {
+    uint64_t id = e[i].id ? nv_rpc_id8(e[i].id) : e[i].id8;
+    if (id == 0) return -EINVAL;
+    if (e[i].pa == 0 || (e[i].pa & 0xFFFu)) return -EINVAL;
+    if (e[i].size == 0) return -EINVAL;
+
+    uint8_t *p = page + (uint64_t)i * NV_RPC_LIBOS_ENTRY;
+    st64(p + NV_RPC_LIBOS_O_ID8, id);
+    st64(p + NV_RPC_LIBOS_O_PA, e[i].pa);
+    st64(p + NV_RPC_LIBOS_O_SIZE, e[i].size);
+    p[NV_RPC_LIBOS_O_KIND] = e[i].kind;
+    p[NV_RPC_LIBOS_O_LOC] = e[i].loc;
+
+    if (ld64(p + NV_RPC_LIBOS_O_ID8) != id ||
+        ld64(p + NV_RPC_LIBOS_O_PA) != e[i].pa)
+      return -EIO;
+  }
+  return 0;
+}
+
+int nv_rpc_libos_read(const uint8_t *page, uint32_t i,
+                      struct nv_rpc_libos_region *out) {
+  if (!page || !out || i >= NV_RPC_LIBOS_MAX) return -EINVAL;
+  const uint8_t *p = page + (uint64_t)i * NV_RPC_LIBOS_ENTRY;
+  /* id8 is the packed u64 from the page, not a string: the page has no NUL,
+   * so a caller comparing it to a name compares it to nv_rpc_id8("RMARGS"). */
+  out->id = 0;
+  out->id8 = ld64(p + NV_RPC_LIBOS_O_ID8);
+  out->pa = ld64(p + NV_RPC_LIBOS_O_PA);
+  out->size = ld64(p + NV_RPC_LIBOS_O_SIZE);
+  out->kind = p[NV_RPC_LIBOS_O_KIND];
+  out->loc = p[NV_RPC_LIBOS_O_LOC];
+  return 0;
 }
 
 /* ======================================================================== */

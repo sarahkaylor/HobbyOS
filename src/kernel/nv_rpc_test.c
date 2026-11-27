@@ -342,6 +342,8 @@ static void test_t04_args_crosscheck(void) {
   ASSERT(nv_rpc_queue_geom(&g) == 0);
   struct nv_rpc_rmargs a;
   zero_bytes(&a, sizeof(a));
+  a.magic = NV_RPC_GSP_ARGS_MAGIC;
+  a.size = NV_RPC_GSP_ARGS_SIZE;
   a.shared_mem_phys = TEST_BUS;
   a.pte_count = 129;
   a.cmd_queue_off = 0x1000;
@@ -354,10 +356,26 @@ static void test_t04_args_crosscheck(void) {
 
   EXPECT_EQ(nv_rpc_args_crosscheck(&g, TEST_BUS, &a), 0);
 
+  /* The two fields that make the page a GSP_ARGUMENTS block at all.  A page
+   * of perfect geometry with the wrong magic is not "RM did not start", it is
+   * "RM was handed something that is not this structure". */
+  a.magic = 0;
+  int f = nv_rpc_args_crosscheck(&g, TEST_BUS, &a);
+  EXPECT_EQ((int)f, (int)NV_RPC_ARG_MAGIC);
+  EXPECT_EQ((int)str_eq(nv_rpc_arg_field_name((enum nv_rpc_arg_field)f),
+                        "magic"),
+            1);
+  a.magic = NV_RPC_GSP_ARGS_MAGIC;
+  a.size = 0xC0;
+  f = nv_rpc_args_crosscheck(&g, TEST_BUS, &a);
+  EXPECT_EQ((int)f, (int)NV_RPC_ARG_SIZE);
+  a.size = NV_RPC_GSP_ARGS_SIZE;
+  EXPECT_EQ(nv_rpc_args_crosscheck(&g, TEST_BUS, &a), 0);
+
   /* The drift this catches: the RMARGS page saying the status queue starts
    * where the command queue does. */
   a.stat_queue_off = 0x40000;
-  int f = nv_rpc_args_crosscheck(&g, TEST_BUS, &a);
+  f = nv_rpc_args_crosscheck(&g, TEST_BUS, &a);
   EXPECT_EQ((int)f, (int)NV_RPC_ARG_STAT_OFF);
   EXPECT_EQ((int)str_eq(nv_rpc_arg_field_name((enum nv_rpc_arg_field)f),
                         "statQueueOffset"),
@@ -1245,9 +1263,169 @@ static void test_t24_link_msgcount(void) {
 }
 
 /* ======================================================================== */
+/* T-25 GSP_ARGUMENTS_CACHED encoder (contract 1.5)                          */
+/* ======================================================================== */
+
+/* One page each: the argument structure and the libos-args table.  Separate
+ * buffers on purpose -- a bug that writes one over the other would otherwise
+ * be invisible. */
+static uint8_t arg_page[NV_RPC_GSP_ARGS_PAGE] __attribute__((aligned(4096)));
+static uint8_t libos_page[NV_RPC_GSP_ARGS_PAGE] __attribute__((aligned(4096)));
+
+static void test_t25_args_page(void) {
+  uart_puts("  Running test_t25_args_page...\n");
+  tests_run++;
+
+  struct nv_rpc_geom g;
+  ASSERT(nv_rpc_queue_geom(&g) == 0);
+
+  /* Prefill, so "the reserved bytes are zero" is a property of the builder and
+   * not of the buffer's history. */
+  for (uint32_t i = 0; i < NV_RPC_GSP_ARGS_PAGE; i++) arg_page[i] = 0xCD;
+
+  ASSERT(nv_rpc_args_build(arg_page, &g, TEST_BUS) == 0);
+
+  /* Offsets written out as literals from the contract's table.  An encoder
+   * tested through its own #defines would follow them off a cliff. */
+  ASSERT(get32(arg_page + 0x00) == 0x20505347u); /* 'G' 'S' 'P' ' ' */
+  ASSERT((get32(arg_page + 0x04) & 0xFFFFu) == 0xC8u);
+  ASSERT((get32(arg_page + 0x04) >> 16) == 0u); /* the two reserved bytes */
+  ASSERT(get64(arg_page + 0x08) == 0);          /* flags: not a resume */
+  ASSERT(get64(arg_page + 0x10) == 0);          /* mq.flags: no encryption */
+  ASSERT(get64(arg_page + 0x18) == TEST_BUS);   /* mq.sharedMemPhysAddr */
+  ASSERT(get64(arg_page + 0x20) == 0x1000u);    /* cmdQueueOffset */
+  ASSERT(get64(arg_page + 0x28) == 0x41000u);   /* statQueueOffset */
+  ASSERT(get32(arg_page + 0x30) == 0x30u);      /* queueElementHdrSize */
+  ASSERT(get32(arg_page + 0x34) == 0x1000u);    /* queueElementSizeMin */
+  ASSERT(get32(arg_page + 0x38) == 0x10000u);   /* queueElementSizeMax */
+  ASSERT(get32(arg_page + 0x3Cu) == 4u);        /* queueHeaderAlign */
+  ASSERT(get32(arg_page + 0x40) == 12u);        /* queueElementAlign */
+  ASSERT(get32(arg_page + 0x44) == 129u);       /* pageTableEntryCount */
+  ASSERT(get32(arg_page + 0x50) == 0u);         /* sr.oldLevel: cold boot */
+  ASSERT(get32(arg_page + 0x54) == 0u);         /* sr.flags */
+  ASSERT(get32(arg_page + 0x64) == 0u);         /* gpuInstance */
+
+  /* Every reserved hole, and everything past the 0xC8 structure. */
+  ASSERT(get32(arg_page + 0x48) == 0u);
+  ASSERT(get32(arg_page + 0x58) == 0u);
+  ASSERT(get32(arg_page + 0x60) == 0u);
+  for (uint32_t i = 0x68; i < 0xC8; i += 8) ASSERT(get64(arg_page + i) == 0);
+  for (uint32_t i = 0xC8; i < NV_RPC_GSP_ARGS_PAGE; i++) ASSERT(arg_page[i] == 0);
+
+  /* The re-read + cross-check pair the boot row is built from. */
+  struct nv_rpc_rmargs a;
+  ASSERT(nv_rpc_args_read(arg_page, &a) == 0);
+  EXPECT_EQ(nv_rpc_args_crosscheck(&g, TEST_BUS, &a), 0);
+
+  /* The cross-check reads the BYTES: break the page, not the struct. */
+  put32(arg_page + 0x00, 0x20505348u); /* "HSP " */
+  ASSERT(nv_rpc_args_read(arg_page, &a) == 0);
+  EXPECT_EQ((int)nv_rpc_args_crosscheck(&g, TEST_BUS, &a),
+            (int)NV_RPC_ARG_MAGIC);
+  EXPECT_EQ((int)str_eq(nv_rpc_arg_field_name(NV_RPC_ARG_MAGIC), "magic"), 1);
+  ASSERT(nv_rpc_args_build(arg_page, &g, TEST_BUS) == 0);
+
+  /* Refusals.  A base the firmware would walk to nowhere is not an address;
+   * a geometry that is not this transport's would publish queues that do not
+   * exist. */
+  EXPECT_EQ(nv_rpc_args_build(arg_page, &g, 0), -EINVAL);
+  EXPECT_EQ(nv_rpc_args_build(arg_page, &g, TEST_BUS + 8), -EINVAL);
+  struct nv_rpc_geom bad = g;
+  bad.stat_off = 0x40000;
+  EXPECT_EQ(nv_rpc_args_build(arg_page, &bad, TEST_BUS), -EINVAL);
+  bad = g;
+  bad.pte_count = 128;
+  EXPECT_EQ(nv_rpc_args_build(arg_page, &bad, TEST_BUS), -EINVAL);
+  EXPECT_EQ(nv_rpc_args_build(0, &g, TEST_BUS), -EINVAL);
+  EXPECT_EQ(nv_rpc_args_read(0, &a), -EINVAL);
+}
+
+/* ======================================================================== */
+/* T-26 the libos-args table (contract 1.6)                                  */
+/* ======================================================================== */
+
+static void test_t26_libos_page(void) {
+  uart_puts("  Running test_t26_libos_page...\n");
+  tests_run++;
+
+  /* id8: the first character in the least significant byte, NUL padded to
+   * eight.  "RMARGS" is spelled in the contract's own table, so it is the
+   * anchor; the others must be non-zero and distinct. */
+  ASSERT(nv_rpc_id8("RMARGS") == 0x0000534752414D52ull);
+  ASSERT(nv_rpc_id8("LOGINIT") == 0x0054494E49474F4Cull);
+  ASSERT(nv_rpc_id8("LOGRM") != 0);
+  ASSERT(nv_rpc_id8("LOGINIT") != nv_rpc_id8("LOGINTR"));
+  /* The padding is part of the name: a prefix is a different region. */
+  ASSERT(nv_rpc_id8("RMARG") != nv_rpc_id8("RMARGS"));
+  /* Truncation is refused, not silently applied. */
+  ASSERT(nv_rpc_id8("RMARGSXYZ") == 0);
+  ASSERT(nv_rpc_id8("") == 0);
+  ASSERT(nv_rpc_id8(0) == 0);
+
+  struct nv_rpc_libos_region e[NV_RPC_LIBOS_MAX];
+  const char *ids[NV_RPC_LIBOS_MAX] = {"LOGINIT", "LOGINTR", "LOGRM", "RMARGS"};
+  for (int i = 0; i < (int)NV_RPC_LIBOS_MAX; i++) {
+    e[i].id = ids[i];
+    e[i].id8 = 0;
+    e[i].pa = 0x30000000ull + (uint64_t)i * 0x1000u;
+    e[i].size = 0x1000u;
+    e[i].kind = NV_RPC_LIBOS_KIND_CONTIG;
+    e[i].loc = NV_RPC_LIBOS_LOC_SYSMEM;
+  }
+  e[3].size = 0xC8u; /* the structure's size, not the page's: legal */
+
+  for (uint32_t i = 0; i < NV_RPC_GSP_ARGS_PAGE; i++) libos_page[i] = 0xCD;
+  ASSERT(nv_rpc_libos_build(libos_page, e, NV_RPC_LIBOS_MAX) == 0);
+
+  /* Layout, byte by byte: 32-byte entries, in the order given. */
+  ASSERT(get64(libos_page + 0x00) == nv_rpc_id8("LOGINIT"));
+  ASSERT(get64(libos_page + 0x08) == 0x30000000ull);
+  ASSERT(get64(libos_page + 0x10) == 0x1000ull);
+  ASSERT(libos_page[0x18] == 1u && libos_page[0x19] == 1u);
+  /* Entry 3 starts at 3 * 0x20 = 0x60. */
+  ASSERT(get64(libos_page + 0x60) == 0x0000534752414D52ull);
+  ASSERT(get64(libos_page + 0x68) == 0x30003000ull);
+  ASSERT(get64(libos_page + 0x70) == 0xC8ull);
+  ASSERT(libos_page[0x78] == 1u && libos_page[0x79] == 1u);
+  /* Reserved bytes inside an entry, and everything past the table. */
+  for (uint32_t i = 0x1A; i < 0x20; i++) ASSERT(libos_page[i] == 0);
+  ASSERT(get64(libos_page + 0x80) == 0); /* a fifth entry does not exist */
+  for (uint32_t i = 0x80; i < NV_RPC_GSP_ARGS_PAGE; i++) ASSERT(libos_page[i] == 0);
+
+  /* Read back what is in the page, entry by entry. */
+  for (uint32_t i = 0; i < NV_RPC_LIBOS_MAX; i++) {
+    struct nv_rpc_libos_region b;
+    ASSERT(nv_rpc_libos_read(libos_page, i, &b) == 0);
+    ASSERT(b.id == 0);
+    ASSERT(b.id8 == nv_rpc_id8(ids[i]));
+    ASSERT(b.pa == e[i].pa);
+    ASSERT(b.size == e[i].size);
+    ASSERT(b.kind == e[i].kind && b.loc == e[i].loc);
+  }
+  struct nv_rpc_libos_region fifth;
+  EXPECT_EQ(nv_rpc_libos_read(libos_page, NV_RPC_LIBOS_MAX, &fifth), -EINVAL);
+
+  /* Refusals that would otherwise reach the firmware as a region nobody
+   * named, or one that starts mid-page. */
+  EXPECT_EQ(nv_rpc_libos_build(libos_page, e, 0), -EINVAL);
+  EXPECT_EQ(nv_rpc_libos_build(libos_page, e, NV_RPC_LIBOS_MAX + 1u), -EINVAL);
+  EXPECT_EQ(nv_rpc_libos_build(libos_page, 0, 1), -EINVAL);
+  struct nv_rpc_libos_region bad[NV_RPC_LIBOS_MAX];
+  for (int i = 0; i < (int)NV_RPC_LIBOS_MAX; i++) bad[i] = e[i];
+  bad[0].id = "LOGINITXX"; /* nine characters: would be truncated */
+  EXPECT_EQ(nv_rpc_libos_build(libos_page, bad, NV_RPC_LIBOS_MAX), -EINVAL);
+  bad[0] = e[0];
+  bad[1].pa = 0x30001008ull; /* not page aligned */
+  EXPECT_EQ(nv_rpc_libos_build(libos_page, bad, NV_RPC_LIBOS_MAX), -EINVAL);
+  bad[1] = e[1];
+  bad[2].size = 0; /* a zero-sized region names nothing */
+  EXPECT_EQ(nv_rpc_libos_build(libos_page, bad, NV_RPC_LIBOS_MAX), -EINVAL);
+}
+
+/* ======================================================================== */
 
 void nv_rpc_test_suite(void) {
-  uart_puts("[NV-RPC] unit suite (spec section 7: T-01..T-24)\n");
+  uart_puts("[NV-RPC] unit suite (spec section 7: T-01..T-24, contract T-25/26)\n");
   test_t01_block_geometry();
   test_t02_cmdq_header();
   test_t03_statq_not_written();
@@ -1272,6 +1450,8 @@ void nv_rpc_test_suite(void) {
   test_t22_event_vs_reply();
   test_t23_link_size();
   test_t24_link_msgcount();
+  test_t25_args_page();
+  test_t26_libos_page();
 }
 
 #endif /* KERNEL_MODE_UNIT_TEST */

@@ -95,6 +95,22 @@ int nv_dma_translation_enabled(void);
  * there is nothing to program the device with. */
 uint64_t nv_dma_bus(const struct nv_dma_map *m);
 
+/* The device-visible address of a run of frames the CALLER already owns -- the
+ * firmware loader's blobs, whose frames come from frame_alloc_contig() rather
+ * than from nv_dma_alloc().  It is the same answer, from the same identity
+ * statement, as nv_dma_bus() gives for a mapping: a caller whose address ends
+ * up in a descriptor (the radix3 tree, the WPR metadata block) must not spell
+ * `phys` there, and this is how it asks instead.
+ *
+ * It hands back NO ownership: the frames belong to the caller, and there is no
+ * nv_dma_free() companion.  That is why it returns a value and not a
+ * struct nv_dma_map -- a map that nv_dma_free() would happily release is the
+ * wrong shape for borrowed frames.
+ *
+ * Returns NV_DMA_BUS_INVALID (never `phys`) when translation is live, when the
+ * run is empty or not page aligned, or when it is not pool RAM. */
+uint64_t nv_dma_bus_of_run(uint64_t phys, uint64_t len);
+
 /* The identity guard, in one place: 0 when `phys` may be given to the device
  * as the bus address `bus`, negative otherwise.
  *   -EINVAL  either argument is not page aligned (a corrupted or poisoned

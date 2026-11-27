@@ -344,6 +344,43 @@ TEST(test_nv_dma_free_is_idempotent) {
   nv_dma_free(0); /* and a NULL is not a crash */
 }
 
+/* nv_dma_bus_of_run(): the same accessor for frames the caller owns.  The
+ * firmware loader allocates its blobs with frame_alloc_contig() and has no
+ * nv_dma_map, so without this the only way to name their GPU address would be
+ * to spell `phys` in a descriptor -- the bug this facility exists to prevent.
+ * The case that keeps it honest is the translation refusal: a helper that
+ * simply returned `phys` would pass every other test in this file. */
+TEST(test_nv_dma_bus_of_run_for_borrowed_frames) {
+  uart_puts("  Running test_nv_dma_bus_of_run_for_borrowed_frames...\n");
+  tests_run++;
+
+  int before = frame_free_count();
+  uint64_t phys = frame_alloc_contig(1);
+  ASSERT(phys != 0);
+
+  ASSERT(nv_dma_bus_of_run(phys, NV_DMA_PAGE) == phys);
+  /* Stable, like nv_dma_bus(): not a one-shot. */
+  ASSERT(nv_dma_bus_of_run(phys, NV_DMA_PAGE) == phys);
+
+  /* Shape refusals: an empty, unaligned or non-page-multiple run names no
+   * address at all, so the caller fails instead of publishing a number that
+   * points at half a page. */
+  ASSERT(nv_dma_bus_of_run(0, NV_DMA_PAGE) == NV_DMA_BUS_INVALID);
+  ASSERT(nv_dma_bus_of_run(phys, 0) == NV_DMA_BUS_INVALID);
+  ASSERT(nv_dma_bus_of_run(phys, NV_DMA_PAGE + 1) == NV_DMA_BUS_INVALID);
+  ASSERT(nv_dma_bus_of_run(phys + 1, NV_DMA_PAGE) == NV_DMA_BUS_INVALID);
+
+  /* The refusal that matters: under translation `phys` is not a bus address,
+   * and this must not launder it into one. */
+  nv_dma_test_set_translation(1);
+  ASSERT(nv_dma_bus_of_run(phys, NV_DMA_PAGE) == NV_DMA_BUS_INVALID);
+  nv_dma_test_set_translation(-1);
+  ASSERT(nv_dma_bus_of_run(phys, NV_DMA_PAGE) == phys);
+
+  frame_free(phys);
+  EXPECT_EQ(frame_free_count(), before);
+}
+
 void nv_dma_test_suite(void) {
   uart_puts("[NV-DMA] unit suite (bus address != phys is a first-class value)\n");
   nv_dma_test_set_translation(-1);
@@ -358,6 +395,7 @@ void nv_dma_test_suite(void) {
   test_nv_dma_guard_translation_rejects_identity_too();
   test_nv_dma_bus_never_returns_phys_under_translation();
   test_nv_dma_bus_rejects_nonidentity_map();
+  test_nv_dma_bus_of_run_for_borrowed_frames();
   test_nv_dma_129_page_block();
   test_nv_dma_two_maps_do_not_overlap();
   test_nv_dma_free_is_idempotent();

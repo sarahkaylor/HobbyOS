@@ -316,27 +316,33 @@ TEST(test_nv_gsp_rpc_notify_needs_a_built_queue_and_a_message) {
 }
 
 /* ---- the boot path itself ----------------------------------------------
- * A struct nv_dev with a counting register file: stage 8 must publish the
- * block and must NOT write a single register while the peer's header is
- * absent.  That is the falsifiable form of "the doorbell is not poked at a
- * window a reset just fenced". */
+ * A struct nv_dev with a counting register file: stage 8 must build, publish,
+ * and must NOT write the doorbell while the peer's header is absent.  That is
+ * the falsifiable form of "the doorbell is not poked at a window a reset just
+ * fenced".  The only two writes it is allowed are the two mailbox dwords that
+ * name the libos-args table (contract 1.6), and this file asserts their offset
+ * and value rather than merely counting them. */
+#define T_MMIO_LOG 8
+
 struct t_mmio {
   int writes;
-  uint32_t last_off;
-  uint32_t last_val;
+  uint32_t off[T_MMIO_LOG];
+  uint32_t val[T_MMIO_LOG];
 };
 
 static uint32_t t_rd32(void *ctx, uint32_t off) {
   (void)ctx;
   (void)off;
-  return 0; /* nothing in this stage's decision path is a register read */
+  return 0; /* MAILBOX0/1 read 0 by design (contract 1.6, MEASURED) */
 }
 
 static void t_wr32(void *ctx, uint32_t off, uint32_t val) {
   struct t_mmio *m = (struct t_mmio *)ctx;
+  if (m->writes < T_MMIO_LOG) {
+    m->off[m->writes] = off;
+    m->val[m->writes] = val;
+  }
   m->writes++;
-  m->last_off = off;
-  m->last_val = val;
 }
 
 TEST(test_nv_gsp_rpc_stage8_publishes_and_holds_the_doorbell) {
@@ -358,6 +364,10 @@ TEST(test_nv_gsp_rpc_stage8_publishes_and_holds_the_doorbell) {
    * the field as the stack held it.  The test was reading a field the function
    * only writes on the setup path, and it passed only while the stack happened
    * to hold 0 there. */
+  /* The struct is the caller's; the boot path keeps it in .bss (zeroed).  A
+   * stack copy that starts with garbage `built != 0` would skip setup and then
+   * "publish" a struct nobody built -- exactly the confusion this test is
+   * meant to rule out, so it starts from zero. */
   t_zero(&r, (uint32_t)sizeof r);
   int before = frame_free_count();
 
@@ -366,6 +376,7 @@ TEST(test_nv_gsp_rpc_stage8_publishes_and_holds_the_doorbell) {
   int rc = nv_gsp_rpc_stage8_into(&r, &d);
   EXPECT_EQ(rc, -EAGAIN);
   EXPECT_EQ(r.built, 1);
+  EXPECT_EQ(r.published, 1);
   EXPECT_EQ((int)r.block.pages, (int)BLOCK_PAGES);
 
   uint64_t bus = nv_dma_bus(&r.block);
@@ -373,17 +384,107 @@ TEST(test_nv_gsp_rpc_stage8_publishes_and_holds_the_doorbell) {
   const uint8_t *block = (const uint8_t *)phys_to_virt(r.block.phys);
   ASSERT(t_ld64(block) == bus);
 
-  /* THE PROPERTY: the boot path wrote no register at all.  One doorbell write
-   * would appear here as writes == 1, offset 0x110C00. */
-  EXPECT_EQ(mmio.writes, 0);
+  /* ---- what the publish actually said ---------------------------------- *
+   * (a) the argument page, read back out of MEMORY, names this block's bus
+   *     address and cross-checks against the transport that was built.  This
+   *     is the unit-tier twin of the boot's [NV-ARG] row. */
+  uint64_t args_bus = nv_dma_bus(&r.args);
+  ASSERT(args_bus != NV_DMA_BUS_INVALID);
+  const uint8_t *args = (const uint8_t *)phys_to_virt(r.args.phys);
+  struct nv_rpc_rmargs a;
+  ASSERT(nv_rpc_args_read(args, &a) == 0);
+  ASSERT(a.magic == NV_RPC_GSP_ARGS_MAGIC);
+  ASSERT(a.size == NV_RPC_GSP_ARGS_SIZE);
+  ASSERT(a.shared_mem_phys == bus);
+  ASSERT(a.shared_mem_phys == t_ld64(block));
+  ASSERT(a.pte_count == NV_RPC_PTE_COUNT);
+  { /* local: the cross-check's view of the geometry the transport fixed */
+    struct nv_rpc_geom g;
+    ASSERT(nv_rpc_queue_geom(&g) == 0);
+    EXPECT_EQ(nv_rpc_args_crosscheck(&g, bus, &a), 0);
+  }
+
+  /* (b) the libos table's RMARGS entry names the argument page's bus address */
+  uint64_t libos_bus = nv_dma_bus(&r.libos);
+  ASSERT(libos_bus != NV_DMA_BUS_INVALID);
+  const uint8_t *libos = (const uint8_t *)phys_to_virt(r.libos.phys);
+  struct nv_rpc_libos_region rargs;
+  ASSERT(nv_rpc_libos_read(libos, NV_RPC_LIBOS_MAX - 1u, &rargs) == 0);
+  ASSERT(rargs.id8 == nv_rpc_id8("RMARGS"));
+  ASSERT(rargs.pa == args_bus);
+  for (uint32_t i = 0; i + 1u < NV_RPC_LIBOS_MAX; i++) {
+    struct nv_rpc_libos_region e;
+    ASSERT(nv_rpc_libos_read(libos, i, &e) == 0);
+    ASSERT(e.pa == nv_dma_bus(&r.logs) + (uint64_t)i * NV_DMA_PAGE);
+  }
+
+  /* (c) exactly two register writes, both mailbox words holding the table's
+   * bus address low and high -- and NOT the doorbell. */
+  EXPECT_EQ(mmio.writes, 2);
+  ASSERT(mmio.off[0] == 0x110040u && mmio.off[1] == 0x110044u);
+  ASSERT(mmio.val[0] == (uint32_t)(libos_bus & 0xFFFFFFFFu));
+  ASSERT(mmio.val[1] == (uint32_t)(libos_bus >> 32));
+  ASSERT(mmio.off[0] != NV_RPC_DOORBELL_OFF && mmio.off[1] != NV_RPC_DOORBELL_OFF);
   EXPECT_EQ((int)r.doorbells, 0);
   EXPECT_EQ((int)r.sends, 0);
 
-  /* A second call reuses the same 129 pages rather than taking another run. */
+  /* (d) the status header is still the peer's to write: eight zero words, as
+   * the link stage will read them. */
+  for (uint32_t i = 0; i < 8; i++)
+    ASSERT(t_ld32(block + NV_RPC_STAT_OFF + i * 4u) == 0);
+
+  /* A second call reuses the same pages rather than taking another run, and
+   * rewrites the same two mailbox words. */
   int pages_before = (int)r.block.pages;
   EXPECT_EQ(nv_gsp_rpc_stage8_into(&r, &d), -EAGAIN);
   EXPECT_EQ((int)r.block.pages, pages_before);
+  EXPECT_EQ(mmio.writes, 4);
+  ASSERT(mmio.off[2] == 0x110040u && mmio.off[3] == 0x110044u);
+  ASSERT(mmio.val[2] == mmio.val[0] && mmio.val[3] == mmio.val[1]);
+
+  nv_gsp_rpc_teardown(&r);
+  EXPECT_EQ(frame_free_count(), before);
+}
+
+/* Publishing is an address operation: with VT-d translation live there is no
+ * bus address for either page, so the honest answer is "cannot", no page is
+ * written, and no mailbox is programmed.  The same substitution G-05 catches
+ * for the block, caught for the publish. */
+TEST(test_nv_gsp_rpc_publish_refuses_without_a_bus_address) {
+  uart_puts("  Running test_nv_gsp_rpc_publish_refuses_without_a_bus_address...\n");
+  tests_run++;
+
+  struct t_mmio mmio;
+  t_zero(&mmio, (uint32_t)sizeof mmio);
+  struct nv_dev d;
+  t_zero(&d, (uint32_t)sizeof d);
+  d.ops.rd32 = t_rd32;
+  d.ops.wr32 = t_wr32;
+  d.ops_ctx = &mmio;
+
+  /* An unbuilt transport cannot be published: there is no block to name. */
+  struct nv_gsp_rpc u;
+  t_zero(&u, (uint32_t)sizeof u);
+  EXPECT_EQ(nv_gsp_rpc_publish(&u, &d), -EINVAL);
+  EXPECT_EQ(nv_gsp_rpc_publish(0, &d), -EINVAL);
   EXPECT_EQ(mmio.writes, 0);
+
+  struct nv_gsp_rpc r;
+  t_zero(&r, (uint32_t)sizeof r);
+  int before = frame_free_count();
+  ASSERT(nv_gsp_rpc_setup(&r, g_rx) == 0);
+
+  nv_dma_test_set_translation(1);
+  int rc = nv_gsp_rpc_publish(&r, &d);
+  nv_dma_test_set_translation(-1);
+
+  EXPECT_EQ(rc, -ENOTSUP);
+  EXPECT_EQ(mmio.writes, 0);
+  EXPECT_EQ(r.published, 0);
+  /* Nothing was published, so the pages still carry the zeros nv_dma_alloc
+   * left them as -- not a magic number that would look like a valid page. */
+  const uint8_t *args = (const uint8_t *)phys_to_virt(r.args.phys);
+  ASSERT(t_ld32(args) == 0);
 
   nv_gsp_rpc_teardown(&r);
   EXPECT_EQ(frame_free_count(), before);
@@ -397,6 +498,7 @@ void nv_gsp_glue_test_suite(void) {
   test_nv_gsp_rpc_refuses_to_build_without_a_bus_address();
   test_nv_gsp_rpc_notify_needs_a_built_queue_and_a_message();
   test_nv_gsp_rpc_stage8_publishes_and_holds_the_doorbell();
+  test_nv_gsp_rpc_publish_refuses_without_a_bus_address();
 }
 
 #endif /* __x86_64__ */
