@@ -441,6 +441,26 @@ void nv_shim_syncfile_release(struct process *grp, int fd, void *obj,
 #define NVSHIM_SYNC_TRANSFER_HANDLE_NOT_HELD  18
 #define NVSHIM_SYNC_TRANSFER_SRC_SYNC_FILE     19
 #define NVSHIM_SYNC_TRANSFER_POINT_BELOW_IMPORT 20
+/* WP-EVENTFD (SYNCOBJ_EVENTFD is served; these are what its refusals print):
+ *   21  `fd` is not an eventfd fd -- an absent/closed one at registration, or
+ *       the node, a pipe, a syncobj fd.  Linux's eventfd_ctx_fdget answers
+ *       -EBADF/-EINVAL; the row says which object it found instead.
+ *   22  the eventfd the registration resolved was CLOSED (or its slot reused by
+ *       a later eventfd) before the point retired.  The registration names a
+ *       counter that no longer exists, so the retire writes NOTHING -- this is
+ *       the named refusal the close-after-register case must produce, not a
+ *       silent NULL and not somebody else's counter.
+ *   23  a second registration for the same (handle, point).  drm.h's 24 bytes
+ *       carry no cancel form, so the node refuses rather than silently
+ *       replacing the first registration (each retire writes 1 once).
+ *   24  `point` does not name a fence this handle carries: a handle imported
+ *       from IMPORT_SYNC_FILE has exactly ONE fence (its floor), so a point
+ *       above or below it is not that fence -- never a silent clamp, which
+ *       would fire the counter at a point that never existed. */
+#define NVSHIM_SYNC_NOT_EVENTFD                21
+#define NVSHIM_SYNC_EVENTFD_CLOSED             22
+#define NVSHIM_SYNC_EVENTFD_REGISTERED         23
+#define NVSHIM_SYNC_EVENTFD_POINT_NOT_FENCE    24
 #define NVSHIM_SYNC_REASON_MAX         40
 void nv_shim_sync_refusal_name(int why, char *dst, int cap);
 

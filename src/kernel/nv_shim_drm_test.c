@@ -86,6 +86,8 @@ static void test_nvshim_drm_layout(void) {
    * request macro encodes that size -- a size mismatch is the one way a served
    * row can be green here and wrong for a real client. */
   EXPECT_EQ((int)sizeof(struct nvshim_drm_syncobj_transfer), 32);
+  /* WP-EVENTFD: drm.h's struct drm_syncobj_eventfd is 24 bytes. */
+  EXPECT_EQ((int)sizeof(struct nvshim_drm_syncobj_eventfd), 24);
   EXPECT_EQ((int)sizeof(struct nvshim_drm_channel_alloc), 88);
   EXPECT_EQ((int)sizeof(struct nvshim_drm_channel_free), 4);
   EXPECT_EQ((int)sizeof(struct nvshim_drm_exec_push), 16);
@@ -124,6 +126,11 @@ static void test_nvshim_drm_layout(void) {
   EXPECT_EQ(OFF(struct nvshim_drm_syncobj_transfer, dst_point), 16);
   EXPECT_EQ(OFF(struct nvshim_drm_syncobj_transfer, flags), 24);
   EXPECT_EQ(OFF(struct nvshim_drm_syncobj_transfer, pad), 28);
+  /* WP-EVENTFD: drm.h's field order and offsets. */
+  EXPECT_EQ(OFF(struct nvshim_drm_syncobj_eventfd, flags), 4);
+  EXPECT_EQ(OFF(struct nvshim_drm_syncobj_eventfd, point), 8);
+  EXPECT_EQ(OFF(struct nvshim_drm_syncobj_eventfd, fd), 16);
+  EXPECT_EQ(OFF(struct nvshim_drm_syncobj_eventfd, pad), 20);
   EXPECT_EQ(OFF(struct nvshim_drm_version, name_len), 16);
   EXPECT_EQ(OFF(struct nvshim_drm_version, desc), 56);
 
@@ -160,6 +167,9 @@ static void test_nvshim_drm_layout(void) {
    * refusal by number before this rung, so its encoding is pinned here at the
    * value a winsys built against drm.h would send. */
   EXPECT_EQ((int)NVSHIM_DRM_IOC_SYNCOBJ_TRANSFER, (int)0xC02064CCu);
+  /* WP-EVENTFD: DRM_IOWR(0xcf, syncobj_eventfd) -- 24 bytes, the value a
+   * winsys built against drm.h sends. */
+  EXPECT_EQ((int)NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD, (int)0xC01864CFu);
 
   /* Field decomposition: magic 'd', the uAPI sub-number, the struct size. */
   EXPECT_EQ((int)NVSHIM_DRM_TYPE(NVSHIM_DRM_IOC_EXEC), 0x64);
@@ -187,7 +197,9 @@ static void test_nvshim_drm_layout(void) {
   EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_SYNCOBJ_QUERY), 24);
   EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_SYNCOBJ_TRANSFER), 32);
   EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_ANY(NVSHIM_DRM_NR_SYNCOBJ_TRANSFER, 31)), 32);
-  EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD), 0);
+  /* WP-EVENTFD: 0xcf is the last syncobj row to leave the refusal table, so it
+   * carries drm.h's 24 rather than a refusal's 0. */
+  EXPECT_EQ(nv_shim_drm_req_size(NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD), 24);
   /* NVIF is served since WP-NVIF, and it is the ONE row whose encoded size is
    * a buffer length: the table states the bare header as its minimum, and the
    * handler applies each type's own shape rule.  So any encoded size >= 24
@@ -204,15 +216,16 @@ static void test_nvshim_drm_layout(void) {
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_NVIF) != 0), 0);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_GEM_PUSHBUF) != 0), 1);
   /* WP-SYNC: the four served syncobj rows left the refusal table; WP-SYNCFAM
-   * served QUERY and WP-TRANSFER served TRANSFER, so EVENTFD is the one syncobj
-   * row left in it. */
+   * served QUERY, WP-TRANSFER served TRANSFER, WP-TRANSFERFILE its sync_file
+   * source leg and WP-EVENTFD served EVENTFD -- so NO syncobj row is a named
+   * refusal any more. */
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT) != 0), 0);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_SIGNAL) != 0), 0);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_HANDLE_TO_FD) != 0), 0);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_FD_TO_HANDLE) != 0), 0);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_QUERY) != 0), 0);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_TRANSFER) != 0), 0);
-  EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD) != 0), 1);
+  EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD) != 0), 0);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_EXEC) != 0), 0);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_GEM_NEW) != 0), 0);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_ANY(0x7e, 8)) != 0), 0);
@@ -254,16 +267,17 @@ static void test_nvshim_drm_refusals(void) {
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_PRIME_HANDLE_TO_FD, 0), -EINVAL);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_PRIME_FD_TO_HANDLE, 0), -EINVAL);
   /* WP-SYNC: 0xc1 / 0xc2 / 0xca / 0xcd are SERVED now, so with no process they
-   * answer the same -EINVAL every served row does; WP-SYNCFAM served QUERY and
-   * WP-TRANSFER served TRANSFER for the same reason, and the one syncobj row
-   * this node still refuses stays -ENOSYS by name. */
+   * answer the same -EINVAL every served row does; WP-SYNCFAM served QUERY,
+   * WP-TRANSFER served TRANSFER and WP-EVENTFD served EVENTFD for the same
+   * reason -- no syncobj row is a named refusal any more (its legs refuse by
+   * REASON, which the syncobj suites drive). */
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_HANDLE_TO_FD, 0), -EINVAL);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_FD_TO_HANDLE, 0), -EINVAL);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_WAIT, 0), -EINVAL);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_TIMELINE_SIGNAL, 0), -EINVAL);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_QUERY, 0), -EINVAL);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_TRANSFER, 0), -EINVAL);
-  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD, 0), -ENOSYS);
+  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD, 0), -EINVAL);
 
   /* A number nobody implements is -ENOTTY (not a silent 0, not a refusal). */
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_ANY(0x7e, 8), 0), -ENOTTY);
@@ -1919,7 +1933,7 @@ static void test_nvshim_drm_prime_refusals(void) {
    * longer a named refusal -- with no process it answers the -EINVAL every
    * served row gives, never -ENOSYS. */
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_TRANSFER, 0), -EINVAL);
-  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD, 0), -ENOSYS);
+  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD, 0), -EINVAL);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_GEM_PUSHBUF, 0), -ENOSYS);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_DRM_IOC_SETPARAM, 0), -ENOSYS);
   EXPECT_EQ((int)(nv_shim_drm_refusal_name(NVSHIM_DRM_IOC_GEM_FLINK) != 0), 1);
@@ -3068,12 +3082,12 @@ static void test_nvshim_drm_syncfile(void) {
   }
   EXPECT_EQ(sync_name_is(NVSHIM_SYNC_NOT_SYNC_FILE, "not_a_sync_file"), 1);
   EXPECT_EQ(sync_name_is(NVSHIM_SYNC_POINT_WITHOUT_TIMELINE, "point_without_timeline"), 1);
-  /* EVENTFD is the one syncobj row this node still refuses, and it still
-   * answers -ENOSYS by name (docs/nv-shim-syncfile.md §5.2).  TRANSFER is
-   * SERVED since WP-TRANSFER -- its timeline handle->handle leg needs no
-   * sync_file at all -- and is driven by test_nvshim_drm_syncobj_transfer*. */
+  /* WP-EVENTFD: EVENTFD is SERVED now, so this call is not a named refusal any
+   * more -- `pr.fd` is the node, not an eventfd, so the row answers -EINVAL and
+   * prints reason=not_an_eventfd.  The served path (a real eventfd, a real
+   * read(2)) is test_nvshim_drm_syncobj_eventfd*. */
   EXPECT_EQ(nv_shim_ioctl(pr.p, pr.fd, NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD, DREQ_BASE),
-            -ENOSYS);
+            -EINVAL);
 
   /* --- (5) close order: one reference per description, freed at the last -- */
   EXPECT_EQ(sobj_destroy(&pr, h3), 0);
@@ -3859,15 +3873,218 @@ static void test_nvshim_drm_syncobj_refusals(void) {
               -EINVAL);
   }
 
-  /* --- the rows this rung did NOT serve are still -ENOSYS by name.  QUERY is
-   * not in this list any more: WP-SYNCFAM serves it, the sync_file legs of
-   * HANDLE_TO_FD/FD_TO_HANDLE are served by WP-SYNCFILE and TRANSFER is served
-   * by WP-TRANSFER -- so EVENTFD is the ONLY syncobj row left refused: its
-   * kernel-side counter writer still does not exist.  --- */
+  /* --- WP-EVENTFD: NO syncobj row is refused by number any more.  QUERY was
+   * served by WP-SYNCFAM, the sync_file legs of HANDLE_TO_FD/FD_TO_HANDLE by
+   * WP-SYNCFILE, TRANSFER by WP-TRANSFER/WP-TRANSFERFILE and EVENTFD by
+   * WP-EVENTFD -- so this call is a served row whose `fd` (the node) is not an
+   * eventfd: -EINVAL, with its own reason on the console. --- */
   EXPECT_EQ(nv_shim_ioctl(pr.p, pr.fd, NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD, DREQ_BASE),
-            -ENOSYS);
+            -EINVAL);
 
   EXPECT_EQ(sobj_destroy(&pr, h), 0);
+  drm_probe_down(&pr);
+  EXPECT_EQ(nv_rm_mock_live(), 0);
+}
+
+/* ============================================================================
+ *  WP-EVENTFD: SYNCOBJ_EVENTFD -- a retired point writes the client's eventfd
+ *
+ *  The measurement is a REAL eventfd and a REAL read: file_eventfd_create() is
+ *  the entry eventfd2's handler calls, file_read_user() is the path read(2)
+ *  takes (the same function the syscall handler uses), and file_poll() is the
+ *  poll(2) engine the sync_file suite already drives.  The request goes through
+ *  the real route table at drm.h's own encoding (0xC01864CF, 24 bytes).
+ *
+ *  What the rows must show:
+ *    - BEFORE the retire: read -> -EAGAIN, poll -> 0 ready, nothing readable;
+ *    - ONE unsigned EXEC (the kick) retires the point: poll -> POLLIN, read ->
+ *      8 bytes == 1, and a SECOND read -> -EAGAIN (the counter was cleared, not
+ *      a level that a log line merely claimed);
+ *    - a registration whose fd was CLOSED before the retire writes NOTHING --
+ *      an eventfd that REUSES that exact slot still reads -EAGAIN, and the shim
+ *      names the refusal (reason 22) instead of waking a stranger;
+ *    - a second registration for the same (handle, point) is refused by name,
+ *      as are a non-eventfd fd, an undefined flag and a never-submitted point.
+ * ========================================================================== */
+
+/* The user VA this suite reads the counter into and back from (inside the
+ * mapping drm_probe_up() installs; clear of every other DREQ_* object). */
+#define DREQ_EVENTFD (DREQ_BASE + 0x1C00)
+
+/* One SYNCOBJ_EVENTFD request.  `flags` is passed raw so the refusal checks can
+ * send the bit drm.h does not define. */
+static int sobj_eventfd_reg(struct drm_probe *pr, uint32_t handle, uint64_t point,
+                            int efd, uint32_t flags) {
+  struct nvshim_drm_syncobj_eventfd ef;
+  for (unsigned i = 0; i < sizeof ef; i++) ((unsigned char *)&ef)[i] = 0;
+  ef.handle = handle;
+  ef.flags = flags;
+  ef.point = point;
+  ef.fd = efd;
+  return drm_ioc(pr, NVSHIM_DRM_IOC_SYNCOBJ_EVENTFD, &ef, (int)sizeof ef);
+}
+
+/* read(2)'s path, 8 bytes, through a real user range: -EAGAIN when the counter
+ * is 0 and the fd was made EFD_NONBLOCK, 8 on a value. */
+static int efd_read(struct drm_probe *pr, int efd, uint64_t *val) {
+  uint64_t z = 0;
+  if (vm_kwrite(pr->p, DREQ_EVENTFD, &z, (int)sizeof z) != 0) return -1000;
+  int rc = file_read_user(pr->p, efd, DREQ_EVENTFD, (int)sizeof z, 0);
+  if (rc == (int)sizeof z && val &&
+      vm_user_read(pr->p, DREQ_EVENTFD, val, (int)sizeof z) != 0)
+    return -1001;
+  return rc;
+}
+
+/* poll(2)'s engine: the ready count and the revents it wrote. */
+static int efd_poll(struct drm_probe *pr, int efd, short *revents) {
+  struct k_pollfd pf;
+  pf.fd = efd;
+  pf.events = K_POLLIN;
+  pf.revents = 0x7FFF;
+  int rc = file_poll(pr->p, &pf, 1, 0);
+  if (revents) *revents = pf.revents;
+  return rc;
+}
+
+static void test_nvshim_drm_syncobj_eventfd(void) {
+  uart_puts("  Running test_nvshim_drm_syncobj_eventfd...\n");
+  tests_run++;
+
+  struct drm_probe pr;
+  EXPECT_EQ(drm_probe_up(&pr, 112), 0);
+  if (!pr.up) return;
+  struct nvshim_drm_getparam q;
+  q.param = NVSHIM_PARAM_CHIPSET_ID;
+  q.value = 0;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GETPARAM, &q, (int)sizeof q), 0);
+  uint32_t bo = 0;
+  int32_t ch = 0;
+  int setup = sync_exec_setup(&pr, &bo, &ch);
+  EXPECT_EQ(setup, 0);
+  if (setup != 0) {
+    drm_probe_down(&pr);
+    return;
+  }
+
+  uint32_t h = 0;
+  EXPECT_EQ(sobj_create(&pr, 0, &h), 0);
+  const uint64_t N = 4;
+
+  /* --- (1) a real eventfd, the way eventfd2(0, EFD_NONBLOCK) makes one. --- */
+  int efd = file_eventfd_create(pr.p, 0, 0x800 /* EFD_NONBLOCK */);
+  EXPECT_EQ((efd >= 0), 1);
+  uint32_t egen = 0;
+  int eslot = file_eventfd_slot(pr.p, efd, &egen);
+  EXPECT_EQ((eslot >= 0), 1);
+  EXPECT_EQ((int)(egen != 0), 1);
+  EXPECT_EQ(efd_read(&pr, efd, 0), -EAGAIN); /* nothing written yet */
+
+  /* --- (2) N is SUBMITTED with the kick held: in the ledger, not reached. --- */
+  struct nvshim_drm_sync sig;
+  sig.flags = NVSHIM_DRM_SYNC_TIMELINE_SYNCOBJ;
+  sig.handle = h;
+  sig.timeline_value = N;
+  nv_rm_mock_hold(1);
+  EXPECT_EQ(sync_exec_with(&pr, ch, &sig, 1), 0);
+  EXPECT_EQ(nv_rm_mock_pending(), 1);
+
+  /* --- (3) register at N: SERVED, and nothing has fired. --- */
+  EXPECT_EQ(sobj_eventfd_reg(&pr, h, N, efd, 0), 0);
+  {
+    short rev = 0x7FFF;
+    EXPECT_EQ(efd_poll(&pr, efd, &rev), 0); /* poll(2): not readable */
+    EXPECT_EQ((int)rev, 0);
+    EXPECT_EQ(efd_read(&pr, efd, 0), -EAGAIN);
+  }
+
+  /* --- (4) the refusals, each by its own name. --- */
+  /* a second registration for the same (handle, point): no silent replace */
+  EXPECT_EQ(sobj_eventfd_reg(&pr, h, N, efd, 0), -EINVAL);
+  /* the node fd is not an eventfd; an absent fd is not either */
+  EXPECT_EQ(sobj_eventfd_reg(&pr, h, N, pr.fd, 0), -EINVAL);
+  EXPECT_EQ(sobj_eventfd_reg(&pr, h, N, -1, 0), -EBADF);
+  /* drm.h defines no flag for this row */
+  EXPECT_EQ(sobj_eventfd_reg(&pr, h, N, efd, 1), -EINVAL);
+  /* a point that was never submitted has no fence to wait on */
+  EXPECT_EQ(sobj_eventfd_reg(&pr, h, N + 100, efd, 0), -EINVAL);
+  /* a handle this client does not hold */
+  EXPECT_EQ(sobj_eventfd_reg(&pr, h + 500, N, efd, 0), -EINVAL);
+
+  /* --- (5) ONE unsigned EXEC (the kick) retires the point.  The counter is
+   * written during that ioctl; read(2) then returns 8 bytes == 1 and the
+   * SECOND read is -EAGAIN again -- a level, consumed, not a claimed wake. --- */
+  nv_rm_mock_hold(0);
+  EXPECT_EQ(sync_exec_with(&pr, ch, 0, 0), 0);
+  EXPECT_EQ(nv_rm_mock_pending(), 0);
+  {
+    short rev = 0;
+    EXPECT_EQ(efd_poll(&pr, efd, &rev), 1);
+    EXPECT_EQ((int)rev, K_POLLIN);
+  }
+  uint64_t got = 0;
+  EXPECT_EQ(efd_read(&pr, efd, &got), (int)sizeof got);
+  EXPECT_EQ((int)got, 1);
+  EXPECT_EQ(efd_read(&pr, efd, 0), -EAGAIN);
+  uart_puts("  [NVSHIM] eventfd: read -EAGAIN before the retire, 8 bytes == 1 "
+            "after the SAME unsigned EXEC, -EAGAIN on the second read; poll 0 -> POLLIN\n");
+
+  /* --- (6) closed before the retire: refused by name, and NOTHING written.
+   * The slot the registration pinned is learned from the resolver; the fd is
+   * then closed and a fresh eventfd is allocated until it REUSES that exact
+   * slot.  Without the generation check the retire would write into the new
+   * fd's counter -- so its read staying -EAGAIN is the measurement. --- */
+  const uint64_t M = 9;
+  struct nvshim_drm_sync sig2;
+  sig2.flags = NVSHIM_DRM_SYNC_TIMELINE_SYNCOBJ;
+  sig2.handle = h;
+  sig2.timeline_value = M;
+  nv_rm_mock_hold(1);
+  EXPECT_EQ(sync_exec_with(&pr, ch, &sig2, 1), 0);
+  int e2 = file_eventfd_create(pr.p, 0, 0x800);
+  EXPECT_EQ((e2 >= 0), 1);
+  int e2slot = file_eventfd_slot(pr.p, e2, 0);
+  EXPECT_EQ((e2slot >= 0), 1);
+  EXPECT_EQ(sobj_eventfd_reg(&pr, h, M, e2, 0), 0);
+  EXPECT_EQ(file_close(pr.p, e2), 0); /* the eventfd is gone, the registration is not */
+
+  int extra[32], nextra = 0, reuse = -1;
+  while (nextra < 32 && reuse < 0) {
+    int f = file_eventfd_create(pr.p, 0, 0x800);
+    EXPECT_EQ((f >= 0), 1);
+    if (f < 0) break;
+    extra[nextra++] = f;
+    uint32_t g2 = 0;
+    if (file_eventfd_slot(pr.p, f, &g2) == e2slot) reuse = f;
+  }
+  EXPECT_EQ((reuse >= 0), 1); /* a live eventfd now owns the registered slot */
+
+  /* the retire that lands M */
+  nv_rm_mock_hold(0);
+  EXPECT_EQ(sync_exec_with(&pr, ch, 0, 0), 0);
+  EXPECT_EQ(nv_rm_mock_pending(), 0);
+  /* nothing was written into the slot, even though a live eventfd owns it */
+  EXPECT_EQ(efd_read(&pr, reuse, 0), -EAGAIN);
+  uart_puts("  [NVSHIM] eventfd closed: the retire wrote NOTHING -- an eventfd "
+            "reusing the registered slot still reads -EAGAIN; row reason=eventfd_closed\n");
+
+  /* The names this rung's refusals print. */
+  EXPECT_EQ(sync_name_is(NVSHIM_SYNC_NOT_EVENTFD, "not_an_eventfd"), 1);
+  EXPECT_EQ(sync_name_is(NVSHIM_SYNC_EVENTFD_CLOSED, "eventfd_closed"), 1);
+  EXPECT_EQ(sync_name_is(NVSHIM_SYNC_EVENTFD_REGISTERED, "eventfd_registered"), 1);
+  EXPECT_EQ(sync_name_is(NVSHIM_SYNC_EVENTFD_POINT_NOT_FENCE, "eventfd_point_not_fence"), 1);
+
+  /* --- teardown --- */
+  EXPECT_EQ(file_close(pr.p, efd), 0);
+  for (int i = 0; i < nextra; i++) EXPECT_EQ(file_close(pr.p, extra[i]), 0);
+  EXPECT_EQ(sobj_destroy(&pr, h), 0);
+  struct nvshim_drm_channel_free cf;
+  cf.channel = ch;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_CHANNEL_FREE, &cf, (int)sizeof cf), 0);
+  struct nvshim_drm_gem_close gc;
+  gc.handle = bo;
+  gc.pad = 0;
+  EXPECT_EQ(drm_ioc(&pr, NVSHIM_DRM_IOC_GEM_CLOSE, &gc, (int)sizeof gc), 0);
   drm_probe_down(&pr);
   EXPECT_EQ(nv_rm_mock_live(), 0);
 }
@@ -4389,6 +4606,7 @@ void nv_shim_drm_test_suite(void) {
   test_nvshim_drm_syncobj_transfer();          /* WP-TRANSFER: a point moves */
   test_nvshim_drm_syncobj_transfer_syncfile(); /* WP-TRANSFERFILE: the file's point */
   test_nvshim_drm_syncobj_transfer_refusals(); /* WP-TRANSFER: the named walls */
+  test_nvshim_drm_syncobj_eventfd();           /* WP-EVENTFD: retire writes read(2) */
   test_nvshim_nvif_layout();
   test_nvshim_nvif_device();
   test_nvshim_nvif_sclass();

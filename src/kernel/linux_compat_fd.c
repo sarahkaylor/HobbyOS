@@ -1354,12 +1354,20 @@ static struct {
   int used;
   int sem;
   uint64_t count;
+  /* WP-EVENTFD: monotonically increasing per ALLOCATION.  A slot number is
+   * reused the moment its eventfd is closed, so a shim registration that only
+   * remembered the slot could write into a stranger's counter after a close(2).
+   * The generation is taken at registration and re-checked at signal time:
+   * `used && gen == registered` is the only honest "this is still the eventfd
+   * the client registered". */
+  uint32_t gen;
   /* C1-k4: parked readers / writers.  A blocking read used to re-poll in
      10 ms slices with nobody waking it: an eventfd ping-pong ran at 50 round
      trips a second (linux_probe_pipestorm R10). */
   struct pid_mask rwait, wwait;
 } l_efd[L_EVENTFD_SLOTS];
 static spinlock_t l_efd_lock;
+static uint32_t l_efd_serial; /* never 0: a registration's gen 0 means "none" */
 
 static void l_efd_drain(struct pid_mask *m) {
   for (int wi = 0; wi < PID_MASK_WORDS; wi++) {
@@ -1380,6 +1388,10 @@ int l_eventfd_new(unsigned int initval, int flags) {
       l_efd[i].used = 1;
       l_efd[i].sem = (flags & L_EFD_SEMAPHORE) != 0;
       l_efd[i].count = initval;
+      /* WP-EVENTFD: a new allocation is a NEW eventfd, whatever slot it
+       * reuses; a registration taken against the previous one must not match. */
+      l_efd[i].gen = ++l_efd_serial;
+      if (l_efd[i].gen == 0) l_efd[i].gen = ++l_efd_serial; /* 32-bit wrap */
       pid_mask_zero(&l_efd[i].rwait);
       pid_mask_zero(&l_efd[i].wwait);
       slot = i;
@@ -1388,6 +1400,55 @@ int l_eventfd_new(unsigned int initval, int flags) {
   }
   spinlock_release_irqrestore(&l_efd_lock, fl);
   return slot;
+}
+
+/* WP-EVENTFD: the generation an fd's slot currently carries, or 0 when the slot
+ * is not live.  Exported through fs.c's file_eventfd_slot() so the shim records
+ * the pair (slot, gen) at registration. */
+uint32_t l_eventfd_gen(int slot) {
+  if (slot < 0 || slot >= L_EVENTFD_SLOTS) return 0;
+  uint64_t fl = spinlock_acquire_irqsave(&l_efd_lock);
+  uint32_t gen = l_efd[slot].used ? l_efd[slot].gen : 0;
+  spinlock_release_irqrestore(&l_efd_lock, fl);
+  return gen;
+}
+
+/* WP-EVENTFD: the KERNEL-side writer.  w(2)'s l_eventfd_write() takes a USER
+ * pointer because it IS write(2); a syncobj retire has no user pointer and no
+ * business copying one, so this is the same body with the value already in the
+ * kernel: add n under the slot lock, take and drain the parked readers, and
+ * notify pollers on the slot's own key.  Linux's
+ * syncobj_eventfd_signal -> eventfd_signal(efd, 1) is the only caller shape, so
+ * n is 1 there; the parameter stays general to keep the arithmetic honest.
+ *
+ * Returns 0 when the counter moved, -EBADF when the slot is dead or no longer
+ * the generation the caller registered (closed, or reused by another eventfd --
+ * writing then would wake a process and increment a counter that has nothing to
+ * do with the registration), -ERANGE when the add would pass the counter's
+ * 0xfffffffffffffffe ceiling (Linux's eventfd_signal drops such a signal; this
+ * one says so instead of silently not writing). */
+int l_eventfd_signal(int slot, uint32_t gen, uint64_t n) {
+  if (slot < 0 || slot >= L_EVENTFD_SLOTS) return -EBADF;
+  if (n == 0) return 0;
+  struct pid_mask wake;
+  pid_mask_zero(&wake);
+  uint64_t fl = spinlock_acquire_irqsave(&l_efd_lock);
+  if (!l_efd[slot].used || l_efd[slot].gen != gen) {
+    spinlock_release_irqrestore(&l_efd_lock, fl);
+    return -EBADF;
+  }
+  uint64_t c = l_efd[slot].count;
+  if (n > L_EVENTFD_MAX - c) {
+    spinlock_release_irqrestore(&l_efd_lock, fl);
+    return -ERANGE;
+  }
+  l_efd[slot].count = c + n;
+  wake = l_efd[slot].rwait;
+  pid_mask_zero(&l_efd[slot].rwait);
+  spinlock_release_irqrestore(&l_efd_lock, fl);
+  l_efd_drain(&wake);
+  poll_notify_obj(&l_efd[slot]); /* the key l_eventfd_key() returns */
+  return 0;
 }
 
 /* C1-k6 round 2: an eventfd's poll notification key. */

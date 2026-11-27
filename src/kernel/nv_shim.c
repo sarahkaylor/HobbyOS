@@ -50,6 +50,11 @@ extern void uart_print_hex(uint64_t v);
 #define SHIM_MAX_CHANNELS 8
 #define SHIM_MAX_SYNCOBJS NVSHIM_DRM_MAX_SYNCOBJS
 #define SHIM_MAX_SIGPEND 32
+/* WP-EVENTFD: eventfd registrations a client may hold.  One registration per
+ * (syncobj record, point) -- see struct shim_efd_reg.  Small on purpose: this
+ * row registers one counter per point a consumer cares about, and the table is
+ * per client, not per node. */
+#define SHIM_MAX_EVENTFD 8
 /* WP-NVIF: objects in one client's NVIF tree.  A stock winsys probes with one
  * context (1 device + up to 5 engine objects), destroys it, then makes one per
  * real context, so 24 leaves room for a handful of live contexts and still
@@ -72,6 +77,25 @@ struct shim_sigpend {
   uint32_t ch;    /* the channel whose fence must retire first */
   uint64_t fence;
   uint64_t point; /* WP-SYNC: the point this fence writes when it retires */
+};
+
+/* WP-EVENTFD: one registration -- "when this point of this record retires,
+ * write 1 into this eventfd counter".  The fd was resolved AT REGISTRATION to
+ * (slot, gen), which is what makes a close(2) in between a named refusal at
+ * retire instead of a write into a counter that means something else now (the
+ * slot table reuses numbers; the generation does not).
+ *
+ * One entry per (record, point): drm.h's 24 bytes carry no cancel form, so the
+ * node refuses a second registration on the same target by name rather than
+ * silently replacing the first -- replacing would drop a signal a client asked
+ * for, which is the §2.13 fake in its quiet form. */
+struct shim_efd_reg {
+  int used;
+  uint8_t obj;     /* index+1 into g_sobjs (the RECORD, not the handle) */
+  uint32_t handle; /* the client handle it was registered through, for rows */
+  uint64_t point;  /* the effective point (binary form -> 1) */
+  int slot;
+  uint32_t gen;
 };
 
 /* WP-F3: one live CPU mapping of a GEM object.  Tracked so GEM_CLOSE (or the
@@ -146,6 +170,19 @@ struct shim_client {
   uint64_t sobj_floor[SHIM_MAX_SYNCOBJS];
   int npend;
   struct shim_sigpend pend[SHIM_MAX_SIGPEND];
+
+  /* ---- WP-EVENTFD ---- */
+  int nefd;
+  struct shim_efd_reg efds[SHIM_MAX_EVENTFD];
+  /* Landed registrations moved out of `efds` by client_reap_locked(): the
+   * counter write happens later, at the END of the ioctl that retired the
+   * point (nv_shim_drm_ioctl), because signalling wakes processes and takes
+   * their locks -- work that does not belong under g_shim_lock, and rows are
+   * emitted after it is released (this file's convention).  The write still
+   * happens before the retiring ioctl returns, so a read(2) issued after it
+   * observes the 1. */
+  int nefd_fire;
+  struct shim_efd_reg efd_fire[SHIM_MAX_EVENTFD];
 
   /* WP-F3: what the last EXEC fetched out of the push buffers it was given
    * (bytes + FNV-1a 32).  Read only by the kernel unit tier's seam. */
@@ -430,6 +467,15 @@ static int r_syncfile = 48;
  * paid for twice. */
 static int r_synctransfer = 48;
 
+/* WP-EVENTFD's own bucket.  The rows that carry this rung's acceptance are the
+ * registration naming (handle, point, slot, generation) and the RETIRE row that
+ * proves the counter write went to a live slot (or names the closed one), plus
+ * one row per refused shape.  They run after six syncobj suites, so r_sync is
+ * not the place to spend them: a green tier whose log has no `eventfd signal
+ * slot=` row is exactly the silent-budget failure this project has paid for
+ * twice. */
+static int r_eventfd = 32;
+
 static void row_end(void) {
   uint32_t cpu = row_cpu();
   if (g_row_n[cpu] <= 0) return;
@@ -577,6 +623,17 @@ static void client_clear(struct shim_client *c) {
     c->pend[i].ch = 0;
     c->pend[i].fence = 0;
     c->pend[i].point = 0;
+  }
+  /* WP-EVENTFD: registrations and queued counter writes die with the client --
+   * a recycled client slot must not inherit a registration that names another
+   * client's record or another process's eventfd slot. */
+  c->nefd = 0;
+  c->nefd_fire = 0;
+  for (int i = 0; i < SHIM_MAX_EVENTFD; i++) {
+    c->efds[i].used = 0;
+    c->efds[i].slot = -1;
+    c->efd_fire[i].used = 0;
+    c->efd_fire[i].slot = -1;
   }
   c->exec_have = 0;
   c->exec_sum = 0;
@@ -1493,6 +1550,11 @@ static const struct drm_row g_drm_rows[] = {
      * -EINVAL. */
     {0xcc, 32}, /* SYNCOBJ_TRANSFER            struct ..._transfer          */
     {0xcd, 24}, /* SYNCOBJ_TIMELINE_SIGNAL     struct ..._timeline_array    */
+    /* WP-EVENTFD: the last syncobj row, at drm.h's own width (24).  It left
+     * g_drm_refusals[] in the same edit -- a number in both tables would be
+     * answered -ENOSYS before the size check, and this row would look served
+     * while never running. */
+    {0xcf, 24}, /* SYNCOBJ_EVENTFD             struct ..._eventfd          */
 };
 
 /* The refusal rows' names are FIXED-SIZE ARRAYS, not `const char *`.  The
@@ -1520,17 +1582,17 @@ static const struct {
     {NVSHIM_DRM_NR_GEM_CPU_FINI, "gem_cpu_fini"},
     /* WP-SYNC: 0xc1 / 0xc2 / 0xca / 0xcd are SERVED now (the row table above),
      * and WP-SYNCFAM added 0xcb (QUERY) to it.  WP-SYNCFILE served the two
-     * sync_file legs of 0xc1/0xc2 (EXPORT_SYNC_FILE / IMPORT_SYNC_FILE), and
-     * WP-TRANSFER served 0xcc (the timeline handle->handle leg).  What remains
-     * of the syncobj surface is named here:
-     *   EVENTFD registers an eventfd to be written when a point signals; the
-     *   kernel-side counter writer does not exist (linux_compat_fd.c's l_efd[]
-     *   is file-static), so there is nothing to register WITH -- unchanged.
+     * sync_file legs of 0xc1/0xc2, WP-TRANSFER served 0xcc (the timeline
+     * handle->handle leg) and WP-EVENTFD served 0xcf (EVENTFD), so NO syncobj
+     * row is refused by number any more -- the syncobj surface is "served or
+     * refused by reason", never by absence.
      * TRANSFER's other two legs are refused by REASON, not by number, because
      * the row itself answers: the binary form (no TRANSFER_FLAGS_TIMELINE) and
      * a source that came from IMPORT_SYNC_FILE print their own names from
-     * op_drm_syncobj_transfer -- see docs/nv-shim-transfer.md §2. */
-    {NVSHIM_DRM_NR_SYNCOBJ_EVENTFD, "syncobj_eventfd"},
+     * op_drm_syncobj_transfer -- see docs/nv-shim-transfer.md §2.  EVENTFD's
+     * refusals (a non-eventfd fd, a closed one at retire, a duplicate
+     * registration, a point its handle does not carry) are the same shape --
+     * see docs/nv-shim-eventfd.md §3. */
 };
 
 /* -1 = nobody implements this number, 0 = refused, >0 = the size it pairs
@@ -3328,6 +3390,43 @@ static uint64_t sobj_submitted_locked(const struct shim_sobj *o) {
   return o ? o->submitted : 0;
 }
 
+/* WP-EVENTFD: one syncobj RECORD reached `point` -- a fence retired in
+ * client_reap_locked(), an EXEC landed a new point, or TIMELINE_SIGNAL /
+ * TRANSFER moved it.  Every registration on that record at or below the new
+ * point is moved to the client's fire queue and dropped from the table, so it
+ * fires exactly once, at the retire that reached it.  The RECORD is the target
+ * (index+1), not the handle number: a handle may be destroyed while an exported
+ * fd keeps the object, and Linux's registration lives on the FENCE, which is
+ * the same thing here.
+ *
+ * Called with g_shim_lock held.  Only the queue entry is made here; the counter
+ * write happens after the lock is released (see struct shim_client's
+ * efd_fire comment) because it wakes parked readers and notifies pollers. */
+static void sobj_reach_locked(struct shim_client *c, struct shim_sobj *o,
+                              uint64_t point) {
+  if (!o || !o->used) return;
+  if (point > o->point) o->point = point;
+  if (c->nefd <= 0) return;
+  uint32_t idx = sobj_index(o);
+  if (!idx) return;
+  for (int i = 0; i < c->nefd;) {
+    if (c->efds[i].obj != (uint8_t)idx || c->efds[i].point > o->point) {
+      i++;
+      continue;
+    }
+    if (c->nefd_fire >= SHIM_MAX_EVENTFD) {
+      /* The queue is one slot per registration, so this cannot happen; if it
+       * ever did, leaving the entry registered is the honest failure: a later
+       * reach retries it instead of dropping a signal a client asked for. */
+      i++;
+      continue;
+    }
+    c->efd_fire[c->nefd_fire++] = c->efds[i];
+    for (int k = i; k + 1 < c->nefd; k++) c->efds[k] = c->efds[k + 1];
+    c->nefd--;
+  }
+}
+
 /* A syncobj reaches its point when the fence it is waiting on has retired.
  * Called with g_shim_lock held: fence_test is a constant-time read on the mock,
  * so the shim -> mock lock order holds and nothing blocks inside the lock. */
@@ -3344,7 +3443,9 @@ static void client_reap_locked(struct shim_client *c) {
      * its own point -- the record may have moved on to a higher one meanwhile
      * (a later EXEC on the same syncobj), and a point never goes backwards. */
     struct shim_sobj *o = sobj_lookup(c->pend[i].obj);
-    if (o && c->pend[i].point > o->point) o->point = c->pend[i].point;
+    /* WP-EVENTFD: the same land, and the same place an eventfd registration
+     * fires -- there is no second completion path. */
+    sobj_reach_locked(c, o, c->pend[i].point);
     for (int k = i; k + 1 < c->npend; k++) c->pend[k] = c->pend[k + 1];
     c->npend--;
   }
@@ -3394,6 +3495,11 @@ static const char k_sync_reasons[][32] = {
     "transfer_src_sync_file",
     /* WP-TRANSFERFILE (nv_shim.h orders this 20) */
     "transfer_point_below_import",
+    /* WP-EVENTFD (nv_shim.h orders these 21..24) */
+    "not_an_eventfd",
+    "eventfd_closed",
+    "eventfd_registered",
+    "eventfd_point_not_fence",
 };
 #define SYNC_NUM_REASONS (int)(sizeof k_sync_reasons / sizeof k_sync_reasons[0])
 
@@ -3513,6 +3619,19 @@ static int op_drm_syncobj_destroy(struct process *p, int fd, uint64_t arg) {
     if (c->pend[i].obj == idx) {
       for (int k = i; k + 1 < c->npend; k++) c->pend[k] = c->pend[k + 1];
       c->npend--;
+    } else {
+      i++;
+    }
+  }
+  /* WP-EVENTFD: a registration names that same record, and with the handle
+   * gone its pending entries are gone too, so no fence can land its point any
+   * more.  Drop them with the pendings (an exported fd keeps the OBJECT alive,
+   * but it is a descriptor nobody can submit through, so a registration left
+   * behind would wait for a retire that cannot come). */
+  for (int i = 0; i < c->nefd;) {
+    if (c->efds[i].obj == idx) {
+      for (int k = i; k + 1 < c->nefd; k++) c->efds[k] = c->efds[k + 1];
+      c->nefd--;
     } else {
       i++;
     }
@@ -3827,7 +3946,10 @@ static int op_drm_syncobj_timeline_signal(struct process *p, int fd, uint64_t ar
   uint64_t last = 0;
   for (uint32_t i = 0; i < sa.count_handles; i++) {
     struct shim_sobj *o = client_sobj_obj(c, handles[i]);
-    if (o && points[i] > o->point) o->point = points[i];
+    /* WP-EVENTFD: a timeline signal IS a submission and a signal in one, so a
+     * registration at this point fires here -- Linux's add_point of an
+     * already-signalled stub. */
+    if (o) sobj_reach_locked(c, o, points[i]);
     /* WP-SYNCFAM: a timeline signal ADDS a point to the object's timeline (in
      * Linux it is drm_syncobj_add_point with an already-signalled stub), so it
      * is a submission and the ledger records it -- otherwise QUERY would have
@@ -4106,7 +4228,9 @@ static int op_drm_syncobj_transfer(struct process *p, int fd, uint64_t arg) {
   uint64_t src_at = src->point;
   if (tf.dst_point > dst->submitted) dst->submitted = tf.dst_point;
   if (chain < 0) {
-    if (tf.dst_point > dst->point) dst->point = tf.dst_point;
+    /* WP-EVENTFD: the destination RECEIVED this point, so a registration on it
+     * fires here (Linux's add_point of an already-signalled fence). */
+    sobj_reach_locked(c, dst, tf.dst_point);
   } else {
     /* One entry, one (channel, fence), one retire -- the source's own entry is
      * untouched, so its wait and the destination's wait end together. */
@@ -4135,6 +4259,211 @@ static int op_drm_syncobj_transfer(struct process *p, int fd, uint64_t arg) {
   row_hex(src_at);
   row_end();
   return 0;
+}
+
+
+/* ---- EVENTFD (WP-EVENTFD) ----------------------------------------------
+ * The last syncobj row, and the only one whose "served" is measured by a real
+ * read(2): registration pins (record, point, eventfd slot, slot generation),
+ * and the SAME client_reap_locked() pass the timeline and transfer rows use
+ * writes the counter when that point retires.
+ *
+ * WHAT IS SERVED: flags == 0 and pad == 0 (drm.h defines no flag bit for this
+ * row, and no cancel form -- see nv_drm_uapi.h's struct comment), a handle this
+ * client holds, and a point that names one of the handle's fences:
+ *   - an ordinary handle: point == 0 is the binary form (point 1, Linux's
+ *     stub-fence case) and any other point must be in the SUBMITTED ledger --
+ *     a point that was never handed to the timeline has no fence, so nothing
+ *     can ever land it;
+ *   - a handle imported from IMPORT_SYNC_FILE: exactly its floor, the one fence
+ *     the handle carries (its own name if not, reason 24).
+ * A point already reached signals INSIDE this request, which is Linux's
+ * dma_fence_add_callback on an already-signalled fence (and its explicit stub
+ * case); otherwise the registration waits for the retire.
+ *
+ * WHAT IS REFUSED, by its own name (nv_shim.h 21..24): an fd that is not an
+ * eventfd (21); a duplicate registration for the same (record, point) -- the
+ * 24 bytes carry no cancel form, so replacing would silently drop a signal
+ * (23); a point the handle does not carry (24); and, at retire time, a
+ * registration whose eventfd was CLOSED (or whose slot was reused) before the
+ * point landed (22) -- nothing is written then, which is the case a slot-only
+ * record would get wrong.
+ *
+ * On retire the counter moves by exactly 1: Linux's syncobj_eventfd_signal
+ * calls eventfd_signal(efd, 1).
+ * ---------------------------------------------------------------------- */
+extern int l_eventfd_signal(int slot, uint32_t gen, uint64_t n);
+
+static int op_drm_syncobj_eventfd(struct process *p, int fd, uint64_t arg) {
+  struct nvshim_drm_syncobj_eventfd ef;
+  if (vm_user_read(p, arg, &ef, (int)sizeof ef) != 0) return -EFAULT;
+  if (ef.pad != 0) {
+    sync_refuse_rows("drm syncobj refuse", &r_eventfd, "eventfd pad=",
+                     (uint64_t)ef.pad, NVSHIM_SYNC_BAD_SHAPE);
+    return -EINVAL;
+  }
+  if (ef.flags != 0) {
+    /* drm.h defines no flag for this row; Linux refuses any non-zero value. */
+    sync_refuse_rows("drm syncobj refuse", &r_eventfd, "eventfd flags=",
+                     (uint64_t)ef.flags, NVSHIM_SYNC_BAD_FLAGS);
+    return -EINVAL;
+  }
+
+  /* The fd -> (slot, generation) resolution happens BEFORE the shim lock: it
+   * reads the file table, not the shim's, and pinning the pair here is what
+   * turns a later close(2) into a named refusal instead of a write into a
+   * counter some other eventfd now owns. */
+  uint32_t gen = 0;
+  int slot = file_eventfd_slot(p, ef.fd, &gen);
+  if (slot < 0) {
+    sync_refuse_rows("drm syncobj refuse", &r_eventfd, "eventfd fd=",
+                     (uint64_t)(int64_t)ef.fd, NVSHIM_SYNC_NOT_EVENTFD);
+    return slot; /* -EBADF (absent) or -EINVAL (not an eventfd) */
+  }
+
+  uint64_t eff = ef.point ? ef.point : 1; /* point 0 = the binary form */
+  int now = 0, id = 0, regs = 0;
+
+  spinlock_acquire(&g_shim_lock);
+  struct shim_client *c = client_find(shim_pid(p), fd);
+  if (!c) {
+    spinlock_release(&g_shim_lock);
+    return -ENODEV;
+  }
+  /* The completion path first, as every handler that decides from a point
+   * does: a retire nobody observed must be visible to THIS registration, so a
+   * point that already landed signals instead of waiting forever. */
+  client_reap_locked(c);
+  int at = client_find_sobj(c, ef.handle);
+  struct shim_sobj *o = at >= 0 ? sobj_lookup(c->sobj_obj[at]) : 0;
+  if (!o) {
+    spinlock_release(&g_shim_lock);
+    sync_refuse_rows("drm syncobj refuse", &r_eventfd, "eventfd handle=",
+                     (uint64_t)ef.handle, NVSHIM_SYNC_NOT_THIS_CLIENTS);
+    return -EINVAL;
+  }
+  uint64_t floor = c->sobj_floor[at];
+  if (floor != 0 && eff != floor) {
+    spinlock_release(&g_shim_lock);
+    sync_refuse_rows("drm syncobj refuse", &r_eventfd, "eventfd point=", eff,
+                     NVSHIM_SYNC_EVENTFD_POINT_NOT_FENCE);
+    return -EINVAL;
+  }
+  if (floor == 0 && ef.point != 0 && eff > o->submitted) {
+    /* A timeline point that was never submitted has no fence: nothing could
+     * ever land it, so registering would be a wait that cannot end. */
+    spinlock_release(&g_shim_lock);
+    sync_refuse_rows("drm syncobj refuse", &r_eventfd, "eventfd point=", eff,
+                     NVSHIM_SYNC_POINT_BEYOND_LEDGER);
+    return -EINVAL;
+  }
+  uint32_t idx = sobj_index(o);
+  for (int i = 0; i < c->nefd; i++) {
+    if (c->efds[i].obj == (uint8_t)idx && c->efds[i].point == eff) {
+      spinlock_release(&g_shim_lock);
+      /* No cancel form exists in the 24-byte struct, so a replace would drop a
+       * signal the client already asked for.  Refuse by name instead. */
+      sync_refuse_rows("drm syncobj refuse", &r_eventfd, "eventfd dup point=",
+                       eff, NVSHIM_SYNC_EVENTFD_REGISTERED);
+      return -EINVAL;
+    }
+  }
+  if (c->nefd >= SHIM_MAX_EVENTFD) {
+    spinlock_release(&g_shim_lock);
+    sync_refuse_rows("drm syncobj refuse", &r_eventfd, "eventfd regs=",
+                     (uint64_t)c->nefd, NVSHIM_SYNC_NO_SLOT);
+    return -ENOSPC;
+  }
+  now = o->point >= eff; /* an already-signalled fence: signal at once */
+  id = o->id;
+  if (!now) {
+    c->efds[c->nefd].used = 1;
+    c->efds[c->nefd].obj = (uint8_t)idx;
+    c->efds[c->nefd].handle = ef.handle;
+    c->efds[c->nefd].point = eff;
+    c->efds[c->nefd].slot = slot;
+    c->efds[c->nefd].gen = gen;
+    c->nefd++;
+  }
+  regs = c->nefd;
+  spinlock_release(&g_shim_lock);
+
+  if (now) {
+    int rc = l_eventfd_signal(slot, gen, 1);
+    if (rc != 0) {
+      sync_refuse_rows("drm syncobj refuse", &r_eventfd, "eventfd slot=",
+                       (uint64_t)slot, NVSHIM_SYNC_EVENTFD_CLOSED);
+      return rc;
+    }
+    row_begin("drm syncobj", &r_eventfd);
+    row_s("eventfd reg=now handle=");
+    row_say((int)ef.handle);
+    row_s(" point=");
+    row_hex(eff);
+    row_s(" slot=");
+    row_say(slot);
+    row_s(" gen=");
+    row_say((int)gen);
+    row_s(" n=1");
+    row_end();
+    return 0;
+  }
+  row_begin("drm syncobj", &r_eventfd);
+  row_s("eventfd reg handle=");
+  row_say((int)ef.handle);
+  row_s(" obj=");
+  row_say(id);
+  row_s(" point=");
+  row_hex(eff);
+  row_s(" slot=");
+  row_say(slot);
+  row_s(" gen=");
+  row_say((int)gen);
+  row_s(" regs=");
+  row_say(regs);
+  row_end();
+  return 0;
+}
+
+/* The counter writes the completion path queued, delivered AFTER g_shim_lock is
+ * released and before the ioctl returns -- so a read(2) issued once the ioctl
+ * returns observes the 1, while the signal itself never runs under the shim
+ * lock (it wakes parked readers and notifies pollers).  l_eventfd_signal()
+ * re-checks (slot, generation): a close(2) between the retire and this delivery
+ * is the named refusal, not a write into a reused slot. */
+static void client_efd_flush(struct process *p, int fd) {
+  struct shim_efd_reg q[SHIM_MAX_EVENTFD];
+  int n = 0;
+  spinlock_acquire(&g_shim_lock);
+  struct shim_client *c = client_find(shim_pid(p), fd);
+  if (c && c->nefd_fire > 0) {
+    n = c->nefd_fire;
+    for (int i = 0; i < n; i++) q[i] = c->efd_fire[i];
+    c->nefd_fire = 0;
+  }
+  spinlock_release(&g_shim_lock);
+  for (int i = 0; i < n; i++) {
+    int rc = l_eventfd_signal(q[i].slot, q[i].gen, 1);
+    if (rc == 0) {
+      row_begin("drm syncobj", &r_eventfd);
+      row_s("eventfd signal slot=");
+      row_say(q[i].slot);
+      row_s(" gen=");
+      row_say((int)q[i].gen);
+      row_s(" point=");
+      row_hex(q[i].point);
+      row_s(" handle=");
+      row_say((int)q[i].handle);
+      row_s(" n=1");
+      row_end();
+    } else {
+      /* Closed, or its slot was reused by another eventfd after the retire's
+       * registration.  NOTHING was written: this is the case the card calls
+       * "refused by its own name, and nothing is written". */
+      sync_refuse_rows("drm syncobj refuse", &r_eventfd, "eventfd slot=",
+                       (uint64_t)q[i].slot, NVSHIM_SYNC_EVENTFD_CLOSED);
+    }
+  }
 }
 
 
@@ -4179,6 +4508,11 @@ static int op_drm_syncobj_set(struct process *p, int fd, uint64_t arg, int signa
      * `point` never goes backwards except here, where going back IS the call. */
     o->point = signal ? 1 : 0;
     if (!signal) o->submitted = 0;
+    /* WP-EVENTFD: a binary SIGNAL makes the record reach point 1, so a
+     * registration at or below it fires here.  RESET replaces the fence with
+     * NULL, so the fence a registration named is gone -- those registrations
+     * stay pending rather than being fired for a point nobody signalled. */
+    if (signal) sobj_reach_locked(c, o, o->point);
   }
   spinlock_release(&g_shim_lock);
   return 0;
@@ -4658,8 +4992,10 @@ static int op_drm_exec(struct process *p, int fd, uint64_t arg) {
        * client asks about. */
       if (want[i] > o->submitted) o->submitted = want[i];
       if (rm()->fence_test(ch, fence) == 0) {
-        /* Retired already: the point is there now, no pending entry needed. */
-        if (want[i] > o->point) o->point = want[i];
+        /* Retired already: the point is there now, no pending entry needed.
+         * WP-EVENTFD: that IS the retire, so a registration at or below it
+         * fires here (the same helper client_reap_locked uses). */
+        sobj_reach_locked(c, o, want[i]);
       } else if (c->npend < SHIM_MAX_SIGPEND) {
         c->pend[c->npend].obj = (uint8_t)sobj_index(o);
         c->pend[c->npend].ch = ch;
@@ -5179,33 +5515,41 @@ int nv_shim_drm_ioctl(struct process *p, int fd, unsigned long req, uint64_t arg
   }
   if (!nv_shim_present()) return -ENODEV;
 
+  int rc;
   switch (nr) {
-  case 0x00: return op_drm_version(p, arg);
-  case 0x09: return op_drm_gem_close(p, fd, arg);
-  case 0x0c: return op_drm_get_cap(p, arg);
-  case 0x2d: return op_drm_prime_handle_to_fd(p, fd, arg);
-  case 0x2e: return op_drm_prime_fd_to_handle(p, fd, arg);
-  case 0x40: return op_drm_getparam(p, fd, arg);
-  case 0x42: return op_drm_channel_alloc(p, fd, arg);
-  case 0x43: return op_drm_channel_free(p, fd, arg);
-  case 0x50: return op_drm_vm_init(p, fd, arg);
-  case 0x51: return op_drm_vm_bind(p, fd, arg);
-  case 0x52: return op_drm_exec(p, fd, arg);
-  case 0x80: return op_drm_gem_new(p, fd, arg);
-  case 0x84: return op_drm_gem_info(p, fd, arg);
-  case 0xbf: return op_drm_syncobj_create(p, fd, arg);
-  case 0xc0: return op_drm_syncobj_destroy(p, fd, arg);
-  case 0xc1: return op_drm_syncobj_handle_to_fd(p, fd, arg);
-  case 0xc2: return op_drm_syncobj_fd_to_handle(p, fd, arg);
-  case 0xc3: return op_drm_syncobj_wait(p, fd, arg);
-  case 0xc4: return op_drm_syncobj_set(p, fd, arg, 0);
-  case 0xc5: return op_drm_syncobj_set(p, fd, arg, 1);
-  case 0xca: return op_drm_syncobj_timeline_wait(p, fd, arg);
-  case 0xcb: return op_drm_syncobj_query(p, fd, arg);
-  case 0xcc: return op_drm_syncobj_transfer(p, fd, arg);
-  case 0xcd: return op_drm_syncobj_timeline_signal(p, fd, arg);
+  case 0x00: rc = op_drm_version(p, arg); break;
+  case 0x09: rc = op_drm_gem_close(p, fd, arg); break;
+  case 0x0c: rc = op_drm_get_cap(p, arg); break;
+  case 0x2d: rc = op_drm_prime_handle_to_fd(p, fd, arg); break;
+  case 0x2e: rc = op_drm_prime_fd_to_handle(p, fd, arg); break;
+  case 0x40: rc = op_drm_getparam(p, fd, arg); break;
+  case 0x42: rc = op_drm_channel_alloc(p, fd, arg); break;
+  case 0x43: rc = op_drm_channel_free(p, fd, arg); break;
+  case 0x50: rc = op_drm_vm_init(p, fd, arg); break;
+  case 0x51: rc = op_drm_vm_bind(p, fd, arg); break;
+  case 0x52: rc = op_drm_exec(p, fd, arg); break;
+  case 0x80: rc = op_drm_gem_new(p, fd, arg); break;
+  case 0x84: rc = op_drm_gem_info(p, fd, arg); break;
+  case 0xbf: rc = op_drm_syncobj_create(p, fd, arg); break;
+  case 0xc0: rc = op_drm_syncobj_destroy(p, fd, arg); break;
+  case 0xc1: rc = op_drm_syncobj_handle_to_fd(p, fd, arg); break;
+  case 0xc2: rc = op_drm_syncobj_fd_to_handle(p, fd, arg); break;
+  case 0xc3: rc = op_drm_syncobj_wait(p, fd, arg); break;
+  case 0xc4: rc = op_drm_syncobj_set(p, fd, arg, 0); break;
+  case 0xc5: rc = op_drm_syncobj_set(p, fd, arg, 1); break;
+  case 0xca: rc = op_drm_syncobj_timeline_wait(p, fd, arg); break;
+  case 0xcb: rc = op_drm_syncobj_query(p, fd, arg); break;
+  case 0xcc: rc = op_drm_syncobj_transfer(p, fd, arg); break;
+  case 0xcd: rc = op_drm_syncobj_timeline_signal(p, fd, arg); break;
+  case 0xcf: rc = op_drm_syncobj_eventfd(p, fd, arg); break;
   default: return -ENOTTY; /* unreachable: drm_row_size() covered the table */
   }
+  /* WP-EVENTFD: deliver the eventfd counter writes this request's completion
+   * pass queued (a fence that retired while it ran).  Still inside the ioctl,
+   * so a read(2) issued after it returns observes the 1; after g_shim_lock is
+   * released, because the signal wakes parked readers and notifies pollers. */
+  client_efd_flush(p, fd);
+  return rc;
 }
 
 /* ---- entry ------------------------------------------------------------- */

@@ -4567,6 +4567,26 @@ int file_eventfd_create(struct process *cur, unsigned int initval, int flags) {
   return ufd;
 }
 
+/* WP-EVENTFD: the fd -> counter-slot resolver a KERNEL-side writer needs.  The
+ * slot lives in the file description (f->eventfd.slot), so this is a read of an
+ * existing field, not a new table; the generation comes from the counter table
+ * in linux_compat_fd.c and is what makes a close(2) after registration a NAMED
+ * refusal later instead of a write into a slot some new eventfd now owns.
+ * -EBADF for an absent fd, -EINVAL for a live fd that is not an eventfd. */
+int file_eventfd_slot(struct process *p, int fd, uint32_t *gen) {
+  extern uint32_t l_eventfd_gen(int slot);
+  p = process_group(p); /* the fd table is group state */
+  if (!p || fd < 0 || fd >= MAX_OPEN_FDS) return -EBADF;
+  int gfd = p->open_fds[fd];
+  if (gfd < 0 || gfd >= MAX_GLOBAL_FILES) return -EBADF;
+  struct file *f = gfile(gfd);
+  if (!f || f->type != FILE_TYPE_EVENTFD) return -EINVAL;
+  uint32_t g = l_eventfd_gen(f->eventfd.slot);
+  if (g == 0) return -EBADF; /* the counter went away under the description */
+  if (gen) *gen = g;
+  return f->eventfd.slot;
+}
+
 /* C1-k6 (docs/cp-k6.md §4): a signalfd.  Its only state is the mask; the
    signals stay in the reader's pending sets until a read dequeues them
    (linux_compat_fd.c l_signalfd_read). */
