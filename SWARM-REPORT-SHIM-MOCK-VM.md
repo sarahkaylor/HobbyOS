@@ -407,10 +407,13 @@ inside existing test functions, not new ones. Both tiers print the same rows in
 the same order, so the object is not an x86-only path; the tier is where the
 "two views of one memory" check (§5) actually runs, on both architectures.
 
-A note on the log files so the line numbers can be re-checked: the two *lane*
-logs are the test script's captured console (the script `cat`s `qemu.log` on
-success), so a row sits five lines lower there than in the raw console; the two
-*merged* logs are the raw `qemu.log`. The report cites each file it quotes.
+A note on the log files so the line numbers can be re-checked: each file is a
+verbatim console capture from the run named, but they are not all the same
+capture. `unit-tier-intel-vm.log` is the intel test script's own stdout (its status
+lines, then the `qemu.log` it cats on success); the other three are the
+`qemu.log` files those runs wrote, which begin with the `make run` recipe echo
+before the guest's first line. Line numbers are therefore per file, and
+`check-quotes-vm.py` verifies every citation in the file it names.
 
 ### 7.1 The merged tip (both lanes)
 
