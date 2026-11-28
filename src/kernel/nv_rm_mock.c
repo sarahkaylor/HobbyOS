@@ -39,6 +39,7 @@
 #define MOCK_MAX_ALLOC   64
 #define MOCK_MAX_VM      8
 #define MOCK_MAX_CHANNEL 16
+#define MOCK_MAX_ENGINE_CLASS 16 /* class objects across all channels */
 #define MOCK_MAX_RANGE   64 /* VA intervals per VM */
 #define MOCK_MAX_PENDING 64 /* fences enqueued but not retired */
 
@@ -133,6 +134,18 @@ struct mock_channel {
   uint64_t done;   /* last fence id retired on this channel */
 };
 
+/* One HW class object (a GR/CE context) parented on a channel.  It has no
+ * memory and no engine behind it: it is the RM-side object a real Ada channel
+ * would carry (nvkm_gsp_rm_alloc), and its handle is stamped by this table's
+ * counter -- never by the client -- so the ABI can prove where it came from. */
+struct mock_engine_class {
+  int used;
+  uint32_t dev;
+  uint32_t ch;     /* parent channel */
+  int32_t oclass;  /* NVIF class id (0xc7b5 etc.) */
+  uint64_t handle; /* RM handle, unique per RM lifetime */
+};
+
 struct mock_pending {
   uint32_t ch;
   uint64_t fence;
@@ -147,9 +160,11 @@ static struct {
   uint64_t next_handle;
   uint64_t next_vm;
   uint64_t next_ch;
+  uint64_t next_ec;
   struct mock_alloc alloc[MOCK_MAX_ALLOC];
   struct mock_vm vm[MOCK_MAX_VM];
   struct mock_channel ch[MOCK_MAX_CHANNEL];
+  struct mock_engine_class ec[MOCK_MAX_ENGINE_CLASS];
   struct mock_pending pend[MOCK_MAX_PENDING];
   uint32_t pend_head, pend_tail, pend_n;
 } g_mock;
@@ -162,6 +177,7 @@ static void mock_reset(void) {
   g_mock.next_handle = 0;
   g_mock.next_vm = 0;
   g_mock.next_ch = 0;
+  g_mock.next_ec = 0;
   g_mock.pend_head = 0;
   g_mock.pend_tail = 0;
   g_mock.pend_n = 0;
@@ -195,6 +211,13 @@ static void mock_reset(void) {
     g_mock.ch[i].pushbuf = 0;
     g_mock.ch[i].issued = 0;
     g_mock.ch[i].done = 0;
+  }
+  for (int i = 0; i < MOCK_MAX_ENGINE_CLASS; i++) {
+    g_mock.ec[i].used = 0;
+    g_mock.ec[i].dev = 0;
+    g_mock.ec[i].ch = 0;
+    g_mock.ec[i].oclass = 0;
+    g_mock.ec[i].handle = 0;
   }
   for (int i = 0; i < MOCK_MAX_PENDING; i++) {
     g_mock.pend[i].ch = 0;
@@ -498,8 +521,77 @@ static void mock_channel_destroy(uint32_t dev, uint32_t ch_id) {
   if (c && c->dev == dev) {
     c->used = 0;
     c->dev = 0;
+    /* A class object is parented on its channel's RM object, so it dies with
+     * the channel -- the same rule a real nvkm_gsp_rm_alloc'd object follows. */
+    for (int i = 0; i < MOCK_MAX_ENGINE_CLASS; i++) {
+      struct mock_engine_class *e = &g_mock.ec[i];
+      if (e->used && e->dev == dev && e->ch == ch_id) {
+        e->used = 0;
+        e->dev = 0;
+        e->ch = 0;
+      }
+    }
   }
   spinlock_release(&g_mock.lock);
+}
+
+/* ---- engine class objects ---------------------------------------------- */
+
+static struct mock_engine_class *mock_ec_find(uint32_t dev, uint64_t handle) {
+  for (int i = 0; i < MOCK_MAX_ENGINE_CLASS; i++)
+    if (g_mock.ec[i].used && g_mock.ec[i].dev == dev &&
+        g_mock.ec[i].handle == handle)
+      return &g_mock.ec[i];
+  return 0;
+}
+
+static int mock_engine_class_create(uint32_t dev, uint32_t ch_id, int32_t oclass,
+                                    uint64_t *handle) {
+  if (!handle || oclass == 0) return -EINVAL;
+  int rc = 0;
+  spinlock_acquire(&g_mock.lock);
+  if (!g_mock.ready) {
+    rc = -ENODEV;
+    goto out;
+  }
+  struct mock_channel *c = mock_ch_find(ch_id);
+  if (!c || c->dev != dev) {
+    rc = -EINVAL;
+    goto out;
+  }
+  struct mock_engine_class *e = 0;
+  for (int i = 0; i < MOCK_MAX_ENGINE_CLASS; i++)
+    if (!g_mock.ec[i].used) {
+      e = &g_mock.ec[i];
+      break;
+    }
+  if (!e) {
+    rc = -ENOSPC;
+    goto out;
+  }
+  e->used = 1;
+  e->dev = dev;
+  e->ch = ch_id;
+  e->oclass = oclass;
+  e->handle = ++g_mock.next_ec; /* the RM assigns it; the client never does */
+  *handle = e->handle;
+out:
+  spinlock_release(&g_mock.lock);
+  return rc;
+}
+
+static int mock_engine_class_destroy(uint32_t dev, uint64_t handle) {
+  int rc = -EINVAL;
+  spinlock_acquire(&g_mock.lock);
+  struct mock_engine_class *e = mock_ec_find(dev, handle);
+  if (e) {
+    e->used = 0;
+    e->dev = 0;
+    e->ch = 0;
+    rc = 0;
+  }
+  spinlock_release(&g_mock.lock);
+  return rc;
 }
 
 /* ---- submit and fences ------------------------------------------------- */
@@ -667,6 +759,7 @@ int nv_rm_mock_live(void) {
   for (int i = 0; i < MOCK_MAX_ALLOC; i++) n += g_mock.alloc[i].used ? 1 : 0;
   for (int i = 0; i < MOCK_MAX_VM; i++) n += g_mock.vm[i].used ? 1 : 0;
   for (int i = 0; i < MOCK_MAX_CHANNEL; i++) n += g_mock.ch[i].used ? 1 : 0;
+  for (int i = 0; i < MOCK_MAX_ENGINE_CLASS; i++) n += g_mock.ec[i].used ? 1 : 0;
   n += (int)g_mock.pend_n;
   spinlock_release(&g_mock.lock);
   return n;
@@ -716,6 +809,8 @@ static void mock_if_fill(void) {
   g_rm_if.vm_bind = mock_vm_bind;
   g_rm_if.channel_create = mock_channel_create;
   g_rm_if.channel_destroy = mock_channel_destroy;
+  g_rm_if.engine_class_create = mock_engine_class_create;
+  g_rm_if.engine_class_destroy = mock_engine_class_destroy;
   g_rm_if.submit = mock_submit;
   g_rm_if.submit_va = mock_submit_va;
   g_rm_if.read_va = mock_read_va;

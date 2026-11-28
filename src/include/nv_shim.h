@@ -48,6 +48,17 @@
  *     9  CHANNEL_FREE            DRM_IOCTL_NOUVEAU_CHANNEL_FREE
  *    10  SUBMIT                  DRM_IOCTL_NOUVEAU_EXEC
  *    11  FENCE_WAIT              DRM_IOCTL_SYNCOBJ_WAIT (binary syncobj)
+ *    18  ENGINE_CLASS_ALLOC      none: a mock-RM object (see below)
+ *    19  ENGINE_CLASS_FREE       none: ditto
+ *
+ *  ONE EXCEPTION TO "NOTHING NEW" (2026-11-28, the RM-object spine re-scope).
+ *  Rows 18/19 allocate and free one engine class object on a channel through
+ *  the mock RM.  They belong on this face and NOT on the DRM face: a stock
+ *  client must never receive a fake class object -- NVIF NEW of an engine class
+ *  is still refused by name (`need=gsp_rm`), because a fake object would let
+ *  nvk build a command stream nothing reads.  A HobbyOS-only request whose
+ *  every row says `mock=1` is the honest way to carry the object until GSP-RM
+ *  exists.
  *
  *  DELIBERATELY REFUSED, each with -ENOSYS and a named serial row (never a
  *  silent no-op -- the project rule).  These are the parts of nouveau's uAPI
@@ -77,11 +88,11 @@
  *    -ENOMEM    the RM's memory arena is exhausted
  *    -ETIMEDOUT FENCE_WAIT with timeout_ms == 0 on a fence not yet retired
  *
- *  Limits: 8 clients, 32 allocations / 4 VMs / 8 channels per client, 64 KiB
- *  command stream per submit, 4 GiB per allocation, 512 MiB per client,
- *  4 GiB mock arena.  Structs are naturally aligned, explicit padding, and the
- *  same size in the freestanding kernel and in glibc user space (asserted in
- *  src/kernel/nv_shim_test.c).
+ *  Limits: 8 clients, 32 allocations / 4 VMs / 8 channels / 8 engine class
+ *  objects per client, 64 KiB command stream per submit, 4 GiB per allocation,
+ *  512 MiB per client, 4 GiB mock arena.  Structs are naturally aligned,
+ *  explicit padding, and the same size in the freestanding kernel and in glibc
+ *  user space (asserted in src/kernel/nv_shim_test.c).
  * ========================================================================== */
 
 #include <stdint.h>
@@ -243,6 +254,26 @@ struct nvshim_channel_free {
   uint32_t pad;
 };                      /* 8 bytes */
 
+/* ---- 5b. engine class objects ------------------------------------------ */
+
+/* One HW class object (a GR/CE context) parented on a channel.  `oclass` is an
+ * SCLASS id (NVSHIM_NVIF_CLASS_*), and `handle` is the RM's: on the real path
+ * nvkm_gsp_rm_alloc() stamps it, so the client never chooses it.  This is the
+ * mock-RM object spine, not the stock client's path -- NVIF NEW of an engine
+ * class stays refused by name (`need=gsp_rm`); see the block comment at the top
+ * of this file.  Every row this request prints says `mock=1`. */
+struct nvshim_engine_class {
+  uint32_t dev_id; /* in */
+  uint32_t ch_id;  /* in: the channel the object is parented on */
+  int32_t oclass;  /* in: NVSHIM_NVIF_CLASS_* as SCLASS reports it */
+  uint32_t handle; /* out: RM object handle (nonzero) */
+};                 /* 16 bytes */
+
+struct nvshim_engine_class_free {
+  uint32_t handle; /* in */
+  uint32_t pad;
+};                 /* 8 bytes */
+
 /* ---- 6. submit and fences ---------------------------------------------- */
 
 #define NVSHIM_MAX_CS 65536 /* bytes per SUBMIT, dword aligned */
@@ -278,6 +309,10 @@ struct nvshim_fence_wait {
 #define NVSHIM_IOC_CHANNEL_FREE  NVSHIM_IOW(NVSHIM_IOC_MAGIC, 9, struct nvshim_channel_free)
 #define NVSHIM_IOC_SUBMIT        NVSHIM_IOWR(NVSHIM_IOC_MAGIC, 10, struct nvshim_submit)
 #define NVSHIM_IOC_FENCE_WAIT    NVSHIM_IOW(NVSHIM_IOC_MAGIC, 11, struct nvshim_fence_wait)
+#define NVSHIM_IOC_ENGINE_CLASS_ALLOC \
+  NVSHIM_IOWR(NVSHIM_IOC_MAGIC, 18, struct nvshim_engine_class)
+#define NVSHIM_IOC_ENGINE_CLASS_FREE \
+  NVSHIM_IOW(NVSHIM_IOC_MAGIC, 19, struct nvshim_engine_class_free)
 
 /* Refused rows: routed (so a client can tell "not implemented" from "not an
  * ioctl"), answered -ENOSYS, named on the console.  See the table above. */

@@ -164,6 +164,19 @@ struct nv_rm_if {
                         uint32_t *engine);
   void (*channel_destroy)(uint32_t dev_id, uint32_t ch_id);
 
+  /* One HW class object (a GR/CE context) parented on a channel: the mock's
+   * stand-in for the Ada path's nvkm_gsp_rm_alloc(chan, handle, class, ...).
+   * `oclass` is the NVIF class id SCLASS reported (0xc7b5 etc.); *handle is the
+   * RM's object handle -- the CLIENT never chooses it, which is the property
+   * this op exists to keep.  -EINVAL for an unknown channel or a zero class,
+   * -ENOSPC when the object table is full.  The object also dies with its
+   * channel, exactly as an allocation parented on the channel's RM object
+   * would. */
+  int (*engine_class_create)(uint32_t dev_id, uint32_t ch_id, int32_t oclass,
+                             uint64_t *handle);
+  /* Explicit destroy; -EINVAL for an unknown handle (or one of another dev). */
+  int (*engine_class_destroy)(uint32_t dev_id, uint64_t handle);
+
   /* Enqueue one command stream on a channel; *fence gets this channel's next
    * sequence number.  No execution happens in the mock: the stream bytes are
    * accepted, counted and dropped. */

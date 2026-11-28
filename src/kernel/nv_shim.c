@@ -48,6 +48,7 @@ extern void uart_print_hex(uint64_t v);
 #define SHIM_MAX_ALLOCS 32
 #define SHIM_MAX_VMS 4
 #define SHIM_MAX_CHANNELS 8
+#define SHIM_MAX_ENGINE_CLASS 8
 #define SHIM_MAX_SYNCOBJS NVSHIM_DRM_MAX_SYNCOBJS
 #define SHIM_MAX_SIGPEND 32
 /* WP-EVENTFD: eventfd registrations a client may hold.  One registration per
@@ -153,6 +154,12 @@ struct shim_client {
    * shim owns it and must free it with the channel.  0 = none (the 'N' face's
    * CHANNEL_ALLOC takes a client handle and owns nothing). */
   uint64_t ch_pushbuf[SHIM_MAX_CHANNELS];
+
+  /* Engine class objects, parented on the channel named in ec_ch[].  The RM
+   * assigns ec_handle[]; the client only ever receives it. */
+  int nec;
+  uint32_t ec_handle[SHIM_MAX_ENGINE_CLASS];
+  uint32_t ec_ch[SHIM_MAX_ENGINE_CLASS];
 
   /* ---- DRM face ('d' requests; nv_drm_uapi.h) ----
    * There is no device handle on this half of the ABI: the open fd IS the
@@ -407,6 +414,8 @@ static int r_dev = SHIM_ROW_BUDGET, r_alloc = SHIM_ROW_BUDGET,
                        * row, so the per-boot budget is two rows per alloc and
                        * the tier makes four: 8 would be exactly full and the
                        * next suite's rows would vanish. */
+           r_ec = 12, /* engine class objects: request + reply per alloc, plus
+                       * the refusal and free rows the tier exercises */
            r_submit = SHIM_ROW_BUDGET,
            r_fence = SHIM_ROW_BUDGET, r_refuse = SHIM_ROW_BUDGET,
            r_nvif = 96, /* WP-NVIF: one row per object operation, success AND
@@ -530,6 +539,10 @@ int nv_shim_req_size(unsigned long req) {
   if (req == NVSHIM_IOC_CHANNEL_FREE) return (int)sizeof(struct nvshim_channel_free);
   if (req == NVSHIM_IOC_SUBMIT) return (int)sizeof(struct nvshim_submit);
   if (req == NVSHIM_IOC_FENCE_WAIT) return (int)sizeof(struct nvshim_fence_wait);
+  if (req == NVSHIM_IOC_ENGINE_CLASS_ALLOC)
+    return (int)sizeof(struct nvshim_engine_class);
+  if (req == NVSHIM_IOC_ENGINE_CLASS_FREE)
+    return (int)sizeof(struct nvshim_engine_class_free);
   if (nv_shim_refusal_name(req)) return 0;
   return -1;
 }
@@ -613,6 +626,11 @@ static void client_clear(struct shim_client *c) {
     c->ch_id[i] = 0;
     c->ch_pushbuf[i] = 0;
   }
+  c->nec = 0;
+  for (int i = 0; i < SHIM_MAX_ENGINE_CLASS; i++) {
+    c->ec_handle[i] = 0;
+    c->ec_ch[i] = 0;
+  }
   c->drm = 0;
   c->drm_vm = 0;
   c->nsobj = 0;
@@ -688,6 +706,12 @@ static int client_find_ch(const struct shim_client *c, uint32_t ch) {
   return -1;
 }
 
+static int client_find_ec(const struct shim_client *c, uint32_t handle) {
+  for (int i = 0; i < c->nec; i++)
+    if (c->ec_handle[i] == handle) return i;
+  return -1;
+}
+
 /* Slot to fill once an RM creation returns: the first RESERVED entry, which is
  * the one this request put there.  Returns -1 if the client is gone (or the
  * reservation was torn down while the RM call was in flight). */
@@ -704,6 +728,11 @@ static int client_reserved_vm(const struct shim_client *c) {
 static int client_reserved_ch(const struct shim_client *c) {
   for (int i = 0; i < c->nch; i++)
     if (c->ch_id[i] == SHIM_RESERVED) return i;
+  return -1;
+}
+static int client_reserved_ec(const struct shim_client *c) {
+  for (int i = 0; i < c->nec; i++)
+    if (c->ec_handle[i] == SHIM_RESERVED) return i;
   return -1;
 }
 
@@ -810,6 +839,11 @@ static void shim_maps_drop_object(struct process *p, uint64_t handle);
  * go when the last one goes. */
 static void client_teardown(struct process *p, int fd,
                             const struct shim_client *snap) {
+  /* Class objects are parented on their channel: destroy them first, so the
+   * RM never sees a child outlive its parent. */
+  for (int i = snap->nec - 1; i >= 0; i--)
+    if (snap->ec_handle[i] && snap->ec_handle[i] != SHIM_RESERVED)
+      rm()->engine_class_destroy(snap->dev_id, snap->ec_handle[i]);
   for (int i = snap->nch - 1; i >= 0; i--) {
     if (snap->ch_id[i] && snap->ch_id[i] != SHIM_RESERVED)
       rm()->channel_destroy(snap->dev_id, snap->ch_id[i]);
@@ -1382,9 +1416,147 @@ static int op_channel_free(struct process *p, int fd, uint64_t arg) {
     c->ch_pushbuf[i] = c->ch_pushbuf[i + 1];
   }
   c->nch--;
+  /* Class objects parented on this channel die with it (the RM's rule), so the
+   * client's table forgets them in the same critical section: a later FREE of
+   * one of these handles must be -EINVAL, not a stale success. */
+  for (int i = c->nec - 1; i >= 0; i--) {
+    if (c->ec_ch[i] != cf.ch_id) continue;
+    for (int k = i; k + 1 < c->nec; k++) {
+      c->ec_handle[k] = c->ec_handle[k + 1];
+      c->ec_ch[k] = c->ec_ch[k + 1];
+    }
+    c->nec--;
+    c->ec_handle[c->nec] = 0;
+    c->ec_ch[c->nec] = 0;
+  }
   spinlock_release(&g_shim_lock);
 
   rm()->channel_destroy(dev, cf.ch_id);
+  return 0;
+}
+
+/* ---- 5b. engine class objects ------------------------------------------ */
+
+/* Allocate ONE HW class object on a channel through the mock RM.  The row pair
+ * is the card's evidence shape: what the shim asked the RM for, and the handle
+ * the RM handed back.  Both say mock=1 -- there is no firmware behind this
+ * node, and no NV_VGPU_MSG_* reaches it.  The class must be one SCLASS reports:
+ * a class the chip does not have is -EINVAL at the lookup, not an RM call. */
+static int op_engine_class_alloc(struct process *p, int fd, uint64_t arg) {
+  struct nvshim_engine_class ec;
+  if (vm_user_read(p, arg, &ec, (int)sizeof ec) != 0) return -EFAULT;
+
+  const char *name = 0, *engine = 0, *alloc = 0;
+  if (nv_shim_nvif_engine_class(ec.oclass, &name, &engine, &alloc) != 0) {
+    row_begin("engine_class refused", &r_ec);
+    row_s("class=");
+    row_hex((uint64_t)(uint32_t)ec.oclass);
+    row_s(" reason=no_such_class");
+    row_end();
+    return -EINVAL;
+  }
+
+  int pid = shim_pid(p);
+  uint32_t dev = 0, ch = 0;
+  spinlock_acquire(&g_shim_lock);
+  struct shim_client *c = client_find(pid, fd);
+  if (!client_owns_device(c, ec.dev_id) || client_find_ch(c, ec.ch_id) < 0) {
+    spinlock_release(&g_shim_lock);
+    row_begin("engine_class refused", &r_ec);
+    row_s("reason=not_this_clients_channel");
+    row_end();
+    return -EINVAL;
+  }
+  if (c->nec >= SHIM_MAX_ENGINE_CLASS) {
+    spinlock_release(&g_shim_lock);
+    return -ENOSPC;
+  }
+  dev = c->dev_id;
+  ch = ec.ch_id;
+  c->ec_handle[c->nec] = SHIM_RESERVED;
+  c->ec_ch[c->nec++] = ch;
+  spinlock_release(&g_shim_lock);
+
+  row_begin("engine_class req", &r_ec);
+  row_s("mock=1 ioc=engine_class_alloc ch=");
+  row_say((int)ch);
+  row_s(" class=");
+  row_hex((uint64_t)(uint32_t)ec.oclass);
+  row_s(" name=");
+  row_s(name);
+  row_s(" engine=");
+  row_s(engine);
+  row_s(" alloc=");
+  row_s(alloc);
+  row_end();
+
+  uint64_t handle = 0;
+  int rc = rm()->engine_class_create(dev, ch, ec.oclass, &handle);
+
+  spinlock_acquire(&g_shim_lock);
+  c = client_find(pid, fd);
+  int done = 0;
+  if (rc == 0 && c) {
+    int slot = client_reserved_ec(c);
+    if (slot >= 0) {
+      c->ec_handle[slot] = (uint32_t)handle;
+      done = 1;
+    }
+  }
+  spinlock_release(&g_shim_lock);
+
+  if (rc != 0) {
+    row_begin("engine_class rsp", &r_ec);
+    row_s("mock=1 ioc=engine_class_alloc err=");
+    row_say(rc);
+    row_end();
+    return rc;
+  }
+  if (!done) {
+    rm()->engine_class_destroy(dev, handle);
+    return -EBADF;
+  }
+  ec.handle = (uint32_t)handle;
+  if (vm_kwrite(p, arg, &ec, (int)sizeof ec) != 0) return -EFAULT;
+
+  row_begin("engine_class rsp", &r_ec);
+  row_s("mock=1 ch=");
+  row_say((int)ch);
+  row_s(" class=");
+  row_hex((uint64_t)(uint32_t)ec.oclass);
+  row_s(" handle=");
+  row_say((int)handle);
+  row_end();
+  return 0;
+}
+
+static int op_engine_class_free(struct process *p, int fd, uint64_t arg) {
+  struct nvshim_engine_class_free ef;
+  if (vm_user_read(p, arg, &ef, (int)sizeof ef) != 0) return -EFAULT;
+
+  uint32_t dev = 0;
+  spinlock_acquire(&g_shim_lock);
+  struct shim_client *c = client_find(shim_pid(p), fd);
+  int at = c ? client_find_ec(c, ef.handle) : -1;
+  if (!c || at < 0) {
+    spinlock_release(&g_shim_lock);
+    return -EINVAL;
+  }
+  dev = c->dev_id;
+  for (int i = at; i + 1 < c->nec; i++) {
+    c->ec_handle[i] = c->ec_handle[i + 1];
+    c->ec_ch[i] = c->ec_ch[i + 1];
+  }
+  c->nec--;
+  c->ec_handle[c->nec] = 0;
+  c->ec_ch[c->nec] = 0;
+  spinlock_release(&g_shim_lock);
+
+  rm()->engine_class_destroy(dev, ef.handle);
+  row_begin("engine_class free", &r_ec);
+  row_s("mock=1 handle=");
+  row_say((int)ef.handle);
+  row_end();
   return 0;
 }
 
@@ -5639,5 +5811,7 @@ int nv_shim_ioctl(struct process *p, int fd, unsigned long req, uint64_t arg) {
   if (req == NVSHIM_IOC_CHANNEL_FREE) return op_channel_free(p, fd, arg);
   if (req == NVSHIM_IOC_SUBMIT) return op_submit(p, fd, arg);
   if (req == NVSHIM_IOC_FENCE_WAIT) return op_fence_wait(p, fd, arg);
+  if (req == NVSHIM_IOC_ENGINE_CLASS_ALLOC) return op_engine_class_alloc(p, fd, arg);
+  if (req == NVSHIM_IOC_ENGINE_CLASS_FREE) return op_engine_class_free(p, fd, arg);
   return -ENOTTY;
 }
