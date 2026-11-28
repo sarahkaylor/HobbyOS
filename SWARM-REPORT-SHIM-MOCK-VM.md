@@ -97,7 +97,7 @@ The shim was extended (SOURCE, four files, all additive):
   channel and engine-class rows and every one carrying `mock=1`. The reply rows
   carry `phys=`, `bus=` and `mapped=` **as the walk returned them**. The DRM
   face's existing `drm bind` row carries the same three fields for its first MAP
-  op, so the stock-client path shows the read-back too (`:3459-3474`).
+  op, so the stock-client path shows the read-back too (`:3460-3475`).
 * **Row budget** (`src/kernel/nv_shim.c:421-430`): `r_vmbind = 16`. This is not
   cosmetic — the first run of this change returned `-EINVAL` for a VA past the
   space with **no row at all**, because `r_refuse` is 8 rows per boot and the
