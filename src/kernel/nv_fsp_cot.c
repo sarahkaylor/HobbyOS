@@ -2386,19 +2386,19 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
   }
   if (frts_ok) {
     uint32_t lo = (uint32_t)m_frts.bus, hi = (uint32_t)(m_frts.bus >> 32);
-    /* Both maps, then read back both: GH100's 0x14F4/8/C (what this lane wrote
-     * before this rung) and Blackwell's 0x4F4/8/C (what GB202 publishes). The
-     * read-back rows say which pair this part actually latches -- a zero board
-     * of 0x4F4 while 0x4DC is live would have been the tell that the block is
-     * real and the old offsets were not. */
+    /* A10: program ONLY the GH100 pair at 0x14F4/8/C, which is where this
+     * part's PBUS block lands (NV_PBUS0_PRI_BASE = 0x1000; the GB202 HAL's
+     * FRTS_INSECURE writes are 0x14F4/8/C -- vendor kern_fsp_gh100.c:1646-1679
+     * writes this pair and nothing else).  The 0x4F4/8/C copy this lane used
+     * to write as well is gone; the read-backs stay, so a future boot still
+     * records that the GB202 alias answers 0xBADF5040/0 and was never touched
+     * by us. */
     nv_wr32(d, NV_PBUS_SW_FRTS_ADDR_LO32, lo);
     nv_wr32(d, NV_PBUS_SW_FRTS_ADDR_HI32, hi);
     nv_wr32(d, NV_PBUS_SW_FRTS_CONFIG, NV_PBUS_FRTS_CONFIG_SYSMEM(NV_COT_FRTS_BYTES));
-    nv_wr32(d, NV_PBUS_ZB_FRTS_ADDR_LO32, lo);
-    nv_wr32(d, NV_PBUS_ZB_FRTS_ADDR_HI32, hi);
-    nv_wr32(d, NV_PBUS_ZB_FRTS_CONFIG, NV_PBUS_FRTS_CONFIG_SYSMEM(NV_COT_FRTS_BYTES));
     p("frts regs lo=");
     uart_print_hex(m_frts.bus);
+    pki(" wrote_zb", 0);
     pkv(" gh100_rb_lo", nv_rd32(d, NV_PBUS_SW_FRTS_ADDR_LO32));
     pkv(" gh100_rb_cfg", nv_rd32(d, NV_PBUS_SW_FRTS_CONFIG));
     pkv(" gb202_rb_lo", nv_rd32(d, NV_PBUS_ZB_FRTS_ADDR_LO32));
@@ -2414,7 +2414,13 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
   nv_wr32(d, NV_PBUS_PRI_GSP_FMC_ERROR, 0);
   rm_fmc_error_row(d, "pre(zeroed)");
 
-  /* ---- 9. clock boost, mailbox, COT ------------------------------------ */
+  /* ---- 9. clock boost, mailbox, COT ------------------------------------ *
+   * A9: the GSP MAILBOX0/1 write that used to sit here is GONE -- on the FSP
+   * path the boot-args address travels in the COT (gspBootArgsSysmemOffset)
+   * and 580.178.04 never writes those words before the COT.  The read-back
+   * stays so the log still records what the pair holds: post-reset it is 0,
+   * and "landed" is then a fact about the hardware, not about a write this
+   * host made. */
   {
     uint8_t one[4] = {1, 0, 0, 0};
     boost_err = cot_roundtrip(d, base, "boost", COT_NVDM_CLOCK_BOOST, one, 4);
@@ -2423,12 +2429,14 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
     cot_wait_us(d, 5000);
   }
   {
-    uint32_t wlo = (uint32_t)m_args.bus, whi = (uint32_t)(m_args.bus >> 32);
-    nv_wr32(d, NV_GSP_BASE + NV_GSP_MAILBOX0, wlo);
-    nv_wr32(d, NV_GSP_BASE + NV_GSP_MAILBOX1, whi);
-    mailbox_writable = (nv_rd32(d, NV_GSP_BASE + NV_GSP_MAILBOX0) == wlo);
-    p("gsp mailbox args=");
+    uint32_t m0 = nv_rd32(d, NV_GSP_BASE + NV_GSP_MAILBOX0);
+    uint32_t m1 = nv_rd32(d, NV_GSP_BASE + NV_GSP_MAILBOX1);
+    mailbox_writable = (m0 == (uint32_t)m_args.bus);
+    p("gsp mailbox pre-cot args=");
     uart_print_hex(m_args.bus);
+    pkv(" m0", (uint64_t)m0);
+    pkv(" m1", (uint64_t)m1);
+    pki(" wrote", 0);
     pki(" landed", mailbox_writable);
     pe();
   }
