@@ -774,7 +774,6 @@ the guest, and r1 has one of each part.
 | `docs/nv-rpc-implementation-spec.md` | transport field by field + 24 test cases |
 | `docs/nv-games-ladder.md` | the ladder, effort ranges, "build now" list |
 
-
 7. **A static function-pointer table in `.rodata` is broken on AArch64** — the kernel
    applies no load-time relocations to static data, so a folded table holds *link*
    addresses and the first call executes zeros (ESR `0x2000000`, EC=0, "unknown
@@ -792,6 +791,23 @@ read-protected; there is **no** descriptor to write on GA102; FWSEC's verdict is
 EFI ROM removed (`+0x14E00` above `0xFC00`).
 
 ---
+
+### 5.1 Reference implementations — read the working driver first
+
+Standing instruction from the owner (2026-11-28): when this work is stuck, **read a working
+implementation before inventing a mechanism**, and if the source does not answer the question,
+**instrument a running Linux instance** and collect the answer from it.
+
+| reference | where | what it is good for |
+|---|---|---|
+| **nouveau** (in-tree) | <https://github.com/torvalds/linux/tree/master/drivers/gpu/drm/nouveau> | the host-side sequence this driver is modelled on: `gf100_*`/`ga102_*` GSP, the `r535_*` RM paths, WPR/falcon/channel/VM bring-up, and the exact register offsets our tree already quotes |
+| **open-gpu-kernel-modules** | NVIDIA's own open kernel module, same tag as the driver under test | what the vendor itself does, with symbols: `kern_fsp_*`, `mem_mgr_*`, `kernel_gsp_gh100.c`, `gsp_fw_wpr_meta.h`. A guest's `nvidia-driver-*-open` package leaves a readable copy in `/usr/src/nvidia-<ver>/` |
+| **a running Linux guest** | any guest where the vendor driver owns the card | the instrument: BAR0 via `/sys/bus/pci/devices/<bdf>/resource0` (read-only mmap), `dmesg`, ftrace — a live reference to compare our rows against |
+
+Two rules that keep this honest: **study, do not copy** (see §6.6 — contracts and byte layouts yes,
+code no, and tag every claim MEASURED / SOURCE / INFERRED with `file:line`); and **ground the
+result in a real game** — RimWorld and Cyberpunk are the measure, so a register-level win that
+moves no game row is not progress, and every games row keeps its `renderer=` label.
 
 ## 6. Rules of evidence (each cost at least one run)
 

@@ -403,7 +403,11 @@ static void row_begin(const char *stage, int *budget) {
 #define SHIM_ROW_BUDGET 8
 static int r_dev = SHIM_ROW_BUDGET, r_alloc = SHIM_ROW_BUDGET,
            r_vm = SHIM_ROW_BUDGET, r_bind = SHIM_ROW_BUDGET,
-           r_ch = SHIM_ROW_BUDGET, r_submit = SHIM_ROW_BUDGET,
+           r_ch = 24, /* channel allocations print a request row and a response
+                       * row, so the per-boot budget is two rows per alloc and
+                       * the tier makes four: 8 would be exactly full and the
+                       * next suite's rows would vanish. */
+           r_submit = SHIM_ROW_BUDGET,
            r_fence = SHIM_ROW_BUDGET, r_refuse = SHIM_ROW_BUDGET,
            r_nvif = 96, /* WP-NVIF: one row per object operation, success AND
                          * refusal.  The budget is per BOOT, not per client, so
@@ -1304,6 +1308,20 @@ static int op_channel_alloc(struct process *p, int fd, uint64_t arg) {
   c->ch_id[c->nch++] = SHIM_RESERVED;
   spinlock_release(&g_shim_lock);
 
+  /* Two rows, one per half of the ABI: what the shim asks for and what the RM
+   * hands back.  Both say mock=1 because the RM behind this node is
+   * nv_rm_mock -- no card, no firmware.  There is no RM message id to quote
+   * here: the mock has no message protocol, so the request is named by its
+   * ioc= field and the object is named by the returned ch= handle. */
+  row_begin("channel req", &r_ch);
+  row_s("mock=1 ioc=channel_alloc vm=");
+  row_say((int)vm);
+  row_s(" pushbuf=");
+  row_hex(pushbuf);
+  row_s(" size=");
+  row_hex(psize);
+  row_end();
+
   uint32_t ch_id = 0, engine = 0;
   int rc = rm()->channel_create(dev, vm, pushbuf, (uint32_t)psize, &ch_id,
                                 &engine);
@@ -1320,7 +1338,13 @@ static int op_channel_alloc(struct process *p, int fd, uint64_t arg) {
   }
   spinlock_release(&g_shim_lock);
 
-  if (rc != 0) return rc;
+  if (rc != 0) {
+    row_begin("channel rsp", &r_ch);
+    row_s("mock=1 ioc=channel_alloc err=");
+    row_say(rc);
+    row_end();
+    return rc;
+  }
   if (!done) {
     rm()->channel_destroy(dev, ch_id);
     return -EBADF;
@@ -1331,13 +1355,11 @@ static int op_channel_alloc(struct process *p, int fd, uint64_t arg) {
   ch.engine = engine;
   if (vm_kwrite(p, arg, &ch, (int)sizeof ch) != 0) return -EFAULT;
 
-  row_begin("channel", &r_ch);
-  row_s("ch=");
+  row_begin("channel rsp", &r_ch);
+  row_s("mock=1 ch=");
   row_say((int)ch_id);
   row_s(" engine=");
   row_say((int)engine);
-  row_s(" pushbuf=");
-  row_hex(pushbuf);
   row_end();
   return 0;
 }
@@ -3265,9 +3287,25 @@ static int op_drm_channel_alloc(struct process *p, int fd, uint64_t arg) {
   rc = rm()->mem_alloc(dev, (uint64_t)NVSHIM_DRM_PUSHBUF_SIZE, domain, &pb_handle,
                        &pb_bus, &pb_size);
   uint32_t ch_id = 0, engine = 0;
-  if (rc == 0)
+  if (rc == 0) {
+    row_begin("drm channel req", &r_drm);
+    row_s("mock=1 ioc=drm_channel_alloc vm=");
+    row_say((int)vm);
+    row_s(" pushbuf=");
+    row_hex(pb_bus);
+    row_s(" size=");
+    row_hex(pb_size);
+    row_end();
     rc = rm()->channel_create(dev, vm, pb_bus, (uint32_t)pb_size, &ch_id, &engine);
+  }
   if (rc != 0 && pb_handle) rm()->mem_free(dev, pb_handle);
+  if (rc != 0) {
+    row_begin("drm channel rsp", &r_drm);
+    row_s("mock=1 ioc=drm_channel_alloc err=");
+    row_say(rc);
+    row_end();
+    return rc;
+  }
 
   spinlock_acquire(&g_shim_lock);
   c = client_find(pid, fd);
@@ -3302,8 +3340,8 @@ static int op_drm_channel_alloc(struct process *p, int fd, uint64_t arg) {
   }
   if (vm_kwrite(p, arg, &ca, (int)sizeof ca) != 0) return -EFAULT;
 
-  row_begin("drm channel", &r_drm);
-  row_s("ch=");
+  row_begin("drm channel rsp", &r_drm);
+  row_s("mock=1 ch=");
   row_say((int)ch_id);
   row_s(" pushbuf=");
   row_hex(pb_bus);
@@ -3338,7 +3376,7 @@ static int op_drm_channel_free(struct process *p, int fd, uint64_t arg) {
   rm()->channel_destroy(dev, (uint32_t)cf.channel);
   if (pb) rm()->mem_free(dev, pb);
   row_begin("drm channel_free", &r_drm);
-  row_s("ch=");
+  row_s("mock=1 ch=");
   row_say((int)cf.channel);
   row_end();
   return 0;
