@@ -27,7 +27,7 @@ hobbyos.elf: folded-table inventory matches -- 22 table(s) / 438 word(s) as audi
 dd if=/dev/zero of=disk.img bs=1M count=1024
 1024+0 records in
 1024+0 records out
-1073741824 bytes (1.1 GB, 1.0 GiB) copied, 0.294571 s, 3.7 GB/s
+1073741824 bytes (1.1 GB, 1.0 GiB) copied, 0.289102 s, 3.7 GB/s
 mkfs.fat -F 16 disk.img
 mkfs.fat 4.2 (2021-01-31)
 mmd -i disk.img ::/EFI
@@ -260,8 +260,8 @@ selfhost-stage: WARNING: /TOOLS toolchain not staged: LLVM distribution staging 
 selfhost-stage: WARNING: clang resource dir missing at obj/selfhost/dist-staging/usr/local/lib/clang/21/include — /TOOLS/RESDIR not staged (stage the LLVM distribution first)
 selfhost-stage: staged 8 files, 1445656 bytes into ::/TOOLS
   --- ::/TOOLS (mdir) ---
-RM       BIN     47864 2026-11-28   6:08 
-TAR      BIN    147592 2026-11-28   6:08 
+RM       BIN     47864 2026-11-28   6:17 
+TAR      BIN    147592 2026-11-28   6:17 
        10 files           1 445 656 bytes
                         903 004 160 bytes free
 
@@ -278,12 +278,12 @@ selfhost-stage: STAGE_LIBCXX=0 — skipping C++ libcxx include subset
 selfhost-stage: staging BUILD-REQUIRED source subset to ::/SRC
 
 selfhost-stage: staged BUILD-REQUIRED subset into disk.img
-  payload: 406 files, 10297442 bytes
+  payload: 406 files, 10298764 bytes
   --- ::/SRC (mdir) ---
         3 files             315 392 bytes
 
 Total files listed:
-      486 files          10 297 511 bytes
+      486 files          10 298 833 bytes
                         888 029 184 bytes free
 
 selfhost-stage: done
@@ -295,7 +295,7 @@ selfhost-stage: done
 tools/selfhost-src-tar.sh obj/selfhost/SRC.TAR
 selfhost-src-tar: assembling obj/selfhost/SRC.TAR
 selfhost-src-tar: done — obj/selfhost/SRC.TAR
-  entries: 2265 (files+dirs), size: 37539840 bytes
+  entries: 2265 (files+dirs), size: 37550080 bytes
   spot-checked members: src/kernel/main.c Makefile.hobbyos linker.ld limine.conf build_kernel.sh
 mcopy -i disk.img obj/selfhost/SRC.TAR ::/SRC.TAR
 mcopy -i disk.img src/user/selfhost/build_kernel.sh ::/BUILD_KERNEL.SH
@@ -346,7 +346,7 @@ BdsDxe: starting Boot0002 "UEFI Non-Block Boot Device" from VenHw(837DCA9E-E874-
 [RELOC] entries=0x00000000000001BB applied=0x00000000000001BB slide=0x00000003FA200000 outside=0x0000000000000000 status=0x0000000000000000 ok
 Booting AArch64 OS...
 MMU Initialized: Page Tables setup securely.
-[GPUDIAG] gpu wait > 5 ms: ack=3 used=4 (park off)
+[GPUDIAG] gpu wait > 4 ms: ack=3 used=4 (park off)
 [GPU] virtio-gpu mmio irq=78
 VirtIO GPU successfully initialized.
 VirtIO Input devices successfully initialized.
@@ -1531,7 +1531,7 @@ Loading program for scheduler (v2 AS): MISSING.BIN
 [WAVE-TRY] CONSOLE.BIN
 Loading program for scheduler (v2 AS): CONSOLE.BIN
 /CONSOLE.BIN
-v2 loader: image mapped (lazy), bytes=48152 pages=12 first=in elap=3ms
+v2 loader: image mapped (lazy), bytes=48152 pages=12 first=in elap=2ms
 v2 loader: PID=40 entry=0x1000000000 sp=0x1800000000 resident=1 tables=3 abi=0x0 native=0 interp=0x0
 [ARRIVED] CONSOLE.BIN rc>0
 [KERNEL] Process 40: CONSOLE.BIN exited (signal 9).
@@ -1634,7 +1634,8 @@ gpu_abi_m2_test_suite:
 [NVSHIM] vm vm=1 size=0x100000000
 [NVSHIM] bind op=0 va=0x10000000 range=0x10000 handle=1
 [NVSHIM] vm_bind refused rm=-22
-[NVSHIM] channel ch=1 engine=1 pushbuf=0x8ef46000
+[NVSHIM] channel req mock=1 ioc=channel_alloc vm=1 pushbuf=0x8ef46000 size=0x10000
+[NVSHIM] channel rsp mock=1 ch=1 engine=1
 [NVSHIM] submit ch=1 len=64 fence=0x1
 [NVSHIM] fence ch=1 fence=0x1 retired=0 timeout=poll
 [NVSHIM] fence ch=1 fence=0x1 retired=0 timeout=ms clamped=0
@@ -1658,7 +1659,8 @@ gpu_abi_m2_test_suite:
 [NV-DMA] map phys=0x000000008EF46000 bus=0x000000008EF46000 pages=16 identity=1
 [NVSHIM] alloc handle=1 bus=0x8ef46000 size=0x10000 domain=0x2
 [NVSHIM] vm vm=1 size=0x40000000
-[NVSHIM] channel ch=1 engine=1 pushbuf=0x8ef46000
+[NVSHIM] channel req mock=1 ioc=channel_alloc vm=1 pushbuf=0x8ef46000 size=0x10000
+[NVSHIM] channel rsp mock=1 ch=1 engine=1
 [NVSHIM] device dev=1 chipset=0x192 pci=0x2684 mock=1 feats=0x1ff
 [NV-DMA] unmap phys=0x000000008EF46000 pages=16
 [KERNEL] Process 43:  exited (signal 9).
@@ -1670,9 +1672,11 @@ gpu_abi_m2_test_suite:
 [NVSHIM] vm vm=1 size=0x40000000
 [NVSHIM] bind op=0 va=0x1000 range=0x1000 handle=1
 [NVSHIM] bind op=0 va=0x3ffff000 range=0x1000 handle=1
-[NVSHIM] channel ch=1 engine=1 pushbuf=0x8ef46000
+[NVSHIM] channel req mock=1 ioc=channel_alloc vm=1 pushbuf=0x8ef46000 size=0x10000
+[NVSHIM] channel rsp mock=1 ch=1 engine=1
 [NVSHIM] submit ch=1 len=4 fence=0x1
-[NVSHIM] channel ch=2 engine=1 pushbuf=0x8ef46000
+[NVSHIM] channel req mock=1 ioc=channel_alloc vm=1 pushbuf=0x8ef46000 size=0x10000
+[NVSHIM] channel rsp mock=1 ch=2 engine=1
 [NV-DMA] unmap phys=0x000000008EF46000 pages=16
 [KERNEL] Process 44:  exited (signal 9).
 [EXITPC] pid=44 last_user_pc=0x0 code=0x9 killed
@@ -1706,7 +1710,8 @@ gpu_abi_m2_test_suite:
 [NVSHIM] drm bind vm=1 ops=2 first_addr=0x10000 first_range=0x10000
 [NVSHIM] drm bind vm=1 ops=1 first_addr=0x20000 first_range=0x1000
 [NV-DMA] map phys=0x000000008EF56000 bus=0x000000008EF56000 pages=16 identity=1
-[NVSHIM] drm channel ch=1 pushbuf=0x8ef56000 size=0x10000
+[NVSHIM] drm channel req mock=1 ioc=drm_channel_alloc vm=1 pushbuf=0x8ef56000 size=0x10000
+[NVSHIM] drm channel rsp mock=1 ch=1 pushbuf=0x8ef56000 size=0x10000
 [NVSHIM] drm syncobj create handle=1 point=0x0 obj=1
 [NVSHIM] drm syncobj create handle=2 point=0x0 obj=2
 [NVSHIM] drm exec ch=1 pushes=1 sigs=1 bytes=64 stream=0xdfde6ac5 fence=0x1
@@ -1719,7 +1724,7 @@ gpu_abi_m2_test_suite:
 [NVSHIM] drm syncobj wait n=1 retired=0 timeout=poll clamped=0
 [NVSHIM] drm syncobj destroy handle=2 freed=1
 [NV-DMA] unmap phys=0x000000008EF56000 pages=16
-[NVSHIM] drm channel_free ch=1
+[NVSHIM] drm channel_free mock=1 ch=1
 [NV-DMA] unmap phys=0x000000008EF46000 pages=16
 [NVSHIM] drm gem_close handle=1 freed=1 refs=0
   [NVSHIM] drm probe version+cap+getparam+gem+vm+bind+channel+exec+syncobj: PASS
@@ -1733,7 +1738,8 @@ gpu_abi_m2_test_suite:
 [NVSHIM] drm gem_new handle=1 size=0x10000 offset=0x8ef46000 domain=0x2 map=0x0
 [NVSHIM] drm bind vm=1 ops=1 first_addr=0x10000 first_range=0x10000
 [NV-DMA] map phys=0x000000008EF56000 bus=0x000000008EF56000 pages=16 identity=1
-[NVSHIM] drm channel ch=1 pushbuf=0x8ef56000 size=0x10000
+[NVSHIM] drm channel req mock=1 ioc=drm_channel_alloc vm=1 pushbuf=0x8ef56000 size=0x10000
+[NVSHIM] drm channel rsp mock=1 ch=1 pushbuf=0x8ef56000 size=0x10000
 [NVSHIM] drm syncobj create handle=1 point=0x0 obj=3
 [NVSHIM] drm device dev=1 chipset=0x192 mock=1
 [NVSHIM] drm getparam param=11 value=0x192
@@ -1757,7 +1763,8 @@ gpu_abi_m2_test_suite:
 [NVSHIM] drm device dev=1 chipset=0x192 mock=1
 [NVSHIM] drm vm vm=1 umd_end=0x8000000000 total=0x10000000000
 [NV-DMA] map phys=0x000000008EF46000 bus=0x000000008EF46000 pages=16 identity=1
-[NVSHIM] drm channel ch=1 pushbuf=0x8ef46000 size=0x10000
+[NVSHIM] drm channel req mock=1 ioc=drm_channel_alloc vm=1 pushbuf=0x8ef46000 size=0x10000
+[NVSHIM] drm channel rsp mock=1 ch=1 pushbuf=0x8ef46000 size=0x10000
 [NVSHIM] drm syncobj create handle=1 point=0x1 obj=4
 [NVSHIM] drm syncobj refuse wait count=0x0 reason=bad_shape
 [NVSHIM] drm syncobj wait n=1 retired=1
@@ -1774,13 +1781,14 @@ gpu_abi_m2_test_suite:
 [NVSHIM] drm gem_info handle=1 offset=0x8ef46000 size=0x2000 map=0x1000
 [NVSHIM] drm bind vm=1 ops=1 first_addr=0x10000 first_range=0x2000
 [NV-DMA] map phys=0x000000008EF48000 bus=0x000000008EF48000 pages=16 identity=1
-[NVSHIM] drm channel ch=1 pushbuf=0x8ef48000 size=0x10000
+[NVSHIM] drm channel req mock=1 ioc=drm_channel_alloc vm=1 pushbuf=0x8ef48000 size=0x10000
+[NVSHIM] drm channel rsp mock=1 ch=1 pushbuf=0x8ef48000 size=0x10000
 [NVSHIM] drm mmap handle=1 va=0x1080004000 len=0x2000 phys=0x8ef46000 domain=0x9
 [NVSHIM] drm exec ch=1 pushes=1 sigs=0 bytes=64 stream=0x6957b385 fence=0x1
 [NVSHIM] drm exec ch=1 pushes=1 sigs=0 bytes=64 stream=0x392d7385 fence=0x2
 [NVSHIM] drm mmap handle=1 va=0x1080006000 len=0x1000 phys=0x8ef46000 domain=0x9
 [NV-DMA] unmap phys=0x000000008EF48000 pages=16
-[NVSHIM] drm channel_free ch=1
+[NVSHIM] drm channel_free mock=1 ch=1
 [NV-DMA] unmap phys=0x000000008EF46000 pages=2
 [NVSHIM] drm gem_close handle=1 freed=1 refs=0
   [NVSHIM] cpu-mapped BO: fault+write+kernel-view+exec digest: PASS
@@ -1899,7 +1907,8 @@ gpu_abi_m2_test_suite:
 [NVSHIM] drm gem_new handle=1 size=0x10000 offset=0x8ef48000 domain=0x9 map=0x1000
 [NVSHIM] drm bind vm=1 ops=1 first_addr=0x10000 first_range=0x10000
 [NV-DMA] map phys=0x000000008EF58000 bus=0x000000008EF58000 pages=16 identity=1
-[NVSHIM] drm channel ch=1 pushbuf=0x8ef58000 size=0x10000
+[NVSHIM] drm channel req mock=1 ioc=drm_channel_alloc vm=1 pushbuf=0x8ef58000 size=0x10000
+[NVSHIM] drm channel rsp mock=1 ch=1 pushbuf=0x8ef58000 size=0x10000
 [NVSHIM] drm syncobj create handle=1 point=0x0 obj=5
 [NVSHIM] drm syncobj timeline_signal n=1 point=0x5
 [NVSHIM] drm syncobj timeline_wait n=1 point=0x5 retired=1
@@ -1936,7 +1945,7 @@ gpu_abi_m2_test_suite:
 [NVSHIM] drm syncobj destroy handle=1 freed=1
 [NVSHIM] drm syncobj destroy handle=2 freed=1
 [NV-DMA] unmap phys=0x000000008EF58000 pages=16
-[NVSHIM] drm channel_free ch=1
+[NVSHIM] drm channel_free mock=1 ch=1
 [NV-DMA] unmap phys=0x000000008EF48000 pages=16
 [NVSHIM] drm gem_close handle=1 freed=1 refs=0
 [KERNEL] Process 55:  exited (signal 9).
@@ -2013,7 +2022,8 @@ gpu_abi_m2_test_suite:
 [NVSHIM] drm gem_new handle=1 size=0x10000 offset=0x8ef58000 domain=0x9 map=0x1000
 [NVSHIM] drm bind vm=1 ops=1 first_addr=0x10000 first_range=0x10000
 [NV-DMA] map phys=0x000000008EF68000 bus=0x000000008EF68000 pages=16 identity=1
-[NVSHIM] drm channel ch=1 pushbuf=0x8ef68000 size=0x10000
+[NVSHIM] drm channel req mock=1 ioc=drm_channel_alloc vm=1 pushbuf=0x8ef68000 size=0x10000
+[NVSHIM] drm channel rsp mock=1 ch=1 pushbuf=0x8ef68000 size=0x10000
 [NVSHIM] drm syncobj create handle=1 point=0x0 obj=10
 [NVSHIM] drm syncobj query n=1 point=0x0 last_submitted=1
 [NVSHIM] drm syncobj query n=1 point=0x0 last_submitted=0
@@ -2048,7 +2058,7 @@ gpu_abi_m2_test_suite:
   [NVSHIM] syncobj query: submitted vs signalled, pre/post submit, held fence, refusals by name: PASS
 [NVSHIM] drm syncobj destroy handle=1 freed=1
 [NV-DMA] unmap phys=0x000000008EF68000 pages=16
-[NVSHIM] drm channel_free ch=1
+[NVSHIM] drm channel_free mock=1 ch=1
 [NV-DMA] unmap phys=0x000000008EF58000 pages=16
 [NVSHIM] drm gem_close handle=1 freed=1 refs=0
 [KERNEL] Process 59:  exited (signal 9).
@@ -2063,7 +2073,8 @@ gpu_abi_m2_test_suite:
 [NVSHIM] drm gem_new handle=1 size=0x10000 offset=0x8ef68000 domain=0x9 map=0x1000
 [NVSHIM] drm bind vm=1 ops=1 first_addr=0x10000 first_range=0x10000
 [NV-DMA] map phys=0x000000008EF78000 bus=0x000000008EF78000 pages=16 identity=1
-[NVSHIM] drm channel ch=1 pushbuf=0x8ef78000 size=0x10000
+[NVSHIM] drm channel req mock=1 ioc=drm_channel_alloc vm=1 pushbuf=0x8ef78000 size=0x10000
+[NVSHIM] drm channel rsp mock=1 ch=1 pushbuf=0x8ef78000 size=0x10000
 [NVSHIM] drm syncobj create handle=1 point=0x0 obj=14
 [NVSHIM] drm syncobj handle_to_fd handle=1 fd=4 obj=14 point=0x0
 [NVSHIM] drm syncobj handle_to_fd sync_file=1 handle=1 fd=5 obj=14 point=0x1 reached=0x0
@@ -2087,7 +2098,7 @@ gpu_abi_m2_test_suite:
 [NVSHIM] syncfile release obj=15 fd=7 point=0x7 reached=0x7 refs=0 freed=1
   [NVSHIM] syncfile refs: dup/fork/SCM_RIGHTS kept ONE description and ONE record reference; the last close freed each record once: PASS
 [NV-DMA] unmap phys=0x000000008EF78000 pages=16
-[NVSHIM] drm channel_free ch=1
+[NVSHIM] drm channel_free mock=1 ch=1
 [NV-DMA] unmap phys=0x000000008EF68000 pages=16
 [NVSHIM] drm gem_close handle=1 freed=1 refs=0
 [KERNEL] Process 61:  exited (signal 9).
@@ -2102,21 +2113,14 @@ gpu_abi_m2_test_suite:
 [NVSHIM] drm gem_new handle=1 size=0x10000 offset=0x8ef80000 domain=0x9 map=0x1000
 [NVSHIM] drm bind vm=1 ops=1 first_addr=0x10000 first_range=0x10000
 [NV-DMA] map phys=0x000000008EF90000 bus=0x000000008EF90000 pages=16 identity=1
-[NVSHIM] drm channel ch=1 pushbuf=0x8ef90000 size=0x10000
-[NVSHIM] drm exec ch=1 pushes=1 sigs=1 bytes=64 stream=0xdfde6ac5 fence=0x1
 [NVSHIM] drm syncobj transfer src=1 dst=2 src_point=0x9 dst_point=0x9 obj=16->17 chained=1 src_at=0x0
-[NVSHIM] drm exec ch=1 pushes=1 sigs=0 bytes=64 stream=0xdfde6ac5 fence=0x2
   [NVSHIM] transfer: dst wait -ETIME while the source fence was held, 0 after the SAME kick that satisfied src; query reports the transferred point
 [NVSHIM] drm syncobj transfer src=1 dst=2 src_point=0xc dst_point=0xc obj=16->17 src_reached=1 src_at=0xc
 [NV-DMA] unmap phys=0x000000008EF90000 pages=16
-[NVSHIM] drm channel_free ch=1
 [NV-DMA] unmap phys=0x000000008EF80000 pages=16
-[NVSHIM] drm gem_close handle=1 freed=1 refs=0
 [KERNEL] Process 62:  exited (signal 9).
 [EXITPC] pid=62 last_user_pc=0x0 code=0x9 killed
   Running test_nvshim_drm_syncobj_transfer_syncfile...
-[NVSHIM] drm device dev=1 chipset=0x192 mock=1
-[NVSHIM] drm getparam param=11 value=0x192
 [NV-DMA] map phys=0x000000008EF80000 bus=0x000000008EF80000 pages=16 identity=1
 [NV-DMA] map phys=0x000000008EF90000 bus=0x000000008EF90000 pages=16 identity=1
 [NVSHIM] drm syncobj handle_to_fd sync_file=1 handle=1 fd=4 obj=18 point=0x9 reached=0x0
@@ -2384,7 +2388,7 @@ time_test_suite:
   Running test_fat16_stats...
   [stats] total=1023MB free=805MB
   Running test_rtc_read...
-  [rtc] epoch=1795846271 -> 2026-11-28 6:11:11
+  [rtc] epoch=1795846795 -> 2026-11-28 6:19:55
   Running math_test_suite (integer-only transcendental dispatch)...
   MATH classes: PASS
   MATH trig-specials: PASS
@@ -2453,8 +2457,8 @@ v2 loader: PID=77 entry=0x1000000200 sp=0x1800000000 resident=3 tables=4 abi=0x0
 [KERNEL] Process 77: ELDSTAT.BIN exited (signal 9).
 [EXITPC] pid=77 last_user_pc=0x0 code=0x9 killed
 
-[LOCKHEALTH] blockhold=0 selflock=0 classerr=0 irqsave_proc=0 irqoff_max_us=23919 irqoff_total_us=4346757 reg_used=531 reg_dropped=0
-[LOCKHEALTH-IRQOFF] cpu=0 max_us=23919 total_us=4346757 worst_lock=vm_lock pc=0x43A3E07FC
+[LOCKHEALTH] blockhold=0 selflock=0 classerr=0 irqsave_proc=0 irqoff_max_us=24906 irqoff_total_us=4600919 reg_used=531 reg_dropped=0
+[LOCKHEALTH-IRQOFF] cpu=0 max_us=24906 total_us=4600919 worst_lock=vm_lock pc=0x43A3E0E9C
 ==================================
 Tests run:    486
 Tests failed: 0

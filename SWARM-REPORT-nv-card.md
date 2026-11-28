@@ -1,7 +1,11 @@
 # GB202 — the boot log prints the PFB census, and A5's gate rejects a fenced ucode read (0 boots)
 
-Card `t_cacffe28`. Branch `nv/gb202-census-gate`, base `origin/nv/integ-swarm`
-`0269b0ea` (the tip rm68 booted at `eb3bbe69`+Tier A2), commit **`4fac9d01`**.
+Card `t_cacffe28`. Branch `nv/gb202-census-gate`, cut from `origin/nv/integ-swarm`
+`0269b0ea` (the tip rm68 booted at `eb3bbe69`+Tier A2), then merged with the tip
+that landed while this card ran — `63a44fab` (`nv/shim-mock-chan2`), merge
+`e1ed3173`. The two tiers below ran **on that merge**, not on the older base:
+`git diff --stat 0269b0ea..e1ed3173` is this card's four files plus that lane's
+`src/kernel/nv_shim.c`, `docs/nv-plan.md` and report.
 
 **No boot, no VM, no `qm`, no GPU was touched.** The GB202 boot window closed at
 2026-11-28T06:00Z; this card exists so the next funded boot returns rows worth
@@ -119,8 +123,8 @@ card, measured by running the base commit's copy in a detached worktree at
 
 | tier | command | result |
 |---|---|---|
-| intel | `SKIP_KVM=1 TOOLS_SKIP=1 BROWSER_SKIP=1 UNIT_TESTS_TIMEOUT=900 bash run_unit_tests_intel.sh` | `Tests run: 623`, `Tests failed: 0`, `UNIT TESTS PASSED` (`evidence/nv/gb202-census-gate-tier-intel.log:3216-3218`) |
-| ARM | `TOOLS_SKIP=1 BROWSER_SKIP=1 UNIT_TESTS_TIMEOUT=1800 bash run_unit_tests.sh` | `Tests run: 486`, `Tests failed: 0`, `UNIT TESTS PASSED` (`evidence/nv/gb202-census-gate-tier-arm.log:2459-2461`) |
+| intel | `SKIP_KVM=1 TOOLS_SKIP=1 BROWSER_SKIP=1 UNIT_TESTS_TIMEOUT=900 bash run_unit_tests_intel.sh` | `Tests run: 623`, `Tests failed: 0`, `UNIT TESTS PASSED` (`evidence/nv/gb202-census-gate-tier-intel.log:3220-3222`) |
+| ARM | `TOOLS_SKIP=1 BROWSER_SKIP=1 UNIT_TESTS_TIMEOUT=1800 bash run_unit_tests.sh` | `Tests run: 486`, `Tests failed: 0`, `UNIT TESTS PASSED` (`evidence/nv/gb202-census-gate-tier-arm.log:2463-2465`) |
 
 Baseline floor was intel ≥ 616 / ARM 486 with 0 failures. Intel gained the two
 new cases (623 ≥ 616); ARM is unchanged at 486 **because
