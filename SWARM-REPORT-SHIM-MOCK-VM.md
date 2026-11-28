@@ -429,8 +429,10 @@ on that merged tree:
 `check-quotes-vm.py` verifies every quoted row at its cited line in **all four
 logs** (lane and merged, both tiers), all four verdict blocks, the row counts
 that prove the budget did not swallow a row, and every `file:line` source
-citation in this tree. The merged tip differs from the tree those rows were
-read on by this report only (markdown, no source change).
+citation in this tree. This report itself arrives on the tip in `a31ff263`
+(parents `8c22fe17` + `970a9227`, the report commit), so the tree the rows were
+read on and the tree carrying this text differ by markdown only — no source
+change.
 
 ---
 
