@@ -158,6 +158,24 @@ struct nv_rm_if {
    * partial unmap is -EINVAL rather than a silent split. */
   int (*vm_bind)(uint32_t dev_id, uint32_t vm_id, uint32_t op, uint64_t handle,
                  uint64_t va, uint64_t range, uint64_t bo_offset);
+  /* The page-table walk behind the binding: resolve `va` through `vm_id`'s
+   * mappings and answer the address that byte actually has.
+   *   *phys  -- CPU physical address of the byte at `va`
+   *   *bus   -- the address a device dereferences for it (on this tree equal
+   *             to *phys only because GSTS.TES is clear; see nv_dma.h)
+   *   *range -- bytes from `va` to the end of the one binding it is in
+   * The client supplies nothing but the VA, and the answer is built from what
+   * the RM recorded at bind time plus the backing object's own addresses, so
+   * this is a read-back *through the mapping*, not an echo of the request.
+   * -EINVAL: unknown dev/vm, `va` past the space or in a hole between
+   * bindings, or a binding whose object has no memory behind it (the same
+   * absence read_va calls -EFAULT; here the caller asked for an address, and
+   * there is none -- a partial walk is never answered by clamping).
+   * This is the mock's stand-in for "a VA bound to VRAM resolves to a VRAM
+   * physical address": the object's frames are real pool RAM, not card VRAM,
+   * and no result here is evidence about the card. */
+  int (*vm_resolve)(uint32_t dev_id, uint32_t vm_id, uint64_t va,
+                    uint64_t *phys, uint64_t *bus, uint64_t *range);
 
   int (*channel_create)(uint32_t dev_id, uint32_t vm_id, uint64_t pushbuf,
                         uint32_t pushbuf_size, uint32_t *ch_id,

@@ -409,7 +409,24 @@ static void row_begin(const char *stage, int *budget) {
 }
 #define SHIM_ROW_BUDGET 8
 static int r_dev = SHIM_ROW_BUDGET, r_alloc = SHIM_ROW_BUDGET,
-           r_vm = SHIM_ROW_BUDGET, r_bind = SHIM_ROW_BUDGET,
+           r_vm = 16, /* VA space objects print a request row and a response row
+                       * per VM_INIT (the channel rows' shape), and the unit
+                       * tier creates three spaces plus the refusal rows; 8
+                       * would be exactly full and the last suite's rows would
+                       * vanish -- the failure this file has paid for before. */
+           r_bind = 24, /* vm_bind prints a request and a reply per call, and a
+                         * reply carries the RM's read-back address; the probe
+                         * and the argument suite together drive ~10 MAP/UNMAP
+                         * successes, so 8 (one row each) is half a budget now */
+           r_vmbind = 16, /* the bind refusals get their own bucket for the
+                           * reason r_param did: r_refuse is 8 rows per BOOT and
+                           * the 'N' face's -ENOSYS rows spend it before the VM
+                           * suites run, so the first evidence run of this card
+                           * returned -EINVAL with NO row for a VA past the
+                           * space (measured: qemu.log, va=0x40000000) -- a
+                           * refusal that cannot be seen is the failure mode
+                           * this project keeps paying for.  Three shapes per
+                           * suite, both tiers. */
            r_ch = 24, /* channel allocations print a request row and a response
                        * row, so the per-boot budget is two rows per alloc and
                        * the tier makes four: 8 would be exactly full and the
@@ -1208,6 +1225,17 @@ static int op_vm_init(struct process *p, int fd, uint64_t arg) {
   c->vm_id[c->nvm++] = SHIM_RESERVED;
   spinlock_release(&g_shim_lock);
 
+  /* Request/response pair, the same shape the channel and engine-class rows
+   * use: what the shim asked the RM for, and what the RM handed back.  Both
+   * say mock=1 because the RM behind this node is nv_rm_mock -- no card, no
+   * firmware, and no NV_VGPU_MSG_* id to quote.  The VA space handle in the
+   * reply row is the RM's: the client's struct leaves vm_id untouched and only
+   * receives it (same property as the channel and engine-class handles). */
+  row_begin("vm req", &r_vm);
+  row_s("mock=1 ioc=vm_init size=");
+  row_hex(v.size);
+  row_end();
+
   uint32_t vm_id = 0;
   int rc = rm()->vm_create(dev, v.size, &vm_id);
 
@@ -1223,7 +1251,13 @@ static int op_vm_init(struct process *p, int fd, uint64_t arg) {
   }
   spinlock_release(&g_shim_lock);
 
-  if (rc != 0) return rc;
+  if (rc != 0) {
+    row_begin("vm rsp", &r_vm);
+    row_s("mock=1 ioc=vm_init err=");
+    row_say(rc);
+    row_end();
+    return rc;
+  }
   if (!done) {
     rm()->vm_destroy(dev, vm_id);
     return -EBADF;
@@ -1231,8 +1265,8 @@ static int op_vm_init(struct process *p, int fd, uint64_t arg) {
   v.vm_id = vm_id;
   if (vm_kwrite(p, arg, &v, (int)sizeof v) != 0) return -EFAULT;
 
-  row_begin("vm", &r_vm);
-  row_s("vm=");
+  row_begin("vm rsp", &r_vm);
+  row_s("mock=1 vm=");
   row_say((int)vm_id);
   row_s(" size=");
   row_hex(v.size);
@@ -1244,8 +1278,8 @@ static int op_vm_bind(struct process *p, int fd, uint64_t arg) {
   struct nvshim_vm_bind b;
   if (vm_user_read(p, arg, &b, (int)sizeof b) != 0) return -EFAULT;
   if (!nv_shim_bind_ok(&b)) {
-    row_begin("vm_bind refused", &r_refuse);
-    row_s("va=");
+    row_begin("vm_bind refused", &r_vmbind);
+    row_s("mock=1 va=");
     row_hex(b.va);
     row_s(" range=");
     row_hex(b.range);
@@ -1267,8 +1301,8 @@ static int op_vm_bind(struct process *p, int fd, uint64_t arg) {
     if (at < 0 || b.bo_offset > c->alloc_size[at] ||
         b.range > c->alloc_size[at] - b.bo_offset) {
       spinlock_release(&g_shim_lock);
-      row_begin("vm_bind refused", &r_refuse);
-      row_s("handle=");
+      row_begin("vm_bind refused", &r_vmbind);
+      row_s("mock=1 handle=");
       row_say((int)b.handle);
       row_s(" reason=not_this_clients_object");
       row_end();
@@ -1276,24 +1310,74 @@ static int op_vm_bind(struct process *p, int fd, uint64_t arg) {
     }
   }
   spinlock_release(&g_shim_lock);
-  int rc = rm()->vm_bind(b.dev_id, b.vm_id, b.op, b.handle, b.va, b.range,
-                         b.bo_offset);
-  if (rc != 0) {
-    row_begin("vm_bind refused", &r_refuse);
-    row_s("rm=");
-    row_say(rc);
-    row_end();
-    return rc;
-  }
-  row_begin("bind", &r_bind);
-  row_s("op=");
+
+  /* The request row names what the shim asks the RM for.  On the real path a
+   * GPU VA is bound by an RM allocation-side operation; here the RM is
+   * nv_rm_mock, so the request is named by its ioc= and the object by handle=
+   * -- no NV_VGPU_MSG_* is sent anywhere. */
+  row_begin("vm_bind req", &r_bind);
+  row_s("mock=1 ioc=vm_bind vm=");
+  row_say((int)b.vm_id);
+  row_s(" op=");
   row_say((int)b.op);
   row_s(" va=");
   row_hex(b.va);
   row_s(" range=");
   row_hex(b.range);
-  row_s(" handle=");
-  row_say((int)b.handle);
+  if (b.op == NVSHIM_VM_BIND_OP_MAP) {
+    row_s(" handle=");
+    row_say((int)b.handle);
+    row_s(" bo_offset=");
+    row_hex(b.bo_offset);
+  }
+  row_end();
+
+  int rc = rm()->vm_bind(b.dev_id, b.vm_id, b.op, b.handle, b.va, b.range,
+                         b.bo_offset);
+  if (rc != 0) {
+    row_begin("vm_bind refused", &r_vmbind);
+    row_s("mock=1 va=");
+    row_hex(b.va);
+    row_s(" range=");
+    row_hex(b.range);
+    row_s(" op=");
+    row_say((int)b.op);
+    row_s(" rm=");
+    row_say(rc);
+    row_end();
+    return rc;
+  }
+
+  /* The reply row carries the answer the RM gives to the walk: for a MAP, the
+   * physical and device addresses the VA now names, read back from the RM's
+   * own mapping record (never from anything the client sent).  For an UNMAP
+   * there is no address left to name, so the row reports the removal only.
+   * `mapped=` is the walk's extent from `va`, so a reader can see the answer is
+   * a range, not a number copied out of the request. */
+  row_begin("vm_bind rsp", &r_bind);
+  row_s("mock=1 op=");
+  row_say((int)b.op);
+  row_s(" va=");
+  row_hex(b.va);
+  row_s(" range=");
+  row_hex(b.range);
+  if (b.op == NVSHIM_VM_BIND_OP_MAP) {
+    uint64_t phys = 0, bus = 0, left = 0;
+    int wrc = rm()->vm_resolve(b.dev_id, b.vm_id, b.va, &phys, &bus, &left);
+    if (wrc == 0) {
+      row_s(" phys=");
+      row_hex(phys);
+      row_s(" bus=");
+      row_hex(bus);
+      row_s(" mapped=");
+      row_hex(left);
+    } else {
+      /* A bind the RM accepted but cannot walk is a broken RM, and the row
+       * says so instead of printing an address that was not read back. */
+      row_s(" resolve=");
+      row_say(wrc);
+    }
+  }
   row_end();
   return 0;
 }
@@ -3382,6 +3466,20 @@ static int op_drm_vm_bind(struct process *p, int fd, uint64_t arg) {
   row_hex(ops[0].addr);
   row_s(" first_range=");
   row_hex(ops[0].range);
+  /* The stock face's read-back, on the same walk the 'N' rows use: the first
+   * MAP op's address as the RM resolves it.  A first op that is an UNMAP has
+   * nothing to name, so the field is omitted rather than answered as zero. */
+  if (ops[0].op == NVSHIM_DRM_VM_BIND_OP_MAP) {
+    uint64_t phys = 0, bus = 0, left = 0;
+    if (rm()->vm_resolve(dev, vm, ops[0].addr, &phys, &bus, &left) == 0) {
+      row_s(" phys=");
+      row_hex(phys);
+      row_s(" bus=");
+      row_hex(bus);
+      row_s(" mapped=");
+      row_hex(left);
+    }
+  }
   row_end();
   return 0;
 }

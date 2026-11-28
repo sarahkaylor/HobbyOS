@@ -32,6 +32,7 @@
 #include "errno.h"
 #include "file_obj.h" /* file_is_devnvshim()/file_is_devnv() */
 #include "fs.h"
+#include "kmem.h" /* phys_to_virt: the kernel's view of a resolved VA */
 #include "nv_rm.h"
 #include "nv_shim.h"
 #include "nv_nvif_uapi.h" /* NVSHIM_NVIF_CLASS_*: the ids SCLASS reports */
@@ -302,6 +303,37 @@ static void test_nvshim_probe(void) {
    * -- the observation could have been negative, and here it is. */
   EXPECT_EQ(probe_ioc(&pr, NVSHIM_IOC_VM_BIND, &vb, (int)sizeof vb), -EINVAL);
 
+  /* --- the binding is a MAPPING, not bookkeeping ------------------------
+   * Ask the RM to walk the VA: the answer must be the physical address of the
+   * byte that VA names, inside the object's own pool frames (nv_dma_alloc's,
+   * not a card's VRAM -- this is the mock), and the walk must translate rather
+   * than repeat.  Two views of one memory: a store at the resolved physical
+   * address is seen through the RM's object handle at the same offset. */
+  const struct nv_rm_if *ri = nv_rm_mock_if();
+  EXPECT_EQ(ri->vm_resolve != 0, 1);
+  uint64_t phys = 0, bus = 0, left = 0;
+  EXPECT_EQ(ri->vm_resolve(d.dev_id, vm.vm_id, vb.va, &phys, &bus, &left), 0);
+  EXPECT_EQ(phys != 0, 1);
+  EXPECT_EQ(left, 65536);          /* the whole binding, from its first byte */
+  EXPECT_EQ(bus, phys);            /* GSTS.TES clear: identity, not a promise */
+  uint64_t phys2 = 0, bus2 = 0, left2 = 0;
+  EXPECT_EQ(ri->vm_resolve(d.dev_id, vm.vm_id, vb.va + 0x2000, &phys2, &bus2,
+                           &left2), 0);
+  EXPECT_EQ(phys2, phys + 0x2000); /* the walk translates; it does not repeat */
+  EXPECT_EQ(left2, 65536 - 0x2000);/* and it reports the extent it walked */
+  /* A hole, and a VA past the space, are refused -- never clamped to the
+   * nearest binding, which would name memory the client did not map. */
+  EXPECT_EQ(ri->vm_resolve(d.dev_id, vm.vm_id, vb.va + 65536, &phys2, &bus2,
+                           &left2), -EINVAL);
+  EXPECT_EQ(ri->vm_resolve(d.dev_id, vm.vm_id, (1ull << 32), &phys2, &bus2,
+                           &left2), -EINVAL);
+  /* The resolved address is the object's memory: store through it, read the
+   * same offset back through the RM's object handle. */
+  uint32_t magic = 0x5a5aa5a5u, back = 0;
+  *(volatile uint32_t *)phys_to_virt(phys) = magic;
+  EXPECT_EQ(nv_rm_mock_read_bo(d.dev_id, push_handle, 0, &back, 4), 0);
+  EXPECT_EQ(back, magic);
+
   /* --- channel --- */
   struct nvshim_channel ch;
   ch.dev_id = d.dev_id;
@@ -411,6 +443,11 @@ static void test_nvshim_probe(void) {
   vb.op = NVSHIM_VM_BIND_OP_UNMAP;
   vb.handle = 0;
   EXPECT_EQ(probe_ioc(&pr, NVSHIM_IOC_VM_BIND, &vb, (int)sizeof vb), 0);
+  /* The walk follows the mapping's lifetime: once unmapped, the VA names
+   * nothing and there is no address to answer. */
+  uint64_t u_phys = 0, u_bus = 0, u_left = 0;
+  EXPECT_EQ(nv_rm_mock_if()->vm_resolve(d.dev_id, vm.vm_id, vb.va, &u_phys,
+                                        &u_bus, &u_left), -EINVAL);
   EXPECT_EQ(probe_ioc(&pr, NVSHIM_IOC_VM_BIND, &vb, (int)sizeof vb), -EINVAL);
 
   struct nvshim_channel_free cf;
