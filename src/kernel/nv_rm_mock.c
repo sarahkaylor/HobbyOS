@@ -470,6 +470,38 @@ out:
   return rc;
 }
 
+/* The walk the bindings exist for.  `va` -> the byte it names: the range that
+ * covers it, the object that range bound, and the object's own physical/bus
+ * address plus the offset into it.  A VA in a hole, past the space, or in a
+ * binding whose object has no memory is refused -- there is no address to
+ * answer, and answering the binding's start would be a plausible-looking lie.
+ * Returns *range = bytes from `va` to the end of that one binding (never past
+ * it), which is what lets the caller see the walk is an extent, not a value. */
+static int mock_vm_resolve(uint32_t dev, uint32_t vm_id, uint64_t va,
+                           uint64_t *phys, uint64_t *bus, uint64_t *range) {
+  if (!phys || !bus || !range) return -EINVAL;
+  int rc = -EINVAL;
+  spinlock_acquire(&g_mock.lock);
+  struct mock_vm *v = mock_vm_find(dev, vm_id);
+  if (!v || va >= v->size) goto out;
+  for (int i = 0; i < MOCK_MAX_RANGE; i++) {
+    struct mock_range *r = &v->r[i];
+    if (!r->used || va < r->va || va >= r->va + r->range) continue;
+    struct mock_alloc *a = mock_alloc_find(dev, r->handle);
+    if (!a || !a->phys) goto out; /* bound, but no memory behind the binding */
+    uint64_t bo = r->bo_offset + (va - r->va);
+    if (bo >= a->size) goto out;
+    *phys = a->phys + bo;
+    *bus = a->bus + bo;
+    *range = r->va + r->range - va;
+    rc = 0;
+    break;
+  }
+out:
+  spinlock_release(&g_mock.lock);
+  return rc;
+}
+
 /* ---- channels ---------------------------------------------------------- */
 
 static struct mock_channel *mock_ch_find(uint32_t ch_id) {
@@ -807,6 +839,7 @@ static void mock_if_fill(void) {
   g_rm_if.vm_create = mock_vm_create;
   g_rm_if.vm_destroy = mock_vm_destroy;
   g_rm_if.vm_bind = mock_vm_bind;
+  g_rm_if.vm_resolve = mock_vm_resolve;
   g_rm_if.channel_create = mock_channel_create;
   g_rm_if.channel_destroy = mock_channel_destroy;
   g_rm_if.engine_class_create = mock_engine_class_create;
