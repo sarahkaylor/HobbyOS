@@ -710,6 +710,48 @@ The owner exercised **R4** on 2026-11-27. Effective immediately:
   games number keeps its `renderer=` label, and the Cyberpunk row is still the
   platform's, not the driver's.
 
+### 2.13.2 The 2026-11-28 boot round is parked (owner decision)
+
+The owner parked the GB202/AD102 boot campaign on 2026-11-28, after the hard-stop report
+below. **Parked, not cancelled** — revive conditions R1–R4 of §2.13.1 stand, and nothing in
+§2.10–§2.12 is withdrawn.
+
+**The round's ledger: 8 GPU boots, 0 gate words moved.**
+
+| boot | what changed | `MAILBOX0` | other rows |
+|---|---|---|---|
+| rm63, rm63b | 615.78.08 FMC pair | `0x824` | `0x14DC=0x12000824` |
+| rm64 | + `nonWprHeapSize=0x300000` | `0x824` | — |
+| rm65 | 580.178.04 FMC control | `0x0B` | — |
+| rm66 | FSP DMEM download-log RPC after the terminal code | `0x824` | 0 bytes returned — the in-band namer is closed negative |
+| rm67 | vendor shape: `frtsVidmemOffset 0x1C00000`, `pmuReservedSize 0x1920000`, args target 2 | `0x0B` | WPR2 pair +36 MiB at both ends vs rm65 — the COT's FRTS pair reaches the FSP |
+| rm68 | rm67 + Tier A A3/A4/A5/A7/A9/A10 | `0x0B` | all six Tier A steps observed on silicon; `linked=0` at 11/11 samples |
+
+`statq_written=0 linked=0 initdone=0` in all seven; the WPR2 pair is live and then torn down
+(`hi=0`) in every `0x0B` boot. On AD102 the fourth container (`ec5bcd11…`) returned
+`0x002B0009` at 4.176 ms with `INTR=0x10` — the same word at the same point as the three
+before it. What moved is plumbing (COS/FRTS description reaching the FSP), never the gate.
+
+**The corpus is exhausted as a question.** `t_d772ae8a` enumerated **all 230 driver tags**
+(load+unload × PROD+DBG rebuilt): 852 containers, 34 distinct AD102 containers, 6 spent, and
+every unspent production load *older* than the ones spent. "No newer AD102-signed booter
+exists" is now a searched negative rather than an inference.
+
+**What a new boot would have to name.** A named change that could move `MAILBOX0` off
+`0x0B`/`0x824` (toward `INIT_DONE 0x1001` with `statq_written=1`), or `0x840094` off
+`0x002B0009`/`0x00250009`. Without one, the boot is the cost this ladder keeps paying.
+
+**What continues, at zero boots.** The **mock-RM ladder** (`t_17ca89e5` landed a `mock=1`
+channel object; VA space and engine class queued behind it) and the **vendor-control**
+reduction — NVIDIA's own open driver owning `41:00` in a guest, reading the registers our
+abort path reads. That comparison is the only thing left that discriminates *our sequence*
+from *the firmware*, and it costs no boots of our image.
+
+Board note: `t_a769beaa` (the GB202 wall card) sits in **`triage`** rather than `blocked` —
+the automated re-block left it there and both `block` and `complete` refuse a `triage` card.
+Triage is a non-dispatching holding state, so it is the park; the ledger comment is on the
+card and this section is its record.
+
 ## 3. Work packages (parallel, each with a gate)
 
 | WP | Scope | Gate | Needs 4090? | Status 2026-11-23 |
