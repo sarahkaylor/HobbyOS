@@ -1065,6 +1065,30 @@ int nv_gsp_time_offset_ns(uint64_t wall_ns, uint32_t sec_lo, uint32_t sec_hi,
   return 0;
 }
 
+/* A 0xBADF_xxxx word is not a version.  MEASURED on GB202: the read at +0x334
+ * answers 0xBADF4100 (the decoupler's privErrTargetLocked code, nv_regs.h), and
+ * rm68's row printed fsp_ucode=0x00000000BADF4100 wrote=1 -- the bare
+ * ">= 0x44C" comparison below accepted it, so the row proved only that the
+ * write was issued, not that the FSP is new enough for it.  A genuinely wrong
+ * ucode would read the same way.  So the gate asks "is this word a version at
+ * all" first and names the refusal; the vendor comparison stays where it is. */
+int nv_gsp_ucode_version_trusted(uint32_t raw, const char **reason) {
+  if (reason) *reason = 0;
+  if (nv_is_badf(raw)) {
+    if (reason) *reason = "fence";
+    return 0;
+  }
+  if (raw == 0) {
+    if (reason) *reason = "unset";
+    return 0;
+  }
+  if (raw > NV_FSP_UCODE_VERSION_MAX) {
+    if (reason) *reason = "out-of-range";
+    return 0;
+  }
+  return 1;
+}
+
 int nv_gsp_set_gpu_time_at(struct nv_dev *d, uint64_t wall_ns) {
   if (!d) return -EINVAL;
   uint32_t hi2 = nv_rd32(d, NV_PGC6_SCI_SEC_TIMER_TIME_1), hi, lo;
@@ -1077,8 +1101,10 @@ int nv_gsp_set_gpu_time_at(struct nv_dev *d, uint64_t wall_ns) {
   uint64_t off = 0;
   int rc = nv_gsp_time_offset_ns(wall_ns, lo, hi, &off);
   uint32_t ucode = nv_rd32(d, NV_FALCON_GSP_BASE + NV_FSP_UCODE_VERSION_OFF);
+  const char *why = 0;
+  int trusted = nv_gsp_ucode_version_trusted(ucode, &why);
   int wrote = 0;
-  if (rc == 0 && ucode >= RM_FSP_BUG_3957833_FIX_VERSION) {
+  if (rc == 0 && trusted && ucode >= RM_FSP_BUG_3957833_FIX_VERSION) {
     nv_wr32(d, NV_PGC6_SCI_SYS_TIMER_OFFSET_1, (uint32_t)(off >> 32));
     nv_wr32(d, NV_PGC6_SCI_SYS_TIMER_OFFSET_0,
             (uint32_t)off | NV_PGC6_SYS_TIMER_OFFSET_UPDATE);
@@ -1090,8 +1116,16 @@ int nv_gsp_set_gpu_time_at(struct nv_dev *d, uint64_t wall_ns) {
   uart_print_hex(wall_ns);
   uart_puts(" offset_ns=");
   uart_print_hex(off);
-  uart_puts(" fsp_ucode=0x");
+  /* The raw word is what the row exists to show: a refused gate must name the
+   * value it refused, or the next boot cannot tell 0xBADF4100 from a version. */
+  uart_puts(" fsp_ucode=");
   uart_print_hex(ucode);
+  uart_puts(" ucode_gate=");
+  uart_puts(trusted ? "passed" : "not-passed");
+  if (!trusted) {
+    uart_puts(" ucode_reject=");
+    uart_puts(why ? why : "unknown");
+  }
   uart_puts(" wrote=");
   print_int(wrote);
   uart_puts("\n");
@@ -1318,45 +1352,58 @@ int nv_gsp_rpc_async_init(struct nv_dev *d) {
 #define NV_GSP_STAGE_STARTED 7
 #define NV_GSP_STAGE_RPC 8
 
-/* Observation only: what the card says about its own firmware state.  Every
- * field here is a read; calling this twice in a row is harmless. */
-int nv_gsp_probe(struct nv_dev *d) {
-  if (!d) return -EINVAL;
-  if (!d->falcon[NV_FALCON_IDX_GSP].present) {
-    uart_puts("[NV-GSP] no gsp window: firmware stage not reachable\n");
-    return -ENODEV;
-  }
-  uint32_t lo = nv_rd32(d, NV_PFB_WPR2_ADDR_LO);
-  uint32_t hi = nv_rd32(d, NV_PFB_WPR2_ADDR_HI);
-  uint32_t rp = nv_rd32(d, NV_PFB_READ_PROTECTION);
-  uint32_t mv_a = nv_rd32(d, NV_PFB_MOVES_A);
-  uint32_t mv_b = nv_rd32(d, NV_PFB_MOVES_B);
-  uint32_t bcr = nv_rd32(d, NV_GSP_BCR_CTRL);
-  uint32_t mb0 = nv_rd32(d, NV_GSP_MAILBOX0);
-  uint32_t mb1 = nv_rd32(d, NV_GSP_MAILBOX1);
-  uint32_t ucctl = nv_rd32(d, NV_GSP_RISCV_CPUCTL);
-  uint32_t eng_reset = nv_rd32(d, NV_GSP_ENGINE_RESET);
+/* ---- the PFB census ------------------------------------------------------
+ * WPR2 and the two MOVES words live in PFB, not in the falcon window, so these
+ * reads answer whether or not the GSP falcon decodes its own window.  That is
+ * measured, not argued: rm67 (t_240a0ac8's log, 5090-gb202fsp-rm67.log:340-343)
+ * printed all four rows on a boot whose falcon words were unreachable, and its
+ * own verdict said the pair is a PFB read.  t_97b8a05c's rm68 put a presence
+ * guard at the top of nv_gsp_probe() and the same part printed none of them
+ * (grep -c '[NV-GSP] probe wpr2': 2 in rm67, 0 in rm68) while both logs read
+ * falcons=0x0000000000000000 -- so the guard fired on every GB202 boot and cost
+ * evidence, not state.
+ *
+ * The helper has no gate of its own and the wording is rm67's, byte for byte:
+ * a reader diffs those two logs line by line. */
+int nv_gsp_pfb_census_read(struct nv_dev *d, struct nv_gsp_pfb_census *c) {
+  if (!d || !c) return -EINVAL;
+  c->wpr2_lo = nv_rd32(d, NV_PFB_WPR2_ADDR_LO);
+  c->wpr2_hi = nv_rd32(d, NV_PFB_WPR2_ADDR_HI);
+  c->readprot = nv_rd32(d, NV_PFB_READ_PROTECTION);
+  c->moves_a = nv_rd32(d, NV_PFB_MOVES_A);
+  c->moves_b = nv_rd32(d, NV_PFB_MOVES_B);
+  uint64_t start_kib = (uint64_t)c->wpr2_lo * 4u;
+  uint64_t end_kib = (uint64_t)c->wpr2_hi * 4u;
+  c->span_kib = end_kib > start_kib ? end_kib - start_kib : 0;
+  if ((c->readprot & NV_PFB_RP_LEVEL0) && c->wpr2_hi != 0)
+    c->verdict = NV_PFB_VERDICT_NOT_ORACLE;
+  else if (c->wpr2_hi == 0)
+    c->verdict = NV_PFB_VERDICT_HI_ZERO;
+  else
+    c->verdict = NV_PFB_VERDICT_SPAN;
+  return 0;
+}
 
+void nv_gsp_pfb_census_print(const struct nv_gsp_pfb_census *c) {
+  if (!c) return;
   uart_puts("[NV-GSP] probe wpr2 lo=");
-  uart_print_hex(lo);
+  uart_print_hex(c->wpr2_lo);
   uart_puts(" hi=");
-  uart_print_hex(hi);
+  uart_print_hex(c->wpr2_hi);
   uart_puts(" readprot=");
-  uart_print_hex(rp);
+  uart_print_hex(c->readprot);
   uart_puts(" (LO/HI are a start/END pair in 4 KiB units)\n");
 
   /* Say what the words mean and what they cannot mean.  On this card they are
    * protected, and the decoded start lands outside a 24 GiB FB -- so the
    * honest report is "these are not state", not a verdict about the firmware. */
-  uint64_t start_kib = (uint64_t)lo * 4u;
-  uint64_t end_kib = (uint64_t)hi * 4u;
   uart_puts("[NV-GSP] probe wpr2 span_kib=");
-  uart_print_hex(end_kib > start_kib ? end_kib - start_kib : 0);
-  if ((rp & NV_PFB_RP_LEVEL0) && hi != 0) {
+  uart_print_hex(c->span_kib);
+  if (c->verdict == NV_PFB_VERDICT_NOT_ORACLE) {
     uart_puts(" verdict=not-a-state-oracle (read-protected; decode would put the "
               "region above any real FB). The SEC2 booter builds WPR2; the host "
               "only supplies the metadata.\n");
-  } else if (hi == 0) {
+  } else if (c->verdict == NV_PFB_VERDICT_HI_ZERO) {
     uart_puts(" verdict=hi-is-zero (region not established); still: the booter "
               "builds it, the host never writes these.\n");
   } else {
@@ -1365,10 +1412,32 @@ int nv_gsp_probe(struct nv_dev *d) {
   }
 
   uart_puts("[NV-GSP] probe moves a=");
-  uart_print_hex(mv_a);
+  uart_print_hex(c->moves_a);
   uart_puts(" b=");
-  uart_print_hex(mv_b);
+  uart_print_hex(c->moves_b);
   uart_puts(" (this pair changes across init; identity unexplained)\n");
+}
+
+/* Observation only: what the card says about its own firmware state.  Every
+ * field here is a read; calling this twice in a row is harmless. */
+int nv_gsp_probe(struct nv_dev *d) {
+  if (!d) return -EINVAL;
+
+  /* PFB first, ungated.  The census is not about the falcon (see above), and
+   * running it behind the presence check is what removed it from rm68. */
+  struct nv_gsp_pfb_census census;
+  if (nv_gsp_pfb_census_read(d, &census) == 0) nv_gsp_pfb_census_print(&census);
+
+  /* Two different reasons leave the falcon-side words unreadable, and the row
+   * says which one fired: the window is not on this part's map at all, or it
+   * is on the map but answers the decoupler fence. */
+  if (!d->falcon[NV_FALCON_IDX_GSP].present) {
+    uart_puts("[NV-GSP] no gsp window (not-present): the falcon window does not "
+              "decode on this part, so the falcon-side words are not readable; "
+              "the WPR2/MOVES rows above are PFB reads and stand\n");
+    return -ENODEV;
+  }
+  uint32_t bcr = nv_rd32(d, NV_GSP_BCR_CTRL);
   uart_puts("[NV-GSP] probe bcr_ctrl=");
   uart_print_hex(bcr);
   if (bcr == NV_REG_FENCED) {
@@ -1378,7 +1447,22 @@ int nv_gsp_probe(struct nv_dev *d) {
     if (bcr & NV_GSP_BCR_RISCV) uart_puts("|RISCV");
     if (bcr & NV_GSP_BCR_BRFETCH) uart_puts("|BRFETCH");
   }
-  uart_puts("\n[NV-GSP] probe mb0=");
+  uart_puts("\n");
+  if (bcr == NV_REG_FENCED) {
+    /* A fenced control word is not state: the words below it would be the
+     * decoupler's answer, so reading them and reporting them as mailboxes is
+     * the same mistake as reading a version out of 0xBADF4100.  The sentence is
+     * rm67's (:343) unchanged -- the parenthesised reason is the only new word,
+     * so a reader diffing the two logs sees the census, not a rewrite. */
+    uart_puts("[NV-GSP] no gsp window (fenced): falcon-side words not reachable; "
+              "the WPR2/MOVES rows above are PFB reads and stand\n");
+    return -ENODEV;
+  }
+  uint32_t mb0 = nv_rd32(d, NV_GSP_MAILBOX0);
+  uint32_t mb1 = nv_rd32(d, NV_GSP_MAILBOX1);
+  uint32_t ucctl = nv_rd32(d, NV_GSP_RISCV_CPUCTL);
+  uint32_t eng_reset = nv_rd32(d, NV_GSP_ENGINE_RESET);
+  uart_puts("[NV-GSP] probe mb0=");
   uart_print_hex(mb0);
   uart_puts(" mb1=");
   uart_print_hex(mb1);
@@ -1388,10 +1472,10 @@ int nv_gsp_probe(struct nv_dev *d) {
   uart_print_hex(eng_reset);
   uart_puts("\n");
 
-  d->wpr2_lo = lo;
-  d->wpr2_hi = hi;
-  d->wpr_ctl_a = mv_a;
-  d->wpr_ctl_b = mv_b;
+  d->wpr2_lo = census.wpr2_lo;
+  d->wpr2_hi = census.wpr2_hi;
+  d->wpr_ctl_a = census.moves_a;
+  d->wpr_ctl_b = census.moves_b;
   d->gsp_msg0 = mb0;
   d->gsp_msg1 = mb1;
   d->gsp_ucctl = ucctl;

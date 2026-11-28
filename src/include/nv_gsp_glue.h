@@ -141,8 +141,35 @@ int nv_gsp_rpc_peer_written(void);
 int nv_gsp_write_falcon_os(struct nv_dev *d, uint32_t app_version);
 int nv_gsp_time_offset_ns(uint64_t wall_ns, uint32_t sec_lo, uint32_t sec_hi,
                           uint64_t *out);
+/* A5's FSP-version gate, split out so its refusal is testable without a card.
+ * The version is read from the falcon window at +0x334, and that window can
+ * answer a 0xBADF_xxxx decoupler code instead of a version (measured: GB202
+ * reads 0xBADF4100).  A bare ">= 0x44C" accepts that code, so the gate first
+ * decides whether the word is a version at all: fence -> "fence", zero ->
+ * "unset", above NV_FSP_UCODE_VERSION_MAX -> "out-of-range".  Returns 1 when
+ * the word can be trusted as a version (the caller still compares it against
+ * the bug-3957833 fix), 0 when it cannot, and sets *reason to the name above. */
+#define NV_FSP_UCODE_VERSION_MAX 0xFFFFu
+int nv_gsp_ucode_version_trusted(uint32_t raw, const char **reason);
 int nv_gsp_set_gpu_time(struct nv_dev *d);
 int nv_gsp_set_gpu_time_at(struct nv_dev *d, uint64_t wall_ns);
+
+/* The PFB census nv_gsp_probe() prints BEFORE it asks whether the GSP falcon
+ * decodes its window.  WPR2 (0x1FA824/28) and MOVES A/B (0x1FA804/8) are PFB
+ * registers: they answer on a part whose falcon window is fenced or does not
+ * decode at all, which is exactly GB202.  Kept as a struct so the unit tier
+ * can assert the fields and the verdict without parsing the log row. */
+#define NV_PFB_VERDICT_NOT_ORACLE 1 /* read-protected and hi != 0 */
+#define NV_PFB_VERDICT_HI_ZERO 2    /* hi == 0: no region established */
+#define NV_PFB_VERDICT_SPAN 3       /* decodes; the pair's meaning is unproven */
+
+struct nv_gsp_pfb_census {
+  uint32_t wpr2_lo, wpr2_hi, readprot, moves_a, moves_b;
+  uint64_t span_kib;
+  int verdict;
+};
+int nv_gsp_pfb_census_read(struct nv_dev *d, struct nv_gsp_pfb_census *c);
+void nv_gsp_pfb_census_print(const struct nv_gsp_pfb_census *c);
 int nv_gsp_rpc_queue_async_init(struct nv_gsp_rpc *r, struct nv_dev *d);
 int nv_gsp_rpc_async_init(struct nv_dev *d);
 
