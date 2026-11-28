@@ -63,6 +63,11 @@ extern void uart_puts(const char *s);
 extern void uart_print_hex(uint64_t v);
 extern void print_int(int v);
 
+/* A4's one-shot status-queue link latch lives in struct nv_gsp_rpc.rx_linked;
+ * see the note beside nv_gsp_rpc_peer_link(). */
+/* The kernel's boot-anchored wall clock (src/kernel/time.c). */
+extern uint64_t hb_clock_realtime_us(void);
+
 /* Two hex digits.  uart_print_hex() is 16 digits wide, which turns an 8-byte
  * digest into a wall of zeros and makes the log hard to compare by eye. */
 static void nv_hex_byte(uint8_t b) {
@@ -550,6 +555,7 @@ int nv_gsp_rpc_setup(struct nv_gsp_rpc *r, uint8_t *rx_stage) {
   r->doorbells = 0;
   r->built = 0;
   r->published = 0;
+  r->rx_linked = 0; /* a new block is a new link */
   r->rx_stage = rx_stage; /* before build: queue_init copies it */
 
   int rc = nv_dma_alloc(NV_RPC_BLOCK_SIZE, &r->block);
@@ -596,6 +602,7 @@ void nv_gsp_rpc_teardown(struct nv_gsp_rpc *r) {
   r->q.swapped = 0;
   r->built = 0;
   r->published = 0;
+  r->rx_linked = 0;
 }
 
 int nv_gsp_rpc_notify(struct nv_gsp_rpc *r, const uint8_t *stage,
@@ -645,6 +652,12 @@ int nv_gsp_rpc_notify(struct nv_gsp_rpc *r, const uint8_t *stage,
  * outlive every call that builds it, so it lives here rather than on a stack. */
 static struct nv_gsp_rpc g_gsp_rpc;
 static uint8_t g_rpc_rx_stage[NV_RPC_SLOT * NV_RPC_ELEM_MAX];
+/* A4: the vendor's msgqRxLink sets rxLinked on the first success and returns
+ * -1 (no second link) afterwards (msgq.c:331-338).  One host-side link per
+ * transport, latched in g_peer_linked_once (declared at the top of the file
+ * so setup/teardown can reset it); the boot path calls peer_link() on a timer
+ * and the latch is what makes the second and later calls no-ops instead of
+ * rewrites of the read pointer. */
 
 const struct nv_gsp_rpc *nv_gsp_rpc_state(void) { return &g_gsp_rpc; }
 
@@ -825,19 +838,31 @@ void nv_gsp_rpc_peer_row(const char *tag, int t_ms) {
 /* One link attempt.  0 = the peer published a usable status header; -EAGAIN =
  * nothing there yet; anything else = written but unusable (the row names the
  * field).  On success the queue's read-pointer offsets are resolved, which is
- * what nv_gsp_rpc_peer_take() needs. */
-int nv_gsp_rpc_peer_link(struct nv_dev *d) {
-  if (!d) return -EINVAL;
-  if (!g_gsp_rpc.built) return -EINVAL;
+ * what nv_gsp_rpc_peer_take() needs.
+ *
+ * A4: this is the host's msgqRxLink.  The vendor sets rxLinked on the first
+ * success and a second call returns -1 without touching anything
+ * (msgq.c:331-338); the same rule is kept here, where the second call returns
+ * 0 as a no-op so a polling caller does not read it as an error.  The latch is
+ * per transport (rx_linked), so a re-built block links again. */
+int nv_gsp_rpc_peer_link_into(struct nv_gsp_rpc *r, struct nv_dev *d) {
+  if (!d || !r) return -EINVAL;
+  if (!r->built) return -EINVAL;
+  if (r->rx_linked) {
+    uart_puts("[NV-RPC] peer link linked=1 one-shot (already linked; no "
+              "second link, readPtr untouched)\n");
+    return 0;
+  }
   enum nv_rpc_link_field bad = NV_RPC_LINK_OK;
-  int rc = nv_rpc_link_apply(&g_gsp_rpc.q, &bad);
+  int rc = nv_rpc_link_apply(&r->q, &bad);
   uart_puts("[NV-RPC] peer link ");
   if (rc == 0) {
+    r->rx_linked = 1;
     uart_puts("linked=1 swapped=");
-    print_int((int)g_gsp_rpc.q.swapped);
+    print_int((int)r->q.swapped);
     uart_puts(" flags=0x");
-    uart_print_hex(g_gsp_rpc.q.peer.flags);
-    uart_puts(" (GSP-RM wrote the status header)\n");
+    uart_print_hex(r->q.peer.flags);
+    uart_puts(" (GSP-RM wrote the status header; readPtr written once)\n");
   } else if (rc == -EAGAIN) {
     uart_puts("linked=0 peer=none (status header still zero: no RM task has "
               "started)\n");
@@ -847,6 +872,10 @@ int nv_gsp_rpc_peer_link(struct nv_dev *d) {
     uart_puts(" (header written but unusable)\n");
   }
   return rc;
+}
+
+int nv_gsp_rpc_peer_link(struct nv_dev *d) {
+  return nv_gsp_rpc_peer_link_into(&g_gsp_rpc, d);
 }
 
 /* Nonzero once GSP-RM has written the status queue's size word. */
@@ -931,6 +960,265 @@ int nv_gsp_rpc_peer_take(const char *tag) {
   print_int((int)next);
   uart_puts(" (our status read index, written where SWAP_RX put it)\n");
   return 1;
+}
+
+/* ============================================================================
+ *  The host steps 580.178.04 takes around this path that this lane did not:
+ *  FALCON_OS (A3), GPU time before the COT (A5), and the two pre-boot RPCs
+ *  (A7).  A4's one-shot link is nv_gsp_rpc_peer_link() above, whose latch is
+ *  the msgqRxLink rule.
+ *
+ *  Every entry point here is unit-tier callable: the only hardware dependency
+ *  is nv_wr32()/nv_rd32() through d->ops, which nv_gsp_glue_test replaces with
+ *  a register model.  The FSP path calls the same functions and prints the
+ *  same rows.
+ * ========================================================================== */
+
+/* ---- A3: FALCON_OS after lockdown release ------------------------------ *
+ * kernel_gsp_gh100.c:955-956 writes pRiscvDesc->appVersion into
+ * NV_PFALCON_FALCON_OS (0x080) once the FMC has released the window, i.e.
+ * after the COT and before the status-queue link.  The descriptor is the
+ * boot image's RM_RISCV_UCODE_DESC; 580.178.04's GB202 PROD descriptor
+ * (g_gsp_gb20x_dyn_prd_desc.bin: 28 compressed bytes -> 84 uncompressed,
+ * bindata label UCODE_DESC_PROD in g_bindata_kgspGetBinArchiveGspRmBoot_GB202.c)
+ * has version 5 at +0x00 and appVersion 0 at +0x1C.  The release ships no
+ * changelist there, so the vendor's own write is 0.  Stated, not hidden: if a
+ * later descriptor carries a number, this constant follows it. */
+#define NV_GSP_FALCON_OS              0x080u
+
+int nv_gsp_write_falcon_os(struct nv_dev *d, uint32_t app_version) {
+  if (!d) return -EINVAL;
+  nv_wr32(d, NV_FALCON_GSP_BASE + NV_GSP_FALCON_OS, app_version);
+  uint32_t rb = nv_rd32(d, NV_FALCON_GSP_BASE + NV_GSP_FALCON_OS);
+  uart_puts("[NV-GSP] falcon_os write=0x");
+  uart_print_hex(app_version);
+  uart_puts(" read=0x");
+  uart_print_hex(rb);
+  uart_puts(" app_version_src=580.178.04+0x1C\n");
+  return rb == app_version ? 0 : -EIO;
+}
+
+/* ---- A5: GPU time before the COT -------------------------------------- *
+ * tmrSetCurrentTime_GH100 (timer/arch/hopper/timer_gh100.c:49) reads the
+ * secure timer hi-lo-hi, subtracts it from the host wall clock, and writes
+ * NV_PGC6_SCI_SYS_TIMER_OFFSET_1 then _0 with UPDATE set -- unless the FSP
+ * ucode is older than 0x44C (bug 3957833), in which case only the value is
+ * recorded.  The rm67 boot's fsp-ucode-ver is exactly 0x44C, so on this part
+ * the vendor does write.  PTIMER itself is a read-only counter (our nv_regs.h
+ * refusal to write PTIMER_TIME is correct); the anchor is this GC6 offset. */
+#define NV_PGC6_SCI_SEC_TIMER_TIME_0    0x00118F54u
+#define NV_PGC6_SCI_SEC_TIMER_TIME_1    0x00118F58u
+#define NV_PGC6_SCI_SYS_TIMER_OFFSET_0  0x00118DF4u
+#define NV_PGC6_SCI_SYS_TIMER_OFFSET_1  0x00118DF8u
+#define NV_PGC6_SYS_TIMER_OFFSET_UPDATE 1u
+#define NV_FSP_UCODE_VERSION_OFF        0x334u
+#define RM_FSP_BUG_3957833_FIX_VERSION  0x44Cu
+
+/* Pure: the vendor's two-subtraction arithmetic, in one place so the test and
+ * the writer cannot disagree.  Returns -ERANGE when there is no wall clock or
+ * the secure timer is ahead of it (a stale/zero RTC), which is the vendor's
+ * NV_ERR_INVALID_STATE; on success *out is the non-negative offset. */
+int nv_gsp_time_offset_ns(uint64_t wall_ns, uint32_t sec_lo, uint32_t sec_hi,
+                          uint64_t *out) {
+  if (!out) return -EINVAL;
+  *out = 0;
+  uint64_t sec_ns = (uint64_t)sec_lo | ((uint64_t)sec_hi << 32);
+  if (wall_ns == 0 || wall_ns <= sec_ns) return -ERANGE;
+  *out = wall_ns - sec_ns;
+  return 0;
+}
+
+int nv_gsp_set_gpu_time_at(struct nv_dev *d, uint64_t wall_ns) {
+  if (!d) return -EINVAL;
+  uint32_t hi2 = nv_rd32(d, NV_PGC6_SCI_SEC_TIMER_TIME_1), hi, lo;
+  do {
+    hi = hi2;
+    lo = nv_rd32(d, NV_PGC6_SCI_SEC_TIMER_TIME_0);
+    hi2 = nv_rd32(d, NV_PGC6_SCI_SEC_TIMER_TIME_1);
+  } while (hi != hi2);
+
+  uint64_t off = 0;
+  int rc = nv_gsp_time_offset_ns(wall_ns, lo, hi, &off);
+  uint32_t ucode = nv_rd32(d, NV_FALCON_GSP_BASE + NV_FSP_UCODE_VERSION_OFF);
+  int wrote = 0;
+  if (rc == 0 && ucode >= RM_FSP_BUG_3957833_FIX_VERSION) {
+    nv_wr32(d, NV_PGC6_SCI_SYS_TIMER_OFFSET_1, (uint32_t)(off >> 32));
+    nv_wr32(d, NV_PGC6_SCI_SYS_TIMER_OFFSET_0,
+            (uint32_t)off | NV_PGC6_SYS_TIMER_OFFSET_UPDATE);
+    wrote = 1;
+  }
+  uart_puts("[NV-GSP] gpu-time sec=0x");
+  uart_print_hex((uint64_t)lo | ((uint64_t)hi << 32));
+  uart_puts(" wall_ns=");
+  uart_print_hex(wall_ns);
+  uart_puts(" offset_ns=");
+  uart_print_hex(off);
+  uart_puts(" fsp_ucode=0x");
+  uart_print_hex(ucode);
+  uart_puts(" wrote=");
+  print_int(wrote);
+  uart_puts("\n");
+  if (wrote) {
+    uart_puts("[NV-GSP] gpu-time sys_timer_offset rb_hi=0x");
+    uart_print_hex(nv_rd32(d, NV_PGC6_SCI_SYS_TIMER_OFFSET_1));
+    uart_puts(" rb_lo=0x");
+    uart_print_hex(nv_rd32(d, NV_PGC6_SCI_SYS_TIMER_OFFSET_0));
+    uart_puts("\n");
+  }
+  return rc;
+}
+
+int nv_gsp_set_gpu_time(struct nv_dev *d) {
+  return nv_gsp_set_gpu_time_at(d, hb_clock_realtime_us() * 1000ULL);
+}
+
+/* ---- A7: the two pre-boot RPCs ---------------------------------------- *
+ * kgspQueueAsyncInitRpcs (kernel_gsp.c:3792-3815) queues
+ * NV_VGPU_MSG_FUNCTION_GSP_SET_SYSTEM_INFO (72) then SET_REGISTRY (73) into
+ * the command queue before the GSP-RM image is started; GSP-RM reads them at
+ * its own start, so they are committed WITHOUT a doorbell (nothing is
+ * listening yet).
+ *
+ * Payload sizes are the vendor's: sizeof(GspSystemInfo) = 888 (measured by
+ * compiling gsp_static_config.h:143-172 with the RM types and the nested ACPI
+ * structs, MAX_DISPLAYS=16), and a PACKED_REGISTRY_TABLE with no entries = 8.
+ * The fields filled are the ones this driver knows (BAR addresses, the PCI
+ * identity, the user-VA limit, the config mirror); ACPI method data, the VF
+ * block and the hypervisor words are zero, which is what a bare-metal,
+ * non-VF, no-ACPI client sends.  The registry table is sent EMPTY and the row
+ * says so: reproducing the vendor's eleven private keys is not something the
+ * sources in this tree support, and an empty table is structurally valid.
+ */
+#define RM_SYSTEM_INFO_BYTES        888u
+#define RM_REGISTRY_TABLE_BYTES     8u
+#define RM_SYSINFO_OFF_MAX_USERVa   56u
+#define RM_SYSINFO_OFF_PCI_CFG_BASE 64u
+#define RM_SYSINFO_OFF_PCI_CFG_SIZE 68u
+#define RM_MAX_USER_VA              0x0000800000000000ULL
+
+static void a7_put32(uint8_t *p, uint32_t v) {
+  p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8);
+  p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24);
+}
+static void a7_put64(uint8_t *p, uint64_t v) {
+  a7_put32(p, (uint32_t)v);
+  a7_put32(p + 4, (uint32_t)(v >> 32));
+}
+
+int nv_gsp_rpc_queue_async_init(struct nv_gsp_rpc *r, struct nv_dev *d) {
+  if (!d || !r) return -EINVAL;
+  if (!r->built) return -EINVAL;
+  struct nv_rpc_hw hw;
+  nv_rpc_hw_dev(d, &hw);
+  static uint8_t stage[0x1000];
+  for (uint32_t i = 0; i < sizeof stage; i++) stage[i] = 0;
+
+  /* 72 GSP_SET_SYSTEM_INFO */
+  int rq = nv_rpc_req_init(stage, NV_RPC_FN_SET_SYSTEM_INFO,
+                           NV_RPC_RPC_HDR + RM_SYSTEM_INFO_BYTES);
+  if (rq != 0) {
+    uart_puts("[NV-RPC] async-init FAIL req_init rc=");
+    print_int(rq);
+    uart_puts("\n");
+    return -EINVAL;
+  }
+  uint8_t *si = stage + NV_RPC_R_PAYLOAD;
+  a7_put64(si + 0, d->bar0_phys);
+  a7_put64(si + 8, d->bar1_phys);
+  a7_put64(si + 16, d->bar3_phys);
+  a7_put64(si + 24, (uint64_t)(((uint32_t)d->bus << 8) |
+                               ((uint32_t)d->slot << 3) | d->func));
+  a7_put64(si + RM_SYSINFO_OFF_MAX_USERVa, RM_MAX_USER_VA);
+  a7_put32(si + RM_SYSINFO_OFF_PCI_CFG_BASE, 0x088000u);
+  a7_put32(si + RM_SYSINFO_OFF_PCI_CFG_SIZE, 0x1000u);
+  int ec = nv_rpc_elem_build(stage, NV_RPC_RPC_HDR + RM_SYSTEM_INFO_BYTES, 0);
+  if (ec < 1) {
+    uart_puts("[NV-RPC] async-init FAIL elem_build rc=");
+    print_int(ec);
+    uart_puts("\n");
+    return -EINVAL;
+  }
+  enum nv_rpc_reason why = NV_RPC_OK;
+  uint32_t ec_out = 0;
+  int prc = nv_rpc_tx_prepare(&r->q, NV_RPC_RPC_HDR + RM_SYSTEM_INFO_BYTES,
+                              &ec_out, &why);
+  if (prc != 0) {
+    uart_puts("[NV-RPC] async-init FAIL prepare rc=");
+    print_int(prc);
+    uart_puts(" why=");
+    uart_puts(nv_rpc_reason_name(why));
+    uart_puts("\n");
+    return -EINVAL;
+  }
+  int crc = nv_rpc_tx_commit(&r->q, stage, &hw);
+  if (crc != 0) {
+    uart_puts("[NV-RPC] async-init FAIL commit rc=");
+    print_int(crc);
+    uart_puts("\n");
+    return -EIO;
+  }
+
+  /* 73 SET_REGISTRY: an 8-byte table, zero entries. */
+  for (uint32_t i = 0; i < sizeof stage; i++) stage[i] = 0;
+  rq = nv_rpc_req_init(stage, NV_RPC_FN_SET_REGISTRY,
+                       NV_RPC_RPC_HDR + RM_REGISTRY_TABLE_BYTES);
+  if (rq != 0) {
+    uart_puts("[NV-RPC] async-init FAIL req_init(73) rc=");
+    print_int(rq);
+    uart_puts("\n");
+    return -EINVAL;
+  }
+  a7_put32(stage + NV_RPC_R_PAYLOAD + 0, RM_REGISTRY_TABLE_BYTES);
+  a7_put32(stage + NV_RPC_R_PAYLOAD + 4, 0);
+  ec = nv_rpc_elem_build(stage, NV_RPC_RPC_HDR + RM_REGISTRY_TABLE_BYTES, 1);
+  if (ec < 1) {
+    uart_puts("[NV-RPC] async-init FAIL elem_build(73) rc=");
+    print_int(ec);
+    uart_puts("\n");
+    return -EINVAL;
+  }
+  prc = nv_rpc_tx_prepare(&r->q, NV_RPC_RPC_HDR + RM_REGISTRY_TABLE_BYTES,
+                          &ec_out, &why);
+  if (prc != 0) {
+    uart_puts("[NV-RPC] async-init FAIL prepare(73) rc=");
+    print_int(prc);
+    uart_puts(" why=");
+    uart_puts(nv_rpc_reason_name(why));
+    uart_puts("\n");
+    return -EINVAL;
+  }
+  crc = nv_rpc_tx_commit(&r->q, stage, &hw);
+  if (crc != 0) {
+    uart_puts("[NV-RPC] async-init FAIL commit(73) rc=");
+    print_int(crc);
+    uart_puts("\n");
+    return -EIO;
+  }
+
+  /* The row is read back out of the RING, not the staging buffer. */
+  const uint8_t *block = (const uint8_t *)phys_to_virt(r->block.phys);
+  const uint8_t *cmd = block + r->q.cmd_off;
+  uint32_t entry_off = glue_ld32(cmd + NV_RPC_Q_ENTRY_OFF);
+  uart_puts("[NV-RPC] async-init queue elements=2 writePtr=");
+  print_int((int)glue_ld32(cmd + NV_RPC_Q_WRITE_PTR));
+  uart_puts(" (queued without a doorbell: RM reads them at its start)\n");
+  for (uint32_t i = 0; i < 2; i++) {
+    const uint8_t *slot = cmd + entry_off + (uint64_t)i * NV_RPC_SLOT;
+    uart_puts("[NV-RPC] async-init[");
+    print_int((int)i);
+    uart_puts("] fn=");
+    print_int((int)glue_ld32(slot + NV_RPC_R_FUNCTION));
+    uart_puts(" len=");
+    print_int((int)glue_ld32(slot + NV_RPC_R_LENGTH));
+    uart_puts(" elem=");
+    print_int((int)glue_ld32(slot + NV_RPC_E_ELEMCOUNT));
+    uart_puts("\n");
+  }
+  return 0;
+}
+
+int nv_gsp_rpc_async_init(struct nv_dev *d) {
+  return nv_gsp_rpc_queue_async_init(&g_gsp_rpc, d);
 }
 
 /* PFB: the write-protected-region block.  MEASURED (docs/nv-gsp-reference.md)

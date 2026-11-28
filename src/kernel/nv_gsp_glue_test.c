@@ -31,6 +31,7 @@
 #include "nv.h" /* struct nv_dev, for the boot-path case */
 #include "nv_dma.h"
 #include "nv_rpc.h"
+#include "nv_regs.h"
 #include "errno.h"
 #include "frame.h"
 #include "kmem.h"
@@ -62,6 +63,11 @@ static uint32_t t_ld32(const uint8_t *p) {
 static void t_zero(void *p, uint32_t n) {
   volatile uint8_t *b = (volatile uint8_t *)p;
   for (uint32_t i = 0; i < n; i++) b[i] = 0;
+}
+
+static void t_put32(uint8_t *p, uint32_t v) {
+  p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8);
+  p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24);
 }
 
 /* ---- the counting seam -------------------------------------------------
@@ -490,6 +496,217 @@ TEST(test_nv_gsp_rpc_publish_refuses_without_a_bus_address) {
   EXPECT_EQ(frame_free_count(), before);
 }
 
+/* ============================================================================
+ *  Tier A: the four host steps 580.178.04 takes (A3/A4/A5/A7)
+ *
+ *  These run against a register model, not a card: the driver's only hardware
+ *  dependency on this path is nv_rd32()/nv_wr32() through d->ops, so a map of
+ *  (offset, value) is the whole device.  The rows each case prints are the same
+ *  rows the FSP path prints on a boot.
+ * ========================================================================== */
+
+struct t_reg {
+  uint32_t off[16];   /* the memory: distinct offsets */
+  uint32_t val[16];
+  int n;
+  uint32_t w_off[16]; /* the write log, in order (a write to an existing   */
+  uint32_t w_val[16]; /* offset must still be recorded: that is the row)    */
+  int writes;
+  int read_only; /* wr32 counts but does not store: a read-back mismatch */
+};
+
+static int t_reg_find(struct t_reg *m, uint32_t off) {
+  for (int i = 0; i < m->n; i++)
+    if (m->off[i] == off) return i;
+  return -1;
+}
+
+static void t_reg_set(struct t_reg *m, uint32_t off, uint32_t val) {
+  int i = t_reg_find(m, off);
+  if (i < 0) { i = m->n++; m->off[i] = off; }
+  m->val[i] = val;
+}
+
+static uint32_t t_reg_rd32(void *ctx, uint32_t off) {
+  struct t_reg *m = (struct t_reg *)ctx;
+  int i = t_reg_find(m, off);
+  return i < 0 ? 0 : m->val[i];
+}
+
+static void t_reg_wr32(void *ctx, uint32_t off, uint32_t val) {
+  struct t_reg *m = (struct t_reg *)ctx;
+  if (m->writes < 16) { m->w_off[m->writes] = off; m->w_val[m->writes] = val; }
+  m->writes++;
+  if (!m->read_only) t_reg_set(m, off, val);
+}
+
+static void t_reg_dev(struct nv_dev *d, struct t_reg *m) {
+  t_zero(d, (uint32_t)sizeof *d);
+  t_zero(m, (uint32_t)sizeof *m);
+  d->ops.rd32 = t_reg_rd32;
+  d->ops.wr32 = t_reg_wr32;
+  d->ops_ctx = m;
+}
+
+/* A3: one write to FALCON_OS (0x110080) and a read-back of the same word. */
+TEST(test_nv_gsp_falcon_os_write_read_back) {
+  uart_puts("  Running test_nv_gsp_falcon_os_write_read_back...\n");
+  tests_run++;
+
+  struct t_reg m;
+  struct nv_dev d;
+  t_reg_dev(&d, &m);
+
+  /* The vendor's own value for the 580.178.04 GB202 image is 0. */
+  EXPECT_EQ(nv_gsp_write_falcon_os(&d, NV_GSP_GB202_BOOT_APP_VERSION), 0);
+  EXPECT_EQ((int)t_reg_rd32(&m, NV_FALCON_GSP_BASE + 0x080u), 0);
+  EXPECT_EQ(m.writes, 1);
+  EXPECT_EQ((int)m.w_off[0], (int)(NV_FALCON_GSP_BASE + 0x080u));
+
+  /* A second value is written and read back: the row is not hard-coded. */
+  EXPECT_EQ(nv_gsp_write_falcon_os(&d, 0x1234u), 0);
+  EXPECT_EQ((int)t_reg_rd32(&m, NV_FALCON_GSP_BASE + 0x080u), 0x1234);
+
+  /* A write that does not land is -EIO, not a silent success. */
+  m.read_only = 1;
+  EXPECT_EQ(nv_gsp_write_falcon_os(&d, 0x55u), -EIO);
+  EXPECT_EQ(nv_gsp_write_falcon_os(0, 0), -EINVAL);
+}
+
+/* A5: the pure conversion, then the FSP-version gate on the two writes. */
+TEST(test_nv_gsp_time_offset_conversion) {
+  uart_puts("  Running test_nv_gsp_time_offset_conversion...\n");
+  tests_run++;
+
+  uint64_t out = 1;
+  /* offset = wall - (hi<<32 | lo), exactly the vendor's subtraction. */
+  EXPECT_EQ(nv_gsp_time_offset_ns(10000, 4000, 0, &out), 0);
+  EXPECT_EQ((int)out, 6000);
+  EXPECT_EQ(nv_gsp_time_offset_ns((1ULL << 32) + 10, 5, 1, &out), 0);
+  EXPECT_EQ((int)out, 5);
+  /* No wall clock / a secure timer ahead of it is the vendor's INVALID_STATE. */
+  EXPECT_EQ(nv_gsp_time_offset_ns(0, 1, 0, &out), -ERANGE);
+  EXPECT_EQ(nv_gsp_time_offset_ns(100, 200, 0, &out), -ERANGE);
+  EXPECT_EQ(nv_gsp_time_offset_ns(100, 0, 0, 0), -EINVAL);
+}
+
+TEST(test_nv_gsp_time_write_gated_on_fsp_version) {
+  uart_puts("  Running test_nv_gsp_time_write_gated_on_fsp_version...\n");
+  tests_run++;
+
+  struct t_reg m;
+  struct nv_dev d;
+  t_reg_dev(&d, &m);
+  t_reg_set(&m, 0x118F54u, 0); /* secure timer low  */
+  t_reg_set(&m, 0x118F58u, 0); /* secure timer high */
+  t_reg_set(&m, NV_FALCON_GSP_BASE + 0x334u, 0x44Cu); /* fsp ucode == fix */
+
+  /* wall 10 s, secure timer 0 -> offset 10 s, written hi then lo|UPDATE. */
+  EXPECT_EQ(nv_gsp_set_gpu_time_at(&d, 10000000000ULL), 0);
+  EXPECT_EQ(m.writes, 2);
+  EXPECT_EQ((int)m.w_off[0], 0x118DF8);
+  EXPECT_EQ((int)m.w_val[0], 2); /* 10e9 >> 32 */
+  EXPECT_EQ((int)m.w_off[1], 0x118DF4);
+  EXPECT_EQ((int)m.w_val[1], (int)(0x540BE400u | 1u));
+
+  /* FSP older than 0x44C: the vendor records the value and does NOT write. */
+  t_reg_dev(&d, &m);
+  t_reg_set(&m, 0x118F54u, 0);
+  t_reg_set(&m, 0x118F58u, 0);
+  t_reg_set(&m, NV_FALCON_GSP_BASE + 0x334u, 0x44Bu);
+  EXPECT_EQ(nv_gsp_set_gpu_time_at(&d, 10000000000ULL), 0);
+  EXPECT_EQ(m.writes, 0);
+}
+
+/* A7: two RPCs, function ids 72 then 73, lengths 32+888 and 32+8, in the ring,
+ * with writePtr advanced by the two elements and NO doorbell. */
+TEST(test_nv_gsp_async_init_queues_two_rpcs) {
+  uart_puts("  Running test_nv_gsp_async_init_queues_two_rpcs...\n");
+  tests_run++;
+
+  struct t_reg m;
+  struct nv_dev d;
+  t_reg_dev(&d, &m);
+  d.bar0_phys = 0x00000000A0000000ULL;
+  d.bar1_phys = 0x00000000B0000000ULL;
+  d.bar3_phys = 0x00000000C0000000ULL;
+  d.bus = 0x41; d.slot = 2; d.func = 0;
+
+  struct nv_gsp_rpc r;
+  t_zero(&r, (uint32_t)sizeof r);
+  ASSERT(nv_gsp_rpc_setup(&r, g_rx) == 0);
+
+  EXPECT_EQ(nv_gsp_rpc_queue_async_init(&r, &d), 0);
+
+  const uint8_t *block = (const uint8_t *)phys_to_virt(r.block.phys);
+  const uint8_t *cmd = block + NV_RPC_CMD_OFF;
+  EXPECT_EQ((int)t_ld32(cmd + NV_RPC_Q_WRITE_PTR), 2);
+  const uint8_t *slot = cmd + NV_RPC_SLOT;
+
+  EXPECT_EQ((int)t_ld32(slot + NV_RPC_R_FUNCTION), NV_RPC_FN_SET_SYSTEM_INFO);
+  EXPECT_EQ((int)t_ld32(slot + NV_RPC_R_LENGTH), 32 + 888);
+  EXPECT_EQ((int)t_ld32(slot + NV_RPC_E_ELEMCOUNT), 1);
+  EXPECT_EQ((int)t_ld32(slot + NV_RPC_R_PAYLOAD + 0), 0xA0000000u);
+  EXPECT_EQ((int)t_ld32(slot + NV_RPC_R_PAYLOAD + 4), 0x00000000u);
+  EXPECT_EQ((int)t_ld32(slot + NV_RPC_R_PAYLOAD + 8), 0xB0000000u);
+  EXPECT_EQ((int)t_ld32(slot + NV_RPC_R_PAYLOAD + 24), 0x4110u); /* bus<<8 | slot<<3 | func */
+  EXPECT_EQ((int)t_ld32(slot + NV_RPC_R_PAYLOAD + 68), 0x1000u); /* pciConfigMirrorSize */
+
+  slot += NV_RPC_SLOT;
+  EXPECT_EQ((int)t_ld32(slot + NV_RPC_R_FUNCTION), NV_RPC_FN_SET_REGISTRY);
+  EXPECT_EQ((int)t_ld32(slot + NV_RPC_R_LENGTH), 32 + 8);
+  EXPECT_EQ((int)t_ld32(slot + NV_RPC_R_PAYLOAD + 0), 8); /* table size */
+  EXPECT_EQ((int)t_ld32(slot + NV_RPC_R_PAYLOAD + 4), 0); /* numEntries */
+
+  /* Nothing was rung: RM is not listening yet. */
+  EXPECT_EQ((int)r.doorbells, 0);
+  EXPECT_EQ((int)r.sends, 0);
+
+  nv_gsp_rpc_teardown(&r);
+}
+
+/* A4: the link happens once; a second call must not rewrite the read pointer. */
+TEST(test_nv_gsp_peer_link_is_one_shot) {
+  uart_puts("  Running test_nv_gsp_peer_link_is_one_shot...\n");
+  tests_run++;
+
+  struct t_reg m;
+  struct nv_dev d;
+  t_reg_dev(&d, &m);
+  struct nv_gsp_rpc r;
+  t_zero(&r, (uint32_t)sizeof r);
+  ASSERT(nv_gsp_rpc_setup(&r, g_rx) == 0);
+
+  /* Zero header first: not linked, and the row says so. */
+  EXPECT_EQ(nv_gsp_rpc_peer_link_into(&r, &d), -EAGAIN);
+  EXPECT_EQ(r.rx_linked, 0);
+
+  /* GSP-RM's own status header (msgqTxCreate's shape). */
+  uint8_t *block = (uint8_t *)phys_to_virt(r.block.phys);
+  uint8_t *st = block + NV_RPC_STAT_OFF;
+  t_put32(st + NV_RPC_Q_VERSION, 0);
+  t_put32(st + NV_RPC_Q_SIZE, NV_RPC_QUEUE_BYTES);
+  t_put32(st + NV_RPC_Q_MSG_SIZE, NV_RPC_SLOT);
+  t_put32(st + NV_RPC_Q_MSG_COUNT, NV_RPC_MSG_COUNT);
+  t_put32(st + NV_RPC_Q_WRITE_PTR, 0);
+  t_put32(st + NV_RPC_Q_FLAGS, NV_RPC_FLAGS_SWAP_RX);
+  t_put32(st + NV_RPC_Q_RX_HDR_OFF, 0x30u);
+  t_put32(st + NV_RPC_Q_ENTRY_OFF, NV_RPC_SLOT);
+
+  EXPECT_EQ(nv_gsp_rpc_peer_link_into(&r, &d), 0);
+  EXPECT_EQ(r.rx_linked, 1);
+  /* SWAP_RX: our read index lives in the status header. */
+  EXPECT_EQ((int)t_ld32(block + r.q.own_readptr_off), 0);
+
+  /* Stomp it; the one-shot call must leave the stomp alone. */
+  t_put32(block + r.q.own_readptr_off, 0xDEADu);
+  EXPECT_EQ(nv_gsp_rpc_peer_link_into(&r, &d), 0);
+  EXPECT_EQ((int)t_ld32(block + r.q.own_readptr_off), 0xDEAD);
+
+  nv_gsp_rpc_teardown(&r);
+  EXPECT_EQ(r.rx_linked, 0);
+}
+
 void nv_gsp_glue_test_suite(void) {
   test_nv_gsp_rpc_setup_allocates_the_whole_block();
   test_nv_gsp_rpc_pte0_is_the_bus_address_nv_dma_issued();
@@ -499,6 +716,11 @@ void nv_gsp_glue_test_suite(void) {
   test_nv_gsp_rpc_notify_needs_a_built_queue_and_a_message();
   test_nv_gsp_rpc_stage8_publishes_and_holds_the_doorbell();
   test_nv_gsp_rpc_publish_refuses_without_a_bus_address();
+  test_nv_gsp_falcon_os_write_read_back();
+  test_nv_gsp_time_offset_conversion();
+  test_nv_gsp_time_write_gated_on_fsp_version();
+  test_nv_gsp_async_init_queues_two_rpcs();
+  test_nv_gsp_peer_link_is_one_shot();
 }
 
 #endif /* __x86_64__ */

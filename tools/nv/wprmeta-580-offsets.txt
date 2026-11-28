@@ -1,0 +1,12 @@
+sizeof(GspFwWprMeta) = 256
+off magic                    0x000
+off revision                 0x008
+off nonWprHeapOffset         0x060
+off nonWprHeapSize           0x068
+off gspFwHeapSize            0x080
+off frtsSize                 0x0a0
+off vgaWorkspaceSize         0x0c0
+off gspFwHeapVfPartitionCount 0x0f0
+off flags                    0x0f1
+off pmuReservedSize          0x0f4
+off verified                 0x0f8

@@ -60,6 +60,7 @@ struct nv_gsp_rpc {
   uint32_t doorbells;      /* notifications rung (must equal sends)        */
   int built;
   int published;           /* the two mailbox words were written           */
+  int rx_linked;           /* A4: the one host-side status-queue link      */
 };
 
 /* Allocate the block through nv_dma, build it, and point the queue at it.
@@ -126,8 +127,24 @@ int nv_gsp_rpc_publish_bus(struct nv_dev *d, uint64_t *bus_out,
  * "has GSP-RM written the size word yet". */
 void nv_gsp_rpc_peer_row(const char *tag, int t_ms);
 int nv_gsp_rpc_peer_link(struct nv_dev *d);
+int nv_gsp_rpc_peer_link_into(struct nv_gsp_rpc *r, struct nv_dev *d);
 int nv_gsp_rpc_peer_take(const char *tag);
 int nv_gsp_rpc_peer_written(void);
+
+/* ---- the four host steps 580.178.04 takes around the FSP path ----------
+ * A3 FALCON_OS, A4 the one-shot link (inside peer_link above), A5 GPU time
+ * before the COT, A7 the two pre-boot RPCs.  Each is unit-tier callable with
+ * a fake d->ops; the FSP path calls the same functions. */
+/* 580.178.04's GB202 boot descriptor carries appVersion 0 at +0x1C (see the
+ * note in nv_gsp.c); this is the value the vendor's FALCON_OS write uses. */
+#define NV_GSP_GB202_BOOT_APP_VERSION 0u
+int nv_gsp_write_falcon_os(struct nv_dev *d, uint32_t app_version);
+int nv_gsp_time_offset_ns(uint64_t wall_ns, uint32_t sec_lo, uint32_t sec_hi,
+                          uint64_t *out);
+int nv_gsp_set_gpu_time(struct nv_dev *d);
+int nv_gsp_set_gpu_time_at(struct nv_dev *d, uint64_t wall_ns);
+int nv_gsp_rpc_queue_async_init(struct nv_gsp_rpc *r, struct nv_dev *d);
+int nv_gsp_rpc_async_init(struct nv_dev *d);
 
 /* Commit one staged element (nv_rpc_req_init + nv_rpc_elem_build format,
  * length at NV_RPC_R_LENGTH) and notify the peer.  Exactly one

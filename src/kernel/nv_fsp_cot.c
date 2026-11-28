@@ -1805,6 +1805,7 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
   struct cot_fmc sec;
   int mode = 1, frts_ok = 0, boost_err = -1, cot_err = -1;
   int lock_released = 0, linked = 0, initdone = 0, statq_written = 0;
+  int falcon_os_written = 0;
   int mailbox_writable = 0, radix3_ok = 0;
   uint64_t t_send = 0, blk_bus = 0;
   uint32_t blk_ptes = 0;
@@ -1998,6 +1999,15 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
         "verdict=no-block\n");
       goto out;
     }
+    /* A7: the vendor queues GSP_SET_SYSTEM_INFO then SET_REGISTRY into the
+     * command queue before the RM image starts (kgspQueueAsyncInitRpcs,
+     * kernel_gsp.c:3792-3815, called at :4179).  Committed here -- after the
+     * block is published, before the COT -- and NOT notified: nothing is
+     * listening yet, and RM reads the queue at its own start. */
+    int qrc = nv_gsp_rpc_async_init(d);
+    p("async-init rc=");
+    print_int(qrc);
+    p(" (fn 72 then 73; no doorbell)\n");
   }
 
   /* ---- 5. WPR meta: the block the FMC's ACR reads ----------------------- */
@@ -2414,13 +2424,16 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
   nv_wr32(d, NV_PBUS_PRI_GSP_FMC_ERROR, 0);
   rm_fmc_error_row(d, "pre(zeroed)");
 
-  /* ---- 9. clock boost, mailbox, COT ------------------------------------ *
-   * A9: the GSP MAILBOX0/1 write that used to sit here is GONE -- on the FSP
-   * path the boot-args address travels in the COT (gspBootArgsSysmemOffset)
-   * and 580.178.04 never writes those words before the COT.  The read-back
-   * stays so the log still records what the pair holds: post-reset it is 0,
-   * and "landed" is then a fact about the hardware, not about a write this
-   * host made. */
+  /* ---- 9. GPU time, clock boost, mailbox, COT -------------------------- *
+   * A5 first: the vendor anchors the GPU clock to the wall clock after GFW
+   * boot and before it starts GSP-RM (kernel_gsp.c:4145).  Then the boost
+   * query and the COT.  A9: the GSP MAILBOX0/1 write that used to sit here is
+   * GONE -- on the FSP path the boot-args address travels in the COT
+   * (gspBootArgsSysmemOffset) and 580.178.04 never writes those words before
+   * the COT.  The read-back stays so the log still records what the pair
+   * holds: post-reset it is 0, and "landed" is then a fact about the hardware,
+   * not about a write this host made. */
+  nv_gsp_set_gpu_time(d);
   {
     uint8_t one[4] = {1, 0, 0, 0};
     boost_err = cot_roundtrip(d, base, "boost", COT_NVDM_CLOCK_BOOST, one, 4);
@@ -2732,6 +2745,14 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
       m0_last = nv_rd32(d, NV_GSP_BASE + NV_GSP_MAILBOX0);
       m1_last = nv_rd32(d, NV_GSP_BASE + NV_GSP_MAILBOX1);
       if (!cot_gsp_locked(hwcfg2_last) && hwcfg2_last != 0) lock_released = 1;
+      /* A3: the vendor writes FALCON_OS once the lockdown is released and
+       * MAILBOX0 is still 0 (kernel_gsp_gh100.c:946-956), before it links the
+       * status queue.  One write, latched: the value is the boot image
+       * descriptor's appVersion -- 0 for 580.178.04's GB202 descriptor. */
+      if (lock_released && !falcon_os_written && m0_last == 0) {
+        nv_gsp_write_falcon_os(d, NV_GSP_GB202_BOOT_APP_VERSION);
+        falcon_os_written = 1;
+      }
       if (nv_gsp_rpc_peer_written()) statq_written = 1;
       if (!linked && nv_gsp_rpc_peer_link(d) == 0) linked = 1;
       if (linked) {
