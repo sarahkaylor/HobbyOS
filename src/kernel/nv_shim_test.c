@@ -34,6 +34,7 @@
 #include "fs.h"
 #include "nv_rm.h"
 #include "nv_shim.h"
+#include "nv_nvif_uapi.h" /* NVSHIM_NVIF_CLASS_*: the ids SCLASS reports */
 #include "process.h"
 #include "vm.h"
 
@@ -55,6 +56,8 @@ static void test_nvshim_layout(void) {
   EXPECT_EQ((int)sizeof(struct nvshim_vm_bind), 40);
   EXPECT_EQ((int)sizeof(struct nvshim_channel), 32);
   EXPECT_EQ((int)sizeof(struct nvshim_channel_free), 8);
+  EXPECT_EQ((int)sizeof(struct nvshim_engine_class), 16);
+  EXPECT_EQ((int)sizeof(struct nvshim_engine_class_free), 8);
   EXPECT_EQ((int)sizeof(struct nvshim_submit), 32);
   EXPECT_EQ((int)sizeof(struct nvshim_fence_wait), 16);
 
@@ -69,11 +72,22 @@ static void test_nvshim_layout(void) {
   EXPECT_EQ((int)(NVSHIM_IOC_VM_BIND >> 30), 1);  /* write only */
   EXPECT_EQ((int)(NVSHIM_IOC_GROBJ & 0xFF), 12);
   EXPECT_EQ((int)(NVSHIM_IOC_SETPARAM & 0xFF), 17);
+  /* 18/19 are the mock-RM object spine's rows (engine class alloc/free); the
+   * numbering skips 12..17 because those stay the named refusals above. */
+  EXPECT_EQ((int)(NVSHIM_IOC_ENGINE_CLASS_ALLOC & 0xFF), 18);
+  EXPECT_EQ((int)(NVSHIM_IOC_ENGINE_CLASS_FREE & 0xFF), 19);
+  EXPECT_EQ((int)((NVSHIM_IOC_ENGINE_CLASS_ALLOC >> 16) & 0x3FFF),
+            (int)sizeof(struct nvshim_engine_class));
+  EXPECT_EQ((int)(NVSHIM_IOC_ENGINE_CLASS_FREE >> 30), 1); /* write only */
 
   /* Route table: implemented rows carry their size, refusals carry 0, and
    * anything else is not a request (-1). */
   EXPECT_EQ(nv_shim_req_size(NVSHIM_IOC_SUBMIT), (int)sizeof(struct nvshim_submit));
   EXPECT_EQ(nv_shim_req_size(NVSHIM_IOC_VM_BIND), (int)sizeof(struct nvshim_vm_bind));
+  EXPECT_EQ(nv_shim_req_size(NVSHIM_IOC_ENGINE_CLASS_ALLOC),
+            (int)sizeof(struct nvshim_engine_class));
+  EXPECT_EQ(nv_shim_req_size(NVSHIM_IOC_ENGINE_CLASS_FREE),
+            (int)sizeof(struct nvshim_engine_class_free));
   EXPECT_EQ(nv_shim_req_size(NVSHIM_IOC_NVIF), 0);
   EXPECT_EQ(nv_shim_req_size(NVSHIM_IOC_SETPARAM), 0);
   EXPECT_EQ(nv_shim_req_size(NVSHIM_IOC(NVSHIM_IOC_READ, NVSHIM_IOC_MAGIC, 18, 8)), -1);
@@ -116,6 +130,8 @@ static void test_nvshim_refusals(void) {
    * three different mistakes, which is the point. */
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_IOC_SUBMIT, 0), -EINVAL);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_IOC_DEVICE_ALLOC, 0), -EINVAL);
+  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_IOC_ENGINE_CLASS_ALLOC, 0), -EINVAL);
+  EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_IOC_ENGINE_CLASS_FREE, 0), -EINVAL);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_IOC(NVSHIM_IOC_READ, NVSHIM_IOC_MAGIC, 99, 8), 0), -ENOTTY);
   EXPECT_EQ(nv_shim_ioctl(0, -1, NVSHIM_IOWR('g', 8, struct nvshim_submit), 0), -ENOTTY);
 
@@ -300,6 +316,44 @@ static void test_nvshim_probe(void) {
   EXPECT_EQ(ch.pushbuf, push_bus);
   EXPECT_EQ((int)ch.pushbuf_size, 65536);
   EXPECT_EQ((int)ch.engine, NVSHIM_ENGINE_GR);
+
+  /* --- engine class objects (the mock-RM object spine) -------------------
+   * The class a stock nvk asks for first is the copy class 0xc7b5
+   * (nouveau_context.c's find_class(..., 0xb5)); here it is allocated on the
+   * channel through the mock RM, and the handle is the RM's, not the client's.
+   * A second class gets its own handle, a class SCLASS never reported is
+   * -EINVAL at the lookup, and a channel this client does not own is refused. */
+  struct nvshim_engine_class egc;
+  egc.dev_id = d.dev_id;
+  egc.ch_id = ch.ch_id;
+  egc.oclass = NVSHIM_NVIF_CLASS_AMPERE_DMA_COPY_B;
+  egc.handle = 0xFFFFFFFFu;
+  EXPECT_EQ(probe_ioc(&pr, NVSHIM_IOC_ENGINE_CLASS_ALLOC, &egc, (int)sizeof egc), 0);
+  EXPECT_EQ((egc.handle != 0 && egc.handle != 0xFFFFFFFFu), 1);
+  uint32_t ec_copy = egc.handle;
+
+  egc.oclass = NVSHIM_NVIF_CLASS_AMPERE_B;
+  egc.handle = 0;
+  EXPECT_EQ(probe_ioc(&pr, NVSHIM_IOC_ENGINE_CLASS_ALLOC, &egc, (int)sizeof egc), 0);
+  EXPECT_EQ(egc.handle != ec_copy, 1);
+  uint32_t ec_3d = egc.handle;
+
+  egc.oclass = 0x00001234;
+  egc.handle = 0;
+  EXPECT_EQ(probe_ioc(&pr, NVSHIM_IOC_ENGINE_CLASS_ALLOC, &egc, (int)sizeof egc), -EINVAL);
+
+  egc.oclass = NVSHIM_NVIF_CLASS_AMPERE_DMA_COPY_B;
+  egc.ch_id = ch.ch_id + 99;
+  EXPECT_EQ(probe_ioc(&pr, NVSHIM_IOC_ENGINE_CLASS_ALLOC, &egc, (int)sizeof egc), -EINVAL);
+  egc.ch_id = ch.ch_id;
+
+  struct nvshim_engine_class_free ecf;
+  ecf.handle = ec_3d;
+  ecf.pad = 0;
+  EXPECT_EQ(probe_ioc(&pr, NVSHIM_IOC_ENGINE_CLASS_FREE, &ecf, (int)sizeof ecf), 0);
+  EXPECT_EQ(probe_ioc(&pr, NVSHIM_IOC_ENGINE_CLASS_FREE, &ecf, (int)sizeof ecf), -EINVAL);
+  /* ec_copy is deliberately left to die with its channel below: the RM
+   * parents it on the channel, so CHANNEL_FREE must destroy it too. */
 
   /* --- submit + fence, in both directions --- */
   unsigned char cs[64];
