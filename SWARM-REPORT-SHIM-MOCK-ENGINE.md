@@ -278,8 +278,10 @@ qemu_count=0 rc=1        # pgrep -c qemu-system-x86
 ```
 
 `pgrep -c` prints `0` and exits 1 when nothing matches, which is exactly the
-measured state: no QEMU process exists. The guests' files were not touched by
-this run — their mtimes are still the previous card's boot:
+measured state: no QEMU process exists. A second read-only check after the
+merged-tip reruns, at 06:29:37Z, returned the same three answers and the same
+mtimes below. The guests' files were not touched by this run — their mtimes
+are still the previous card's boot:
 
 ```
 /root/hobbyos5090/disk.img    2026-11-27 23:39:01.541392178 -0600
