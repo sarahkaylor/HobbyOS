@@ -640,6 +640,7 @@ the board's attachments directory):
 | the only register-measured topology (AD102) | `t_78a50be7/tpcba.log`, `…/tpcba.record`, `…/nv-topology-measured.md` |
 | GB202 part identity + closing state | read-only `qm` / `lspci` / `stat` at 2026-11-28T06:54:55Z, quoted in the header and §8 |
 | the parked wall's GB202 rows (Part II) | `t_a769beaa/5090-gb202fsp-rm{50…65}.log`, `…/KEY-ROWS-gb202-rm-objects.txt` |
+| this card's own excerpt file | `gb202-rm-objects-excerpts.txt.gz`, attached to `t_c5453775`: the cited raw log lines with their line numbers, plus the checker's result |
 
 ---
 
