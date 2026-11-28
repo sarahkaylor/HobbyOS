@@ -182,7 +182,7 @@ the same boot, still refused by name:
 
 There is **no GSP-RM message id** on this path, and saying otherwise would be
 the fabricated reply the card forbids: `NV_VGPU_MSG_*` appears in this tree only
-in comments (`src/include/nv_rm.h:70`, `src/kernel/nv_gsp.c:1114`) and nothing
+in comments (`src/include/nv_rm.h:70`, `src/kernel/nv_gsp.c:1148`) and nothing
 sends one (SOURCE). The mock has no message protocol — no queue, no packet, no
 console.
 
@@ -246,6 +246,24 @@ directory. The stage runs in both, so the object is not an x86-only path
 (`nv_shim.c` and `nv_rm_mock.c` have no `__x86_64__` guard). The ARM tier also
 links with the kernel relocation audit, so the runtime-built RM table
 (`nv_rm_mock.c`'s `mock_if_fill`) still carries its slide with two more entries.
+
+### 6.1 The merged tip (both lanes)
+
+The code was merged onto `origin/nv/integ-swarm`, which had moved to the
+census-gate lane's `6cd6239f`: merge commit `1c0c3c0f` (parents `930a8a5d` +
+`6cd6239f`; `930a8a5d` is the engine-class merge, parents `63a44fab` +
+`f63b5776`). Both tiers were re-run on that merged tree:
+
+* intel: **`Tests run: 623` / `Tests failed: 0` / `UNIT TESTS PASSED`**
+  (`unit-tier-intel-merged.log:3226-3228`, MEASURED), engine-class rows at
+  `:2366-2372`, the NVIF wall still refused at `:2978`.
+* ARM: **`Tests run: 486` / `Tests failed: 0` / `UNIT TESTS PASSED`**
+  (`unit-tier-arm-merged.log:2470-2472`, MEASURED), engine-class rows at
+  `:1639-1645`, the NVIF wall still refused at `:2251`.
+
+The two extra intel tests are the census lane's; this card adds assertions to
+existing tests, not new test functions. The merged tip differs from `1c0c3c0f`
+by this report only.
 
 ---
 
