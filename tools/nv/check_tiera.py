@@ -21,6 +21,10 @@ GSP = open(os.path.join(TREE, "src/kernel/nv_gsp.c")).read()
 COT = open(os.path.join(TREE, "src/kernel/nv_fsp_cot.c")).read()
 TEST = open(os.path.join(TREE, "src/kernel/nv_gsp_glue_test.c")).read()
 GLUE = open(os.path.join(TREE, "src/include/nv_gsp_glue.h")).read()
+FMC_H = open(os.path.join(TREE, "src/include/nv_fmc_args.h")).read()
+FMC_C = open(os.path.join(TREE, "src/kernel/nv_fmc_args.c")).read()
+LOG_H = open(os.path.join(TREE, "src/include/nv_libos_log.h")).read()
+LOG_C = open(os.path.join(TREE, "src/kernel/nv_libos_log.c")).read()
 
 fails = []
 n = [0]
@@ -112,12 +116,76 @@ check('pkv(" gb202_rb_lo", nv_rd32(d, NV_PBUS_ZB_FRTS_ADDR_LO32));' in COT and
 check('pki(" wrote_zb", 0);' in COT,
       "A10 the row says the alias was not written")
 
+# ---- A6: the vendor's DMA-target pair (+8 / +40) ---------------------------
+# kernel_gsp_gh100.c:390-405 maps SYSMEM+CACHED -> 1 and SYSMEM+UNCACHED -> 2;
+# kernel_gsp_tu102.c:121/:148 allocate the WPR meta page CACHED and the libos
+# args page UNCACHED, so the vendor's pair is 1/2 (kernel_gsp_gh100.c:453-461).
+check("#define NV_FMC_ARGS_OFF_DESC_TARGET    8u" in FMC_H and
+      "#define NV_FMC_ARGS_OFF_ARGS_TARGET    40u" in FMC_H,
+      "A6 the two words are the vendor's +8 (descriptor) and +40 (args page)")
+check("case NV_FMC_CACHE_CACHED:\n      return NV_FMC_TARGET_COHERENT_SYSTEM;" in FMC_C and
+      "case NV_FMC_CACHE_UNCACHED:\n      return NV_FMC_TARGET_NONCOHERENT_SYSTEM;" in FMC_C,
+      "A6 the target is derived from the cache attribute, not hard-coded")
+check("put32(page + NV_FMC_ARGS_OFF_DESC_TARGET, desc);" in FMC_C and
+      "put32(page + NV_FMC_ARGS_OFF_ARGS_TARGET, args);" in FMC_C,
+      "A6 the encoder stores the pair at +8 and +40")
+check("nv_fmc_args_targets_check(a, NV_FMCP_BYTES)" in COT,
+      "A6 the boot path reads the pair back off the page and gates on it")
+check("st32(a, NV_FMCP_OFF_BOOTTGT, nv_fmc_args_dma_target(NV_FMC_CACHE_CACHED));" in COT and
+      "nv_fmc_args_dma_target(NV_FMC_CACHE_UNCACHED));" in COT and
+      "GSP_DMA_TARGET_COHERENT_SYSTEM);\n    st32(a, NV_FMCP_OFF_RMTGT" not in COT,
+      "A6 the default args page is NONCOHERENT and the descriptor page COHERENT")
+check("p(\"a6 targets desc=\");" in COT,
+      "A6 the boot prints the pair it sent")
+
+# ---- A8: real LIBOS log regions with a valid nvlog header ------------------
+# The header is LIBOS_LOG_NVLOG_BUFFER_V2 (liblogdecode.h:123-135), version 2
+# (:137-141), 72 bytes, put pointer at offsetof(data) (:2086).
+check("#define NV_LIBOS_NVLOG_VERSION        2u" in LOG_H and
+      "#define NV_LIBOS_NVLOG_HEADER_BYTES   0x48u" in LOG_H and
+      "#define NV_LIBOS_NVLOG_PUT_OFF        0x48u" in LOG_H,
+      "A8 the container is V2: version 2, 72-byte header, put pointer at 0x48")
+check("uint32_t gpu_arch;" in LOG_H and "uint32_t gpu_impl;" in LOG_H and
+      "uint32_t build_id_length;" in LOG_H and
+      "char task_prefix[NV_LIBOS_NVLOG_TASK_PREFIX];" in LOG_H and
+      "uint64_t timer_delta;" in LOG_H and
+      "uint8_t build_id[NV_LIBOS_NVLOG_BUILD_ID_MAX];" in LOG_H and
+      "uint32_t flags;" in LOG_H and "uint32_t reserved;" in LOG_H,
+      "A8 the struct carries every V2 field in the vendor's order")
+check("_Static_assert(sizeof(struct nv_libos_nvlog_header) == NV_LIBOS_NVLOG_HEADER_BYTES" in LOG_C,
+      "A8 the compiled header is asserted to be the vendor's 72 bytes")
+check("if (version != NV_LIBOS_NVLOG_VERSION) return -EINVAL;" in LOG_C and
+      "if (get32(p + 0x44) != 0) return -EINVAL;" in LOG_C,
+      "A8 a zeroed or foreign region is refused (version 0 != 2, reserved != 0)")
+ids = ['{"LOGINIT", "INIT", 0x10000u, 1u}',
+       '{"LOGINTR", "INTR", 0x10000u, 1u}',
+       '{"LOGRM",   "RM",   0x10000u, 1u}',
+       '{"LOGMNOC", "MNOC", 0x10000u, 1u}',
+       '{"LOGDBG",  "DBG",  0x10000u, 0u}',
+       '{"LOGROOT", "ROOT", 0x1000u,  1u}']
+pos = [LOG_C.find(i) for i in ids]
+check(all(p >= 0 for p in pos) and pos == sorted(pos),
+      "A8 the six vendor tasks are present in logInitValues' order (LOGINIT first)")
+check("for (unsigned i = 0; i < nv_libos_log_task_count; i++) {" in COT and
+      "nv_libos_log_tasks[i].id, lbus + off, bytes);" in COT,
+      "A8 every task gets its own LOG* entry with the vendor's size")
+check("rm_log_row(\"log-setup\"" in COT and "rm_log_row(\"log-after\"" in COT and
+      "rm_log_zeroed_row();" in COT,
+      "A8 the boot prints the channel before and after the COT, and rejects a zeroed header")
+check("stage=log[" in GSP,
+      "A8 the kernel stage-8 path prints the same per-region header rows")
+
 # ---- the unit cases that exercise each helper ------------------------------
 for case in ("test_nv_gsp_falcon_os_write_read_back",
              "test_nv_gsp_peer_link_is_one_shot",
              "test_nv_gsp_time_offset_conversion",
              "test_nv_gsp_time_write_gated_on_fsp_version",
-             "test_nv_gsp_async_init_queues_two_rpcs"):
+             "test_nv_gsp_async_init_queues_two_rpcs",
+             "test_nv_gsp_boot_args_targets",
+             "test_nv_gsp_nvlog_header_round_trip",
+             "test_nv_gsp_nvlog_header_rejects_zeroed",
+             "test_nv_gsp_nvlog_region_snapshot",
+             "test_nv_gsp_libos_log_set_matches_the_vendor"):
     check(("TEST(%s)" % case) in TEST,
           "unit case %s exists" % case)
 check(all(("  %s();" % c) in TEST for c in
@@ -125,8 +193,13 @@ check(all(("  %s();" % c) in TEST for c in
            "test_nv_gsp_peer_link_is_one_shot",
            "test_nv_gsp_time_offset_conversion",
            "test_nv_gsp_time_write_gated_on_fsp_version",
-           "test_nv_gsp_async_init_queues_two_rpcs")),
-      "all five Tier A cases are registered in the suite")
+           "test_nv_gsp_async_init_queues_two_rpcs",
+           "test_nv_gsp_boot_args_targets",
+           "test_nv_gsp_nvlog_header_round_trip",
+           "test_nv_gsp_nvlog_header_rejects_zeroed",
+           "test_nv_gsp_nvlog_region_snapshot",
+           "test_nv_gsp_libos_log_set_matches_the_vendor")),
+      "all ten Tier A cases are registered in the suite")
 
 print()
 print("assertions %d failures %d" % (n[0], len(fails)))

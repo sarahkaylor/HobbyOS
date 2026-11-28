@@ -52,6 +52,7 @@
 #include "nv_fw.h"
 #include "nv_flcn.h"
 #include "nv_dma.h"
+#include "nv_libos_log.h"
 #include "nv_rpc.h"
 #include "nv_gsp_glue.h"
 #include "nv_vram.h"
@@ -418,6 +419,42 @@ int nv_gsp_rpc_publish(struct nv_gsp_rpc *r, struct nv_dev *d) {
     uart_puts(" loc=");
     print_int((int)b.loc);
     uart_puts("\n");
+  }
+
+  /* A8: the three log pages this table names are real NVLOG channels.  The
+   * firmware region's own layout is one put pointer + records
+   * (liblogdecode.c:1281-1282); the header a reader validates is the V2
+   * container the RM wraps it in (:1985-2013, :2086).  Build that container
+   * from each page's own bytes and print what a reader would see, so stage 8's
+   * log channel is an observable and not a claim. */
+  {
+    static uint8_t container[0x3000];
+    static const char *const lp[NV_RPC_LIBOS_LOG_PAGES] = {"INIT", "INTR", "RM"};
+    for (uint32_t i = 0; i < NV_RPC_LIBOS_LOG_PAGES; i++) {
+      const uint8_t *page = (const uint8_t *)phys_to_virt(
+          r->logs.phys + (uint64_t)i * NV_DMA_PAGE);
+      struct nv_libos_nvlog_header h;
+      int rc = nv_libos_nvlog_snapshot(page, NV_DMA_PAGE, container,
+                                       sizeof container, NV_LIBOS_GPU_ARCH_GB2XX,
+                                       NV_LIBOS_GPU_IMPL_GB202, lp[i],
+                                       NV_LIBOS_NVLOG_FLAG_PACKED_METADATA);
+      if (rc == 0) rc = nv_libos_nvlog_decode(container, sizeof container, &h);
+      uart_puts("[NV-ARG] stage=log[");
+      print_int((int)i);
+      uart_puts("] pa=");
+      uart_print_hex(nv_dma_bus(&r->logs) + (uint64_t)i * NV_DMA_PAGE);
+      uart_puts(" size=");
+      uart_print_hex(NV_DMA_PAGE);
+      uart_puts(" put=");
+      uart_print_hex(nv_libos_log_region_put(r, NV_DMA_PAGE));
+      uart_puts(" hdr=");
+      uart_puts(rc == 0 ? "valid" : "invalid");
+      uart_puts(" prefix=");
+      uart_puts(rc == 0 ? h.task_prefix : "-");
+      uart_puts(" version=");
+      uart_print_hex(rc == 0 ? h.version : 0);
+      uart_puts("\n");
+    }
   }
 
   /* The fourth entry is the whole point of the page: it must name the argument

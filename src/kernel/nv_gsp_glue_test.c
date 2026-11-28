@@ -30,6 +30,8 @@
 #include "nv_gsp_glue.h"
 #include "nv.h" /* struct nv_dev, for the boot-path case */
 #include "nv_dma.h"
+#include "nv_fmc_args.h"
+#include "nv_libos_log.h"
 #include "nv_rpc.h"
 #include "nv_regs.h"
 #include "errno.h"
@@ -707,6 +709,252 @@ TEST(test_nv_gsp_peer_link_is_one_shot) {
   EXPECT_EQ(r.rx_linked, 0);
 }
 
+/* ---- A6: the vendor's DMA-target pair ----------------------------------
+ * kernel_gsp_gh100.c:453-461 writes +8 from _kgspMemdescToDmaTarget of the WPR
+ * meta descriptor (CACHED -> 1) and +40 from the same call on the libos args
+ * descriptor (UNCACHED -> 2).  The old default was 1/1; this pins the pair and
+ * the attribute mapping that produces it. */
+
+static int t_streq8(const char *a, const char *b) {
+  for (int i = 0; i < 8; i++) {
+    if (a[i] != b[i]) return 0;
+    if (a[i] == 0) return 1;
+  }
+  return 1;
+}
+
+TEST(test_nv_gsp_boot_args_targets) {
+  uart_puts("  Running test_nv_gsp_boot_args_targets...\n");
+  tests_run++;
+
+  uint8_t page[NV_FMC_ARGS_BYTES];
+  t_zero(page, (uint32_t)sizeof page);
+  t_put32(page + 0, 0x11111111u); /* regkeys: not ours to move */
+  t_put32(page + NV_FMC_ARGS_OFF_ARGS_OFFSET, 0x22222222u);
+
+  /* The pair A6 removes (1/1) is refused from the page's own bytes. */
+  t_put32(page + NV_FMC_ARGS_OFF_DESC_TARGET, 1u);
+  t_put32(page + NV_FMC_ARGS_OFF_ARGS_TARGET, 1u);
+  EXPECT_EQ(nv_fmc_args_targets_check(page, sizeof page), -EIO);
+
+  /* The attribute -> target mapping is the vendor's (_kgspMemdescToDmaTarget). */
+  EXPECT_EQ((int)nv_fmc_args_dma_target(NV_FMC_CACHE_CACHED),
+            (int)NV_FMC_TARGET_COHERENT_SYSTEM);
+  EXPECT_EQ((int)nv_fmc_args_dma_target(NV_FMC_CACHE_UNCACHED),
+            (int)NV_FMC_TARGET_NONCOHERENT_SYSTEM);
+
+  /* Encode the vendor pair and read it back at +8 / +40. */
+  EXPECT_EQ(nv_fmc_args_targets_encode(page, sizeof page), 0);
+  EXPECT_EQ((int)t_ld32(page + NV_FMC_ARGS_OFF_DESC_TARGET), 1);
+  EXPECT_EQ((int)t_ld32(page + NV_FMC_ARGS_OFF_ARGS_TARGET), 2);
+  EXPECT_EQ(nv_fmc_args_targets_check(page, sizeof page), 0);
+
+  /* Nothing else on the page moved. */
+  EXPECT_EQ((int)t_ld32(page + 0), 0x11111111);
+  EXPECT_EQ((int)t_ld32(page + NV_FMC_ARGS_OFF_ARGS_OFFSET), 0x22222222);
+
+  /* The vendor's GSP_FMC_BOOT_PARAMS is 88 bytes at this ABI; a short page is
+   * refused rather than half-written (gspifpub.h:113-120). */
+  EXPECT_EQ((int)NV_FMC_ARGS_BYTES, 88);
+  EXPECT_EQ(nv_fmc_args_targets_encode(page, 8), -EINVAL);
+  EXPECT_EQ(nv_fmc_args_targets_check(page, 8), -EINVAL);
+}
+
+/* ---- A8: the NVLOG header, field for field (liblogdecode.h:123-135) ----- */
+
+TEST(test_nv_gsp_nvlog_header_round_trip) {
+  uart_puts("  Running test_nv_gsp_nvlog_header_round_trip...\n");
+  tests_run++;
+
+  static uint8_t c[0x200];
+  const uint8_t bid[4] = {0xDE, 0xAD, 0xBE, 0xEF};
+  t_zero(c, (uint32_t)sizeof c);
+  ASSERT(nv_libos_nvlog_encode(c, sizeof c, NV_LIBOS_GPU_ARCH_GB2XX,
+                               NV_LIBOS_GPU_IMPL_GB202, "RM",
+                               0x1122334455667788ULL, bid, 4,
+                               NV_LIBOS_NVLOG_FLAG_PACKED_METADATA) == 0);
+
+  /* The wire bytes, at the offsets the vendor's struct compiles to. */
+  EXPECT_EQ((int)t_ld32(c + 0x00), (int)NV_LIBOS_GPU_ARCH_GB2XX);
+  EXPECT_EQ((int)t_ld32(c + 0x04), (int)NV_LIBOS_GPU_IMPL_GB202);
+  EXPECT_EQ((int)t_ld32(c + 0x08), (int)NV_LIBOS_NVLOG_VERSION);
+  EXPECT_EQ((int)t_ld32(c + 0x0C), 4);
+  EXPECT_EQ((int)c[0x10], 'R');
+  EXPECT_EQ((int)c[0x11], 'M');
+  EXPECT_EQ((int)c[0x12], 0);
+  EXPECT_EQ((int)(t_ld64(c + 0x18) == 0x1122334455667788ULL), 1);
+  EXPECT_EQ((int)c[0x20], 0xDE);
+  EXPECT_EQ((int)c[0x23], 0xEF);
+  EXPECT_EQ((int)t_ld32(c + 0x40), (int)NV_LIBOS_NVLOG_FLAG_PACKED_METADATA);
+  EXPECT_EQ((int)t_ld32(c + 0x44), 0);
+  EXPECT_EQ((int)t_ld64(c + NV_LIBOS_NVLOG_PUT_OFF), 0);
+
+  /* Decode it back: every field, not just the version. */
+  struct nv_libos_nvlog_header h;
+  ASSERT(nv_libos_nvlog_decode(c, sizeof c, &h) == 0);
+  EXPECT_EQ((int)h.gpu_arch, (int)NV_LIBOS_GPU_ARCH_GB2XX);
+  EXPECT_EQ((int)h.gpu_impl, (int)NV_LIBOS_GPU_IMPL_GB202);
+  EXPECT_EQ((int)h.version, 2);
+  EXPECT_EQ((int)h.build_id_length, 4);
+  EXPECT_EQ(t_streq8(h.task_prefix, "RM"), 1);
+  EXPECT_EQ((int)(h.timer_delta == 0x1122334455667788ULL), 1);
+  EXPECT_EQ((int)h.build_id[0], 0xDE);
+  EXPECT_EQ((int)h.build_id[3], 0xEF);
+  EXPECT_EQ((int)h.flags, (int)NV_LIBOS_NVLOG_FLAG_PACKED_METADATA);
+  EXPECT_EQ((int)h.reserved, 0);
+
+  /* The header is 72 bytes and the put pointer starts where data[] does; the
+   * vendor says pos = offsetof(data) + sizeof(NvU64) (liblogdecode.c:2086). */
+  EXPECT_EQ((int)NV_LIBOS_NVLOG_HEADER_BYTES, 72);
+  EXPECT_EQ((int)NV_LIBOS_NVLOG_PUT_OFF, 72);
+  EXPECT_EQ((int)NV_LIBOS_NVLOG_RECORDS_OFF, 80);
+
+  /* A put pointer naming records past the container is -E2BIG, not a wrap. */
+  for (int i = 0; i < 8; i++) c[NV_LIBOS_NVLOG_PUT_OFF + i] = 0xFF;
+  EXPECT_EQ(nv_libos_nvlog_decode(c, sizeof c, 0), -E2BIG);
+
+  /* Encode refuses inputs that are not this layout. */
+  t_zero(c, (uint32_t)sizeof c);
+  EXPECT_EQ(nv_libos_nvlog_encode(c, sizeof c, 0x1B, 2, "", 0, 0, 0, 0), -EINVAL);
+  EXPECT_EQ(nv_libos_nvlog_encode(c, sizeof c, 0x1B, 2, "INIT", 0, bid, 33, 0),
+            -EINVAL);
+  EXPECT_EQ(nv_libos_nvlog_encode(c, 0x40, 0x1B, 2, "INIT", 0, 0, 0, 0), -E2BIG);
+}
+
+/* The mode-4 probe's exact defect: a zeroed region.  version 0 is not
+ * LIBOS_LOG_NVLOG_BUFFER_VERSION_2 (liblogdecode.h:137-141), so a reader must
+ * refuse it instead of reporting an empty log. */
+TEST(test_nv_gsp_nvlog_header_rejects_zeroed) {
+  uart_puts("  Running test_nv_gsp_nvlog_header_rejects_zeroed...\n");
+  tests_run++;
+
+  static uint8_t z[0x1000];
+  t_zero(z, (uint32_t)sizeof z);
+  EXPECT_EQ(nv_libos_nvlog_decode(z, sizeof z, 0), -EINVAL);
+
+  /* Every field of the zeroed bytes is also wrong on its own: version 0,
+   * reserved 0 (the only one that happens to be right), no prefix. */
+  { struct nv_libos_nvlog_header h;
+    t_zero(&h, (uint32_t)sizeof h);
+    EXPECT_EQ((int)h.version, 0);
+    EXPECT_EQ(t_streq8(h.task_prefix, ""), 1);
+  }
+
+  /* A V1 header (version 1) is not this reader's layout either. */
+  const uint8_t bid[1] = {0x01};
+  ASSERT(nv_libos_nvlog_encode(z, sizeof z, 0x1B, 2, "INIT", 0, bid, 1, 0) == 0);
+  ASSERT(nv_libos_nvlog_decode(z, sizeof z, 0) == 0);
+  z[0x08] = 1; /* version 1 */
+  EXPECT_EQ(nv_libos_nvlog_decode(z, sizeof z, 0), -EINVAL);
+
+  /* A nonzero reserved word is not this layout. */
+  z[0x08] = 2;
+  z[0x44] = 1;
+  EXPECT_EQ(nv_libos_nvlog_decode(z, sizeof z, 0), -EINVAL);
+}
+
+/* A region with no records still yields a VALID container with put = 0: that is
+ * the difference between "the channel exists and the task wrote nothing" and
+ * "these bytes are not an nvlog header at all". */
+TEST(test_nv_gsp_nvlog_region_snapshot) {
+  uart_puts("  Running test_nv_gsp_nvlog_region_snapshot...\n");
+  tests_run++;
+
+  static uint8_t region[0x2000];
+  static uint8_t cont[0x3000];
+  t_zero(region, (uint32_t)sizeof region);
+
+  /* An empty firmware region (put = 0) wraps into a valid empty container. */
+  ASSERT(nv_libos_nvlog_snapshot(region, sizeof region, cont, sizeof cont,
+                                 NV_LIBOS_GPU_ARCH_GB2XX,
+                                 NV_LIBOS_GPU_IMPL_GB202, "INIT",
+                                 NV_LIBOS_NVLOG_FLAG_PACKED_METADATA) == 0);
+  struct nv_libos_nvlog_header h;
+  ASSERT(nv_libos_nvlog_decode(cont, sizeof cont, &h) == 0);
+  EXPECT_EQ((int)t_ld64(cont + NV_LIBOS_NVLOG_PUT_OFF), 0);
+  EXPECT_EQ((int)h.version, 2);
+  EXPECT_EQ(t_streq8(h.task_prefix, "INIT"), 1);
+
+  /* One record word written by the task: put counts NvU64 entries and the
+   * record lands after the put pointer (liblogdecode.c:1281-1282). */
+  region[0] = 1;
+  region[8] = 0x5A;
+  t_zero(cont, (uint32_t)sizeof cont);
+  ASSERT(nv_libos_nvlog_snapshot(region, sizeof region, cont, sizeof cont,
+                                 NV_LIBOS_GPU_ARCH_GB2XX,
+                                 NV_LIBOS_GPU_IMPL_GB202, "INIT", 0) == 0);
+  EXPECT_EQ((int)t_ld64(cont + NV_LIBOS_NVLOG_PUT_OFF), 1);
+  EXPECT_EQ((int)nv_libos_log_region_put(region, sizeof region), 1);
+  EXPECT_EQ((int)nv_libos_log_region_records(region, sizeof region), 1);
+  EXPECT_EQ((int)cont[NV_LIBOS_NVLOG_RECORDS_OFF], 0x5A);
+  EXPECT_EQ((int)nv_libos_log_region_nonzero(region, sizeof region), 2);
+
+  /* A region too big for the container is -E2BIG, not a truncated copy. */
+  EXPECT_EQ(nv_libos_nvlog_snapshot(region, sizeof region, cont, 0x100, 0x1B,
+                                    2, "INIT", 0),
+            -E2BIG);
+}
+
+/* ---- A8: the task set is the vendor's, in the vendor's order ------------
+ * logInitValues (kernel_gsp.c:3152-3164) with the ids/prefixes from
+ * nv-firmware-chip-family-select.h:107-113. */
+
+TEST(test_nv_gsp_libos_log_set_matches_the_vendor) {
+  uart_puts("  Running test_nv_gsp_libos_log_set_matches_the_vendor...\n");
+  tests_run++;
+
+  static const char *const ids[] = {"LOGINIT", "LOGINTR", "LOGRM",
+                                    "LOGMNOC", "LOGDBG", "LOGROOT"};
+  static const char *const pfx[] = {"INIT", "INTR", "RM", "MNOC", "DBG", "ROOT"};
+
+  EXPECT_EQ((int)nv_libos_log_task_count, 6);
+  for (unsigned i = 0; i < nv_libos_log_task_count; i++) {
+    EXPECT_EQ(t_streq8(nv_libos_log_tasks[i].id, ids[i]), 1);
+    EXPECT_EQ(t_streq8(nv_libos_log_tasks[i].prefix, pfx[i]), 1);
+  }
+  /* Vendor sizes: five 64 KiB task logs and the 4 KiB root log. */
+  for (unsigned i = 0; i < 5; i++)
+    EXPECT_EQ((int)nv_libos_log_tasks[i].bytes, 0x10000);
+  EXPECT_EQ((int)nv_libos_log_tasks[5].bytes, 0x1000);
+  EXPECT_EQ((int)nv_libos_log_total_bytes(), 0x51000);
+  /* LOGDBG is the one task the vendor builds but does not decode. */
+  EXPECT_EQ((int)nv_libos_log_tasks[4].nvlog, 0);
+  EXPECT_EQ((int)nv_libos_log_tasks[0].nvlog, 1);
+
+  /* LOGINIT is first (kernel_gsp.c:5191) and every region is page-aligned. */
+  uint32_t off = 0xFFFFu, bytes = 0;
+  ASSERT(nv_libos_log_region(0, &off, &bytes) == 0);
+  EXPECT_EQ((int)off, 0);
+  EXPECT_EQ((int)bytes, 0x10000);
+  uint32_t prev_end = 0;
+  for (unsigned i = 0; i < nv_libos_log_task_count; i++) {
+    ASSERT(nv_libos_log_region(i, &off, &bytes) == 0);
+    EXPECT_EQ((int)(off & 0xFFFu), 0);
+    EXPECT_EQ((int)(off >= prev_end), 1);
+    prev_end = off + bytes;
+  }
+  EXPECT_EQ((int)prev_end, (int)nv_libos_log_total_bytes());
+  EXPECT_EQ(nv_libos_log_region(6, &off, &bytes), -EINVAL);
+
+  /* Each region wraps into a container whose prefix is that task's. */
+  static uint8_t region0[0x10000];
+  static uint8_t cont[0x11000];
+  t_zero(region0, (uint32_t)sizeof region0);
+  for (unsigned i = 0; i < nv_libos_log_task_count; i++) {
+    t_zero(cont, (uint32_t)sizeof cont);
+    ASSERT(nv_libos_nvlog_snapshot(region0, nv_libos_log_tasks[i].bytes, cont,
+                                   sizeof cont, NV_LIBOS_GPU_ARCH_GB2XX,
+                                   NV_LIBOS_GPU_IMPL_GB202,
+                                   nv_libos_log_tasks[i].prefix,
+                                   nv_libos_log_tasks[i].nvlog
+                                       ? NV_LIBOS_NVLOG_FLAG_PACKED_METADATA
+                                       : 0u) == 0);
+    struct nv_libos_nvlog_header h;
+    ASSERT(nv_libos_nvlog_decode(cont, sizeof cont, &h) == 0);
+    EXPECT_EQ(t_streq8(h.task_prefix, pfx[i]), 1);
+  }
+}
+
 void nv_gsp_glue_test_suite(void) {
   test_nv_gsp_rpc_setup_allocates_the_whole_block();
   test_nv_gsp_rpc_pte0_is_the_bus_address_nv_dma_issued();
@@ -721,6 +969,11 @@ void nv_gsp_glue_test_suite(void) {
   test_nv_gsp_time_write_gated_on_fsp_version();
   test_nv_gsp_async_init_queues_two_rpcs();
   test_nv_gsp_peer_link_is_one_shot();
+  test_nv_gsp_boot_args_targets();
+  test_nv_gsp_nvlog_header_round_trip();
+  test_nv_gsp_nvlog_header_rejects_zeroed();
+  test_nv_gsp_nvlog_region_snapshot();
+  test_nv_gsp_libos_log_set_matches_the_vendor();
 }
 
 #endif /* __x86_64__ */

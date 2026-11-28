@@ -57,6 +57,8 @@
 #include "nv.h"
 #include "nv_dma.h"
 #include "nv_fw.h"
+#include "nv_fmc_args.h"
+#include "nv_libos_log.h"
 #include "nv_rpc.h"
 #include "nv_gsp_glue.h"
 #include "sha384.h"
@@ -1376,8 +1378,10 @@ out:
  *   '2'            same, RMARGS = the 0xC8 'GSP '-magic shape
  *   '3'            same as 1 but WITHOUT the GSP-RM image/signature (control:
  *                  bIsGspRmBoot=1 with a 0 radix3 must not move the FMC)
- *   '4'            same as 1 plus the four libos LOG* regions, zeroed
- *                  (control for "is a missing log region what stops RM")
+ *   '4'            same as 1 but WITHOUT the libos LOG* regions (control for
+ *                  "does the RM require the log regions at all"; until A8 this
+ *                  variant sent four zeroed 1 MiB regions, which is not a
+ *                  libos nvlog buffer -- see src/include/nv_libos_log.h)
  *   '5'            same as 1 but with an all-zero signature blob (control for
  *                  "does this ACR verify the GSP-RM signature at all")
  *   '6'            bIsGspRmBoot=1 with gspRmDescSize/Offset = 0 and no image
@@ -1797,15 +1801,89 @@ static void rm_sample(struct nv_dev *d, const char *tag, int t_ms) {
   nv_gsp_rpc_peer_row(tag, t_ms);
 }
 
+/* ---- A8: the LIBOS task log channel ------------------------------------
+ * The vendor hands each task one sysmem region (kernel_gsp.c:3152-3164) and
+ * names it in the libos args table (:5194-5206).  The region's own layout is
+ * the task's: one NvU64 put pointer at +0, records from +8
+ * (liblogdecode.c:1281-1282).  What a reader validates is the NVLOG container
+ * the RM wraps that region in (liblogdecode.c:1985-2013, :2086), so this row
+ * builds the container from the region's own bytes and decodes it -- the same
+ * wrap libosLogAddLogEx does.  A valid container with put=0 says "the channel
+ * exists and this task wrote nothing"; that is a different answer from a
+ * register that reads 0, and it is the answer the next boot needs.
+ *
+ * These rows are the unit model until an authorised boot runs: nothing here
+ * touches the device.  The regions are read out of sysmem after the COT. */
+static void rm_log_row(const char *tag, const struct nv_dma_map *logs) {
+  static uint8_t container[0x11000];
+  if (!logs || !logs->phys) {
+    rm_p(tag);
+    p(" logs=none (no LOG* entries this boot)\n");
+    return;
+  }
+  const uint8_t *base = (const uint8_t *)phys_to_virt(logs->phys);
+  uint64_t bus = nv_dma_bus(logs);
+  if (bus == NV_DMA_BUS_INVALID) {
+    rm_p(tag);
+    p(" logs=no-bus-address (nv_dma refused)\n");
+    return;
+  }
+  for (unsigned i = 0; i < nv_libos_log_task_count; i++) {
+    uint32_t off = 0, bytes = 0;
+    if (nv_libos_log_region(i, &off, &bytes) != 0) continue;
+    if ((uint64_t)off + bytes > logs->len) continue;
+    const struct nv_libos_log_task *t = &nv_libos_log_tasks[i];
+    const uint8_t *r = base + off;
+    struct nv_libos_nvlog_header h;
+    int rc = nv_libos_nvlog_snapshot(
+        r, bytes, container, sizeof container, NV_LIBOS_GPU_ARCH_GB2XX,
+        NV_LIBOS_GPU_IMPL_GB202, t->prefix,
+        t->nvlog ? NV_LIBOS_NVLOG_FLAG_PACKED_METADATA : 0u);
+    if (rc == 0)
+      rc = nv_libos_nvlog_decode(container, sizeof container, &h);
+    rm_p(tag);
+    p(" log[");
+    uart_puts(t->id);
+    p("] pa=");
+    uart_print_hex(bus + off);
+    pkv(" size", bytes);
+    pkv(" put", nv_libos_log_region_put(r, bytes));
+    pkv(" records", nv_libos_log_region_records(r, bytes));
+    pkv(" nz_dwords", nv_libos_log_region_nonzero(r, bytes));
+    p(" hdr=");
+    uart_puts(rc == 0 ? "valid" : "invalid");
+    p(" prefix=");
+    uart_puts(rc == 0 ? h.task_prefix : "-");
+    pkv(" version", rc == 0 ? h.version : 0);
+    pkv(" flags", rc == 0 ? h.flags : 0);
+    p(" nvlog=");
+    print_int((int)t->nvlog);
+    pe();
+  }
+}
+
+/* The mode-4 defect, executable: a zeroed region is version 0, and version 0
+ * is not LIBOS_LOG_NVLOG_BUFFER_VERSION_2 (liblogdecode.h:137-141), so a
+ * reader must refuse it rather than call it an empty log. */
+static void rm_log_zeroed_row(void) {
+  static uint8_t z[0x1000];
+  for (unsigned i = 0; i < sizeof z; i++) z[i] = 0;
+  int rc = nv_libos_nvlog_decode(z, sizeof z, 0);
+  rm_p("log hdr zeroed=");
+  uart_puts(rc == -EINVAL ? "rejected (invalid nvlog header)\n"
+                          : "ACCEPTED -- decoder is wrong\n");
+}
+
 int nv_fsp_rm_boot(struct nv_dev *d) {
   const uint32_t base = d ? d->pfsp_base : 0;
   struct nv_dma_map m_image, m_frts, m_args, m_cot, m_bootimg, m_sig, m_wprm,
-                     m_rmargs, m_libos, m_rmimg, m_tree, m_alt;
+                     m_rmargs, m_libos, m_logs, m_rmimg, m_tree, m_alt;
   struct nv_fw_blob fmc, bootimg, sig, gsprm;
   struct cot_fmc sec;
   int mode = 1, frts_ok = 0, boost_err = -1, cot_err = -1;
   int lock_released = 0, linked = 0, initdone = 0, statq_written = 0;
   int falcon_os_written = 0;
+  int logs_ok = 0;
   int mailbox_writable = 0, radix3_ok = 0;
   uint64_t t_send = 0, blk_bus = 0;
   uint32_t blk_ptes = 0;
@@ -1853,7 +1931,7 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
 
   m_image.phys = m_image.bus = m_image.len = 0; m_image.pages = 0;
   m_frts = m_args = m_cot = m_bootimg = m_sig = m_wprm = m_image;
-  m_rmargs = m_libos = m_rmimg = m_tree = m_alt = m_image;
+  m_rmargs = m_libos = m_logs = m_rmimg = m_tree = m_alt = m_image;
   fmc.buf = 0; fmc.size = 0; fmc.pages = 0;
   fmc.map.phys = fmc.map.bus = fmc.map.len = 0; fmc.map.pages = 0;
   bootimg = sig = gsprm = fmc;
@@ -1987,6 +2065,27 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
       nv_dma_alloc(NV_DMA_PAGE, &m_alt) != 0) {
     p("dma wprm/rmargs/libos/alt: no run -- no COT sent\nverdict=no-rmargs-nomem\n");
     goto out;
+  }
+  /* A8: the six task log regions, one contiguous run, each region page-aligned
+   * inside it (kernel_gsp.c:3152-3164 sizes).  One page-aligned run rather than
+   * six mappings because the args entries only carry pa/size and a contiguous
+   * run is what _setupLogBufferBaremetal's memdescCreate gives each task.  A
+   * failure is not fatal to the boot -- it is fatal to the log channel, and the
+   * row says so before the COT goes out. */
+  if (mode != 4) {
+    uint32_t log_bytes = nv_libos_log_total_bytes();
+    if (nv_dma_alloc(log_bytes, &m_logs) == 0) {
+      logs_ok = 1;
+      p("dma logs bytes=");
+      print_int((int)log_bytes);
+      pkv(" bus", nv_dma_bus(&m_logs));
+      pkv(" pages", (uint64_t)m_logs.pages);
+      pe();
+    } else {
+      p("dma logs bytes=");
+      print_int((int)log_bytes);
+      p(" rc=no-run (the six LOG* entries are omitted this boot)\n");
+    }
   }
 
   /* ---- 4. the publish block, BEFORE the RMARGS that names it ------------ */
@@ -2218,31 +2317,64 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
     if (mode == 2) rm_args_b(ra, blk_bus, blk_ptes);
     else           rm_args_a(ra, blk_bus, blk_ptes);
 
-    rm_libos_entry(la + 0 * RM_LIBOS_ENTRY, "RMARGS",
-                   nv_dma_bus(&m_rmargs), NV_DMA_PAGE);
-    if (mode == 4) {
-      /* Control: the four LOG* regions the RM's own id table lists, as plain
-       * zeroed 1 MiB sysmem regions.  A zeroed region is NOT a valid libos
-       * nvlog header, so this variant is a probe of "does the RM require the
-       * region at all", not a logging implementation. */
-      static struct nv_dma_map mlog;
-      mlog = m_image;
-      if (nv_dma_alloc(0x100000, &mlog) == 0) {
-        rm_libos_entry(la + 1 * RM_LIBOS_ENTRY, "LOGINIT",
-                       nv_dma_bus(&mlog), 0x100000);
-        rm_libos_entry(la + 2 * RM_LIBOS_ENTRY, "LOGRM",
-                       nv_dma_bus(&mlog), 0x100000);
-        rm_libos_entry(la + 3 * RM_LIBOS_ENTRY, "LOGINTR",
-                       nv_dma_bus(&mlog), 0x100000);
+    /* A8 (D12): the vendor's order is the LOG* regions first and RMARGS last
+     * (kernel_gsp.c:5194-5206), and its own comment says why -- "LOGINIT must
+     * be first for early init logging to work" (:5191).  Until this card the
+     * rung published RMARGS first and, in mode 4, four zeroed 1 MiB regions
+     * under three names: no per-task size, no per-task space, nothing a task
+     * could put a record in.  Each region below is its own page-aligned run at
+     * the vendor's own size for that task, zeroed (the put pointer the task
+     * owns starts at 0), and every entry carries the task's own memory id. */
+    int entries = 0;
+    if (logs_ok) {
+      uint8_t *lb = (uint8_t *)phys_to_virt(m_logs.phys);
+      uint64_t lbus = nv_dma_bus(&m_logs);
+      for (unsigned i = 0; i < nv_libos_log_task_count; i++) {
+        uint32_t off = 0, bytes = 0;
+        if (nv_libos_log_region(i, &off, &bytes) != 0) continue;
+        uint8_t *r = lb + off;
+        for (uint32_t k = 0; k < bytes; k++) r[k] = 0; /* put = 0, no records */
+        rm_libos_entry(la + (uint64_t)entries * RM_LIBOS_ENTRY,
+                       nv_libos_log_tasks[i].id, lbus + off, bytes);
+        entries++;
       }
     }
+    rm_libos_entry(la + (uint64_t)entries * RM_LIBOS_ENTRY, "RMARGS",
+                   nv_dma_bus(&m_rmargs), NV_DMA_PAGE);
+    entries++;
+
     p("rmargs layout=");
     uart_puts(mode == 2 ? "B('GSP ' magic, 0xC8)" : "A(GSP_ARGUMENTS_CACHED)");
     pkv(" bus", nv_dma_bus(&m_rmargs));
     pkv(" blk", blk_bus);
     pkv(" ptes", (uint64_t)blk_ptes);
     pkv(" libos_page", nv_dma_bus(&m_libos));
+    pki(" libos_entries", entries);
     pe();
+    /* Every entry read back out of the table's own bytes: a writer that stored
+     * the wrong id or address still returns 0. */
+    for (int i = 0; i < entries; i++) {
+      const uint8_t *e = la + (uint64_t)i * RM_LIBOS_ENTRY;
+      uint64_t id8 = ld64(e, 0);
+      p("libos[");
+      print_int(i);
+      p("] id8=0x");
+      uart_print_hex(id8);
+      p(" pa=");
+      uart_print_hex(ld64(e, 8));
+      p(" size=");
+      uart_print_hex(ld64(e, 16));
+      p(" kind=");
+      print_int((int)e[24]);
+      p(" loc=");
+      print_int((int)e[25]);
+      pe();
+    }
+    /* The log channel's own rows: each task's region, its put pointer and the
+     * NVLOG header a reader would validate, plus the negative control that used
+     * to be this rung's whole log implementation. */
+    rm_log_row("log-setup", logs_ok ? &m_logs : 0);
+    rm_log_zeroed_row();
     p("rmargs dwords");
     for (int i = 0; i < 10; i++) {
       p(" d");
@@ -2251,18 +2383,19 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
       uart_print_hex(ld32(ra, (uint32_t)(i * 4)));
     }
     pe();
-    p("libos rmargs entry id8=0x");
-    uart_print_hex(rm_id8("RMARGS"));
-    pkv(" pa", nv_dma_bus(&m_rmargs));
-    pkv(" size", NV_DMA_PAGE);
-    p(" kind=1 loc=1\n");
   }
 
   /* ---- 7. the boot params page: this is the one that changes ------------- */
   {
     uint8_t *a = (uint8_t *)phys_to_virt(m_args.phys);
     st32(a, NV_FMCP_OFF_REGKEYS, 0);
-    st32(a, NV_FMCP_OFF_BOOTTGT, GSP_DMA_TARGET_COHERENT_SYSTEM);
+    /* A6 (D4): the descriptor page is NV_MEMORY_CACHED and the libos args page
+     * NV_MEMORY_UNCACHED in the vendor's own allocations
+     * (kernel_gsp_tu102.c:121, :148), and _kgspMemdescToDmaTarget
+     * (kernel_gsp_gh100.c:390-405) maps that difference to the two target
+     * values this pair carries (src/include/nv_fmc_args.h).  Ours sent COHERENT
+     * for both outside the 7/67/50 probes; that divergence is what A6 closes. */
+    st32(a, NV_FMCP_OFF_BOOTTGT, nv_fmc_args_dma_target(NV_FMC_CACHE_CACHED));
     st32(a, NV_FMCP_OFF_DESCSIZE, mode == 6 ? 0u : RM_WPRM_BYTES);
     st64(a, NV_FMCP_OFF_DESCOFF, mode == 6 ? 0ull : nv_dma_bus(&m_wprm));
     st64(a, NV_FMCP_OFF_WPR_OFF, (mode == 26) ? 0x7F0000000ULL : 0);
@@ -2272,11 +2405,12 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
      * (kgspAllocBootArgs_TU102, pLibosInitArgumentsDescriptor), and
      * _kgspMemdescToDmaTarget maps that to NONCOHERENT_SYSTEM.  The WPR meta
      * page is NV_MEMORY_CACHED -> COHERENT_SYSTEM, so the two targets differ in
-     * the vendor's own block; mode 7 sends the vendor pair, mode 1 (the parent's)
-     * sent COHERENT for both. */
+     * the vendor's own block.  The mode-7/67 branch is the provenance of this
+     * row (the probe that first sent the vendor's 2); A6 makes the DEFAULT the
+     * same value, derived from the buffer's attribute. */
     st32(a, NV_FMCP_OFF_RMTGT, (mode == 7 || mode == 67)
                                    ? GSP_DMA_TARGET_NONCOHERENT_SYSTEM
-                                   : GSP_DMA_TARGET_COHERENT_SYSTEM);
+                                   : nv_fmc_args_dma_target(NV_FMC_CACHE_UNCACHED));
     st64(a, NV_FMCP_OFF_RMARGS, nv_dma_bus(&m_libos));
     st32(a, NV_FMCP_OFF_SPDMTGT, 0);
     st64(a, NV_FMCP_OFF_SPDMBUF, 0);
@@ -2289,6 +2423,21 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
        * +56.  One boot, one pair of fields, mode 17 otherwise. */
       st32(a, NV_FMCP_OFF_BOOTTGT, GSP_DMA_TARGET_NONCOHERENT_SYSTEM);
       st32(a, NV_FMCP_OFF_SPDMTGT, GSP_DMA_TARGET_NONCOHERENT_SYSTEM);
+    }
+    /* A6 row: the pair read back from the page's own bytes.  Mode 50 overrides
+     * both words on purpose (its card is "both targets 2"); every other mode
+     * must carry the vendor's 1/2. */
+    {
+      uint32_t dt = ld32(a, NV_FMCP_OFF_BOOTTGT);
+      uint32_t at = ld32(a, NV_FMCP_OFF_RMTGT);
+      int ok = (mode == 50) ? (dt == GSP_DMA_TARGET_NONCOHERENT_SYSTEM &&
+                               at == GSP_DMA_TARGET_NONCOHERENT_SYSTEM)
+                            : (nv_fmc_args_targets_check(a, NV_FMCP_BYTES) == 0);
+      p("a6 targets desc=");
+      print_int((int)dt);
+      p(" args=");
+      print_int((int)at);
+      p(ok ? " pair=vendor(1/2)\n" : " pair=DIVERGES\n");
     }
     p("boot_args bus=");
     uart_print_hex(nv_dma_bus(&m_args));
@@ -2634,8 +2783,8 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
       a[NV_FMCP_OFF_ISRMBOOT] = 1;
       st32(a, NV_FMCP_OFF_DESCSIZE, RM_WPRM_BYTES);
       st64(a, NV_FMCP_OFF_DESCOFF, nv_dma_bus(&m_wprm));
-      st32(a, NV_FMCP_OFF_BOOTTGT, GSP_DMA_TARGET_COHERENT_SYSTEM);
-      st32(a, NV_FMCP_OFF_RMTGT, GSP_DMA_TARGET_COHERENT_SYSTEM);
+      st32(a, NV_FMCP_OFF_BOOTTGT, nv_fmc_args_dma_target(NV_FMC_CACHE_CACHED));
+      st32(a, NV_FMCP_OFF_RMTGT, nv_fmc_args_dma_target(NV_FMC_CACHE_UNCACHED));
       st64(a, NV_FMCP_OFF_RMARGS, nv_dma_bus(&m_libos));
       if (mode == 22) {
         st64(c, NV_COT_OFF_FRTS_VID, 0x4000000ULL);
@@ -2723,8 +2872,8 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
     a[NV_FMCP_OFF_ISRMBOOT] = 1;
     st32(a, NV_FMCP_OFF_DESCSIZE, RM_WPRM_BYTES);
     st64(a, NV_FMCP_OFF_DESCOFF, nv_dma_bus(&m_wprm));
-    st32(a, NV_FMCP_OFF_BOOTTGT, GSP_DMA_TARGET_COHERENT_SYSTEM);
-    st32(a, NV_FMCP_OFF_RMTGT, GSP_DMA_TARGET_COHERENT_SYSTEM);
+    st32(a, NV_FMCP_OFF_BOOTTGT, nv_fmc_args_dma_target(NV_FMC_CACHE_CACHED));
+    st32(a, NV_FMCP_OFF_RMTGT, nv_fmc_args_dma_target(NV_FMC_CACHE_UNCACHED));
     st64(a, NV_FMCP_OFF_RMARGS, nv_dma_bus(&m_libos));
     st64(c, NV_COT_OFF_FRTS_VID, (mode == 22) ? 0x4000000ULL : 0);
     st32(c, NV_COT_OFF_FRTS_VSIZE, (mode == 22) ? 0x100000u : 0);
@@ -2941,8 +3090,8 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
       a[NV_FMCP_OFF_ISRMBOOT] = 1;
       st32(a, NV_FMCP_OFF_DESCSIZE, RM_WPRM_BYTES);
       st64(a, NV_FMCP_OFF_DESCOFF, nv_dma_bus(&m_wprm));
-      st32(a, NV_FMCP_OFF_BOOTTGT, GSP_DMA_TARGET_COHERENT_SYSTEM);
-      st32(a, NV_FMCP_OFF_RMTGT, GSP_DMA_TARGET_COHERENT_SYSTEM);
+      st32(a, NV_FMCP_OFF_BOOTTGT, nv_fmc_args_dma_target(NV_FMC_CACHE_CACHED));
+      st32(a, NV_FMCP_OFF_RMTGT, nv_fmc_args_dma_target(NV_FMC_CACHE_UNCACHED));
       st64(a, NV_FMCP_OFF_RMARGS, nv_dma_bus(&m_libos));
       st64(c, NV_COT_OFF_FRTS_VID, 0x4000000ULL);
       st32(c, NV_COT_OFF_FRTS_VSIZE, 0x100000u);
@@ -3171,6 +3320,12 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
     }
   }
 
+  /* A8: the log channel after the COT.  This is the row the next authorised
+   * boot spends its budget to read: per task, put/records and whether the
+   * region still describes a valid NVLOG buffer.  Read from sysmem, not from a
+   * register, and printed for every mode (mode 4 has no regions by design). */
+  rm_log_row("log-after", logs_ok ? &m_logs : 0);
+
   rm_p("verdict=");
   uart_puts(initdone ? "rm-answers" : (linked ? "rm-linked-no-initdone"
                                               : (lock_released ? "fmc-or-rm-window-open"
@@ -3188,6 +3343,7 @@ int nv_fsp_rm_boot(struct nv_dev *d) {
   pkv(" rm_last", nv_rd32(d, NV_GSP_BASE + NV_GSP_FALCON_RM));
   pkv(" fmcerr_last", rm_fmc_error_raw(d));
   pki(" radix3", radix3_ok);
+  pki(" logs", logs_ok);
   pe();
   rm_fmc_error_row(d, "verdict");
 
@@ -3196,6 +3352,7 @@ out:
   nv_dma_free(&m_rmimg);
   nv_dma_free(&m_sig);
   nv_dma_free(&m_bootimg);
+  nv_dma_free(&m_logs);
   nv_dma_free(&m_libos);
   nv_dma_free(&m_rmargs);
   nv_dma_free(&m_wprm);
