@@ -514,6 +514,8 @@ struct t_reg {
   uint32_t w_off[16]; /* the write log, in order (a write to an existing   */
   uint32_t w_val[16]; /* offset must still be recorded: that is the row)    */
   int writes;
+  int reads;     /* how many rd32 calls the code under test made: a guard that
+                  * returns early is visible as a smaller number */
   int read_only; /* wr32 counts but does not store: a read-back mismatch */
 };
 
@@ -531,6 +533,7 @@ static void t_reg_set(struct t_reg *m, uint32_t off, uint32_t val) {
 
 static uint32_t t_reg_rd32(void *ctx, uint32_t off) {
   struct t_reg *m = (struct t_reg *)ctx;
+  m->reads++;
   int i = t_reg_find(m, off);
   return i < 0 ? 0 : m->val[i];
 }
@@ -616,6 +619,24 @@ TEST(test_nv_gsp_time_write_gated_on_fsp_version) {
   t_reg_set(&m, 0x118F54u, 0);
   t_reg_set(&m, 0x118F58u, 0);
   t_reg_set(&m, NV_FALCON_GSP_BASE + 0x334u, 0x44Bu);
+  EXPECT_EQ(nv_gsp_set_gpu_time_at(&d, 10000000000ULL), 0);
+  EXPECT_EQ(m.writes, 0);
+
+  /* MEASURED rm68: the version word answered 0xBADF4100, the decoupler code,
+   * not a version.  ">= 0x44C" accepted it and the row printed wrote=1; the
+   * gate must refuse the word itself and write nothing. */
+  t_reg_dev(&d, &m);
+  t_reg_set(&m, 0x118F54u, 0);
+  t_reg_set(&m, 0x118F58u, 0);
+  t_reg_set(&m, NV_FALCON_GSP_BASE + 0x334u, 0xBADF4100u);
+  EXPECT_EQ(nv_gsp_set_gpu_time_at(&d, 10000000000ULL), 0);
+  EXPECT_EQ(m.writes, 0);
+
+  /* A word above the version space is refused the same way. */
+  t_reg_dev(&d, &m);
+  t_reg_set(&m, 0x118F54u, 0);
+  t_reg_set(&m, 0x118F58u, 0);
+  t_reg_set(&m, NV_FALCON_GSP_BASE + 0x334u, 0xFFFFFFFFu);
   EXPECT_EQ(nv_gsp_set_gpu_time_at(&d, 10000000000ULL), 0);
   EXPECT_EQ(m.writes, 0);
 }
@@ -955,6 +976,97 @@ TEST(test_nv_gsp_libos_log_set_matches_the_vendor) {
   }
 }
 
+/* ---- the PFB census and A5's version gate, both no-card ----------------
+ * Two defects the rm68 boot exposed in what a boot can report (t_cacffe28):
+ *   - the census rows vanished behind nv_gsp_probe()'s presence guard, on a
+ *     part (GB202) whose falcon window never decodes;
+ *   - A5's ">= 0x44C" gate accepted 0xBADF4100, the decoupler code, as a
+ *     version and wrote the offset anyway.
+ * Both are pinned here because neither is observable without a card at boot
+ * time -- the unit tier is what makes them a measurement instead of a promise.
+ */
+
+TEST(test_nv_gsp_pfb_census_survives_an_absent_falcon_window) {
+  uart_puts("  Running test_nv_gsp_pfb_census_survives_an_absent_falcon_window...\n");
+  tests_run++;
+
+  struct t_reg m;
+  struct nv_dev d;
+  t_reg_dev(&d, &m);
+  /* rm67's measured values (5090-gb202fsp-rm67.log:340-343). */
+  t_reg_set(&m, 0x1FA824u, 0x7FFFFE00u); /* WPR2_ADDR_LO */
+  t_reg_set(&m, 0x1FA828u, 0x00000000u); /* WPR2_ADDR_HI */
+  t_reg_set(&m, 0x1FA7C8u, 0x884CB8Fu);  /* READ_PROTECTION */
+  t_reg_set(&m, 0x1FA804u, 0x7FFFF000u); /* MOVES_A */
+  t_reg_set(&m, 0x1FA808u, 0x00000000u); /* MOVES_B */
+  EXPECT_EQ(d.falcon[NV_FALCON_IDX_GSP].present, 0);
+
+  struct nv_gsp_pfb_census c;
+  EXPECT_EQ(nv_gsp_pfb_census_read(&d, &c), 0);
+  EXPECT_EQ((int)c.wpr2_lo, (int)0x7FFFFE00u);
+  EXPECT_EQ((int)c.wpr2_hi, 0);
+  EXPECT_EQ((int)c.readprot, (int)0x884CB8Fu);
+  EXPECT_EQ((int)c.moves_a, (int)0x7FFFF000u);
+  EXPECT_EQ((int)c.span_kib, 0);
+  EXPECT_EQ(c.verdict, NV_PFB_VERDICT_HI_ZERO);
+
+  /* The probe still refuses the falcon side exactly as before (-ENODEV), but
+   * it reads and prints the census before that guard and writes nothing. */
+  EXPECT_EQ(nv_gsp_probe(&d), -ENODEV);
+  EXPECT_EQ(m.writes, 0);
+
+  /* The other two verdicts: a pair with READ_PROTECTION_LEVEL0 set is "not a
+   * state oracle"; the same pair without the bit decodes and reports its span
+   * as (hi - lo) * 4 KiB. */
+  t_reg_set(&m, 0x1FA828u, 0x7FFFFF00u);
+  EXPECT_EQ(nv_gsp_pfb_census_read(&d, &c), 0);
+  EXPECT_EQ(c.verdict, NV_PFB_VERDICT_NOT_ORACLE);
+  EXPECT_EQ((int)c.span_kib, 1024);
+  t_reg_set(&m, 0x1FA7C8u, 0x00000000u);
+  EXPECT_EQ(nv_gsp_pfb_census_read(&d, &c), 0);
+  EXPECT_EQ(c.verdict, NV_PFB_VERDICT_SPAN);
+  EXPECT_EQ(nv_gsp_pfb_census_read(0, &c), -EINVAL);
+
+  /* The second reason the falcon-side words can be unreadable: the window IS
+   * on the part's map (present) but its control word answers the decoupler
+   * fence.  Probe must name that reason, not report fenced mailboxes as state. */
+  struct nv_dev d2;
+  struct t_reg m2;
+  t_reg_dev(&d2, &m2);
+  t_reg_set(&m2, 0x1FA824u, 0x7FFFFE00u);
+  t_reg_set(&m2, 0x1FA828u, 0x00000000u);
+  t_reg_set(&m2, NV_FALCON_GSP_BASE + 0x1668u, 0xBADF5620u); /* BCR_CTRL fenced */
+  t_reg_set(&m2, NV_FALCON_GSP_BASE + 0x040u, 0xDEADBEEFu);  /* "mailbox" */
+  d2.falcon[NV_FALCON_IDX_GSP].present = 1;
+  EXPECT_EQ(nv_gsp_probe(&d2), -ENODEV);
+  EXPECT_EQ(m2.writes, 0);
+  /* Five census reads then one BCR read, and nothing after it: the fenced
+   * branch returned before it could print a fenced word as a mailbox. */
+  EXPECT_EQ(m2.reads, 6);
+}
+
+TEST(test_nv_gsp_ucode_gate_names_its_refusals) {
+  uart_puts("  Running test_nv_gsp_ucode_gate_names_its_refusals...\n");
+  tests_run++;
+
+  const char *why = 0;
+  /* A version passes, including the vendor's own fix version and one below it
+   * (being older than the bug fix is the vendor's separate comparison). */
+  EXPECT_EQ(nv_gsp_ucode_version_trusted(0x0000044Cu, &why), 1);
+  EXPECT_EQ(why == 0, 1);
+  EXPECT_EQ(nv_gsp_ucode_version_trusted(0x0000044Bu, &why), 1);
+  /* The three refusals, each named, because they mean different things. */
+  EXPECT_EQ(nv_gsp_ucode_version_trusted(0xBADF4100u, &why), 0);
+  EXPECT_EQ(t_streq8(why, "fence"), 1);
+  EXPECT_EQ(nv_gsp_ucode_version_trusted(0xFFFFFFFFu, &why), 0);
+  EXPECT_EQ(t_streq8(why, "out-of-range"), 1);
+  EXPECT_EQ(nv_gsp_ucode_version_trusted(0u, &why), 0);
+  EXPECT_EQ(t_streq8(why, "unset"), 1);
+  /* A caller that only wants the answer may pass no reason pointer. */
+  EXPECT_EQ(nv_gsp_ucode_version_trusted(0xBADF4100u, 0), 0);
+  EXPECT_EQ(nv_gsp_ucode_version_trusted(0x44Cu, 0), 1);
+}
+
 void nv_gsp_glue_test_suite(void) {
   test_nv_gsp_rpc_setup_allocates_the_whole_block();
   test_nv_gsp_rpc_pte0_is_the_bus_address_nv_dma_issued();
@@ -974,6 +1086,8 @@ void nv_gsp_glue_test_suite(void) {
   test_nv_gsp_nvlog_header_rejects_zeroed();
   test_nv_gsp_nvlog_region_snapshot();
   test_nv_gsp_libos_log_set_matches_the_vendor();
+  test_nv_gsp_pfb_census_survives_an_absent_falcon_window();
+  test_nv_gsp_ucode_gate_names_its_refusals();
 }
 
 #endif /* __x86_64__ */

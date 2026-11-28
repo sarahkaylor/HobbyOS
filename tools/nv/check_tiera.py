@@ -175,6 +175,68 @@ check("rm_log_row(\"log-setup\"" in COT and "rm_log_row(\"log-after\"" in COT an
 check("stage=log[" in GSP,
       "A8 the kernel stage-8 path prints the same per-region header rows")
 
+# ---- the boot's own reporting: PFB census and A5's gate (t_cacffe28) --------
+# Two defects rm68 exposed in what a boot can report, both no-card:
+#   1. nv_gsp_probe() returned at the falcon-presence guard before the PFB
+#      reads, so a GB202 boot (falcons=0x0000000000000000) printed none of
+#      rm67's :340-343 rows -- grep -c '[NV-GSP] probe wpr2' was 2 in rm67 and
+#      0 in rm68.  The census is a PFB read and must precede the guard.
+#   2. A5's ">= 0x44C" accepted 0xBADF4100, the decoupler code, as a version.
+probe = GSP[GSP.index("int nv_gsp_probe(struct nv_dev *d) {"):]
+probe = probe[:probe.index("\n}\n")]
+check("nv_gsp_pfb_census_read(d, &census)" in probe and
+      "nv_gsp_pfb_census_print(&census)" in probe,
+      "the probe reads and prints the PFB census")
+check(probe.index("nv_gsp_pfb_census_print(&census)") <
+      probe.index("if (!d->falcon[NV_FALCON_IDX_GSP].present) {"),
+      "the census prints BEFORE the falcon-presence guard (rm68 printed none)")
+check("no gsp window (not-present)" in probe and
+      "no gsp window (fenced)" in probe,
+      "the no-gsp-window row names which reason fired (not-present vs fenced)")
+check('uart_puts("[NV-GSP] probe wpr2 lo=")' in GSP and
+      'uart_puts(" readprot=")' in GSP and
+      'uart_puts("[NV-GSP] probe wpr2 span_kib=")' in GSP and
+      'uart_puts("[NV-GSP] probe moves a=")' in GSP and
+      "verdict=hi-is-zero" in GSP and "verdict=not-a-state-oracle" in GSP,
+      "the census keeps rm67's fields and wording (lo/hi, readprot, span_kib, "
+      "moves a/b, verdict)")
+check("nv_is_badf(raw)" in GSP,
+      "A5's gate refuses a 0xBADF_xxxx word before it is compared as a version")
+check("NV_FSP_UCODE_VERSION_MAX 0xFFFFu" in GLUE and
+      "nv_gsp_ucode_version_trusted" in GLUE and
+      "struct nv_gsp_pfb_census" in GLUE,
+      "the gate's bounds and the census are exported to the unit tier")
+check('" ucode_gate="' in GSP and '" ucode_reject="' in GSP and
+      '" fsp_ucode="' in GSP,
+      "A5's row names the raw word and says passed, or not-passed and why")
+check("if (rc == 0 && trusted && ucode >= RM_FSP_BUG_3957833_FIX_VERSION)" in GSP,
+      "the write needs the trusted word AND the vendor's 0x44C comparison")
+
+# ---- and the rows the unit tier actually printed (committed evidence) ------
+# The two defects above are about what a boot CAN report, so a source-text gate
+# is not enough on its own: the tier's own console must show the census rows
+# with falcon.present == 0 and the gate's three answers.  The log is committed
+# under evidence/nv/ so this assertion is reproducible without a card or a boot.
+TIER = os.path.join(TREE, "evidence/nv/gb202-census-gate-tier-intel.log")
+if os.path.exists(TIER):
+    T = open(TIER, errors="replace").read().replace("\r\n", "\n")
+    check(T.count("[NV-GSP] no gsp window (not-present)") >= 1,
+          "the intel tier log prints the not-present reason")
+    check("[NV-GSP] probe wpr2 lo=0x000000007FFFFE00 hi=0x0000000000000000 "
+          "readprot=0x000000000884CB8F" in T,
+          "the tier log carries rm67's own census values from a device with no "
+          "GSP window")
+    check("fsp_ucode=0x000000000000044C ucode_gate=passed wrote=1" in T,
+          "the tier log shows a normal 0x44C passing the gate and writing")
+    check("fsp_ucode=0x00000000BADF4100 ucode_gate=not-passed "
+          "ucode_reject=fence wrote=0" in T,
+          "the tier log shows 0xBADF4100 refused as a fence, named, with no write")
+    check("fsp_ucode=0x00000000FFFFFFFF ucode_gate=not-passed "
+          "ucode_reject=out-of-range wrote=0" in T,
+          "the tier log shows an out-of-range word refused, named, with no write")
+else:
+    check(False, "evidence/nv/gb202-census-gate-tier-intel.log is committed")
+
 # ---- the unit cases that exercise each helper ------------------------------
 for case in ("test_nv_gsp_falcon_os_write_read_back",
              "test_nv_gsp_peer_link_is_one_shot",
@@ -185,7 +247,9 @@ for case in ("test_nv_gsp_falcon_os_write_read_back",
              "test_nv_gsp_nvlog_header_round_trip",
              "test_nv_gsp_nvlog_header_rejects_zeroed",
              "test_nv_gsp_nvlog_region_snapshot",
-             "test_nv_gsp_libos_log_set_matches_the_vendor"):
+             "test_nv_gsp_libos_log_set_matches_the_vendor",
+             "test_nv_gsp_pfb_census_survives_an_absent_falcon_window",
+             "test_nv_gsp_ucode_gate_names_its_refusals"):
     check(("TEST(%s)" % case) in TEST,
           "unit case %s exists" % case)
 check(all(("  %s();" % c) in TEST for c in
@@ -198,8 +262,10 @@ check(all(("  %s();" % c) in TEST for c in
            "test_nv_gsp_nvlog_header_round_trip",
            "test_nv_gsp_nvlog_header_rejects_zeroed",
            "test_nv_gsp_nvlog_region_snapshot",
-           "test_nv_gsp_libos_log_set_matches_the_vendor")),
-      "all ten Tier A cases are registered in the suite")
+           "test_nv_gsp_libos_log_set_matches_the_vendor",
+           "test_nv_gsp_pfb_census_survives_an_absent_falcon_window",
+           "test_nv_gsp_ucode_gate_names_its_refusals")),
+      "all twelve Tier A cases are registered in the suite")
 
 print()
 print("assertions %d failures %d" % (n[0], len(fails)))
