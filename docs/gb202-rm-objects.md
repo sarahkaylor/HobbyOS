@@ -1,4 +1,660 @@
-# GB202 (RTX 5090 `41:00.0`, VM 313) — every FMC / boot-image / ACR blob reachable, and the two abort points
+# GB202 (RTX 5090 `41:00.0`, VM 313) — the three RM objects, as mock objects
+
+Card **`t_c5453775`**, child of the wall card `t_a769beaa`. This file answers the
+card's question for three objects — a **channel**, a **VA space**, an **engine
+class** — in the form the owner re-scoped it to on 2026-11-28T05:44Z: all three
+objects are minted by the **mock** RM behind `/dev/nvshim`, and every row and
+every sentence about them says `mock`. **Zero GB202 boots were run**: the boot
+campaign was stopped at 06:00Z, and VM 300 / 313 / 314 / 315 were not started by
+any card in this spine.
+
+**Part identity, stated once and true of every row in Part I: GB202, `41:00.0`,
+VM 313.** NVIDIA GB202 [GeForce RTX 5090], `10de:2b85`, at PCI `41:00.0`, owned
+by VM 313 (`hobbyos-nv5090`). Read-only, with nothing booted
+(2026-11-28T06:54:55Z; commands and output exactly as `r1` printed them):
+
+```
+$ qm config 313 | grep -E "^(cores|memory|name|hostpci0):"
+cores: 8
+hostpci0: 0000:41:00,pcie=1
+memory: 16384
+name: hobbyos-nv5090
+$ lspci -nn -s 41:00.0
+41:00.0 VGA compatible controller [0300]: NVIDIA Corporation GB202 [GeForce RTX 5090] [10de:2b85] (rev a1)
+```
+
+VM 300, for contrast, still passes through `0000:01:00` — the AD102:
+`hostpci0: 0000:01:00,pcie=1`. **No object in this document was created on
+either card.** The runs that produced the rows are the unit-tier guests (x86-64
+and AArch64, QEMU TCG, no PCI passthrough), which is why every handle below is a
+mock handle and the one physical address is pool RAM.
+
+**What this file is not.** Nothing here may be quoted as "GSP-RM allocated", a
+"firmware handle", a VRAM address, or L3 evidence — the owner's re-scope forbids
+each of those. The firmware version of this claim stays parked on the GB202 ACR
+wall `t_a769beaa` (revive condition R2: a GSP-RM peer appears), which is Part II
+of this file.
+
+**Two parts, two numbering schemes.** **Part I** (§0–§10) is the three mock
+objects. **Part II** is the wall card's FMC corpus record, kept unchanged with
+its own section numbers (§0–§13); a bare "§13.5" below means the wall record's.
+
+---
+
+## 0. The result, in six lines
+
+1. **All three objects allocated — as mock objects.** Channel `ch=1`, VA space
+   `vm=1`, engine class `handle=1`. Each handle is quoted below from the log line
+   that printed it, and each was stamped by the mock RM's own counter, not by
+   the client.
+2. **The firmware hypothesis is falsified as written and was not attempted.**
+   There is no GSP-RM peer on GB202 to ask: the wall's ladder ends at
+   `MAILBOX0=0x0B` / `0x824` with `linked=0 initdone=0 statq_written=0` (Part II,
+   §0). Zero boots; no mock reply is offered as a firmware reply.
+3. **No `NV_VGPU_MSG_*` message id is used anywhere.** The ids that are on the
+   path are `NVSHIM_IOC_*` requests on the HobbyOS `'N'` face and their DRM-face
+   sub-numbers, each named with `file:line` (§6).
+4. **The VA space's physical address reads back, and it is pool RAM, not VRAM**:
+   `phys=0x209686000` on intel TCG, `phys=0x8ef46000` on ARM — two platforms,
+   two real addresses, which is what a read-back looks like and what a retyped
+   constant would not.
+5. **No GPU-visible layout number is consumed by these objects, and no GB202
+   layout number is claimed.** `docs/nv-plan.md` §2.7's `gpc=11 tpc=64
+   src=register` is an **AD102** measurement (`t_78a50be7`, `vmid=300`); no GB202
+   boot log in this tree carries that row, so this document does not copy it to
+   GB202 (§8).
+6. **Clean closing state for every run named here**: VM 313 `stopped`, VM 300
+   `stopped`, `pgrep -c qemu-system-x86` = 0, re-measured at 06:54:55Z; the GB202
+   guest's files still carry the previous boot's mtime (05:39:01Z), so nothing in
+   this spine wrote them (§9).
+
+---
+
+## 1. The three hypotheses, and their verdicts
+
+Each object card was written as a **firmware** hypothesis ("Boot GB202 and
+allocate … from GSP-RM"). The owner re-scoped all three on 2026-11-28T05:44Z
+(mock RM is acceptance; the firmware claim stays parked) and stopped the boot
+campaign at 06:00Z. So each hypothesis is recorded here as it was written, and
+the verdict is the same shape for all three:
+
+| object | named hypothesis (as the card was written) | verdict | what was delivered instead |
+|---|---|---|---|
+| channel | "GSP-RM on GB202 allocates a channel object for our driver, and the handle comes from firmware, not the mock RM." | **falsified as written; not attempted** (0 boots, no peer) | mock channel object `ch=1` through `NVSHIM_IOC_CHANNEL_ALLOC` |
+| VA space | "GSP-RM on GB202 allocates a VA space object for our driver and a VA bound through it resolves to a real VRAM physical address readable back from the mapping." | **falsified as written; not attempted** (0 boots, no VRAM) | mock VA space `vm=1` + a binding whose address the RM's own walk answers |
+| engine class | "GSP-RM on GB202 allocates one engine class object for our driver, with the handle coming from firmware." | **falsified as written; not attempted** (0 boots, no peer) | mock engine class `handle=1` on `ch=1`, class `0xC7B5` |
+
+**Step 6 of this card's body is superseded, and this file obeys the newer
+instruction.** The body said: "explicitly state that every object came from
+firmware and that no mock/synthetic object is being claimed as acceptance." The
+owner's 05:44Z comment inverts it: the mock *is* acceptance for these objects,
+every row and sentence must say `mock`, and no result here may be quoted as
+"GSP-RM allocated" or as L3 evidence. This document says so once here, says
+`mock` on every row, and does not claim a firmware allocation anywhere.
+
+---
+
+## 2. The invocation for each object — zero boots, and what ran instead
+
+The card body's "boot invocation" line is the wall harness's GB202 boot, which
+**was not run**. For the record, that invocation looks like this (quoted from the
+wall's own log header, `ATT/t_a769beaa/5090-gb202fsp-rm50.log:1-3`):
+
+```
+# [NV-GB202FSP] boot 2026-11-26T07:22:49Z
+# image=/home/nvcard/.hermes/kanban/boards/hobbyos-nv/workspaces/t_a769beaa/rm50.img sha256=e5163852fb…
+# tag=rm50 vm=313 hostpci0=0000:41:00
+```
+
+The invocation that actually produced every row in this document is the **unit
+tier** — the kernel's own test image booted under QEMU, TCG, no passthrough. The
+scripts print their own banner, quoted from the top of each log
+(`ATT/…/unit-tier-*.log:1`): `Running unit tests with QEMU_ARGS: ` — the argument
+list is empty, so no host device was handed to the guest.
+
+| object | tested tree (source sha) | intel (x86-64, TCG) | ARM (AArch64, TCG) | verdict rows | log |
+|---|---|---|---|---|---|
+| channel | `fd69e681` on `f7c2a714` | `TOOLS_SKIP=1 SKIP_KVM=1 ./run_unit_tests_intel.sh` | `TOOLS_SKIP=1 ./run_unit_tests.sh` | intel **621/0**, ARM **486/0** | `unit-tier-intel-chan.log:3205-3207`, `unit-tier-arm-chan.log:2463-2465` |
+| VA space | `7faed719` on `ef591e93` (merge `8c22fe17`) | `TOOLS_SKIP=1 BROWSER_SKIP=1 SKIP_KVM=1 UNIT_TESTS_TIMEOUT=1200 ./run_unit_tests_intel.sh` | `TOOLS_SKIP=1 BROWSER_SKIP=1 UNIT_TESTS_TIMEOUT=1200 ./run_unit_tests.sh` | intel **623/0**, ARM **486/0** | `unit-tier-intel-vm.log:3242-3244`, `unit-tier-arm-vm.log:2482-2484` |
+| engine class | `5e0887a7` on `63a44fab` (merge `1c0c3c0f`) | same as VA row | same as VA row | lane 621/0 · 486/0; merged tip intel **623/0** | `unit-tier-intel-ec.log:3210-3212`, `unit-tier-arm-ec.log:2470-2472`, `unit-tier-intel-merged.log:3226-3228` |
+
+Where a row was re-verified on the merged tip, the cite is given with the quote.
+The tier runs are guest boots of the *unit-test* image; **none of them is a GB202
+boot**, and none of them touched `41:00.0`.
+
+---
+
+## 3. Object 1 — the channel object (`ch=1`)
+
+### 3.1 The rows, quoted verbatim
+
+Request — `ATT/t_17ca89e5/unit-tier-intel-chan.log:2350` (MEASURED):
+
+```
+[NVSHIM] channel req mock=1 ioc=channel_alloc vm=1 pushbuf=0x209686000 size=0x10000
+```
+
+Response, and the handle — same log `:2351` (MEASURED):
+
+```
+[NVSHIM] channel rsp mock=1 ch=1 engine=1
+```
+
+**The handle is `ch=1`**, quoted from the reply row, not from a summary. ARM
+printed the same pair at `unit-tier-arm-chan.log:1637-1638`, with that tier's own
+push-buffer address:
+
+```
+[NVSHIM] channel req mock=1 ioc=channel_alloc vm=1 pushbuf=0x8ef46000 size=0x10000
+[NVSHIM] channel rsp mock=1 ch=1 engine=1
+```
+
+The `mock=1` on the reply is not decoration — the line above the pair is the
+node's provenance (`:2341`, `:2342`, MEASURED):
+
+```
+[NVSHIM] device dev=1 chipset=0x192 pci=0x2684 mock=1 feats=0x1ff
+[NVSHIM] getparam refused param=14 reason=mock_has_no_card
+```
+
+`chipset=0x192 pci=0x2684` is the mock's **declared** AD102 identity; it read no
+card, and says so on the next line.
+
+A second allocation in the same boot proves the handle is the RM's counter
+(`:2391-2392`, MEASURED):
+
+```
+[NVSHIM] channel req mock=1 ioc=channel_alloc vm=1 pushbuf=0x209685000 size=0x10000
+[NVSHIM] channel rsp mock=1 ch=2 engine=1
+```
+
+The stock client's face mints the same kind of object (`:2426-2427`, `:2440`,
+MEASURED):
+
+```
+[NVSHIM] drm channel req mock=1 ioc=drm_channel_alloc vm=1 pushbuf=0x209696000 size=0x10000
+[NVSHIM] drm channel rsp mock=1 ch=1 pushbuf=0x209696000 size=0x10000
+[NVSHIM] drm channel_free mock=1 ch=1
+```
+
+ARM: `unit-tier-arm-chan.log:1713-1714`, `:1727`.
+
+### 3.2 The ids used
+
+* `NVSHIM_IOC_CHANNEL_ALLOC` — `src/include/nv_shim.h:308` in the merged tree
+  (`:277` in the tree this card tested, before the VA and engine-class rows
+  shifted the header):
+  `NVSHIM_IOWR(NVSHIM_IOC_MAGIC, 8, struct nvshim_channel)`, with
+  `#define NVSHIM_IOC_MAGIC 'N'` (`nv_shim.h:106`). This is the request the row
+  above names `ioc=channel_alloc`.
+* DRM face: `NVSHIM_DRM_NOUVEAU_CHANNEL_ALLOC = 0x02` (`src/include/nv_drm_uapi.h:545`),
+  encoded as `NVSHIM_DRM_IOC_CHANNEL_ALLOC` (`:573-575`) and named in the row
+  as `ioc=drm_channel_alloc`.
+* **No `NV_VGPU_MSG_*` id.** The mock has no message protocol — no queue, no
+  packet, no console — and nothing on this path sends one (§6).
+
+### 3.3 Where the handle comes from
+
+SOURCE, `src/kernel/nv_rm_mock.c:514-546` (`mock_channel_create`): the request is
+validated against the mock's own tables, the first free slot is taken, and
+`c->id = (uint32_t)++g_mock.next_ch;` (`:539`). The interface is named `"mock"`
+(`nv_rm_mock.c:833`) and the node is bound to it wholesale
+(`nv_shim.c`, `static const struct nv_rm_if *rm(void) { return nv_rm_mock_if(); }`).
+`ch=1` is an index in `g_mock.ch[]`, not a GSP-RM object.
+
+---
+
+## 4. Object 2 — the VA space object (`vm=1`) and the address it resolves
+
+### 4.1 The rows, quoted verbatim
+
+Request and response — `ATT/t_b9c4df6d/unit-tier-intel-vm.log:2361-2362`
+(MEASURED):
+
+```
+[NVSHIM] vm req mock=1 ioc=vm_init size=0x100000000
+[NVSHIM] vm rsp mock=1 vm=1 size=0x100000000
+```
+
+**The VA space handle is `vm=1`.** ARM: `unit-tier-arm-vm.log:1630-1631`;
+merged tip intel: `unit-tier-intel-merged.log:2356-2357`.
+
+The two bind rows — request, then the reply that carries the address the RM's
+walk answered (`:2363-2364`, MEASURED):
+
+```
+[NVSHIM] vm_bind req mock=1 ioc=vm_bind vm=1 op=0 va=0x10000000 range=0x10000 handle=1 bo_offset=0x0
+[NVSHIM] vm_bind rsp mock=1 op=0 va=0x10000000 range=0x10000 phys=0x209686000 bus=0x209686000 mapped=0x10000
+```
+
+**The physical address read back is `phys=0x209686000`** (intel TCG). ARM, same
+request, its own frame (`unit-tier-arm-vm.log:1632-1633`, MEASURED):
+
+```
+[NVSHIM] vm_bind req mock=1 ioc=vm_bind vm=1 op=0 va=0x10000000 range=0x10000 handle=1 bo_offset=0x0
+[NVSHIM] vm_bind rsp mock=1 op=0 va=0x10000000 range=0x10000 phys=0x8ef46000 bus=0x8ef46000 mapped=0x10000
+```
+
+Merged tip intel reproduces the intel pair byte for byte at
+`unit-tier-intel-merged.log:2358-2359`. `op=0` is `NVSHIM_VM_BIND_OP_MAP`,
+`handle=1` is the 64 KiB memory object the probe allocated, `bo_offset=0x0`,
+`range=0x10000` covers it whole; `mapped=0x10000` is the walk's extent from `va`.
+
+**Why this is a measurement and not a constant.** The two tiers differ — that is
+the point: each address is the first frame of the run `nv_dma_alloc` handed that
+tier's pool. It is answered by the RM's own walk of the binding, not echoed from
+the request: `struct nvshim_vm_bind` has **no address field of any kind**
+(`src/include/nv_shim.h:228`), so the client cannot even offer one.
+
+The walk translates rather than repeating. The argument suite binds one object at
+two VAs and each resolves through its own binding (`:2417`, `:2420`, MEASURED):
+
+```
+[NVSHIM] vm_bind rsp mock=1 op=0 va=0x1000 range=0x1000 phys=0x209685000 bus=0x209685000 mapped=0x1000
+[NVSHIM] vm_bind rsp mock=1 op=0 va=0x3ffff000 range=0x1000 phys=0x209685000 bus=0x209685000 mapped=0x1000
+```
+
+and the tier holds it to values, not to prose (SOURCE,
+`src/kernel/nv_shim_test.c:313-334`, `:449`): `vm_resolve(0x10000000)` returns
+`phys != 0`, `mapped == 0x10000`, `bus == phys`; `vm_resolve(0x10002000)` returns
+`phys + 0x2000` with `mapped == 0x10000 - 0x2000`; a hole and a VA at the space's
+size are `-EINVAL`; and a store of `0x5a5aa5a5` **at the resolved physical
+address** is read back through the RM's object handle at the same offset
+(`nv_rm_mock_read_bo`), so the answer names the object's bytes.
+
+The same `vm=1` appears again for the second and third probe in that boot
+(`:2400-2401`, `:2414-2415`, MEASURED, both with `size=0x40000000`) because each
+probe is a separate device lifetime: the last `device_close` calls `mock_reset()`
+(SOURCE: `src/kernel/nv_rm_mock.c:175-185`, called at `:265`), which zeroes the
+counters.
+They are sequential first-spaces, not three concurrent spaces sharing a handle.
+
+Refusals are named, not silent (`:2366`, `:2422`, `:2423`, `:2424`, MEASURED):
+
+```
+[NVSHIM] vm_bind refused mock=1 va=0x10000000 range=0x10000 op=0 rm=-22
+[NVSHIM] vm_bind refused mock=1 va=0x40000000 range=0x1000 op=0 rm=-22
+[NVSHIM] vm_bind refused mock=1 handle=1 reason=not_this_clients_object
+[NVSHIM] vm_bind refused mock=1 va=0x30000 range=0x1000 op=7 reason=geometry
+```
+
+An UNMAP has nothing left to name, so its reply carries no address (`:2383`,
+MEASURED): `[NVSHIM] vm_bind rsp mock=1 op=1 va=0x10000000 range=0x10000`.
+
+The stock client's face carries the same read-back (`:2460-2461`, MEASURED):
+
+```
+[NVSHIM] drm bind vm=1 ops=2 first_addr=0x10000 first_range=0x10000 phys=0x209685000 bus=0x209685000 mapped=0x10000
+[NVSHIM] drm bind vm=1 ops=1 first_addr=0x20000 first_range=0x1000
+```
+
+ARM: `unit-tier-arm-vm.log:1729-1730`. A batch whose first op is an UNMAP omits
+the field rather than answering zero.
+
+### 4.2 "VA → VRAM": the one sentence this document cannot write
+
+**These are not VA→VRAM bind rows.** The object's frames are `nv_dma_alloc`'s
+host pool RAM; GB202's VRAM is never allocated or addressed on this path. The
+honest label is **VA → physical address of a pool-RAM object**, and the tree's
+own header for the new seam says the same thing in the code
+(SOURCE, `src/include/nv_rm.h:174-176`):
+
+```
+   * This is the mock's stand-in for "a VA bound to VRAM resolves to a VRAM
+   * physical address": the object's frames are real pool RAM, not card VRAM,
+   * and no result here is evidence about the card. */
+```
+
+So the card body's "VA→VRAM bind rows" cannot be satisfied by this run, and this
+document says so rather than rephrasing the row to look like it did.
+
+### 4.3 The ids used
+
+* `NVSHIM_IOC_VM_INIT` — `src/include/nv_shim.h:306`:
+  `NVSHIM_IOWR(NVSHIM_IOC_MAGIC, 6, struct nvshim_vm_init)`; the row names it
+  `ioc=vm_init`.
+* `NVSHIM_IOC_VM_BIND` — `src/include/nv_shim.h:307`:
+  `NVSHIM_IOW(NVSHIM_IOC_MAGIC, 7, struct nvshim_vm_bind)`; the row names it
+  `ioc=vm_bind`.
+* Structures: `struct nvshim_vm_init` (`nv_shim.h:219`, `vm_id` is **out**) and
+  `struct nvshim_vm_bind` (`:228`, and no address field).
+* DRM face: `NVSHIM_DRM_NOUVEAU_VM_INIT = 0x10`, `NVSHIM_DRM_NOUVEAU_VM_BIND = 0x11`
+  (`src/include/nv_drm_uapi.h:553-554`).
+* **No `NV_VGPU_MSG_*` id.** For the parked path only (SOURCE, fetched —
+  `nouveau-r535-vmm.c`, attached): nouveau's `r535_mmu_vaspace_new()` makes the
+  VA space an RM allocation of class `FERMI_VASPACE_A` whose handle is
+  `vmm->rm.object.handle`, and programs the page directory with
+  `NV0080_CTRL_CMD_DMA_SET_PAGE_DIRECTORY` / `NV90F1_CTRL_CMD_VASPACE_COPY_SERVER_RESERVED_PDES`
+  — control commands, not `NV_VGPU_MSG_FUNCTION_*` ids. None of that was sent.
+
+### 4.4 Where the handle and the address come from
+
+SOURCE, `src/kernel/nv_rm_mock.c`: `mock_vm_create()` (`:393-421`) stamps
+`v->id = (uint32_t)++g_mock.next_vm` (`:405`); `mock_vm_resolve()` (`:480-510`)
+finds the range covering `va`, resolves its object and returns
+`a->phys + r->bo_offset + (va - r->va)` — where `a->phys` is the first byte of
+the run `mock_mem_alloc()` got from `nv_dma_alloc` (`:281`, stored at `:322`:
+`a->phys = m.phys;`). The seam is registered at `nv_rm_mock.c:842`
+(`g_rm_if.vm_resolve = mock_vm_resolve`). `vm=1` is an index in `g_mock.vm[]`,
+not a GSP-RM object.
+
+---
+
+## 5. Object 3 — the engine class object (`handle=1`)
+
+### 5.1 The rows, quoted verbatim
+
+Request — `ATT/t_7cf2e538/unit-tier-intel-ec.log:2349` (MEASURED):
+
+```
+[NVSHIM] engine_class req mock=1 ioc=engine_class_alloc ch=1 class=0xc7b5 name=ampere_dma_copy_b engine=copy1 alloc=ce_alloc
+```
+
+Response, and the handle — `:2350` (MEASURED):
+
+```
+[NVSHIM] engine_class rsp mock=1 ch=1 class=0xc7b5 handle=1
+```
+
+**The handle is `handle=1`.** ARM printed the same pair at
+`unit-tier-arm-ec.log:1639-1640`; the merged tip intel log at
+`unit-tier-intel-merged.log:2366-2367`, one line after the channel reply that
+created `ch=1` (`:2364-2365`).
+
+A second object proves the counter is the RM's, and the explicit free names the
+handle (`unit-tier-intel-ec.log:2351-2352`, `:2355`; ARM `:1641-1642`, `:1645`,
+MEASURED):
+
+```
+[NVSHIM] engine_class req mock=1 ioc=engine_class_alloc ch=1 class=0xc797 name=ampere_b_gr engine=eng3d alloc=rm_alloc
+[NVSHIM] engine_class rsp mock=1 ch=1 class=0xc797 handle=2
+[NVSHIM] engine_class free mock=1 handle=2
+```
+
+`handle=1` is deliberately left to its channel: `CHANNEL_FREE`'s cascade frees
+it, and `nv_rm_mock_live() == 0` after teardown is what proves the cascade ran.
+
+Refusals, named (`:2353-2354`, ARM `:1643-1644`, MEASURED):
+
+```
+[NVSHIM] engine_class refused class=0x1234 reason=no_such_class
+[NVSHIM] engine_class refused reason=not_this_clients_channel
+```
+
+### 5.2 The class asked for, and the wall this did not move
+
+`0xC7B5` is `NVSHIM_NVIF_CLASS_AMPERE_DMA_COPY_B`
+(`src/include/nv_nvif_uapi.h:221`), `ampere_dma_copy_b`, engine instance
+`copy1`, CE `ce_alloc` shape — the **first** engine class a stock nvk asks for
+(`nouveau_ws_context_find_class(classes, 0xb5)` takes the highest class whose low
+byte matches). The `0xC797` object exists only to show the counter moves.
+
+**The stock client is still refused, by name, in the same boot**
+(`unit-tier-intel-ec.log:2961`; merged tip `:2978`; ARM `:2251`, MEASURED):
+
+```
+[NVSHIM] nvif new refused class=0xc7b5 name=ampere_dma_copy_b need=gsp_rm missing=rm_chan_object alloc=ce_alloc engine=copy1
+```
+
+So nothing here says nvk gets past the engine-class object. The new rows are
+HobbyOS-only (`'N'` face); the NVIF path deliberately keeps answering
+`need=gsp_rm`.
+
+### 5.3 The ids used
+
+* `NVSHIM_IOC_ENGINE_CLASS_ALLOC` — `src/include/nv_shim.h:312`:
+  `NVSHIM_IOWR(NVSHIM_IOC_MAGIC, 18, struct nvshim_engine_class)`; row name
+  `ioc=engine_class_alloc`.
+* `NVSHIM_IOC_ENGINE_CLASS_FREE` — `src/include/nv_shim.h:314`:
+  `NVSHIM_IOW(NVSHIM_IOC_MAGIC, 19, struct nvshim_engine_class_free)`.
+* The class id: `NVSHIM_NVIF_CLASS_AMPERE_DMA_COPY_B 0x0000c7b5`
+  (`src/include/nv_nvif_uapi.h:221`); structure `struct nvshim_engine_class`
+  (`nv_shim.h:265`).
+* **No `NV_VGPU_MSG_*` id**, for the same reason as the other two objects: on the
+  real Ada path the object is an RM allocation under the channel's RM object
+  (`nvkm_gsp_rm_alloc`, CE through `rm->api->ce->alloc`), and no message is sent
+  here, so none is named.
+
+### 5.4 Where the handle comes from
+
+SOURCE, `src/kernel/nv_rm_mock.c:580-617` (`mock_engine_class_create`): the
+object must be requested on a live channel of the same device, the first free
+slot is taken, and `e->handle = ++g_mock.next_ec;` (`:608`). The object is
+parented on the channel; `mock_channel_destroy` frees every class object of that
+channel and `nv_rm_mock_live()` counts them, so a leak fails the tier.
+`handle=1` is an index in `g_mock.ec[]`, not a GSP-RM object.
+
+---
+
+## 6. The message ids: there are none, and naming one would be the fabrication the re-scope forbids
+
+**Zero `NV_VGPU_MSG_*` message ids were used by any of the three objects.** The
+mock has no message protocol: no queue, no packet, no console, and the shim's own
+comments say so at the three object entry points
+(`src/kernel/nv_shim.c:1231`, `:1317`, `:1527`).
+
+The whole tree contains **seven** occurrences of the string `NV_VGPU_MSG`
+(`grep -r NV_VGPU_MSG src/ | wc -l` = 7): six are comments
+(`src/include/nv_rm.h:70`, `src/kernel/nv_gsp.c:1148`,
+`src/kernel/nv_fsp_cot.c:1253`, `src/kernel/nv_shim.c:1231`, `:1317`, `:1527`)
+and one is an event name printed when the GSP-RM init event arrives
+(`src/kernel/nv_gsp.c:978`, `NV_VGPU_MSG_EVENT_GSP_INIT_DONE, 0x1001`).
+**None of them is a request any of these three objects makes**, and none is a
+reply. The parked firmware path's
+object ids, where they are known at all, are RM allocations and control commands
+(§4.3), not `NV_VGPU_MSG_FUNCTION_*` ids.
+
+The ids that *are* on the path, per object:
+
+| object | `'N'` face request | DRM face | message ids |
+|---|---|---|---|
+| channel | `NVSHIM_IOC_CHANNEL_ALLOC` (ioctl 8) | `NVSHIM_DRM_NOUVEAU_CHANNEL_ALLOC = 0x02` | none |
+| VA space | `NVSHIM_IOC_VM_INIT` (6), `NVSHIM_IOC_VM_BIND` (7) | `NVSHIM_DRM_NOUVEAU_VM_INIT = 0x10`, `…_VM_BIND = 0x11` | none |
+| engine class | `NVSHIM_IOC_ENGINE_CLASS_ALLOC` (18), `…_FREE` (19) | — (HobbyOS-only `'N'` face by design) | none |
+
+---
+
+## 7. GPU-visible layout numbers: none consumed, and none borrowed
+
+The card asks for "the measured GPU-visible layout number and how it was
+measured (explicitly note it was measured on GB202, not copied from AD102 per
+`docs/nv-plan.md` §2.7)". It gets three separate answers, because the honest
+answer is not one number.
+
+### 7.1 What these objects consume: no layout number at all
+
+A mock channel, a mock VA space and a mock engine class **consume no GPU-visible
+layout number**. Every number in the quoted rows is this run's own value — the
+granted space (`0x100000000`), the VA (`0x10000000`), the range (`0x10000`), the
+physical addresses, the class id, the handles. Nothing here was read from GB202,
+so nothing here can be a GB202 layout number.
+
+The only layout-ish constants on the path belong to the mock and are labelled as
+its bookkeeping (SOURCE, `src/kernel/nv_rm_mock.c`):
+
+```
+#define MOCK_PAGE 4096ull                    /* :46  — the mock's granularity */
+#define MOCK_VRAM_SIZE (4ull << 30)          /* :52  — the mock's arena, what FB_SIZE reports */
+#define MOCK_VA_LIMIT (1ull << 40)           /* :57  — 1 TiB, what a stock client asks for */
+```
+
+These are the mock's, not GB202's: `MOCK_VA_LIMIT`'s own comment says 1 TiB is
+the total a **stock nouveau client** asks for (`drm_nouveau_vm_init {1<<39, 1<<39}`),
+and "the objects mapped into it still get their bus addresses from the 4 GiB
+arena above". No GB202 boot measured them, and this document does not present
+them as GB202's page size or VA width.
+
+### 7.2 §2.7's number was measured — on AD102, and this document will not move it to GB202
+
+The register-measured layout number this project actually has is GR topology
+`gpc=11 tpc=64 src=register`. **It was measured on AD102, not GB202.** The boot
+rows (MEASURED, `ATT/t_78a50be7/tpcba.log:167-168`):
+
+```
+[NV-ENG] topology verdict=MEASURED (gpc/tpc are register fields; this replaces the declared 11/64 row)
+[NV-ENG] measured gpc=11 tpc=64 src=register decode=units.tpc_count[4:0] xcheck_ppc=64
+```
+
+How it was measured: `0x409604` bits [4:0] give the GPC count; each GPC's
+`GPC_UNIT(i,0x2608)` `TPC_COUNT` bits [4:0] are summed for the TPC count and
+cross-checked against the mask-encoded `ppc_tpc_mask`; a control register in the
+same block must answer data or the read is declared `IMPLAUSIBLE` rather than
+"zero GPCs". The rows it was read from are
+`[NV-ENG] gr topology 0x409604=0x000000000C06000B gpc_nr=11 rop_nr=6 … control_ok=1`
+and the eleven per-GPC mask words.
+
+The report that owns that number states its part in its first lines
+(`ATT/t_78a50be7/nv-topology-measured.md:1-4`):
+
+```
+# AD102 topology, measured and decoded (11 GPC / 64 TPC)
+
+**Part:** AD102, `10de:2684` (RTX 4090), VM 300 on r1. **This is not a GB202
+number and no GB202 number is used here.**
+```
+
+and the boot's own record says `vmid=300` (`ATT/t_78a50be7/tpcba.record`).
+
+**The correction, stated plainly.** `docs/nv-plan.md:608` groups that row under
+"measured on both parts (AD102 and GB202)". For the topology clause that sentence
+is **not backed by any GB202 log in this tree**: no GB202 boot log carries an
+`[NV-ENG] gr topology` or `measured gpc=` row (the GB202 wall boots are FSP boots
+and print none; the `measured gpc=11 tpc=64` rows that appear in the unit-tier
+logs come from the test's own fake register block, which is set to "the 4090's
+published shape: 11 GPC, 64 TPC" — `src/kernel/nv_test.c:530-550`, not a card
+read), and the report that owns the measurement says AD102 in its own first
+paragraph. So:
+
+* this document does **not** present `11/64` as GB202's number;
+* it does **not** copy AD102's `11/64` into a GB202 row, which is exactly what
+  `docs/nv-plan.md` §2.7's "declared model" caveat exists to prevent;
+* **GB202's GR topology has not been measured**, and the one read-only boot that
+  would measure it (read `0x409604` and `GPC_UNIT(i,0x2608)` with a control
+  register) is not authorized while the boot campaign is stopped.
+
+The mock does not quietly change that: its device identity still *declares* AD102
+— `chipset 0x192`, `device_id 0x2684`, name `"AD102"`, revision `0xa1`
+(SOURCE: `src/kernel/nv_rm_mock.c:239-249`) — while a real GB202 boot reads
+`chipset=0x1b2 gpu=GB202 stepping=161`
+(`ATT/t_a769beaa/5090-gb202fsp-rm50.log:132`, MEASURED). A document that wanted a
+GB202 number could not get one from this run, and this one does not pretend
+otherwise.
+
+### 7.3 What GB202 *has* measured in the layout register sense — and why it is not a VA number
+
+The wall card's boots read the WPR2 band **on this card** and printed it twice, in
+two unit systems, in the same boot
+(`ATT/t_a769beaa/KEY-ROWS-gb202-rm-objects.txt:6`, `:40`; MEASURED):
+
+```
+[NV-FSPCOT] rm tl t_ms=27000 hwcfg2=0x8187A7F7 m0=0x0 m1=0x0 os=0 rm=0 rvctl=0xBADF5620 wpr2_lo=0x07E61200 wpr2_hi=0x07F1EE00
+[NV-FSPCOT] wpr2c t15s lo=0x7E6120000 hi=0x7F1EE0000
+```
+
+`0x07E61200 << 8 = 0x7E6120000` and `0x07F1EE00 << 8 = 0x7F1EE0000`, so the
+`rm tl` row is in 256-byte units and the `wpr2c` row in bytes (a 189.75 MiB
+span). That is a GB202 measurement, not a constant. **None of it is a VA-space,
+page-table or engine-layout number**, and this document does not stretch it into
+one; it is quoted only to show what "measured on GB202" looks like when it is
+true.
+
+---
+
+## 8. Closing state, for every run named in this document
+
+Read-only checks only — no boot, no VM start. Each row is the state immediately
+after that run; the last row was taken for this document.
+
+| after | measured (UTC) | `qm status 313` | `qm status 300` | `pgrep -c qemu-system-x86` | GB202 guest files |
+|---|---|---|---|---|---|
+| channel tier run (intel + ARM) | 2026-11-28T05:49:14Z | stopped | stopped | 0 | mtime 05:39:01Z (previous boot) |
+| engine-class tier runs (lane) | 2026-11-28T06:18:56Z | stopped | stopped | 0 | mtime 05:39:01Z |
+| engine-class merged-tip reruns | 2026-11-28T06:29:37Z | stopped | stopped | 0 | mtime 05:39:01Z |
+| VA-space tier runs (lane + merged) | 2026-11-28T06:47:40Z (+06:50Z recheck) | stopped | stopped | 0 | mtime 05:39:01Z |
+| **re-measured for this document** | **2026-11-28T06:54:55Z** | **stopped** | **stopped** | **0** | **mtime 2026-11-27 23:39:01.54 -0600 = 05:39:01Z** |
+
+The check behind the last row, quoted as `r1` printed it:
+
+```
+$ qm status 313                  -> status: stopped
+$ qm status 300                  -> status: stopped
+$ pgrep -c qemu-system-x86       -> 0     (exit 1 when nothing matches, which is the measured state)
+$ stat -c "%n %y %s" /root/hobbyos5090/disk.img /root/hobbyos5090/serial.log
+/root/hobbyos5090/disk.img    2026-11-27 23:39:01.541392178 -0600 1073741824
+/root/hobbyos5090/serial.log  2026-11-27 23:39:01.536392179 -0600 74995
+```
+
+Those mtimes are the `rm68` boot of `t_97b8a05c`; nothing in this spine wrote
+them, which is what makes "zero GB202 boots" a measurement rather than a claim.
+
+---
+
+## 9. What this proves, what it does not, and the acceptance line
+
+**Proves (all MEASURED or SOURCE as cited above):** the `/dev/nvshim` ABI can mint
+a channel, a VA space and an engine class object against the mock RM; each handle
+is assigned by the RM's counter and returned to the client (`ch=1`, `vm=1`,
+`handle=1`); a VA bound to a memory object resolves, through the RM's own walk, to
+a real physical address with a real extent, and that address names the object's
+bytes; holes, out-of-range VAs, unowned handles and bad ops are named refusals
+with visible rows; the stock DRM face shows the same channel object and the same
+bind read-back; both unit tiers are green on both architectures; every quoted row
+carries `mock=1` and was re-checked at its cited line.
+
+**Does not prove:** anything about GB202, GSP-RM, firmware, WPR2, VRAM or L3. No
+`NV_VGPU_MSG_*` is sent, no firmware handle exists, the physical address is host
+pool RAM, and the stock client still stops at
+`nvif new refused class=0xc7b5 … need=gsp_rm`. The firmware claim stays where the
+wall card left it — `MAILBOX0=0x0B`, no peer — and this document is **not**
+evidence for it.
+
+**Acceptance, bullet by bullet, with the one gap named:**
+
+| card's acceptance bullet | status |
+|---|---|
+| `docs/gb202-rm-objects.md` exists | yes — this file |
+| all three handles quoted from logs | yes — `ch=1` (§3.1), `vm=1` (§4.1), `handle=1` (§5.1), each with log file + line |
+| all message ids named | yes — `NVSHIM_IOC_*` + DRM sub-numbers with `file:line` (§6); `NV_VGPU_MSG_*` is named as **none**, which is the only honest answer |
+| the VA physical address read back | yes — `phys=0x209686000` (intel) / `phys=0x8ef46000` (ARM), §4.1 |
+| the measured layout number **with its measurement method**, measured on GB202 | **not satisfied for GB202, and stated rather than faked**: these objects consume no layout number (§7.1); the only register-measured layout number is AD102's `gpc=11 tpc=64 src=register` (§7.2, with its method), and no GB202 boot log in this tree carries that row. The GB202 read is one read-only boot away, and no boot is authorized today. |
+| the part identity (GB202, 41:00.0, VM 313) | yes — stated once at the top, re-measured 06:54:55Z |
+| clean closing state for each boot | yes — §8, all runs, plus the live re-check |
+| if any of the three objects failed to allocate, say so and do not complete | **all three allocated** (as mock objects); nothing failed, so nothing is hidden |
+
+Step 6 of the body ("every object came from firmware") is superseded by the
+owner's 05:44Z re-scope and is answered in §1: every object is a mock object, and
+no mock object is presented as a firmware allocation.
+
+---
+
+## 10. Evidence for Part I
+
+Attached to card `t_c5453775`'s three siblings and to the wall card (paths are in
+the board's attachments directory):
+
+| what | where |
+|---|---|
+| channel rows + report | `t_17ca89e5/unit-tier-intel-chan.log`, `…/unit-tier-arm-chan.log`, `…/REPORT-shim-mock-chan.md`, `…/check-quotes-chan.py`, `…/nv_shim-channel-mock.patch` |
+| VA-space rows + report | `t_b9c4df6d/unit-tier-intel-vm.log`, `…/unit-tier-arm-vm.log`, `…/unit-tier-intel-merged.log`, `…/unit-tier-arm-merged.log`, `…/SWARM-REPORT-SHIM-MOCK-VM.md`, `…/check-quotes-vm.py`, `…/check-output-vm.txt`, `…/nv_shim-vm-resolve.patch`, `…/nouveau-r535-vmm.c` |
+| engine-class rows + report | `t_7cf2e538/unit-tier-intel-ec.log`, `…/unit-tier-arm-ec.log`, `…/unit-tier-intel-merged.log`, `…/unit-tier-arm-merged.log`, `…/SWARM-REPORT-SHIM-MOCK-ENGINE.md`, `…/check-quotes-engine.py`, `…/check-output.txt`, `…/nv_shim-engine-class.patch` |
+| the only register-measured topology (AD102) | `t_78a50be7/tpcba.log`, `…/tpcba.record`, `…/nv-topology-measured.md` |
+| GB202 part identity + closing state | read-only `qm` / `lspci` / `stat` at 2026-11-28T06:54:55Z, quoted in the header and §8 |
+| the parked wall's GB202 rows (Part II) | `t_a769beaa/5090-gb202fsp-rm{50…65}.log`, `…/KEY-ROWS-gb202-rm-objects.txt` |
+
+---
+
+## Part II — the parked wall record: every FMC / boot-image / ACR blob reachable, and the two abort points
+
+*Part II is the wall card's record (`t_a769beaa`), kept here unchanged so its
+section numbers still resolve — `SWARM-REPORT-GB202-TIERA.md` cites §13.5, and
+`docs/gb202-rm-parked.md` and `docs/nv-ladder-repoint.md` point at the same
+record through the card's attachment copies. Its numbering is its own (§0–§13),
+not Part I's.*
+
+**Editorial note, added 2026-11-28 with Part I:** Part II's §0 closing sentence —
+"No channel, VA space or engine class exists, because GSP-RM has still never
+started" — remains true of **firmware** objects, and is superseded for **mock**
+objects by Part I of this file. Nothing else in Part II was edited.
 
 Card `t_a769beaa`, reopened by the owner on 2026-11-27 (**R4**, `docs/nv-plan.md`
 §2.13.1). The reopening's first step was a **zero-boot survey** (§1–§10); the
