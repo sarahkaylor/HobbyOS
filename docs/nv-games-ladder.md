@@ -70,6 +70,7 @@ question.
 | N6v | `vkcube` draws + presents | two screendumps, frames > 0 | Gate P5/P6 harness in `tools/cp/venus/` | `renderer=venus` |
 | N8v | Cyberpunk 2077 benchmark, 720p | P9 script end to end | **29.19 avg / 29.7 median / 18.2 1%-low**; host native control 139.41 avg | `renderer=venus` |
 | N9v | "reasonable performance" on the fallback | 720p ≥30 fps incl. present | RimWorld met. Cyberpunk **not met, and not a tail fix away**: avg 29.19 / median 29.66 / 1 %-low 18.18, with the gate line at the run's own *median* (51.9 % of frames over it) — the frame cost has to move ~1.65×. Analysis and the named wall: `docs/nv-n9v-tail.md` | `renderer=venus` |
+| **N8n-ref** | Cyberpunk's own benchmark on **NVIDIA silicon** — the vendor driver in a guest, the reference the `nv` rows will one day be compared against | the benchmark runs to completion; average ≥ 30 fps at 720p Low | **measured 2026-11-28**: **171.61 fps average** on RTX 5090 (`41:00`, 580.178.04 *open* module) and **172.05 fps average** on RTX 4090 (`01:00`), min 125.0/127.0, max 231.2/228.9, 64.26 s each | `renderer=nvidia-proprietary-open-guest` (GE-Proton 11-14, Low preset, 1280×720, VSync/FSR/RT off) — `docs/nv-cp-nvidia-control.md` |
 
 The fallback's remaining lever **for r1's rows** is the **r1 host renderer**
 (`docs/nv-r1-host-renderer.md`): r1 has no `/dev/dri` at all, so its games rows are
