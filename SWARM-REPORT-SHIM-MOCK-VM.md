@@ -433,9 +433,9 @@ on that merged tree:
 logs** (lane and merged, both tiers), all four verdict blocks, the row counts
 that prove the budget did not swallow a row, and every `file:line` source
 citation in this tree. This report itself arrives on the tip in `a31ff263`
-(parents `8c22fe17` + `970a9227`, the report commit), so the tree the rows were
-read on and the tree carrying this text differ by markdown only — no source
-change.
+(parents `8c22fe17` + `970a9227`, the report commit); two docs-only fixes
+follow it (`d747d2a5`, `7c1a8980`). The tree the rows were read on and the tree
+carrying this text therefore differ by markdown only — no source change.
 
 ---
 
